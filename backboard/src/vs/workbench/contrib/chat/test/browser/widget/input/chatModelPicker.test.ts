@@ -14,7 +14,7 @@ import { GalleryMcpServerStatus, IGalleryMcpServer } from '../../../../../../../
 import { McpServerType } from '../../../../../../../platform/mcp/common/mcpPlatformTypes.js';
 import { StateType } from '../../../../../../../platform/update/common/update.js';
 import { buildModelPickerItems, getControlModelsForEntitlement, getModelPickerAccessibilityProvider } from '../../../../browser/widget/input/chatModelPicker.js';
-import { buildCombinedModelSections, COMBINED_MODEL_SECTION_ALL, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_RECOMMENDED, formatModelLabel, formatModelProviderDetail, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
+import { buildCombinedModelSections, buildCombinedModelSectionsForCatalog, combinedModelSectionGroupLabel, COMBINED_MODEL_SECTION_ALL, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_RECOMMENDED, formatModelLabel, formatModelProviderDetail, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
 import { buildMcpMarketplaceItems, buildSkillsLibraryItems, createMcpMarketplaceItemsFromCatalog, getHiddenMcpMarketplaceCatalogEntries, IMcpMarketplaceCatalogEntry, mcpItemMatchesInstalledServer, McpMarketplaceModalItem, resolveMcpMarketplaceItems, parseSkillsShHtml, splitSkillsShId } from '../../../../browser/widget/input/skillsLibrary.js';
 import { IModelPickerSetupCandidate } from '../../../../browser/widget/input/modelPickerActionItem.js';
 import { filterModelsForSession } from '../../../../browser/widget/input/chatModelSelectionLogic.js';
@@ -52,6 +52,11 @@ function createModel(id: string, name: string, vendor = 'copilot'): ILanguageMod
 	};
 }
 
+function createBackboardModel(id: string, name: string, metadata: Partial<ILanguageModelChatMetadata> = {}): ILanguageModelChatMetadataAndIdentifier {
+	const model = createModel(id, name, 'agent-host-backboard');
+	return { ...model, metadata: { ...model.metadata, ...metadata } };
+}
+
 function createAutoModel(): ILanguageModelChatMetadataAndIdentifier {
 	return createModel('auto', 'Auto', 'copilot');
 }
@@ -79,6 +84,65 @@ suite('combined model provider sections', () => {
 		assert.strictEqual(providerIconKeyForCombinedModelSection('provider:openai'), 'open-ai');
 		assert.strictEqual(providerIconKeyForCombinedModelSection('provider:openrouter'), 'open-router');
 		assert.strictEqual(providerIconKeyForCombinedModelSection('provider:xai'), 'x-ai');
+		assert.strictEqual(providerIconKeyForCombinedModelSection('byok:openai'), 'open-ai');
+		assert.strictEqual(providerIconKeyForCombinedModelSection('byok:anthropic-key'), 'anthropic');
+	});
+
+	test('groups the rail by billing source: Backboard, then Subscriptions, then BYOK', () => {
+		const models = [
+			createBackboardModel('openrouter/z-ai/glm-4.7', 'z-ai/glm-4.7', { detail: 'OpenRouter · Z.ai', billingSource: 'backboard' }),
+			createBackboardModel('openai/gpt-5.5', 'GPT-5.5', { detail: 'OpenAI', billingSource: 'byok' }),
+			createBackboardModel('anthropic/claude-fable-5', 'Claude Fable 5', { detail: 'Anthropic', billingSource: 'backboard' }),
+			createBackboardModel('openai-subscription/gpt-5.6-sol', 'GPT-5.6 Sol', { detail: 'OpenAI (ChatGPT Subscription)', billingSource: 'subscription', auth: { providerLabel: 'ChatGPT', accountLabel: 'Connected' } }),
+			createBackboardModel('anthropic-key/claude-opus-5', 'Claude Opus 5', { detail: 'Anthropic' }),
+			createBackboardModel('anthropic-subscription/sonnet', 'Claude Sonnet', { detail: 'Anthropic (Claude Subscription)' }),
+			createBackboardModel('openai/gpt-5.6-sol', 'GPT-5.6 Sol', { detail: 'OpenAI' }),
+			createBackboardModel('openrouter/deepseek/deepseek-v4-pro', 'deepseek/deepseek-v4-pro', { detail: 'OpenRouter · 5 providers' }),
+		];
+
+		const sections = buildCombinedModelSectionsForCatalog(models);
+
+		assert.deepStrictEqual(sections.map(section => `${section.group} ${section.id}`), [
+			'backboard recommended',
+			'backboard all',
+			'backboard provider:anthropic',
+			'backboard provider:openai',
+			'backboard provider:openrouter',
+			'subscriptions provider:openai-subscription',
+			'subscriptions provider:anthropic-subscription',
+			'byok byok:anthropic-key',
+			'byok byok:openai',
+		]);
+		assert.deepStrictEqual(sections.map(section => section.kind), ['library', 'library', 'provider', 'provider', 'provider', 'subscription', 'subscription', 'byok', 'byok']);
+		assert.strictEqual(sections.find(section => section.id === 'provider:openrouter')?.label, 'OpenRouter');
+		assert.strictEqual(sections.find(section => section.id === 'provider:openrouter')?.modelCount, 2);
+		assert.deepStrictEqual(sections.filter(section => section.group === 'byok').map(section => [section.label, section.modelCount]), [['Anthropic', 1], ['OpenAI', 1]]);
+		// A vendor the user holds a key for is split by billing route, never mixed.
+		assert.deepStrictEqual(modelsForCombinedModelSection(models, 'byok:openai', false, false).map(model => model.metadata.id), ['openai/gpt-5.5']);
+		assert.deepStrictEqual(modelsForCombinedModelSection(models, 'provider:openai', false, false).map(model => model.metadata.id), ['openai/gpt-5.6-sol']);
+		assert.deepStrictEqual(modelsForCombinedModelSection(models, 'byok:anthropic-key', false, false).map(model => model.metadata.id), ['anthropic-key/claude-opus-5']);
+		assert.strictEqual(formatModelProviderDetail(models[1]), 'OpenAI · Your key');
+		assert.strictEqual(formatModelProviderDetail(models[6]), 'OpenAI');
+	});
+
+	test('the shipped catalog keeps Backboard first and BYOK last while subscriptions are disabled', () => {
+		const models = [
+			createBackboardModel('anthropic-subscription/sonnet', 'Claude Sonnet', { billingSource: 'subscription' }),
+			createBackboardModel('openai/gpt-5.5', 'GPT-5.5', { detail: 'OpenAI', billingSource: 'byok' }),
+			createBackboardModel('openai/gpt-5.6-sol', 'GPT-5.6 Sol', { detail: 'OpenAI' }),
+		];
+
+		const sections = buildCombinedModelSections(models, false);
+
+		assert.deepStrictEqual(sections.map(section => `${section.group} ${section.id}`), ['backboard recommended', 'backboard all', 'backboard provider:openai', 'byok byok:openai']);
+		assert.ok(sections.every(section => section.kind !== 'subscription'));
+	});
+
+	test('labels rail groups by billing source', () => {
+		assert.strictEqual(combinedModelSectionGroupLabel('backboard'), 'Backboard');
+		assert.strictEqual(combinedModelSectionGroupLabel('subscriptions'), 'Subscriptions');
+		assert.strictEqual(combinedModelSectionGroupLabel('byok'), 'BYOK');
+		assert.strictEqual(combinedModelSectionGroupLabel('models'), 'Models');
 	});
 
 	test('removes redundant Anthropic model prefixes', () => {

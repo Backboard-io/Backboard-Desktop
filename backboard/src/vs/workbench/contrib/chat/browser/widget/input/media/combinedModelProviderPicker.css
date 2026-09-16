@@ -91,6 +91,13 @@
 	text-transform: uppercase;
 }
 
+/* Separates the library views from the per-provider filters inside one group. */
+.combined-model-provider-rail-divider {
+	height: 1px;
+	margin: 5px 8px 6px;
+	background: color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-widget-border)) 58%, transparent);
+}
+
 .combined-model-provider-rail-item {
 	display: grid;
 	grid-template-columns: 15px minmax(0, 1fr) auto;

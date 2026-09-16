@@ -26,7 +26,7 @@ import { IContextViewService } from '../../../../../../platform/contextview/brow
 import { AgentSessionProviders, AgentSessionTarget } from '../../agentSessions/agentSessions.js';
 import { CLAUDE_SUBSCRIPTION_SETUP_ID } from '../../agentSessions/agentCliSetup.js';
 import { ISessionTypePickerDelegate } from '../../chat.js';
-import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../common/languageModels.js';
+import { ILanguageModelChatMetadataAndIdentifier, LanguageModelBillingSource, ILanguageModelsService } from '../../../common/languageModels.js';
 import { IChatInputPickerOptions } from './chatInputPickerActionItem.js';
 import { resolveConfigProperty } from './chatModelPicker.js';
 import { IModelConfigurationAccess, IModelPickerDelegate } from './modelPickerActionItem.js';
@@ -76,12 +76,33 @@ export const COMBINED_MODEL_SECTION_RECOMMENDED = 'recommended';
 export const COMBINED_MODEL_SECTION_ALL = 'all';
 export const COMBINED_MODEL_SECTION_CHATGPT = 'provider:openai-subscription';
 export const COMBINED_MODEL_SECTION_CLAUDE = 'provider:anthropic-subscription';
+/** Section id prefix for a provider's key-billed (BYOK) models; `provider:` covers its Backboard-billed ones. */
+const BYOK_SECTION_PREFIX = 'byok:';
+
+/**
+ * Catalog rows may also mark key billing through a `<vendor>-key` provider
+ * prefix, e.g. `openai-key/gpt-5.5`, while `openai/gpt-5.5` bills to Backboard.
+ */
+const KEY_BILLED_PROVIDER_SUFFIX = '-key';
+
+function isKeyBilledProviderId(providerId: string): boolean {
+	return providerId.length > KEY_BILLED_PROVIDER_SUFFIX.length && providerId.endsWith(KEY_BILLED_PROVIDER_SUFFIX);
+}
+
+/** `openai-key` → `openai`; other provider ids are returned unchanged. */
+function vendorOfProviderId(providerId: string): string {
+	return isKeyBilledProviderId(providerId) ? providerId.slice(0, -KEY_BILLED_PROVIDER_SUFFIX.length) : providerId;
+}
 
 export function providerIconKeyForCombinedModelSection(sectionId: string): string | undefined {
 	if (sectionId === COMBINED_MODEL_SECTION_RECOMMENDED) {
 		return 'backboard';
 	}
-	const providerId = sectionId.startsWith('provider:') ? sectionId.slice('provider:'.length) : undefined;
+	const providerId = sectionId.startsWith('provider:')
+		? vendorOfProviderId(sectionId.slice('provider:'.length))
+		: sectionId.startsWith(BYOK_SECTION_PREFIX)
+			? vendorOfProviderId(sectionId.slice(BYOK_SECTION_PREFIX.length))
+			: undefined;
 	switch (providerId) {
 		case 'openai-subscription':
 		case 'openai': return 'open-ai';
@@ -99,11 +120,29 @@ export function providerIconKeyForCombinedModelSection(sectionId: string): strin
 	}
 }
 
+/**
+ * Left-rail headings, ordered by who bills the request: Backboard's own
+ * catalog, then connected subscriptions, then bring-your-own-key providers.
+ * `models` is the neutral heading used for non-Backboard session types.
+ */
+export type CombinedModelSectionGroup = 'backboard' | 'subscriptions' | 'byok' | 'models';
+
+export function combinedModelSectionGroupLabel(group: CombinedModelSectionGroup): string {
+	switch (group) {
+		case 'backboard': return localize('combinedPicker.backboardGroup', "Backboard");
+		case 'subscriptions': return localize('combinedPicker.subscriptionsGroup', "Subscriptions");
+		case 'byok': return localize('combinedPicker.byokGroup', "BYOK");
+		case 'models': return localize('combinedPicker.modelsGroup', "Models");
+	}
+}
+
 export interface ICombinedModelSection {
 	readonly id: string;
 	readonly label: string;
 	readonly modelCount: number;
-	readonly kind: 'library' | 'subscription' | 'provider';
+	readonly kind: 'library' | 'subscription' | 'provider' | 'byok';
+	/** Rail heading the section is listed under. */
+	readonly group: CombinedModelSectionGroup;
 }
 
 interface ICombinedModelThinkingOption {
@@ -214,21 +253,38 @@ export function formatModelLabel(name: string): string {
 /** Builds the compact source label shown below a model name. */
 export function formatModelProviderDetail(model: ILanguageModelChatMetadataAndIdentifier, selectedOpenRouterProvider?: string): string | undefined {
 	const providerId = upstreamProviderId(model);
+	let detail: string | undefined;
 	if (providerId === 'openai-subscription') {
-		return localize('combinedPicker.chatGptSubscriptionDetail', "ChatGPT subscription");
+		detail = localize('combinedPicker.chatGptSubscriptionDetail', "ChatGPT subscription");
+	} else if (providerId === 'anthropic-subscription') {
+		detail = localize('combinedPicker.claudeSubscriptionDetail', "Claude subscription");
+	} else if (providerId === 'openrouter' && selectedOpenRouterProvider) {
+		detail = localize('combinedPicker.selectedOpenRouterProviderDetail', "OpenRouter · {0}", selectedOpenRouterProvider);
+	} else {
+		detail = model.metadata.detail?.trim();
 	}
-	if (providerId === 'anthropic-subscription') {
-		return localize('combinedPicker.claudeSubscriptionDetail', "Claude subscription");
+	if (billingSourceOf(model) !== 'byok') {
+		return detail;
 	}
-	if (providerId === 'openrouter' && selectedOpenRouterProvider) {
-		return localize('combinedPicker.selectedOpenRouterProviderDetail', "OpenRouter · {0}", selectedOpenRouterProvider);
-	}
-	return model.metadata.detail?.trim();
+	return detail
+		? localize('combinedPicker.yourKeyDetail', "{0} · Your key", detail)
+		: localize('combinedPicker.yourKey', "Your key");
 }
 
 function upstreamProviderId(model: ILanguageModelChatMetadataAndIdentifier): string {
 	const slash = model.metadata.id.indexOf('/');
 	return slash > 0 ? model.metadata.id.slice(0, slash).toLowerCase() : model.metadata.vendor.toLowerCase();
+}
+
+/** Who bills a request to the model: as reported by the runtime, else inferred from its provider id. */
+function billingSourceOf(model: ILanguageModelChatMetadataAndIdentifier): LanguageModelBillingSource {
+	if (model.metadata.billingSource) {
+		return model.metadata.billingSource;
+	}
+	if (isKeyBilledProviderId(upstreamProviderId(model))) {
+		return 'byok';
+	}
+	return isSubscriptionModel(model) ? 'subscription' : 'backboard';
 }
 
 function isSubscriptionModel(model: ILanguageModelChatMetadataAndIdentifier): boolean {
@@ -247,66 +303,95 @@ function recommendedModels(models: readonly ILanguageModelChatMetadataAndIdentif
 	return recommended.length ? recommended : models.filter(isAvailableInRecommendedSection);
 }
 
+/** Rail label for an upstream provider; drops per-model suffixes such as "OpenRouter · Z.ai". */
+function providerSectionLabel(providerId: string, detail: string | undefined): string {
+	const trimmed = detail?.trim() ?? '';
+	const separator = trimmed.indexOf(' · ');
+	const label = separator > 0 ? trimmed.slice(0, separator).trim() : trimmed;
+	return label || formatModelLabel(vendorOfProviderId(providerId));
+}
+
 /** Builds the stable left-rail sections for the Backboard model catalog. */
 export function buildCombinedModelSections(models: readonly ILanguageModelChatMetadataAndIdentifier[], windows = isWindows): ICombinedModelSection[] {
-	models = models.filter(model => isBackboardProviderAvailable(upstreamProviderId(model), windows));
+	return buildCombinedModelSectionsForCatalog(models.filter(model => isBackboardProviderAvailable(upstreamProviderId(model), windows)));
+}
+
+/**
+ * Builds rail sections for an already-filtered catalog, grouped by billing
+ * source: Backboard (library views plus Backboard-billed upstream providers),
+ * then Subscriptions, then BYOK. Prefer {@link buildCombinedModelSections},
+ * which applies the platform availability filter first.
+ */
+export function buildCombinedModelSectionsForCatalog(models: readonly ILanguageModelChatMetadataAndIdentifier[]): ICombinedModelSection[] {
 	const recommendedCount = recommendedModels(models).length;
-	const providers = new Map<string, { label: string; count: number }>();
+	// A provider is tallied separately for its Backboard-billed and key-billed
+	// rows, so a vendor the user holds a key for can appear in both groups.
+	const providers = new Map<string, { label: string; count: number; keyBilled: boolean }>();
 	for (const model of models) {
 		const id = upstreamProviderId(model);
-		const existing = providers.get(id);
-		providers.set(id, {
-			label: model.metadata.detail?.trim() || formatModelLabel(id),
+		const keyBilled = billingSourceOf(model) === 'byok';
+		const sectionId = `${keyBilled ? BYOK_SECTION_PREFIX : 'provider:'}${id}`;
+		const existing = providers.get(sectionId);
+		providers.set(sectionId, {
+			label: existing?.label ?? providerSectionLabel(id, model.metadata.detail),
 			count: (existing?.count ?? 0) + 1,
+			keyBilled,
 		});
 	}
 
-	const sections: ICombinedModelSection[] = [
+	const backboard: ICombinedModelSection[] = [
 		{
 			id: COMBINED_MODEL_SECTION_RECOMMENDED,
 			label: localize('combinedPicker.recommended', "Recommended"),
 			modelCount: recommendedCount,
 			kind: 'library',
+			group: 'backboard',
 		},
 		{
 			id: COMBINED_MODEL_SECTION_ALL,
 			label: localize('combinedPicker.allModels', "All models"),
 			modelCount: models.length,
 			kind: 'library',
+			group: 'backboard',
 		},
 	];
 
-	const chatGpt = providers.get('openai-subscription');
+	const subscriptions: ICombinedModelSection[] = [];
+	const chatGpt = providers.get(COMBINED_MODEL_SECTION_CHATGPT);
 	if (chatGpt) {
-		sections.push({
+		subscriptions.push({
 			id: COMBINED_MODEL_SECTION_CHATGPT,
 			label: localize('combinedPicker.chatGpt', "ChatGPT"),
 			modelCount: chatGpt.count,
 			kind: 'subscription',
+			group: 'subscriptions',
 		});
-		providers.delete('openai-subscription');
+		providers.delete(COMBINED_MODEL_SECTION_CHATGPT);
 	}
 
-	const claude = providers.get('anthropic-subscription');
+	const claude = providers.get(COMBINED_MODEL_SECTION_CLAUDE);
 	if (claude) {
-		sections.push({
+		subscriptions.push({
 			id: COMBINED_MODEL_SECTION_CLAUDE,
 			label: localize('combinedPicker.claude', "Claude"),
 			modelCount: claude.count,
 			kind: 'subscription',
+			group: 'subscriptions',
 		});
-		providers.delete('anthropic-subscription');
+		providers.delete(COMBINED_MODEL_SECTION_CLAUDE);
 	}
 
-	for (const [id, provider] of [...providers].sort((a, b) => a[1].label.localeCompare(b[1].label))) {
-		sections.push({
-			id: `provider:${id}`,
+	const byok: ICombinedModelSection[] = [];
+	for (const [sectionId, provider] of [...providers].sort((a, b) => a[1].label.localeCompare(b[1].label))) {
+		(provider.keyBilled ? byok : backboard).push({
+			id: sectionId,
 			label: provider.label,
 			modelCount: provider.count,
-			kind: 'provider',
+			kind: provider.keyBilled ? 'byok' : 'provider',
+			group: provider.keyBilled ? 'byok' : 'backboard',
 		});
 	}
-	return sections;
+	return [...backboard, ...subscriptions, ...byok];
 }
 
 /** Returns the models represented by one left-rail section, or the full catalog during a search. */
@@ -326,9 +411,13 @@ export function modelsForCombinedModelSection(
 	if (sectionId === COMBINED_MODEL_SECTION_RECOMMENDED) {
 		return recommendedModels(models);
 	}
+	if (sectionId.startsWith(BYOK_SECTION_PREFIX)) {
+		const providerId = sectionId.slice(BYOK_SECTION_PREFIX.length);
+		return models.filter(model => upstreamProviderId(model) === providerId && billingSourceOf(model) === 'byok');
+	}
 	if (sectionId.startsWith('provider:')) {
 		const providerId = sectionId.slice('provider:'.length);
-		return models.filter(model => upstreamProviderId(model) === providerId);
+		return models.filter(model => upstreamProviderId(model) === providerId && billingSourceOf(model) !== 'byok');
 	}
 	return [...models];
 }
@@ -600,7 +689,7 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		const connectedToClaude = isClaudeSubscriptionConnected(allModels);
 		const sections = showingBackboard
 			? buildCombinedModelSections(allModels)
-			: [{ id: COMBINED_MODEL_SECTION_ALL, label: localize('combinedPicker.allModels', "All models"), modelCount: allModels.length, kind: 'library' as const }];
+			: [{ id: COMBINED_MODEL_SECTION_ALL, label: localize('combinedPicker.allModels', "All models"), modelCount: allModels.length, kind: 'library' as const, group: 'models' as const }];
 		if (!sections.some(section => section.id === this._railSection)) {
 			this._railSection = sections[0]?.id ?? COMBINED_MODEL_SECTION_ALL;
 		}
@@ -964,22 +1053,24 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			renderSetupAction();
 		};
 
+		let previousGroup: CombinedModelSectionGroup | undefined;
 		let previousKind: ICombinedModelSection['kind'] | undefined;
 		let railGroup: HTMLElement | undefined;
 		for (const section of sections) {
-			if (section.kind !== previousKind) {
-				const groupLabel = section.kind === 'library'
-					? localize('combinedPicker.discoverGroup', "Discover")
-					: section.kind === 'subscription'
-						? localize('combinedPicker.subscriptionsGroup', "Subscriptions")
-						: localize('combinedPicker.providersGroup', "Providers");
+			if (section.group !== previousGroup) {
+				const groupLabel = combinedModelSectionGroupLabel(section.group);
 				railGroup = dom.append(railList, dom.$('.combined-model-provider-rail-group'));
 				railGroup.setAttribute('role', 'group');
 				railGroup.setAttribute('aria-label', groupLabel);
 				const heading = dom.append(railGroup, dom.$('.combined-model-provider-rail-heading'));
 				heading.textContent = groupLabel;
 				heading.setAttribute('aria-hidden', 'true');
+			} else if (section.kind !== previousKind) {
+				// Library views and per-provider filters share the Backboard
+				// heading; a hairline keeps the two lists visually distinct.
+				dom.append(railGroup!, dom.$('.combined-model-provider-rail-divider'));
 			}
+			previousGroup = section.group;
 			previousKind = section.kind;
 			const button = dom.append(railGroup!, dom.$('button.combined-model-provider-rail-item')) as HTMLButtonElement;
 			button.type = 'button';

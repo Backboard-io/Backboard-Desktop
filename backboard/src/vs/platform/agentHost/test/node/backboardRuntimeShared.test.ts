@@ -38,6 +38,21 @@ suite('Backboard runtime configuration', () => {
 		});
 	}
 
+	test('reports the runtime billing route on catalog metadata', () => {
+		const models = backboardModelInfos([
+			{ provider: 'openai', name: 'gpt-5.5', modelType: 'llm', source: 'byok' },
+			{ provider: 'anthropic', name: 'claude-opus-5', modelType: 'llm', source: 'Backboard' },
+			{ provider: 'google', name: 'gemini-3-pro', modelType: 'llm' },
+			{ provider: 'xai', name: 'grok-4.5', modelType: 'llm', source: 'mystery' },
+		]);
+		const billing = new Map(models.map(model => [model.id, model._meta?.billingSource]));
+
+		assert.strictEqual(billing.get('openai/gpt-5.5'), 'byok');
+		assert.strictEqual(billing.get('anthropic/claude-opus-5'), 'backboard');
+		assert.strictEqual(billing.get('google/gemini-3-pro'), undefined);
+		assert.strictEqual(billing.get('xai/grok-4.5'), undefined);
+	});
+
 	test('builds OpenRouter serving-provider choices from live catalog metadata', () => {
 		const [model] = backboardModelInfos([{
 			provider: 'openrouter',

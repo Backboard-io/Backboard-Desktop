@@ -82,6 +82,8 @@ export function backboardMultitaskSystemContext(mode: string): string | undefine
 export interface BridgeModel {
 	readonly provider: string;
 	readonly name: string;
+	/** Billing route the runtime resolved for this row: `backboard`, `byok`, or `subscription`. */
+	readonly source?: string;
 	readonly modelType?: string;
 	readonly model_type?: string;
 	readonly displayName?: string;
@@ -296,8 +298,18 @@ function parseModelSelection(model: ModelSelection | undefined): { provider: str
 	return { provider: DEFAULT_PROVIDER, model: id };
 }
 
+const BRIDGE_MODEL_BILLING_SOURCES = ['backboard', 'byok', 'subscription'] as const;
+type BridgeModelBillingSource = typeof BRIDGE_MODEL_BILLING_SOURCES[number];
+
+/** The runtime's per-model billing route, when it reports a known one. */
+function bridgeModelBillingSource(source: string | undefined): BridgeModelBillingSource | undefined {
+	const normalized = source?.trim().toLowerCase();
+	return BRIDGE_MODEL_BILLING_SOURCES.find(candidate => candidate === normalized);
+}
+
 function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 	const id = `${model.provider}/${model.name}`;
+	const billingSource = bridgeModelBillingSource(model.source);
 	const pricePair = modelPricePair(model);
 	const inputCost = pricePair?.[0];
 	const outputCost = pricePair?.[1];
@@ -324,6 +336,7 @@ function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 		_meta: {
 			upstreamProvider: normalizeProviderKey(model.provider),
 			upstreamProviderLabel: providerLabel(model.provider),
+			...(billingSource ? { billingSource } : {}),
 			pricing: modelPriceLabel(model),
 			...(model.description ? { modelDescription: model.description } : {}),
 			...(model.resolved_model ? { resolvedModel: model.resolved_model } : {}),

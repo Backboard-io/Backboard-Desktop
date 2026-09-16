@@ -11,7 +11,7 @@ import { readAgentModelPricingMeta } from '../../../../../../platform/agentHost/
 import { ConfigSchema, SessionModelInfo } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { nullExtensionDescription } from '../../../../../services/extensions/common/extensions.js';
 import { ChatAgentLocation } from '../../../common/constants.js';
-import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelChatProvider, ILanguageModelConfigurationSchema } from '../../../common/languageModels.js';
+import { ILanguageModelChatMetadataAndIdentifier, LanguageModelBillingSource, ILanguageModelChatProvider, ILanguageModelConfigurationSchema } from '../../../common/languageModels.js';
 
 /**
  * Returns whether an agent host provider exposes a synthetic "Auto" model to
@@ -33,6 +33,12 @@ import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelChatProvider, IL
  */
 export function agentHostProviderSupportsAutoModel(provider: string): boolean {
 	return provider === 'copilotcli' || provider === 'claude';
+}
+
+/** The agent host's billing route for a catalog row, ignoring anything it does not recognise. */
+function readBillingSource(meta: Record<string, unknown> | undefined): LanguageModelBillingSource | undefined {
+	const value = meta?.billingSource;
+	return value === 'backboard' || value === 'byok' || value === 'subscription' ? value : undefined;
 }
 
 /**
@@ -75,6 +81,7 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 				const isClaudeSubscription = m._meta?.upstreamProvider === 'anthropic-subscription';
 				const claudeSubscriptionConnected = m._meta?.claudeSubscriptionConnected === true;
 				const modelDescription = typeof m._meta?.modelDescription === 'string' && m._meta.modelDescription.trim() !== '' ? m._meta.modelDescription : undefined;
+				const billingSource = readBillingSource(m._meta);
 				const openRouterProviders = Array.isArray(m._meta?.openRouterProviders)
 					? m._meta.openRouterProviders.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
 					: [];
@@ -93,6 +100,7 @@ export class AgentHostLanguageModelProvider extends Disposable implements ILangu
 						vendor: this._vendor,
 						version: '1.0',
 						detail,
+						...(billingSource ? { billingSource } : {}),
 							auth: isChatGptSubscription
 							? {
 								providerLabel: 'ChatGPT',
