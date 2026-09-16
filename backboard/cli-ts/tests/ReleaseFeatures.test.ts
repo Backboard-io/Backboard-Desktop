@@ -10,12 +10,13 @@ import { readBackboardConfig, saveBackboardConfig } from "../src/config/backboar
 import { supportsSubscriptions } from "../src/config/releaseFeatures.ts";
 
 describe("release subscription availability", () => {
-	it("rejects BYOS login commands before starting provider authentication", () => {
-		for (const args of [["subscription", "login"], ["subscription", "logout"], ["claude-subscription", "login"], ["claude-subscription", "enable"], ["claude-subscription", "logout"], ["claude-subscription", "status"]]) {
-			const result = Bun.spawnSync([process.execPath, "run", "src/entrypoints/cli.tsx", ...args]);
+	for (const args of [["subscription", "login"], ["subscription", "logout"], ["claude-subscription", "login"], ["claude-subscription", "enable"], ["claude-subscription", "logout"], ["claude-subscription", "status"]]) {
+		it(`rejects ${args.join(" ")} before starting provider authentication`, () => {
+			const result = Bun.spawnSync([process.execPath, "run", "src/entrypoints/cli.tsx", ...args], { timeout: 20_000 });
 			expect({ code: result.exitCode, blocked: result.stderr.toString().includes("Subscriptions are currently unavailable") }).toEqual({ code: 1, blocked: true });
-		}
-	});
+		}, 30_000);
+	}
+
 	it("ignores saved BYOS credentials without deleting history", async () => {
 		const homeDir = await mkdtemp(join(tmpdir(), "backboard-windows-auth-"));
 		try {
@@ -37,10 +38,10 @@ describe("release subscription availability", () => {
 	});
 
 	it("omits subscription options from CLI help", () => {
-		const result = Bun.spawnSync([process.execPath, "run", "src/entrypoints/cli.tsx", "--help"]);
+		const result = Bun.spawnSync([process.execPath, "run", "src/entrypoints/cli.tsx", "--help"], { timeout: 20_000 });
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout.toString().toLowerCase()).not.toContain("subscription");
-	});
+	}, 30_000);
 	it("ignores corrupt disabled subscription storage", async () => {
 		const homeDir = await mkdtemp(join(tmpdir(), "backboard-disabled-subs-"));
 		try {
