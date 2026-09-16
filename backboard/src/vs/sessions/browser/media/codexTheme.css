@@ -2356,6 +2356,43 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 		color: #b9ddff;
 		text-decoration: underline;
 	}
+
+	/* A completed turn folds its intermediate messages into
+	 * `.chat-backboard-turn-work-body`, so prose that is not the final answer
+	 * renders outside `> .value` and would otherwise keep the theme's dark
+	 * foreground. Both hosts are document text painted straight onto the image,
+	 * so both take the same light foreground. */
+	.part.sessionspart .interactive-response > .value > .rendered-markdown,
+	.part.sessionspart .interactive-response .chat-backboard-turn-work-body > .rendered-markdown {
+		color: var(--wallpaper-foreground) !important;
+		text-shadow: 0 1px 3px #00000080;
+	}
+
+	/* Prose below those hosts re-states the theme foreground for headings, table
+	 * cells, blockquotes and inline code, which beats the inherited light colour
+	 * on the host itself. Code blocks are excluded: they keep their own opaque
+	 * surface and editor token colours. */
+	.part.sessionspart .interactive-response > .value > .rendered-markdown :is(p, li, dt, dd, strong, em, b, i, h1, h2, h3, h4, h5, h6, blockquote, td, th, summary),
+	.part.sessionspart .interactive-response .chat-backboard-turn-work-body > .rendered-markdown :is(p, li, dt, dd, strong, em, b, i, h1, h2, h3, h4, h5, h6, blockquote, td, th, summary) {
+		color: var(--wallpaper-foreground) !important;
+		text-shadow: 0 1px 3px #00000080;
+	}
+
+	/* Inline code is a surface, not a sticker: over the image it reads as frosted
+	 * glass carrying the same light text instead of an opaque theme chip whose
+	 * dark text would be the only dark text left in the transcript. */
+	.part.sessionspart .interactive-response > .value > .rendered-markdown :not(pre):not(.monaco-editor) > code,
+	.part.sessionspart .interactive-response .chat-backboard-turn-work-body > .rendered-markdown :not(pre):not(.monaco-editor) > code {
+		border-color: color-mix(in srgb, var(--wallpaper-foreground) 34%, transparent) !important;
+		background: color-mix(in srgb, var(--wallpaper-foreground) 16%, transparent) !important;
+		color: var(--wallpaper-foreground) !important;
+		text-shadow: 0 1px 3px #00000080;
+	}
+
+	.part.sessionspart .interactive-response .chat-backboard-turn-work-body > .rendered-markdown a {
+		color: #b9ddff;
+		text-decoration: underline;
+	}
 }
 
 .monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.sessionspart .interactive-response :is(

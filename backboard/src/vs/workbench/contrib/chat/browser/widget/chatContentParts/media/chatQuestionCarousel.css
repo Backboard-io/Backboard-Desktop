@@ -23,7 +23,7 @@
 	--bb-question-surface: var(--bb-cursor-diff-surface, var(--vscode-editor-background));
 	--bb-question-row: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
 	--bb-question-row-hover: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
-	margin: 3px 0;
+	margin: 0;
 	border: 1px solid var(--bb-question-border);
 	border-radius: 8px;
 	display: flex;
@@ -50,7 +50,8 @@
 
 .interactive-session .interactive-input-part > .chat-question-carousel-widget-container:not(:empty),
 .interactive-session .interactive-input-part .interactive-input-and-edit-session > .chat-question-carousel-widget-container:not(:empty) {
-	margin-top: 4px;
+	/* Keep a little air between the question card and the composer below it. */
+	margin: 0 0 8px;
 }
 
 .interactive-session .interactive-input-part > .chat-question-carousel-widget-container .chat-question-carousel-content,
