@@ -238,6 +238,7 @@ export type ProviderEvent =
 	| { kind: "media"; payload: Record<string, unknown> }
 	| {
 			kind: "completed";
+			providerMetadata?: string;
 			finalText?: string;
 			usage?: ProviderUsage;
 			contextUsage?: BackboardContextUsage;
@@ -318,6 +319,7 @@ export interface ModelInfo extends ThinkingModelMetadata {
 }
 
 export interface ModelCatalogItem {
+	supports_vision?: boolean;
 	name: string;
 	provider: string;
 	model_type: string;

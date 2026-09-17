@@ -5,6 +5,7 @@ export const REDACTED_SECRET = "<redacted>";
  * we do not control (vendor error bodies, malformed responses, child output).
  */
 const SECRET_PATTERNS: readonly RegExp[] = [
+	/\bxai-[A-Za-z0-9_-]{16,}/g,
 	// OpenAI, OpenRouter, Anthropic: sk-..., sk-proj-..., sk-or-v1-..., sk-ant-...
 	/\bsk-(?:ant-|proj-|or-v1-)?[A-Za-z0-9_-]{16,}/g,
 	// Google AI Studio.
@@ -16,10 +17,7 @@ const SECRET_PATTERNS: readonly RegExp[] = [
  * it reaches a log, an event, or another process. Header redaction is not
  * enough on its own: vendors echo key fragments in error bodies.
  */
-export function scrubSecret(
-	text: string,
-	secret?: string | null,
-): string {
+export function scrubSecret(text: string, secret?: string | null): string {
 	let out = text;
 	const trimmed = secret?.trim();
 	if (trimmed && trimmed.length >= 4) {

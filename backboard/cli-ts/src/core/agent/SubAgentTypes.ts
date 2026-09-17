@@ -29,7 +29,9 @@ export interface SubAgentRunnerDeps {
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
 	getThinking: () => Promise<ThinkingConfig | null | undefined>;
-	getThinkingResolver?: () => Promise<RuntimeThinkingResolver>;
+	getThinkingResolver?: (
+		route?: ModelRoute,
+	) => Promise<RuntimeThinkingResolver>;
 	systemPrompt: string;
 	toolFactory: SubAgentToolFactory;
 	isToolEnabled?: (name: string) => boolean;
@@ -39,6 +41,7 @@ export interface SubAgentRunnerDeps {
 }
 
 export interface SubAgentRunParams {
+	route?: Readonly<ModelRoute>;
 	name?: string;
 	prompt: string;
 	depth: number;

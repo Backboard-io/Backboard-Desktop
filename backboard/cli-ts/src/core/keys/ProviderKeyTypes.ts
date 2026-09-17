@@ -10,6 +10,7 @@ export const BYOK_PROVIDER_IDS = [
 	"openai",
 	"google",
 	"openrouter",
+	"xai",
 ] as const;
 
 export type ByokProviderId = (typeof BYOK_PROVIDER_IDS)[number];

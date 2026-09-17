@@ -169,11 +169,11 @@ export class ClientRouter implements AgentClient {
 		model: string,
 		options?: RequestOptions,
 	): Promise<ModelThinkingMetadataResponse> {
-		return this.clientFor({ provider, model }).getModelThinkingMetadata(
-			provider,
-			model,
-			options,
-		);
+		return (
+			options?.source
+				? this.forRoute(options.source, undefined, { provider, model })
+				: this.clientFor({ provider, model })
+		).getModelThinkingMetadata(provider, model, options);
 	}
 
 	/**

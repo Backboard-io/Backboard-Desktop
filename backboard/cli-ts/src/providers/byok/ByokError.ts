@@ -30,6 +30,7 @@ export function unexpectedStreamEndMessage(provider: ByokProviderId): string {
 		anthropic: "Anthropic",
 		openai: "OpenAI",
 		google: "Google",
+		xai: "xAI",
 		openrouter: "OpenRouter",
 	};
 	const label = labels[provider];

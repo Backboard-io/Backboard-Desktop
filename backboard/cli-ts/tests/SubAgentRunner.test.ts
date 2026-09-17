@@ -166,6 +166,25 @@ describe("SubAgentRunner", () => {
 		expect(client.messageRequests[0]?.source).toBe("byok");
 	});
 
+	it("uses the submitting turn's route even when a worker starts after the picker changes", async () => {
+		const client = new CompletingClient();
+		const runner = runnerWith(client, []);
+		await runner.run({
+			route: { provider: "google", model: "gemini-2.5-flash", source: "byok" },
+			prompt: "report",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+		expect(
+			client.messageRequests.map((request) => [
+				request.llm_provider,
+				request.model_name,
+				request.source,
+			]),
+		).toEqual([["google", "gemini-2.5-flash", "byok"]]);
+	});
+
 	it("propagates the depth into the sub-agent tool context", async () => {
 		let seenDepth = -1;
 		const probe = new TestTool({ name: "Read", readOnly: true });

@@ -437,6 +437,9 @@ interface CliTsSession {
 	sourceWorkingDirectory?: URI;
 	worktree?: CliTsWorktree;
 	model?: ModelSelection;
+	activeModel?: ModelSelection;
+	modelChangeRevision?: number;
+	appliedModelRevision?: number;
 	config?: Record<string, unknown>;
 	title?: string;
 	threadId?: string;
@@ -1378,6 +1381,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		if (session.archived) {
 			throw new Error(`Cannot send to archived Backboard session: ${session.sessionUri.toString()}`);
 		}
+		await this._applyPendingModel(session);
 		if (session.pendingProviderHandoff) {
 			this._prepareProviderHandoff(session, session.model?.id);
 		}
@@ -1904,33 +1908,52 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 	async changeModel(sessionUri: URI, model: ModelSelection): Promise<void> {
 		const session = this._session(sessionUri);
-		const previousModelId = session.model?.id;
+		session.activeModel ??= session.model;
 		session.model = model;
+		session.modelChangeRevision = (session.modelChangeRevision ?? 0) + 1;
+		const owner = session.turn ?? session.subagentTurnOwners.values().next().value;
+		if (owner) {
+			this._fire(session.sessionUri, { type: ActionType.ChatResponsePart, turnId: owner.turnId, part: {
+				kind: ResponsePartKind.SystemNotification,
+				content: localize('cliTsAgent.pendingModel', "{0}: Applies after current work finishes", model.id),
+			} });
+		}
+		// The selection is visible immediately; applying it is serialized with
+		// sends and waits for detached workers as well as their parent turn.
+		void this._queueSessionOperation(session, () => this._applyPendingModel(session)).catch(error => {
+			this._logService.warn(`[cli-ts] model change pending: ${error instanceof Error ? error.message : String(error)}`);
+		});
+	}
+
+	private async _applyPendingModel(session: CliTsSession): Promise<void> {
+		if (session.modelChangeRevision === undefined || session.appliedModelRevision === session.modelChangeRevision) {
+			return;
+		}
+		if (session.proc?.isRunning) {
+			await session.proc.request({ op: 'waitForIdle', requestId: session.proc.nextRequestId() });
+		}
+		if (session.disposed) { return; }
+		// Read only after the barrier: repeated selections coalesce to the latest.
+		const model = session.model;
+		if (!model?.id) { return; }
+		const revision = session.modelChangeRevision;
 		if (isChatGptSubscriptionModel(model.id)) {
 			await this._ensureChatGptSubscriptionLogin(false);
 		} else if (isClaudeSubscriptionModel(model.id)) {
 			await this._requireClaudeSubscriptionLogin();
 		}
-		const previousProvider = providerFromModelId(previousModelId);
-		const nextProvider = providerFromModelId(model.id);
-		const providerChanged = !!previousProvider && !!nextProvider && previousProvider !== nextProvider;
-		if (session.turn && providerChanged) {
-			// Let the in-flight provider finish cleanly. sendMessage is sequenced
-			// behind it and performs the handoff before the next request starts.
-			session.pendingProviderHandoff = true;
-			this._logService.info(`[cli-ts] deferred provider handoff until the active turn completes session=${session.sessionId} from=${previousModelId} to=${model.id}`);
-			return;
-		}
+		if (revision !== session.modelChangeRevision) { return this._applyPendingModel(session); }
+		const previousModelId = session.activeModel?.id;
 		if (requiresProviderThreadHandoff(session.threadId, previousModelId, model.id)) {
 			this._prepareProviderHandoff(session, model.id, previousModelId);
-			return;
-		}
-		if (session.proc?.isRunning && model.id) {
+		} else if (session.proc?.isRunning) {
 			const route = parseBillingRoute(model.id);
-			session.proc.notify(route
-				? { op: 'setModel', model: `${route.provider}/${route.model}`, source: route.source }
-				: { op: 'setModel', model: model.id });
+			await session.proc.request({ op: 'setModel', model: route ? `${route.provider}/${route.model}` : model.id,
+				...(route ? { source: route.source } : {}), requestId: session.proc.nextRequestId() });
 		}
+		session.activeModel = model;
+		session.appliedModelRevision = revision;
+		this._writeStore();
 	}
 
 	private _prepareProviderHandoff(session: CliTsSession, nextModelId: string | undefined, previousModelId?: string): void {

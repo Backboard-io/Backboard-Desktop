@@ -1,5 +1,5 @@
-import type { Config } from "../config/Config.ts";
 import { z } from "zod";
+import type { Config } from "../config/Config.ts";
 import type { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
 import type { RLMLoop } from "../core/agent/rlm/RLMLoop.ts";
 import type { JSONObject } from "../core/agent/rlm/RLMTypes.ts";
@@ -11,6 +11,7 @@ import type { AgentMode } from "../core/tools/AgentToolOutput.ts";
 import type { Tool } from "../core/tools/Tool.ts";
 import type { WorkerWorkspaceManager } from "../core/workspaces/WorkerWorkspaceManager.ts";
 import type { AgentClient } from "../providers/AgentClient.ts";
+import type { ModelRoute } from "../providers/backboard/types.ts";
 import type { McpRegistrar } from "./FindMcpTool.tsx";
 import type { SkillActivator } from "./FindSkillTool.tsx";
 
@@ -44,7 +45,7 @@ export const agentDisplayNameSchema = z
 export interface AgentToolDeps {
 	taskManager?: AgentTaskManager;
 	runner: Pick<SubAgentRunner, "run">;
-	createRLMLoop: () => Pick<RLMLoop, "run">;
+	createRLMLoop: (route?: Readonly<ModelRoute>) => Pick<RLMLoop, "run">;
 	maxDepth: number;
 	workspaceManager?: Pick<WorkerWorkspaceManager, "runWorker" | "list">;
 }

@@ -10,6 +10,7 @@ import {
 	supportsOpenRouterThinking,
 } from "../src/providers/byok/adapters/OpenRouterAdapter.ts";
 import { ByokClient } from "../src/providers/byok/ByokClient.ts";
+import { decodeProviderMetadata } from "../src/providers/byok/ProviderMetadata.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -62,6 +63,10 @@ function stubStreams(scripts: string[][]): CapturedRequest[] {
 						id: "anthropic/claude-sonnet-4.6",
 						context_length: 200_000,
 						supported_parameters: ["tools", "reasoning"],
+						architecture: {
+							input_modalities: ["text"],
+							output_modalities: ["text"],
+						},
 					},
 				],
 			});
@@ -246,6 +251,7 @@ describe("OpenRouter catalog", () => {
 				context_limit: 200_000,
 				max_output_tokens: 64_000,
 				supports_thinking: true,
+				supports_vision: true,
 			},
 		]);
 		await expect(
@@ -263,6 +269,10 @@ describe("OpenRouter catalog", () => {
 				{
 					id: "openai/gpt-oss-20b:free",
 					supported_parameters: ["tools", "reasoning"],
+					architecture: {
+						input_modalities: ["text"],
+						output_modalities: ["text"],
+					},
 				},
 			],
 		});
@@ -299,6 +309,10 @@ describe("OpenRouter catalog", () => {
 				{
 					id: "openai/gpt-oss-20b:free",
 					supported_parameters: ["tools", "reasoning"],
+					architecture: {
+						input_modalities: ["text"],
+						output_modalities: ["text"],
+					},
 				},
 			],
 		});
@@ -342,6 +356,10 @@ describe("OpenRouter catalog", () => {
 					{
 						id: "openai/gpt-oss-20b:free",
 						supported_parameters: ["tools", "reasoning"],
+						architecture: {
+							input_modalities: ["text"],
+							output_modalities: ["text"],
+						},
 					},
 				],
 			}),
@@ -377,6 +395,10 @@ describe("OpenRouter catalog", () => {
 			isOpenRouterChatModel({
 				id: "meta/llama",
 				supported_parameters: ["temperature"],
+				architecture: {
+					input_modalities: ["text"],
+					output_modalities: ["text"],
+				},
 			}),
 		).toBe(false);
 	});
@@ -478,7 +500,11 @@ describe("OpenRouter streaming", () => {
 		const action = events.find((event) => event.kind === "requires_action");
 		expect(
 			action?.kind === "requires_action"
-				? JSON.parse(action.providerMetadata ?? "")
+				? decodeProviderMetadata(
+						action.providerMetadata,
+						"openrouter",
+						"anthropic/claude-sonnet-4.6",
+					)
 				: null,
 		).toEqual([
 			{
@@ -617,7 +643,11 @@ describe("OpenRouter streaming", () => {
 		expect(captured).toHaveLength(1);
 		expect(
 			action?.kind === "requires_action"
-				? JSON.parse(action.providerMetadata ?? "")
+				? decodeProviderMetadata(
+						action.providerMetadata,
+						"openrouter",
+						"anthropic/claude-sonnet-4.6",
+					)
 				: null,
 		).toEqual([
 			{

@@ -97,11 +97,12 @@ export class SubAgentRunner {
 				isToolEnabled: this.deps.isToolEnabled,
 			});
 
-			// Captured once: a parent selection change after this point applies to
-			// later spawns, never to this worker's billing.
-			const route = this.deps.getRoute();
+			// Inherit the submitting turn, including for delayed and detached workers.
+			const route = Object.freeze({
+				...(params.route ?? this.deps.getRoute()),
+			});
 			const thinkingResolver = this.deps.getThinkingResolver
-				? await this.deps.getThinkingResolver()
+				? await this.deps.getThinkingResolver(route)
 				: undefined;
 			const thinking = thinkingResolver
 				? undefined
@@ -150,6 +151,7 @@ export class SubAgentRunner {
 				: undefined;
 
 			const ctx: ToolContext = {
+				modelRoute: route,
 				sessionId: session.sessionId,
 				cwd: params.parentCwd,
 				isolatedWorkspaceRoot: params.isolatedWorkspace

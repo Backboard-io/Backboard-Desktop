@@ -12,10 +12,10 @@ import { AgentController } from "../core/agent/AgentController.ts";
 import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
 import { AgentTaskStore } from "../core/agent/AgentTaskStore.ts";
 import { EventBus } from "../core/bus/EventBus.ts";
-import { createWorkerSnapshotMutation } from "../core/checkpoints/WorkerSnapshotMutation.ts";
-import { EditorRewind } from "../core/checkpoints/EditorRewind.ts";
 import { CheckpointManager } from "../core/checkpoints/CheckpointManager.ts";
 import { CheckpointStore } from "../core/checkpoints/CheckpointStore.ts";
+import { EditorRewind } from "../core/checkpoints/EditorRewind.ts";
+import { createWorkerSnapshotMutation } from "../core/checkpoints/WorkerSnapshotMutation.ts";
 import { HookController, loadHookConfig } from "../core/hooks/index.ts";
 import { LspService, resolveLspFlags } from "../core/lsp/index.ts";
 import {
@@ -333,9 +333,11 @@ export async function runServe(argv: string[]): Promise<void> {
 	let rewinding = false;
 	const pendingOps = new Set<Promise<void>>();
 	let disposing = false;
+	let credentialRevision = -1;
+	let credentialSnapshot = "";
 	// A host that manages keys must state the route with every selection, and
 	// may not move the live model to another billing source while a turn is
-	// running: everything started by that turn reads the live model.
+	// running: a selection takes effect only after the whole task is idle.
 	const assertRouteAllowed = (
 		model: string | undefined,
 		source: ModelSource | undefined,
@@ -347,13 +349,11 @@ export async function runServe(argv: string[]): Promise<void> {
 			);
 		}
 		if (
-			controller.isRunning &&
-			source !== undefined &&
-			config.modelSource !== undefined &&
-			source !== config.modelSource
+			(controller.isRunning || agentTaskManager.hasActiveTasks) &&
+			(model !== config.modelString || source !== config.modelSource)
 		) {
 			throw new Error(
-				"The billing source cannot change while a turn is running; wait for it to finish or cancel it",
+				"The model or billing source cannot change while a turn or its workers are running; wait for them to finish",
 			);
 		}
 	};
@@ -473,6 +473,11 @@ export async function runServe(argv: string[]): Promise<void> {
 				}
 				return;
 			}
+			case "waitForIdle":
+				await controller.waitForIdle();
+				await workerWorkspaceManager.waitForIdle();
+				writeRecord("serve:ack", control.requestId, { op: "waitForIdle" });
+				return;
 			case "warmup":
 				// Process startup itself is the main warm-up. A model request also
 				// establishes DNS/TLS without creating remote assistant state.
@@ -504,7 +509,21 @@ export async function runServe(argv: string[]): Promise<void> {
 					...(config.modelSource ? { source: config.modelSource } : {}),
 				});
 				return;
-			case "setCredentials":
+			case "setCredentials": {
+				const snapshot = JSON.stringify(
+					[...control.providerKeys].sort((a, b) =>
+						a.provider.localeCompare(b.provider),
+					),
+				);
+				if (
+					control.revision < credentialRevision ||
+					(control.revision === credentialRevision &&
+						snapshot !== credentialSnapshot)
+				) {
+					throw new Error("Stale or conflicting credential revision");
+				}
+				credentialRevision = control.revision;
+				credentialSnapshot = snapshot;
 				// Synchronous on purpose: stdin lines are dispatched in order but
 				// handlers run concurrently, so only the synchronous prefix of a
 				// handler is guaranteed to precede the next line's work.
@@ -517,6 +536,7 @@ export async function runServe(argv: string[]): Promise<void> {
 					providers: control.providerKeys.map((entry) => entry.provider),
 				});
 				return;
+			}
 			case "listModels":
 				writeRecord(
 					"serve:models",

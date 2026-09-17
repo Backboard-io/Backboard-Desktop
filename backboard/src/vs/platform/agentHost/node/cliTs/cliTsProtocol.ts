@@ -24,7 +24,7 @@ export type CliTsModelSource = 'backboard' | 'byok' | 'subscription';
  * provider keys and explicit billing routes. An older packaged runtime lacks
  * it, and key-billed turns must then fail closed instead of routing elsewhere.
  */
-export const CLI_TS_HOST_MANAGED_BYOK_CAPABILITY = 'host-managed-byok-v1';
+export const CLI_TS_HOST_MANAGED_BYOK_CAPABILITY = 'host-managed-byok-v2';
 
 /** Critical-path phase names emitted by cli-ts for structured performance logs. */
 export type CliTsPerformanceTimingPhase =
@@ -113,6 +113,7 @@ export type CliTsServeControl =
 		readonly clientTools?: readonly CliTsClientToolDefinition[];
 	}
 	| { readonly op: 'steer'; readonly requestId?: string; readonly prompt: string; readonly systemContext?: string }
+	| { readonly op: 'waitForIdle'; readonly requestId: string }
 	| { readonly op: 'warmup'; readonly requestId?: string }
 	| { readonly op: 'cancel'; readonly requestId?: string }
 	| { readonly op: 'respondInput'; readonly id: string; readonly answers: readonly string[] }

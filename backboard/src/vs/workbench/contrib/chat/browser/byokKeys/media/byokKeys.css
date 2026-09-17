@@ -53,6 +53,21 @@
 	mask: url('../../widget/media/model-provider-icons/ai_anthropic.svg') center / contain no-repeat;
 }
 
+.backboard-api-keys-icon.provider-google {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_google.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_google.svg') center / contain no-repeat;
+}
+
+.backboard-api-keys-icon.provider-openrouter {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_open_router.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_open_router.svg') center / contain no-repeat;
+}
+
+.backboard-api-keys-icon.provider-xai {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_x_ai.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_x_ai.svg') center / contain no-repeat;
+}
+
 .backboard-api-keys-main {
 	flex: 1 1 auto;
 	min-width: 0;

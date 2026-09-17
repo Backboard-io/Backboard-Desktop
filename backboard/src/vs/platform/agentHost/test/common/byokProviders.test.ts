@@ -14,6 +14,9 @@ suite('byokProviders', () => {
 		assert.deepStrictEqual(
 			[
 				parseBillingRoute('openai-key/gpt-5.5'),
+				parseBillingRoute('openrouter-key/anthropic/claude-sonnet-4.6'),
+				parseBillingRoute('google-key/gemini-2.5-flash'),
+				parseBillingRoute('xai-key/grok-4.6'),
 				parseBillingRoute('anthropic/claude-opus-5'),
 				parseBillingRoute('openai-subscription/gpt-5.5'),
 				parseBillingRoute('openrouter/openai/gpt-5-chat'),
@@ -22,6 +25,9 @@ suite('byokProviders', () => {
 			],
 			[
 				{ source: 'byok', provider: 'openai', model: 'gpt-5.5' },
+				{ source: 'byok', provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' },
+				{ source: 'byok', provider: 'google', model: 'gemini-2.5-flash' },
+				{ source: 'byok', provider: 'xai', model: 'grok-4.6' },
 				{ source: 'backboard', provider: 'anthropic', model: 'claude-opus-5' },
 				{ source: 'subscription', provider: 'openai-subscription', model: 'gpt-5.5' },
 				{ source: 'backboard', provider: 'openrouter', model: 'openai/gpt-5-chat' },
@@ -37,7 +43,7 @@ suite('byokProviders', () => {
 				families: ['openai-key', 'Anthropic-Key', 'openai', 'openai-subscription'].map(routeProviderFamily),
 				keyBilled: keyBilledProviderId('openai'),
 				vendor: vendorOfProvider('openai-key'),
-				unsupported: isByokProviderId('google'),
+				unsupported: isByokProviderId('unsupported'),
 			},
 			{
 				families: ['byok', 'byok', 'openai', 'openai-subscription'],

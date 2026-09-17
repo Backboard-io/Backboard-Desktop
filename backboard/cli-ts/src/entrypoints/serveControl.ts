@@ -5,6 +5,7 @@ const KNOWN_OPS = new Set<ServeControl["op"]>([
 	"submit",
 	"steer",
 	"warmup",
+	"waitForIdle",
 	"cancel",
 	"respondInput",
 	"clientToolResult",
@@ -169,6 +170,7 @@ export function parseControlLine(line: string): ParsedControlLine | null {
 			}
 			break;
 		case "listModels":
+		case "waitForIdle":
 		case "listTools":
 		case "listSkills":
 		case "archiveWorkers":

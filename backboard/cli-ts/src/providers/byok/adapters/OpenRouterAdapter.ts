@@ -10,6 +10,16 @@ import type {
 } from "../ByokTypes.ts";
 import { getJson, postSseJson } from "../httpStream.ts";
 import {
+	assertCredentialCurrent,
+	credentialKey,
+	type ProviderCredential,
+	type ProviderTransport,
+} from "../ProviderCredential.ts";
+import {
+	decodeProviderMetadata,
+	encodeProviderMetadata,
+} from "../ProviderMetadata.ts";
+import {
 	OPENROUTER_API_BASE,
 	OPENROUTER_APP_TITLE,
 	OPENROUTER_APP_URL,
@@ -54,24 +64,29 @@ export const openRouterAdapter: ProviderAdapter = {
 	keyHint: "sk-or-v1-...",
 
 	looksLikeKey(key) {
-		return /^sk-or-v1-[\w-]{20,}$/.test(key.trim());
+		return /^sk-or-v1-[\w-]{20,}$/.test(credentialKey(key).trim());
 	},
 
-	async validateKey(key, signal) {
+	async validateKey(key, signal, transport) {
 		await getJson<unknown>(
 			`${OPENROUTER_API_BASE}/key`,
 			headers(key),
 			"openrouter",
 			signal,
+			key,
+			transport,
 		);
 	},
 
-	async listModels(key, signal) {
-		return (await waitForSignal(loadCatalog(key), signal)).models;
+	async listModels(key, signal, transport) {
+		const catalog = await waitForSignal(loadCatalog(key, transport), signal);
+		assertCredentialCurrent(key);
+		return catalog.models;
 	},
 
-	async supportsThinking(model, key) {
-		const catalog = await loadCatalog(key);
+	async supportsThinking(model, key, transport) {
+		const catalog = await loadCatalog(key, transport);
+		assertCredentialCurrent(key);
 		return (
 			catalog.models.find((candidate) => candidate.name === model)
 				?.supports_thinking === true
@@ -96,7 +111,7 @@ export function isOpenRouterChatModel(model: OpenRouterModel): boolean {
 	const input = model.architecture?.input_modalities;
 	const output = model.architecture?.output_modalities;
 	return (
-		(input?.includes("text") ?? true) && (output?.includes("text") ?? true)
+		(input?.includes("text") ?? false) && (output?.includes("text") ?? false)
 	);
 }
 
@@ -108,10 +123,10 @@ export function supportsOpenRouterThinking(
 
 async function* streamOpenRouter(
 	request: ByokStreamRequest,
-	key: string,
+	key: ProviderCredential,
 ): AsyncIterable<ProviderEvent> {
 	const modelMetadata: { value: ModelCatalogItem | null } = { value: null };
-	void loadCatalog(key)
+	void loadCatalog(key, request.transport)
 		.then((catalog) => {
 			modelMetadata.value =
 				catalog.models.find((candidate) => candidate.name === request.model) ??
@@ -152,6 +167,8 @@ async function* streamOpenRouter(
 	const sseRequest: Parameters<typeof postSseJson>[0] = {
 		url: `${OPENROUTER_API_BASE}/chat/completions`,
 		headers: headers(key),
+		credential: key,
+		transport: request.transport,
 		body,
 		provider: "openrouter",
 	};
@@ -255,7 +272,7 @@ async function* streamOpenRouter(
 	const collectedReasoning = [...reasoningDetails.values()];
 	const providerMetadata =
 		collectedReasoning.length > 0
-			? JSON.stringify(collectedReasoning)
+			? encodeProviderMetadata("openrouter", request.model, collectedReasoning)
 			: undefined;
 	for (const call of calls) yield { kind: "tool_ready", call };
 
@@ -276,12 +293,12 @@ async function* streamOpenRouter(
 		};
 		return;
 	}
-	yield { kind: "completed", usage: finalUsage };
+	yield { kind: "completed", usage: finalUsage, providerMetadata };
 }
 
-function headers(key: string): Record<string, string> {
+function headers(key: ProviderCredential): Record<string, string> {
 	return {
-		Authorization: `Bearer ${key.trim()}`,
+		Authorization: `Bearer ${credentialKey(key).trim()}`,
 		"HTTP-Referer": OPENROUTER_APP_URL,
 		"X-OpenRouter-Title": OPENROUTER_APP_TITLE,
 	};
@@ -296,9 +313,16 @@ function supportsReasoningParameter(
 	);
 }
 
-async function loadCatalog(key: string): Promise<OpenRouterCatalog> {
-	const normalizedKey = key.trim();
-	const credentialId = createHash("sha256").update(normalizedKey).digest("hex");
+async function loadCatalog(
+	key: ProviderCredential,
+	transport?: ProviderTransport,
+): Promise<OpenRouterCatalog> {
+	assertCredentialCurrent(key);
+	const normalizedKey = credentialKey(key).trim();
+	const credentialId = createHash("sha256")
+		.update(normalizedKey)
+		.update(`:${typeof key === "string" ? "raw" : key.generation}`)
+		.digest("hex");
 	if (cachedCatalog?.credentialId === credentialId) {
 		if (cachedCatalog.value && cachedCatalog.expiresAt > Date.now()) {
 			return cachedCatalog.value;
@@ -306,7 +330,7 @@ async function loadCatalog(key: string): Promise<OpenRouterCatalog> {
 		if (cachedCatalog.pending) return cachedCatalog.pending;
 	}
 
-	const pending = fetchCatalog(normalizedKey);
+	const pending = fetchCatalog(key, undefined, transport);
 	cachedCatalog = {
 		credentialId,
 		expiresAt: 0,
@@ -314,6 +338,7 @@ async function loadCatalog(key: string): Promise<OpenRouterCatalog> {
 	};
 	try {
 		const value = await pending;
+		assertCredentialCurrent(key);
 		if (cachedCatalog?.pending === pending) {
 			cachedCatalog = {
 				credentialId,
@@ -329,14 +354,17 @@ async function loadCatalog(key: string): Promise<OpenRouterCatalog> {
 }
 
 async function fetchCatalog(
-	key: string,
+	key: ProviderCredential,
 	signal?: AbortSignal,
+	transport?: ProviderTransport,
 ): Promise<OpenRouterCatalog> {
 	const response = await getJson<OpenRouterModelsResponse>(
 		`${OPENROUTER_API_BASE}/models/user`,
 		headers(key),
 		"openrouter",
 		signal,
+		key,
+		transport,
 	);
 	const models: ModelCatalogItem[] = [];
 	for (const model of response.data ?? []) {
@@ -352,6 +380,8 @@ async function fetchCatalog(
 			last_updated:
 				typeof model.created === "number" ? model.created * 1000 : null,
 			context_limit: positiveNumber(model.context_length),
+			supports_vision:
+				model.architecture?.input_modalities?.includes("image") ?? false,
 			max_output_tokens: positiveNumber(
 				model.top_provider?.max_completion_tokens,
 			),
@@ -439,9 +469,18 @@ function toOpenRouterMessages(request: ByokStreamRequest): unknown[] {
 						arguments: JSON.stringify(call.input ?? {}),
 					},
 				}));
-				const reasoningDetails = readReasoningDetails(message.providerMetadata);
-				if (reasoningDetails) entry.reasoning_details = reasoningDetails;
 			}
+			const reasoningDetails = readReasoningDetails(
+				JSON.stringify(
+					decodeProviderMetadata(
+						message.providerMetadata,
+						"openrouter",
+						request.model,
+					),
+				),
+			);
+			if (reasoningDetails) entry.reasoning_details = reasoningDetails;
+
 			out.push(entry);
 			continue;
 		}

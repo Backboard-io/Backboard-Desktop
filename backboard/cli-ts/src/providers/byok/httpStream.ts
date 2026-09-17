@@ -2,9 +2,16 @@ import type { ByokProviderId } from "../../core/keys/ProviderKeyTypes.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import { readSseFrames, sseDataPayload } from "../backboard/sse.ts";
 import { ByokError, providerErrorMessage } from "./ByokError.ts";
+import {
+	assertCredentialCurrent,
+	type ProviderCredential,
+	type ProviderTransport,
+} from "./ProviderCredential.ts";
 import { scrubSecret } from "./scrubSecret.ts";
 
 export interface ProviderRequest {
+	credential?: ProviderCredential;
+	transport?: ProviderTransport;
 	url: string;
 	headers: Record<string, string>;
 	body: unknown;
@@ -19,7 +26,8 @@ async function send(request: ProviderRequest): Promise<Response> {
 		body: JSON.stringify(request.body),
 	};
 	if (request.signal) options.signal = request.signal;
-	return fetch(request.url, options);
+	if (request.credential) assertCredentialCurrent(request.credential);
+	return (request.transport ?? fetch)(request.url, options);
 }
 
 /** The credential values carried by a request, so error text can be scrubbed of them. */
@@ -71,10 +79,13 @@ export async function getJson<T>(
 	headers: Record<string, string>,
 	provider: ByokProviderId,
 	signal?: AbortSignal,
+	credential?: ProviderCredential,
+	transport: ProviderTransport = fetch,
 ): Promise<T> {
 	const options: RequestInit = { method: "GET", headers };
 	if (signal) options.signal = signal;
-	const res = await fetch(url, options);
+	if (credential) assertCredentialCurrent(credential);
+	const res = await transport(url, options);
 	await assertOk(res, provider, headers);
 	return (await res.json()) as T;
 }
@@ -118,9 +129,7 @@ export async function* postSseJson(
 			payload = JSON.parse(data);
 		} catch (err) {
 			throw new ByokError(
-				`Malformed ${providerLabel(request.provider)} stream event: ${errorMessage(
-					err,
-				)}`,
+				`Malformed ${providerLabel(request.provider)} stream event: ${scrubAll(errorMessage(err), secretsFromHeaders(request.headers))}`,
 				request.provider,
 				0,
 				scrubAll(frame, secretsFromHeaders(request.headers)),
@@ -131,7 +140,20 @@ export async function* postSseJson(
 			continue;
 		}
 		if (typeof payload === "object" && !Array.isArray(payload)) {
-			yield payload as Record<string, unknown>;
+			const record = payload as Record<string, unknown>;
+			// Error payloads are untrusted vendor text, including errors delivered over HTTP 200.
+			if (
+				record.error ||
+				record.type === "error" ||
+				record.type === "response.failed" ||
+				record.type === "response.incomplete"
+			) {
+				yield JSON.parse(
+					scrubAll(JSON.stringify(record), secretsFromHeaders(request.headers)),
+				) as Record<string, unknown>;
+			} else {
+				yield record;
+			}
 		} else {
 			yield {};
 		}
@@ -144,6 +166,8 @@ function providerLabel(provider: ByokProviderId): string {
 			return "Anthropic";
 		case "openai":
 			return "OpenAI";
+		case "xai":
+			return "xAI";
 		case "google":
 			return "Google";
 		case "openrouter":

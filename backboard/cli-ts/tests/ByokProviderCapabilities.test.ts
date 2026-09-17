@@ -14,6 +14,7 @@ import {
 import { ByokError } from "../src/providers/byok/ByokError.ts";
 import type { ByokMessage } from "../src/providers/byok/ByokTypes.ts";
 import { getJson } from "../src/providers/byok/httpStream.ts";
+import { decodeProviderMetadata } from "../src/providers/byok/ProviderMetadata.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -156,7 +157,11 @@ describe("Anthropic thinking preservation", () => {
 		expect(reasoning).toBe("Look at the file.");
 		expect(
 			requiresAction?.kind === "requires_action"
-				? JSON.parse(requiresAction.providerMetadata ?? "null")
+				? decodeProviderMetadata(
+						requiresAction.providerMetadata,
+						"anthropic",
+						"claude-opus-5",
+					)
 				: null,
 		).toEqual({
 			model: "claude-opus-5",

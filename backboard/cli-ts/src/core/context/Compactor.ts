@@ -67,6 +67,7 @@ export class Compactor {
 		options: { signal?: AbortSignal } = {},
 	): Promise<CompactionResult> {
 		const { session, config, client } = this.deps;
+		const route = { ...config.model, source: config.modelSource };
 		const messages = [...session.getMessages()];
 		if (messages.length < MIN_MESSAGES_TO_COMPACT) {
 			throw new CompactionError("Not enough conversation to compress yet.");
@@ -93,11 +94,9 @@ export class Compactor {
 					verbatimTurns: rendered.verbatimCount,
 					todos: renderTodos(session.todos),
 				}),
-				llm_provider: config.model.provider,
-				model_name: config.model.model,
-				...(config.modelSource === undefined
-					? {}
-					: { source: config.modelSource }),
+				llm_provider: route.provider,
+				model_name: route.model,
+				...(route.source === undefined ? {} : { source: route.source }),
 				system_prompt: COMPACTION_SYSTEM_PROMPT,
 				// No tools and no memory: this is a pure text transformation, and
 				// letting it call tools or write memories would be both slow and a

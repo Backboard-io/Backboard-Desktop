@@ -13,6 +13,14 @@ import type {
 } from "../ByokTypes.ts";
 import { getJson, postSseJson } from "../httpStream.ts";
 import {
+	credentialKey,
+	type ProviderCredential,
+} from "../ProviderCredential.ts";
+import {
+	decodeProviderMetadata,
+	encodeProviderMetadata,
+} from "../ProviderMetadata.ts";
+import {
 	thinkingBudgetTokens,
 	thinkingLevel,
 	usesNativeAdaptiveThinking,
@@ -99,7 +107,7 @@ function thinkingMetadata(
 ): string | undefined {
 	if (blocks.length === 0) return undefined;
 	const metadata: AnthropicThinkingMetadata = { model, thinking: [...blocks] };
-	return JSON.stringify(metadata);
+	return encodeProviderMetadata("anthropic", model, metadata);
 }
 
 function parseThinkingMetadata(
@@ -142,10 +150,10 @@ export const anthropicAdapter: ProviderAdapter = {
 	keyHint: "sk-ant-...",
 
 	looksLikeKey(key) {
-		return /^sk-ant-[\w-]{20,}$/.test(key.trim());
+		return /^sk-ant-[\w-]{20,}$/.test(credentialKey(key).trim());
 	},
 
-	async validateKey(key, signal) {
+	async validateKey(key, signal, transport) {
 		// A models list is the cheapest authenticated GET: it costs no tokens
 		// and still fails closed on a bad key.
 		await getJson<AnthropicModelsResponse>(
@@ -153,15 +161,19 @@ export const anthropicAdapter: ProviderAdapter = {
 			headers(key),
 			"anthropic",
 			signal,
+			key,
+			transport,
 		);
 	},
 
-	async listModels(key, signal) {
+	async listModels(key, signal, transport) {
 		const response = await getJson<AnthropicModelsResponse>(
 			`${API_BASE}/models?limit=1000`,
 			headers(key),
 			"anthropic",
 			signal,
+			key,
+			transport,
 		);
 		const models: ModelCatalogItem[] = [];
 		for (const model of response.data ?? []) {
@@ -195,13 +207,16 @@ export const anthropicAdapter: ProviderAdapter = {
 	},
 };
 
-function headers(key: string): Record<string, string> {
-	return { "x-api-key": key.trim(), "anthropic-version": API_VERSION };
+function headers(key: ProviderCredential): Record<string, string> {
+	return {
+		"x-api-key": credentialKey(key).trim(),
+		"anthropic-version": API_VERSION,
+	};
 }
 
 async function* streamAnthropic(
 	request: ByokStreamRequest,
-	key: string,
+	key: ProviderCredential,
 ): AsyncIterable<ProviderEvent> {
 	const maxTokens = maxOutputTokensFor(
 		request.model,
@@ -255,6 +270,8 @@ async function* streamAnthropic(
 	const sseRequest: Parameters<typeof postSseJson>[0] = {
 		url: `${API_BASE}/messages`,
 		headers: headers(key),
+		credential: key,
+		transport: request.transport,
 		body,
 		provider: "anthropic",
 	};
@@ -494,7 +511,11 @@ async function* streamAnthropic(
 		};
 		return;
 	}
-	yield { kind: "completed", usage };
+	yield {
+		kind: "completed",
+		usage,
+		providerMetadata: thinkingMetadata(request.model, thinkingBlocks),
+	};
 }
 
 /**
@@ -633,7 +654,15 @@ function renderMessages(
 			// Replay the turn's thinking blocks unchanged, and only for the model
 			// that produced them: signatures are model-bound, and a different model
 			// would reject them. Dropping them keeps the visible history intact.
-			const thinking = parseThinkingMetadata(message.providerMetadata);
+			const thinking = parseThinkingMetadata(
+				JSON.stringify(
+					decodeProviderMetadata(
+						message.providerMetadata,
+						"anthropic",
+						model ?? "",
+					),
+				),
+			);
 			if (thinking && thinking.model === model) {
 				for (const block of thinking.thinking) content.push({ ...block });
 			}

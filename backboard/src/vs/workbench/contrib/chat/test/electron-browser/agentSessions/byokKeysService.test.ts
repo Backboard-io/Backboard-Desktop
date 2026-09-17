@@ -78,7 +78,7 @@ suite('ByokKeysService', () => {
 		await new Promise<void>(resolve => store.add(service.onDidChange(() => resolve())));
 
 		assert.deepStrictEqual({ immediate, adopted: service.list().map(entry => [entry.provider, entry.configured, entry.masked]) }, {
-			immediate: [['openai', false], ['anthropic', false]],
+			immediate: [['openai', false], ['anthropic', false], ['google', false], ['openrouter', false], ['xai', false]],
 			adopted: [['openai', true, 'sk-test…cdef'], ['anthropic', false, undefined]],
 		});
 	});

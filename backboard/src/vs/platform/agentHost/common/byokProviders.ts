@@ -26,7 +26,7 @@ export interface ModelRoute {
 }
 
 /** Vendors a user can bring a key for in this release. */
-export type ByokProviderId = 'openai' | 'anthropic';
+export type ByokProviderId = 'openai' | 'anthropic' | 'google' | 'openrouter' | 'xai';
 
 export interface IByokProviderDefinition {
 	readonly id: ByokProviderId;
@@ -52,6 +52,21 @@ export const BYOK_PROVIDERS: readonly IByokProviderDefinition[] = [
 		keyHint: 'sk-ant-…',
 		consoleUrl: 'https://console.anthropic.com/settings/keys',
 		looksLikeKey: key => /^sk-ant-[\w-]{20,}$/.test(key.trim()),
+	},
+	{
+		id: 'google', label: 'Google Gemini', keyHint: 'AIza…',
+		consoleUrl: 'https://aistudio.google.com/app/apikey',
+		looksLikeKey: key => /^AIza[\w-]{30,}$/.test(key.trim()),
+	},
+	{
+		id: 'openrouter', label: 'OpenRouter', keyHint: 'sk-or-v1-…',
+		consoleUrl: 'https://openrouter.ai/settings/keys',
+		looksLikeKey: key => /^sk-or-v1-[\w-]{20,}$/.test(key.trim()),
+	},
+	{
+		id: 'xai', label: 'xAI', keyHint: 'xai-…',
+		consoleUrl: 'https://console.x.ai/',
+		looksLikeKey: key => /^xai-[\w-]{20,}$/.test(key.trim()),
 	},
 ];
 

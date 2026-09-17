@@ -87,9 +87,12 @@ export function providerIconKeyForCombinedModelSection(sectionId: string): strin
 		case 'aws-bedrock': return 'bedrock';
 		case 'cerebras': return 'cerebras';
 		case 'cohere': return 'cohere';
+		case 'google-key':
 		case 'google':
 		case 'google-ai': return 'google';
+		case 'openrouter-key':
 		case 'openrouter': return 'open-router';
+		case 'xai-key':
 		case 'xai':
 		case 'x-ai': return 'x-ai';
 		default: return undefined;

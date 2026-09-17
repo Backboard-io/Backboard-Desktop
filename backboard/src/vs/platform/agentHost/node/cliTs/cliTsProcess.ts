@@ -254,6 +254,8 @@ export interface CliTsServeProcessOptions {
 	 * update message instead.
 	 */
 	readonly credentialSnapshot?: () => CliTsCredentialSnapshot;
+	readonly readyTimeoutMs?: number;
+	readonly credentialAckTimeoutMs?: number;
 }
 
 /**
@@ -282,6 +284,7 @@ export class CliTsServeProcess extends Disposable {
 	private exit: DeferredPromise<void> | undefined;
 	/** Set once the startup credential snapshot was written to the current child. */
 	private snapshotWritten = false;
+	private gateOpened = false;
 	/** Why the host ended the child; reported instead of the generic exit message. */
 	private terminationReason: string | undefined;
 	/** The failure that ended the current child, for traffic released after it. */
@@ -359,6 +362,10 @@ export class CliTsServeProcess extends Disposable {
 			return;
 		}
 		this.terminationReason = reason;
+		const failure = new Error(reason);
+		this.lastFailure = failure;
+		this.rejectAll(failure);
+		if (this.ready) { this.settleReady(this.ready, failure); }
 		this.logService.warn(`[cli-ts] terminating serve process: ${reason}`);
 		this.shutdown(child);
 	}
@@ -379,6 +386,10 @@ export class CliTsServeProcess extends Disposable {
 		if (!this.isRunning) {
 			return;
 		}
+		if (control.op === 'cancel' && !this.gateOpened) {
+			this.terminate(localize('cliTsProcess.startupCancelled', "Runtime startup cancelled."));
+			return;
+		}
 		const child = this.ensureProcess();
 		this.gate.then(() => this.write(child, control), () => undefined);
 	}
@@ -395,12 +406,22 @@ export class CliTsServeProcess extends Disposable {
 				this.pending.delete(control.requestId);
 				reject(this.lastFailure ?? new Error('cli-ts serve process exited before the request could be sent.'));
 			}
+		}).then(record => {
+			if (control.op === 'setCredentials') {
+				const payload = record.payload as { op?: string; revision?: number } | undefined;
+				if (record.type !== 'serve:ack' || payload?.op !== control.op || payload.revision !== control.revision) {
+					const message = localize('cliTsProcess.invalidCredentialAck', "Runtime returned an invalid credential acknowledgement. Retry to restart it.");
+					this.terminate(message);
+					throw new Error(message);
+				}
+			}
+			return record;
 		});
 	}
 
 	/** Writes one control line to `child`, but only while it is still the live child. */
 	private write(child: ChildProcessWithoutNullStreams, control: CliTsServeControl): boolean {
-		if (child !== this.child || this.exited) {
+		if (child !== this.child || this.exited || this.terminationReason) {
 			return false;
 		}
 		child.stdin.write(`${JSON.stringify(control)}\n`);
@@ -460,6 +481,7 @@ export class CliTsServeProcess extends Disposable {
 		});
 		this.child = child;
 		this.snapshotWritten = false;
+		this.gateOpened = false;
 		this.terminationReason = undefined;
 		this.lastFailure = undefined;
 		const ready = new DeferredPromise<CliTsReadyPayload>();
@@ -519,21 +541,33 @@ export class CliTsServeProcess extends Disposable {
 	private async openGate(child: ChildProcessWithoutNullStreams, ready: Promise<CliTsReadyPayload>): Promise<void> {
 		const snapshot = this.options.credentialSnapshot;
 		if (!snapshot) {
+			this.gateOpened = true;
 			return;
 		}
-		const payload = await ready;
-		if (!payload.capabilities?.includes(CLI_TS_HOST_MANAGED_BYOK_CAPABILITY)) {
-			const message = localize('cliTsProcess.runtimeTooOld', "The bundled Backboard runtime does not support API keys. Update Backboard, or rebuild the runtime with: npm --prefix extensions/backboard run package-cli-ts");
-			// It can never be used: end it rather than leave it idle, and fail
-			// every request addressed to it with the same message.
-			this.terminate(message);
-			throw new Error(message);
+		try {
+			const payload = await this.startupDeadline(ready, this.options.readyTimeoutMs ?? 30_000, localize('cliTsProcess.readyTimeout', "Runtime did not become ready. Retry to restart it."));
+			if (!payload.capabilities?.includes(CLI_TS_HOST_MANAGED_BYOK_CAPABILITY)) {
+				throw new Error(localize('cliTsProcess.runtimeTooOld', "The bundled Backboard runtime does not support the current API key protocol. Update Backboard, or rebuild it with: npm --prefix extensions/backboard run package-cli-ts"));
+			}
+			const control = { ...snapshot(), requestId: this.nextRequestId() };
+			this.snapshotWritten = true;
+			await this.startupDeadline(this.send(child, control), this.options.credentialAckTimeoutMs ?? 5_000, localize('cliTsProcess.credentialTimeout', "Runtime did not acknowledge its API keys. Retry to restart it."));
+			this.gateOpened = true;
+		} catch (error) {
+			this.terminate(error instanceof Error ? error.message : String(error));
+			throw error;
 		}
-		// Read the host's keys now, not at spawn time, so a change made while the
-		// child was starting is already part of the snapshot.
-		const control = { ...snapshot(), requestId: this.nextRequestId() };
-		this.snapshotWritten = true;
-		await this.send(child, control);
+	}
+
+	private async startupDeadline<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			return await Promise.race([promise, new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new Error(message)), milliseconds);
+			})]);
+		} finally {
+			clearTimeout(timer);
+		}
 	}
 
 	private settleReady(ready: DeferredPromise<CliTsReadyPayload>, failure: Error): void {

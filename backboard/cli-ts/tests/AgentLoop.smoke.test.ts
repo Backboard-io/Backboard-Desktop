@@ -63,6 +63,7 @@ class FakeClient {
 	listModelsCount = 0;
 	threadSource: "byok" | "backboard" = "backboard";
 	listAssistantsDelayMs = 0;
+	onRunMessage?: () => void;
 	assistantRequests: Array<{
 		name: string;
 		system_prompt: string;
@@ -157,6 +158,7 @@ class FakeClient {
 		req: SendMessageRequest,
 		options?: { attachmentFilePaths?: string[] },
 	): AsyncIterable<ProviderEvent> {
+		this.onRunMessage?.();
 		this.messageRequests.push(req);
 		this.messageAttachmentPaths.push(options?.attachmentFilePaths);
 		yield* this.first;
@@ -239,6 +241,55 @@ function controllerWith(
 }
 
 describe("AgentController loop (mocked Backboard)", () => {
+	for (const stage of ["preparing", "generating"] as const) {
+		it(`pins the route during ${stage} and keeps a newer selection on completion`, async () => {
+			const client = new FakeClient(
+				[
+					{ kind: "thread", threadId: "byok_route" },
+					{ kind: "assistant_delta", text: "done" },
+					{ kind: "completed" },
+				],
+				[],
+			);
+			client.threadSource = "byok";
+			client.listAssistantsDelayMs = 20;
+			const { ctrl, config } = controllerWith(
+				client,
+				new TestTool({ name: "Echo", readOnly: true }),
+				[],
+				{ finalVerificationNudge: false },
+			);
+			config.setModel({ provider: "openai", model: "gpt-4.1" }, "byok");
+			if (stage === "generating") {
+				client.onRunMessage = () =>
+					config.setModel(
+						{ provider: "google", model: "gemini-2.5-flash" },
+						"byok",
+					);
+			}
+			const running = ctrl.submit("hello");
+			if (stage === "preparing")
+				config.setModel(
+					{ provider: "google", model: "gemini-2.5-flash" },
+					"byok",
+				);
+			await running;
+			expect({
+				requests: client.messageRequests.map((req) => [
+					req.llm_provider,
+					req.model_name,
+					req.source,
+				]),
+				selection: config.modelString,
+				source: config.modelSource,
+			}).toEqual({
+				requests: [["openai", "gpt-4.1", "byok"]],
+				selection: "google/gemini-2.5-flash",
+				source: "byok",
+			});
+		});
+	}
+
 	it("emits turn:start and accepted prompt before assistant setup finishes", async () => {
 		const client = new FakeClient(
 			[
@@ -463,6 +514,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				yield { kind: "thread", threadId: "thr_1" };
 				yield { kind: "tool_started", id: "c1", name: "Echo" };
@@ -556,6 +608,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				if (this.messageRequests.length === 1) {
 					yield { kind: "thread", threadId: "thr_1" };
@@ -712,6 +765,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				yield { kind: "thread", threadId: "thr_1" };
 				yield {
@@ -750,6 +804,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				if (this.messageRequests.length === 1) {
 					yield {
@@ -799,6 +854,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				if (req.model_name !== "z-ai/glm-5.3") {
 					yield {
@@ -858,6 +914,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				yield { kind: "failed", error: "No endpoints found for gpt-5.5." };
 			}
@@ -901,6 +958,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				if (req.thinking !== null) {
 					yield {
@@ -940,6 +998,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				yield { kind: "thread", threadId: "thr_retry" };
 				yield {
@@ -991,6 +1050,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				yield {
 					kind: "failed",
@@ -1420,6 +1480,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				yield { kind: "thread", threadId: "thr_1" };
 				yield {
@@ -1942,6 +2003,7 @@ describe("AgentController attachment file paths", () => {
 				req: SendMessageRequest,
 				options?: { attachmentFilePaths?: string[] },
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				this.messageAttachmentPaths.push(options?.attachmentFilePaths);
 				if (this.messageRequests.length === 1) {
@@ -1985,6 +2047,7 @@ describe("AgentController attachment file paths", () => {
 				req: SendMessageRequest,
 				options?: { attachmentFilePaths?: string[] },
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				this.messageAttachmentPaths.push(options?.attachmentFilePaths);
 				if (this.messageRequests.length === 1) {

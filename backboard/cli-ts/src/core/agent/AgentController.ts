@@ -315,6 +315,12 @@ export class AgentController {
 		},
 	): Promise<TurnStatus> {
 		const { bus, session, config } = this.deps;
+		const route: Readonly<ModelRoute> = Object.freeze({
+			...config.model,
+			source: config.modelSource,
+		});
+		const modelProfile = config.modelProfile;
+		const thinkingIntent = config.thinkingIntent;
 		this.abortController = new AbortController();
 		const signal = this.abortController.signal;
 		const turn = new Turn(options.turnId);
@@ -351,7 +357,7 @@ export class AgentController {
 			session.addMessage(userMessage(text));
 			turnStarted = true;
 
-			const ctx = this.buildContext(signal);
+			const ctx = { ...this.buildContext(signal), modelRoute: route };
 			// All four are independent of each other: assistant resolution and
 			// thinking metadata are network round-trips, the skill scan reads
 			// only the skill catalog + filesystem, and the tool sync talks to
@@ -374,9 +380,12 @@ export class AgentController {
 								tools: this.baseTools(),
 								signal,
 							}),
-					createRuntimeThinkingResolver(config, this.deps.client),
+					createRuntimeThinkingResolver(
+						{ model: route, modelSource: route.source, thinkingIntent },
+						this.deps.client,
+					),
 				]);
-			const promptProfile = toPromptProfileId(config.modelProfile.name);
+			const promptProfile = toPromptProfileId(modelProfile.name);
 			const tools = config.toolPolicy.visibleSchemas(
 				this.deps.registry,
 				[],
@@ -390,7 +399,7 @@ export class AgentController {
 			// disappears as soon as TodoWrite runs mid-turn.
 			const buildTurnSystemPrompt = () =>
 				getSystemPrompt({
-					layout: config.modelProfile.systemPromptLayout,
+					layout: modelProfile.systemPromptLayout,
 					profile: promptProfile,
 					enabledTools,
 					...skillPromptContext,
@@ -412,13 +421,6 @@ export class AgentController {
 							: undefined,
 				});
 			const systemPrompt = buildTurnSystemPrompt();
-			// The route is fixed here, after onStart applied the host's selection,
-			// and travels with every request of the turn. A selection change while
-			// the turn runs applies to the next turn, never to this one's billing.
-			const route: ModelRoute = {
-				...config.model,
-				source: config.modelSource,
-			};
 			let fallbackCandidatesPromise: Promise<ModelRef[]> | null = null;
 			const resolveCapacityFallback = async (
 				_current: ModelRef,
@@ -481,8 +483,12 @@ export class AgentController {
 				resolveCapacityFallback,
 				onModelSucceeded: async (model) => {
 					try {
-						if (modelKey(model) !== modelKey(config.model)) {
-							config.setModel({ ...model });
+						if (
+							modelKey(model) !== modelKey(route) &&
+							modelKey(config.model) === modelKey(route) &&
+							config.modelSource === route.source
+						) {
+							config.setModel({ ...model }, route.source);
 							await config.saveRecoverySelection();
 						}
 						await config.recordSuccessfulModel(model);

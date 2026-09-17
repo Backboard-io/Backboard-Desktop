@@ -1,4 +1,6 @@
 import type { AgentClient } from "../providers/AgentClient.ts";
+import type { ModelSource } from "../providers/backboard/types.ts";
+import { CredentialChangedError } from "../providers/byok/ProviderCredential.ts";
 import type { Config } from "./Config.ts";
 import type { ThinkingConfig } from "./defaults.ts";
 import { resolveThinking } from "./defaults.ts";
@@ -14,7 +16,9 @@ export interface RuntimeThinkingResolver {
 }
 
 export async function resolveRuntimeThinking(
-	config: Pick<Config, "model" | "thinkingIntent">,
+	config: Pick<Config, "model" | "thinkingIntent"> & {
+		modelSource?: ModelSource;
+	},
 	client: Pick<AgentClient, "getModelThinkingMetadata">,
 	evidence: DynamicThinkingEvidence = {
 		phase: "initial",
@@ -26,7 +30,9 @@ export async function resolveRuntimeThinking(
 }
 
 export async function createRuntimeThinkingResolver(
-	config: Pick<Config, "model" | "thinkingIntent">,
+	config: Pick<Config, "model" | "thinkingIntent"> & {
+		modelSource?: ModelSource;
+	},
 	client: Pick<AgentClient, "getModelThinkingMetadata">,
 ): Promise<RuntimeThinkingResolver> {
 	const intent = config.thinkingIntent;
@@ -34,7 +40,12 @@ export async function createRuntimeThinkingResolver(
 	const metadata =
 		intent === undefined || intent === null
 			? null
-			: await findModelInfo(client, model).catch(() => null);
+			: await findModelInfo(client, model, config.modelSource).catch(
+					(error) => {
+						if (error instanceof CredentialChangedError) throw error;
+						return null;
+					},
+				);
 	return {
 		intent,
 		resolve(evidence) {
@@ -58,6 +69,9 @@ export async function createRuntimeThinkingResolver(
 async function findModelInfo(
 	client: Pick<AgentClient, "getModelThinkingMetadata">,
 	model: { provider: string; model: string },
+	source?: ModelSource,
 ): Promise<ThinkingModelMetadata | null> {
-	return client.getModelThinkingMetadata(model.provider, model.model);
+	return client.getModelThinkingMetadata(model.provider, model.model, {
+		source,
+	});
 }

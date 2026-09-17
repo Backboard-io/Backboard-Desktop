@@ -1,4 +1,3 @@
-import { providerKeyResolver } from "../config/auth.ts";
 import type { Config } from "../config/Config.ts";
 import type { ServerEventLog } from "../core/session/ServerEventLog.ts";
 import type { AgentClient } from "./AgentClient.ts";
@@ -38,7 +37,7 @@ export function createAgentClient(
 	// restart for anyone who started keys-only.
 	const backboard = new BackboardClient(config.env, serverLog);
 	const byok = new ByokClient(
-		(provider) => providerKeyResolver(config.auth)(provider),
+		(provider) => config.providerCredential(provider),
 		serverLog,
 		new ByokConversationStore(conversationBaseDir),
 	);

@@ -185,7 +185,8 @@ suite('CliTsAgent tool metadata', () => {
 				forkContext?: string;
 				providerHandoffContext?: string;
 				storedTurns: Array<{ prompt: string; response: string }>;
-				proc?: { isRunning: boolean; dispose(): void; notify(value: unknown): void };
+				sendQueue?: Promise<void>;
+				proc?: { isRunning: boolean; dispose(): void; notify(value: unknown): void; nextRequestId(): string; request(value: unknown): Promise<unknown> };
 			}>;
 			_writeStore(): void;
 		};
@@ -202,19 +203,61 @@ suite('CliTsAgent tool metadata', () => {
 			isRunning: true,
 			dispose: () => disposed++,
 			notify: () => notified++,
+			nextRequestId: () => 'idle',
+			request: async () => ({}),
 		};
 
 		await agent.changeModel(created.session, { id: 'openai/gpt-5.6' });
+		await session.sendQueue;
 
 		assert.strictEqual(session.model?.id, 'openai/gpt-5.6');
 		assert.strictEqual(session.threadId, undefined);
 		assert.strictEqual(session.proc, undefined);
 		assert.strictEqual(disposed, 1);
 		assert.strictEqual(notified, 0);
-		assert.strictEqual(storeWrites, 1);
+		assert.strictEqual(storeWrites, 2);
 		assert.strictEqual(session.forkContext, undefined);
 		assert.match(session.providerHandoffContext ?? '', /ORCHID/);
 		assert.match(session.providerHandoffContext ?? '', /changed model providers/);
+	});
+
+	test('waits for runtime workers and coalesces model selections before applying one', async () => {
+		const agent = createAgent();
+		const internals = agent as unknown as {
+			_sessions: Map<string, { threadId?: string; sendQueue?: Promise<void>; proc?: unknown }>;
+			_writeStore(): void;
+			_sendMessage(session: unknown): Promise<void>;
+		};
+		internals._writeStore = () => {};
+		let sent = false;
+		internals._sendMessage = async () => { sent = true; };
+		const created = await agent.createSession({ model: { id: 'openai-key/gpt-4.1' } });
+		const session = internals._sessions.get(AgentSession.id(created.session))!;
+		session.threadId = 'byok_thread';
+		let release!: () => void;
+		const idle = new Promise<void>(resolve => { release = resolve; });
+		let entered!: () => void;
+		const waiting = new Promise<void>(resolve => { entered = resolve; });
+		const controls: Array<{ op: string; model?: string; source?: string }> = [];
+		session.proc = { isRunning: true, nextRequestId: () => 'change', dispose: () => {},
+			request: async (control: { op: string; model?: string; source?: string }) => {
+				controls.push(control);
+				if (control.op === 'waitForIdle') { entered(); await idle; }
+				return { payload: { op: control.op } };
+			},
+		};
+		await agent.changeModel(created.session, { id: 'google-key/gemini-2.5-flash' });
+		await waiting;
+		await agent.changeModel(created.session, { id: 'xai-key/grok-4.6' });
+		const submission = agent.sendMessage(created.session, 'queued');
+		assert.deepStrictEqual({ controls: controls.map(control => control.op), sent }, { controls: ['waitForIdle'], sent: false });
+		release();
+		await submission;
+		assert.strictEqual(sent, true);
+		assert.deepStrictEqual(controls.map(({ op, model, source }) => ({ op, model, source })), [
+			{ op: 'waitForIdle', model: undefined, source: undefined },
+			{ op: 'setModel', model: 'xai/grok-4.6', source: 'byok' },
+		]);
 	});
 
 	test('fails fast with an actionable reconnect when Claude login expires', async () => {
@@ -270,7 +313,7 @@ suite('CliTsAgent tool metadata', () => {
 		const keyRow = () => agent.models.get().find(model => model.id === 'openai-key/gpt-5.5');
 
 		await assert.rejects(agent.executeCommand('providerKeys.validate', { provider: 'openai', key: '  ' }), /Enter an? OpenAI API key/);
-		await assert.rejects(agent.executeCommand('providerKeys.validate', { provider: 'google', key: 'AIza-test' }), /not supported/);
+		await assert.rejects(agent.executeCommand('providerKeys.validate', { provider: 'unsupported', key: 'test' }), /not supported/);
 
 		const validation = await agent.executeCommand('providerKeys.validate', { provider: 'openai', key: 'sk-test-key' });
 		const activation = await agent.executeCommand('providerKeys.set', { provider: 'openai', key: 'sk-test-key' });
@@ -294,7 +337,7 @@ suite('CliTsAgent tool metadata', () => {
 			afterActivation: { label: 'OpenAI API Key', configured: true },
 			// The row stays listed so a pinned session keeps its selection, but it is unavailable.
 			afterRemoval: { listed: true, configured: false },
-			status: { providers: { openai: { held: false, discovered: true }, anthropic: { held: false, discovered: false } }, revision: 2 },
+			status: { providers: { openai: { held: false, discovered: true }, anthropic: { held: false, discovered: false }, google: { held: false, discovered: false }, openrouter: { held: false, discovered: false }, xai: { held: false, discovered: false } }, revision: 2 },
 		});
 	});
 
@@ -405,7 +448,7 @@ suite('CliTsAgent tool metadata', () => {
 			await agent.executeCommand('providerKeys.validate', { provider: 'openai', key: 'sk-second-key' });
 			await agent.executeCommand('providerKeys.set', { provider: 'openai', key: 'sk-second-key' });
 			const rows = agent.models.get()
-				.filter(model => model.id.startsWith('openai-key/'))
+				.filter(model => ['openai-key/gpt-5.5', 'openai-key/gpt-5-mini'].includes(model.id))
 				.map(model => [model.id, model._meta?.byokKeyConfigured, model._meta?.byokModelAvailable])
 				.sort((left, right) => String(left[0]).localeCompare(String(right[0])));
 

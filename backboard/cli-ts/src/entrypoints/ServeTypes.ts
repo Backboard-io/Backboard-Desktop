@@ -11,7 +11,7 @@ import type { ModelSource } from "../providers/backboard/types.ts";
  * must see this before it sends credentials or key-billed turns, so an older
  * packaged runtime fails closed instead of silently routing to Backboard.
  */
-export const HOST_MANAGED_BYOK_CAPABILITY = "host-managed-byok-v1";
+export const HOST_MANAGED_BYOK_CAPABILITY = "host-managed-byok-v2";
 
 export const SERVE_CAPABILITIES: readonly string[] = [
 	HOST_MANAGED_BYOK_CAPABILITY,
@@ -77,6 +77,7 @@ export type ServeControl =
 			clientTools?: ClientToolDefinition[];
 	  }
 	| { op: "steer"; requestId?: string; prompt: string; systemContext?: string }
+	| { op: "waitForIdle"; requestId: string }
 	| { op: "warmup"; requestId?: string }
 	| { op: "cancel"; requestId?: string }
 	| { op: "respondInput"; id: string; answers: string[] }

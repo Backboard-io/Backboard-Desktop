@@ -8,6 +8,10 @@ import type {
 	ProviderAdapter,
 } from "../ByokTypes.ts";
 import { getJson, postSseJson } from "../httpStream.ts";
+import {
+	credentialKey,
+	type ProviderCredential,
+} from "../ProviderCredential.ts";
 import { thinkingEffort } from "../thinking.ts";
 import {
 	isSupportedOpenAiModel,
@@ -27,28 +31,33 @@ interface OpenAIModelsResponse {
 export const openaiAdapter: ProviderAdapter = {
 	id: "openai",
 	label: "OpenAI",
+	modelCapabilities: openAiReasoningControls,
 	consoleUrl: "https://platform.openai.com/api-keys",
 	keyHint: "sk-...",
 
 	looksLikeKey(key) {
-		return /^sk-[\w-]{20,}$/.test(key.trim());
+		return /^sk-[\w-]{20,}$/.test(credentialKey(key).trim());
 	},
 
-	async validateKey(key, signal) {
+	async validateKey(key, signal, transport) {
 		await getJson<OpenAIModelsResponse>(
 			`${API_BASE}/models`,
 			headers(key),
 			"openai",
 			signal,
+			key,
+			transport,
 		);
 	},
 
-	async listModels(key, signal) {
+	async listModels(key, signal, transport) {
 		const response = await getJson<OpenAIModelsResponse>(
 			`${API_BASE}/models`,
 			headers(key),
 			"openai",
 			signal,
+			key,
+			transport,
 		);
 		const models: ModelCatalogItem[] = [];
 		for (const model of response.data ?? []) {
@@ -79,13 +88,13 @@ export const openaiAdapter: ProviderAdapter = {
 	},
 };
 
-function headers(key: string): Record<string, string> {
-	return { Authorization: `Bearer ${key.trim()}` };
+function headers(key: ProviderCredential): Record<string, string> {
+	return { Authorization: `Bearer ${credentialKey(key).trim()}` };
 }
 
 async function* streamOpenAI(
 	request: ByokStreamRequest,
-	key: string,
+	key: ProviderCredential,
 ): AsyncIterable<ProviderEvent> {
 	// The catalog filter keeps unsupported ids out of the picker, but a stored
 	// conversation or a stale selection can still name one. Refuse here so the
@@ -158,6 +167,8 @@ async function* streamOpenAI(
 	const sseRequest: Parameters<typeof postSseJson>[0] = {
 		url: `${API_BASE}/chat/completions`,
 		headers: headers(key),
+		credential: key,
+		transport: request.transport,
 		body,
 		provider: "openai",
 	};

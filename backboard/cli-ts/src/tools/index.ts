@@ -95,8 +95,15 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 		memory: deps.config.memory,
 		memoryProfile: deps.config.memoryProfile,
 		getThinking: () => resolveRuntimeThinking(deps.config, deps.client),
-		getThinkingResolver: () =>
-			createRuntimeThinkingResolver(deps.config, deps.client),
+		getThinkingResolver: (route) =>
+			createRuntimeThinkingResolver(
+				{
+					model: route ?? deps.config.model,
+					modelSource: route ? route.source : deps.config.modelSource,
+					thinkingIntent: deps.config.thinkingIntent,
+				},
+				deps.client,
+			),
 		systemPrompt: subagentPrompt.prompt,
 		toolFactory: ({ readOnly }) => {
 			const tools: Tool[] = [];
@@ -124,11 +131,11 @@ function buildAgentTool(deps: DefaultToolDeps, base: Tool[]): AgentTool {
 		taskManager: deps.agentTaskManager,
 		maxDepth: DEFAULT_AGENT_MAX_DEPTH,
 		workspaceManager: deps.workerWorkspaceManager,
-		createRLMLoop: () =>
+		createRLMLoop: (route) =>
 			new RLMLoop({
 				client: deps.client,
-				model: deps.config.model,
-				source: deps.config.modelSource,
+				model: route ?? deps.config.model,
+				source: route ? route.source : deps.config.modelSource,
 				executor: new LocalReplExecutor(),
 			}),
 	});

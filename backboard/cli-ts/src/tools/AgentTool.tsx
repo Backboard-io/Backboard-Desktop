@@ -220,7 +220,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 			try {
 				throwIfAborted(ctx.signal);
 				await onStarted?.();
-				const result = await this.deps.createRLMLoop().run({
+				const result = await this.deps.createRLMLoop(ctx.modelRoute).run({
 					prompt: input.prompt,
 					signal: ctx.signal,
 					timeoutMs: input.timeout_ms,
@@ -290,6 +290,7 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 				? rebaseCoordinatorPaths(input.prompt, ctx.cwd, workerCwd)
 				: input.prompt;
 			return this.deps.runner.run({
+				route: ctx.modelRoute,
 				...(input.name ? { name: input.name } : {}),
 				prompt: options.workspace?.snapshotNotice
 					? `${delegatedPrompt}\n\nWorkspace preparation: ${options.workspace.snapshotNotice}`
