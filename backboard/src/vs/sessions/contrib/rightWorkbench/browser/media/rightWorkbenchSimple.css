@@ -9,7 +9,7 @@
 	border-radius: 12px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-header {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-header {
 	height: 44px;
 	min-height: 44px;
 	padding: 0 8px;
@@ -18,12 +18,12 @@
 	background: transparent;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-tabs {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-tabs {
 	flex: 0 1 auto;
 	gap: 2px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-tab {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-tab {
 	flex: 0 1 156px;
 	min-width: 64px;
 	max-width: 168px;
@@ -34,7 +34,7 @@
 	font-size: 13px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-tab > .codicon {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-tab > .codicon {
 	font-size: 14px;
 	flex-shrink: 0;
 }
@@ -67,34 +67,34 @@
 	flex: 0 0 28px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls {
 	margin-left: auto;
 	padding-left: 8px;
 	flex-shrink: 0;
 	gap: 6px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-icon-button {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-icon-button {
 	width: 28px;
 	height: 28px;
 	border-radius: 8px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-files,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-review-workspace {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-files,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-review-workspace {
 	grid-template-columns: minmax(0, 1fr) clamp(180px, 32%, 280px);
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-file-editor {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-file-editor {
 	display: flex;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple.sessions-right-workbench-files-tree-hidden .sessions-right-workbench-files,
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-review-workspace.rail-hidden {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple.sessions-right-workbench-files-tree-hidden .sessions-right-workbench-files,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-review-workspace.rail-hidden {
 	grid-template-columns: minmax(0, 1fr);
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-file-tree {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-file-tree {
 	border-left: 1px solid var(--rwb-border);
 }
 
@@ -147,13 +147,13 @@
 	background: transparent;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-browser-nav {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-browser-nav {
 	grid-template-columns: 24px 24px 24px minmax(0, 1fr) 24px;
 	gap: 6px;
 	padding: 0 12px;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-browser-url {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-browser-url {
 	text-align: left;
 	font-size: 13px;
 	padding: 0 8px;
@@ -235,8 +235,8 @@
 }
 
 @container (max-width: 480px) {
-	.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-files,
-	.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-review-workspace {
+	.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-files,
+	.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-review-workspace {
 		grid-template-columns: minmax(0, 1fr) 160px;
 	}
 	.sessions-right-workbench-simple .sessions-right-workbench-file-workspace {
@@ -319,7 +319,7 @@
 	flex-shrink: 0;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header .header-content {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header .header-content {
 	background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-editor-foreground));
 }
 
@@ -328,7 +328,7 @@
 }
 
 /* Reveal the shared wallpaper without adding a second tint inside the panel. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple {
 	--rwb-bg: transparent;
 	--rwb-chrome-soft: transparent;
 	--vscode-editor-background: transparent;
@@ -339,7 +339,7 @@
 
 }
 
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
 	.sessions-right-workbench-header,
 	.sessions-right-workbench-body,
 	.sessions-right-workbench-review,
@@ -374,7 +374,7 @@
 }
 
 /* The empty review canvas and its embedded editor use the panel surface. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-simple .multiDiffEditor {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-simple .multiDiffEditor {
 	background: var(--rwb-bg) !important;
 }
 
@@ -394,12 +394,12 @@
 }
 
 /* Keep controls above tab content without painting a square over wallpaper. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls {
 	background: transparent;
 	-webkit-app-region: no-drag;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls .sessions-right-workbench-icon-button {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls .sessions-right-workbench-icon-button {
 	padding: 0;
 	background: transparent;
 	border: 0;
@@ -407,7 +407,7 @@
 	-webkit-app-region: no-drag;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls .sessions-right-workbench-icon-button:hover {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls .sessions-right-workbench-icon-button:hover {
 	background: var(--rwb-hover);
 	color: var(--rwb-foreground);
 }
@@ -418,20 +418,20 @@
 }
 
 /* Chat and right panel share one image, tint, and blur on the window underlay. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light) .part.auxiliarybar {
 	backdrop-filter: none;
 	-webkit-backdrop-filter: none;
 }
 
 /* Header glyphs share their control's foreground instead of independently
  * inheriting a theme accent that may disappear against the header surface. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.auxiliarybar .sessions-right-workbench-simple .sessions-right-workbench-header .codicon {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .sessions-right-workbench-simple .sessions-right-workbench-header .codicon {
 	color: inherit !important;
 }
 
 /* Wallpaper uses a fixed dark tint in every theme. Keep these tokens local
  * to the header so tool content and menus retain their normal theme colors. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple .sessions-right-workbench-header {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple .sessions-right-workbench-header {
 	--rwb-foreground: #ffffff;
 	--rwb-muted: #e2e5e9;
 	--rwb-hover: rgba(255, 255, 255, 0.12);
@@ -439,7 +439,7 @@
 }
 
 /* The selected tab has an opaque theme surface, unlike its surroundings. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple .sessions-right-workbench-header .sessions-right-workbench-tab.active {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple .sessions-right-workbench-header .sessions-right-workbench-tab.active {
 	--rwb-foreground: var(--vscode-foreground);
 	--rwb-muted: var(--vscode-foreground);
 	color: var(--vscode-foreground);
@@ -447,7 +447,7 @@
 
 /* Text on the transparent panel chrome must use the same foreground as the
  * wallpaper header. Keep these overrides off editors and terminal content. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
 	.sessions-right-workbench-file-path,
 	.sessions-right-workbench-browser-chrome,
 	.sessions-right-workbench-browser-empty,
@@ -465,7 +465,7 @@
 
 /* Explorer rows are transparent even in light themes. Pair hover/selection
  * surfaces and labels locally instead of inheriting dark editor text. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple .sessions-right-workbench-file-explorer-host {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple .sessions-right-workbench-file-explorer-host {
 	--vscode-list-activeSelectionForeground: #ffffff;
 	--vscode-list-inactiveSelectionForeground: #ffffff;
 	--vscode-list-hoverForeground: #ffffff;
@@ -487,7 +487,7 @@
 }
 
 /* Filled controls still need the foreground paired with their theme surface. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
 	.sessions-right-workbench-file-filter,
 	.sessions-right-workbench-browser-address) {
 	color: var(--vscode-input-foreground);
@@ -495,7 +495,7 @@
 
 /* Transparent tool chrome uses wallpaper contrast, including native controls
  * that read VS Code tokens instead of the right-workbench foreground tokens. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
 	.sessions-right-workbench-browser-chrome,
 	.browser-navbar,
 	.sessions-right-workbench-file-path,
@@ -527,7 +527,7 @@
 	.deletions { color: #ffa5ac !important; }
 }
 
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light) .part.auxiliarybar .sessions-right-workbench-simple :is(
 	.sessions-right-workbench-browser-address,
 	.sessions-right-workbench-browser-url,
 	.sessions-right-workbench-file-filter,

@@ -217,7 +217,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private get useSimpleRightWorkbench(): boolean {
-		return !this.environmentService.isOptimusWindow;
+		// Focused Advanced chats reuse Simple's launcher, tabs, and Review
+		// surface. The editor-style tool rail stays on the dashboard only.
+		return !this.useEditorSidebar;
 	}
 
 	constructor(

@@ -38,6 +38,13 @@ suite('RightWorkbenchTabSwitch', () => {
 		});
 	});
 
+	test('focused Advanced reuses the Simple launcher tools', () => {
+		const pane = Object.create(RightWorkbenchViewPane.prototype) as RightWorkbenchViewPane;
+		Reflect.set(pane, 'environmentService', { isOptimusWindow: true });
+		Reflect.set(pane, 'editorSidebarEnabled', false);
+		assert.deepStrictEqual(pane['getModeEntries']().map(entry => entry.mode), ['review', 'terminal', 'files', 'browser']);
+	});
+
 	test('returning to a warm terminal restores instance visibility and focus', async () => {
 		const pane = Object.create(RightWorkbenchViewPane.prototype) as RightWorkbenchViewPane;
 		const events: string[] = [];
