@@ -260,7 +260,7 @@ describe("private snapshot workers", () => {
 		expect(result.workspace.snapshotNotice).toContain("excluded");
 	});
 
-	it("rejects symlinks and oversized files explicitly before invoking a worker", async () => {
+	it("rejects symlinks but snapshots oversized files before invoking a worker", async () => {
 		await symlink(join(root, "outside"), join(cwd, "link"));
 		await expect(
 			manager.runWorker(params("symlink"), async () => {
@@ -269,11 +269,12 @@ describe("private snapshot workers", () => {
 		).rejects.toThrow("symbolic links");
 		await rm(join(cwd, "link"));
 		await writeFile(join(cwd, "large.bin"), Buffer.alloc(16 * 1024 * 1024 + 1));
-		await expect(
-			manager.runWorker(params("large"), async () => {
-				throw new Error("worker should not run");
-			}),
-		).rejects.toThrow("byte limit");
+		let ran = false;
+		await manager.runWorker(params("large"), async () => {
+			ran = true;
+			return { status: "completed" };
+		});
+		expect(ran).toBe(true);
 		await expect(access(join(cwd, ".git"))).rejects.toThrow();
 	});
 

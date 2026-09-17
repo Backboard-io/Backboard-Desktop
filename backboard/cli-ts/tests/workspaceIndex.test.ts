@@ -13,10 +13,7 @@ import { join } from "node:path";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import { BlobStore } from "../src/core/checkpoints/blobStore.ts";
 import { CheckpointStore } from "../src/core/checkpoints/CheckpointStore.ts";
-import {
-	MAX_INDEX_FILES,
-	WorkspaceIndex,
-} from "../src/core/checkpoints/workspaceIndex.ts";
+import { WorkspaceIndex } from "../src/core/checkpoints/workspaceIndex.ts";
 import type { SessionPaths } from "../src/core/session/SessionStore.ts";
 
 let root: string;
@@ -157,25 +154,21 @@ describe("WorkspaceIndex", () => {
 		).toEqual([join(work, ".gitignore"), join(work, "kept.txt")].sort());
 	});
 
-	it("disables itself when the file cap is exceeded", async () => {
+	it("indexes a file larger than the former capture cap", async () => {
 		const blobs = new BlobStore(join(root, "objects"));
 		const index = new WorkspaceIndex(work);
-		const perDir = 500;
-		for (let dir = 0; dir * perDir <= MAX_INDEX_FILES; dir++) {
-			const dirPath = join(work, `d${dir}`);
-			await mkdir(dirPath);
-			await Promise.all(
-				Array.from({ length: perDir }, (_, i) =>
-					writeFile(join(dirPath, `f${i}`), ""),
-				),
-			);
-		}
+		const bigPath = join(work, "big.bin");
+		await writeFile(bigPath, Buffer.alloc(2 * 1024 * 1024, 3));
 
-		expect(await index.refresh(blobs)).toBeNull();
-		expect(index.disabled).toMatch(/file cap/);
-		// Once disabled, refresh stays a no-op.
-		expect(await index.refresh(blobs)).toBeNull();
-	}, 60_000);
+		const snapshot = await index.refresh(blobs);
+		expect(snapshot).not.toBeNull();
+		expect(index.disabled).toBeNull();
+		const entry = [...(snapshot ?? new Map()).values()].find(
+			(candidate) => candidate.path === bigPath,
+		);
+		expect(entry?.tooLarge).toBeUndefined();
+		expect(entry?.hash).toBeTruthy();
+	}, 30_000);
 
 	it("diffs created, modified and deleted paths", async () => {
 		const blobs = new BlobStore(join(root, "objects"));

@@ -5,9 +5,6 @@ import { runGitCommand } from "./GitWorktreeManager.ts";
 import type { WorkerIntegrationChangeBytes } from "./WorkerWorkspaceTypes.ts";
 
 type Content = NonNullable<WorkerIntegrationChangeBytes["before"]>;
-const MAX_FILES = 10_000;
-const MAX_FILE_BYTES = 16 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
 
 /** Read exact regular-file/symlink bytes without following the final path. */
 export async function captureCoordinatorFiles(
@@ -15,12 +12,7 @@ export async function captureCoordinatorFiles(
 	paths: readonly string[],
 	signal?: AbortSignal,
 ): Promise<Map<string, Content>> {
-	if (paths.length > MAX_FILES)
-		throw new Error(
-			"Worker integration exceeds the 10,000-file capture limit.",
-		);
 	const result = new Map<string, Content>();
-	let bytes = 0;
 	for (const path of paths) {
 		signal?.throwIfAborted();
 		const filePath = resolve(cwd, path);
@@ -33,7 +25,7 @@ export async function captureCoordinatorFiles(
 					mode: 0o120000,
 				};
 			} else {
-				if (!stat.isFile() || stat.size > MAX_FILE_BYTES)
+				if (!stat.isFile())
 					throw new Error(`Unsupported worker integration capture: ${path}`);
 				const file = await open(
 					filePath,
@@ -41,7 +33,7 @@ export async function captureCoordinatorFiles(
 				);
 				try {
 					const before = await file.stat();
-					if (!before.isFile() || before.size > MAX_FILE_BYTES)
+					if (!before.isFile())
 						throw new Error(`Unsupported worker integration capture: ${path}`);
 					const content = await file.readFile({ signal });
 					const after = await file.stat();
@@ -59,11 +51,6 @@ export async function captureCoordinatorFiles(
 					await file.close();
 				}
 			}
-			bytes += value.content.length;
-			if (bytes > MAX_TOTAL_BYTES)
-				throw new Error(
-					"Worker integration exceeds the 128 MiB per-image capture limit.",
-				);
 			result.set(filePath, value);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

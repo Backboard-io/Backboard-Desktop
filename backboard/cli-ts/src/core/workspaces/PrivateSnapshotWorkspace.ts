@@ -30,16 +30,6 @@ export type SnapshotMutation = (
 	paths: readonly string[],
 	apply: () => Promise<void>,
 ) => Promise<void>;
-export const SNAPSHOT_LIMITS = {
-	files: 100_000,
-	bytes: 1024 * 1024 * 1024,
-	fileBytes: 16 * 1024 * 1024,
-} as const;
-// Baselines can span a large repository; integration still bounds worker edits.
-const INTEGRATION_LIMITS = {
-	files: 10_000,
-	bytes: 2 * 128 * 1024 * 1024,
-} as const;
 interface Entry {
 	path: string;
 	before: Buffer | null;
@@ -72,7 +62,6 @@ export class PrivateSnapshotWorkspace {
 				"Private snapshot storage must be outside the coordinator folder.",
 			);
 		const repositoryRoot = await mkdtemp(join(storage, "snapshot-"));
-		let bytes = 0;
 		try {
 			await git(repositoryRoot, ["init", "--quiet"]);
 			const listingArgs = [
@@ -118,10 +107,6 @@ export class PrivateSnapshotWorkspace {
 						.filter(Boolean),
 				]),
 			].sort();
-			if (inventory.length > SNAPSHOT_LIMITS.files)
-				throw new Error(
-					`Worker snapshot contains ${inventory.length.toLocaleString("en-US")} source files, exceeding the ${SNAPSHOT_LIMITS.files.toLocaleString("en-US")}-file limit; use a narrower workspace.`,
-				);
 			for (const path of inventory) {
 				signal?.throwIfAborted();
 				const from = safeTarget(coordinatorRoot, path);
@@ -143,14 +128,8 @@ export class PrivateSnapshotWorkspace {
 				}
 				try {
 					const stat = await input.stat();
-					if (
-						!stat.isFile() ||
-						stat.size > SNAPSHOT_LIMITS.fileBytes ||
-						(bytes += stat.size) > SNAPSHOT_LIMITS.bytes
-					)
-						throw new Error(
-							"Worker snapshot exceeds the file or byte limit; use a narrower workspace (1 GiB total, 16 MiB per file).",
-						);
+					if (!stat.isFile())
+						throw new Error(`Unsupported worker snapshot entry: ${path}`);
 					const content = await input.readFile();
 					if (content.length !== stat.size)
 						throw new Error(
@@ -340,7 +319,6 @@ export class PrivateSnapshotWorkspace {
 			])
 		).split("\0");
 		const entries: Entry[] = [];
-		let bytes = 0;
 		for (let index = 0; index < raw.length - 1; index += 2) {
 			const header = raw[index]!;
 			const path = raw[index + 1]!;
@@ -357,14 +335,6 @@ export class PrivateSnapshotWorkspace {
 			safeTarget(record.coordinatorCwd, path);
 			const before = beforeMode ? await blob(repo, fields[2]!) : null;
 			const after = afterMode ? await blob(repo, fields[3]!) : null;
-			bytes += (before?.length ?? 0) + (after?.length ?? 0);
-			if (
-				entries.length >= INTEGRATION_LIMITS.files ||
-				bytes > INTEGRATION_LIMITS.bytes
-			)
-				throw new Error(
-					"Private worker result exceeds integration limits; narrow the worker task.",
-				);
 			entries.push({ path, before, after, beforeMode, afterMode });
 		}
 		return entries;
@@ -384,7 +354,7 @@ async function blob(cwd: string, oid: string): Promise<Buffer> {
 			{
 				cwd,
 				encoding: "buffer",
-				maxBuffer: SNAPSHOT_LIMITS.fileBytes,
+				maxBuffer: Number.MAX_SAFE_INTEGER,
 				timeout: 30_000,
 			},
 			(error, stdout) => (error ? reject(error) : resolveBlob(stdout)),
@@ -445,7 +415,7 @@ async function current(
 		);
 		try {
 			const stat = await file.stat();
-			if (!stat.isFile() || stat.size > SNAPSHOT_LIMITS.fileBytes)
+			if (!stat.isFile())
 				throw new Error(`Unsupported coordinator file: ${path}`);
 			return { content: await file.readFile(), mode: stat.mode };
 		} finally {
