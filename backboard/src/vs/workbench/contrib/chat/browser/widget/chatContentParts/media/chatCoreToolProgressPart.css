@@ -451,15 +451,41 @@ a.chat-core-tool-card-item-title:hover {
 	padding-block: 2px;
 }
 
-/* Task progress and file discovery are full transcript rows. Cancel the
- * thinking list's 5px timeline inset so their card edges share the prose rail. */
+/* Task progress, file discovery, and generated media are full transcript rows.
+ * Cancel the thinking list's 5px timeline inset so their card edges share the
+ * prose rail. */
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript :is(
 	.chat-thinking-core-tool-row:has(.chat-core-tool-card-todo),
 	.chat-thinking-core-tool-row:has(.chat-core-tool-card-glob),
+	.chat-thinking-core-tool-row:has(.chat-core-tool-card-generateVideo),
 	.chat-thinking-cursor-plan-row
 ) {
 	width: 100%;
 	margin-inline: 0;
+}
+
+.chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-generating {
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	height: 148px;
+	margin: 4px 0 6px;
+	overflow: hidden;
+	border: 1px solid var(--bb-core-tool-border);
+	border-radius: 8px;
+	background:
+		radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--vscode-foreground) 22%, transparent) 0 13px, transparent 14px),
+		linear-gradient(var(--bb-core-tool-border), var(--bb-core-tool-border)) 0 28px / 100% 1px no-repeat,
+		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground)) 26%, transparent), color-mix(in srgb, var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground)) 13%, transparent)) 12px 10px / 92px 8px no-repeat,
+		linear-gradient(90deg, color-mix(in srgb, var(--vscode-progressBar-background) 55%, transparent), color-mix(in srgb, var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground)) 18%, transparent)) 16px calc(100% - 18px) / 42% 4px no-repeat,
+		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground)) 16%, transparent), transparent) 16px calc(100% - 18px) / calc(100% - 32px) 4px no-repeat,
+		var(--bb-core-tool-surface);
+	animation: backboard-cursor-video-shell-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes backboard-cursor-video-shell-breathe {
+	0%, 100% { opacity: 0.72; }
+	50% { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -469,5 +495,9 @@ a.chat-core-tool-card-item-title:hover {
 
 	.chat-core-tool-card-disclosure {
 		transition: none;
+	}
+
+	.chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-generating {
+		animation: none;
 	}
 }

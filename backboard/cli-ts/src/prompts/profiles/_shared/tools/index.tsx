@@ -1,6 +1,10 @@
 import type { PromptModule } from "../../../PromptModule.ts";
 import { agent } from "../../../tools/agent.tsx";
-import { agentSpawn, agentSpawnBatch, agentCancel } from "../../../tools/agentSpawn.tsx";
+import {
+	agentCancel,
+	agentSpawn,
+	agentSpawnBatch,
+} from "../../../tools/agentSpawn.tsx";
 import { agentWait } from "../../../tools/agentWait.tsx";
 import { applyPatch } from "../../../tools/applyPatch.tsx";
 import { askUser } from "../../../tools/askUser.tsx";
@@ -9,6 +13,7 @@ import { computer } from "../../../tools/computer.tsx";
 import { edit } from "../../../tools/edit.tsx";
 import { execute } from "../../../tools/execute.tsx";
 import { fetchUrl } from "../../../tools/fetchUrl.tsx";
+import { generateVideo } from "../../../tools/generateVideo.tsx";
 import { glob } from "../../../tools/glob.tsx";
 import { grep } from "../../../tools/grep.tsx";
 import { read } from "../../../tools/read.tsx";
@@ -36,4 +41,5 @@ export const toolPrompts: Record<string, PromptModule> = {
 	agent_spawn_batch: agentSpawnBatch,
 	agent_cancel: agentCancel,
 	agent_wait: agentWait,
+	generate_video: generateVideo,
 };

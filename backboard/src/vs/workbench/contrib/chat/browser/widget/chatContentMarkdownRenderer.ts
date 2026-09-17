@@ -15,11 +15,18 @@ import { IConfigurationService } from '../../../../../platform/configuration/com
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
 import product from '../../../../../platform/product/common/product.js';
-import { Schemas } from '../../../../../base/common/network.js';
+import { FileAccess, Schemas } from '../../../../../base/common/network.js';
 import { AGENT_HOST_SCHEME } from '../../../../../platform/agentHost/common/agentHostUri.js';
 
 const BACKBOARD_GENERATED_IMAGE_HOST = 'backboard-prod.s3.ca-central-1.amazonaws.com';
-const BACKBOARD_GENERATED_IMAGE_PATH = '/generated-images/';
+/**
+ * Backboard stores artifacts under a singular folder name (`generated-image/`,
+ * `generated-video/`), while older payloads and the project folders use the
+ * plural form; accept both so a stored clip still renders.
+ */
+const BACKBOARD_GENERATED_IMAGE_PATH = /^\/generated-images?\//;
+const BACKBOARD_GENERATED_VIDEO_PATH = /^\/generated-videos?\//;
+const generatedVideoExtension = /\.(?:mp4|webm|mov|m4v)$/i;
 
 /** Resolve agent-authored relative media against its session, not the app page. */
 export function withChatMarkdownBaseUri(markdown: IMarkdownString, workingDirectory: URI | undefined): IMarkdownString {
@@ -40,7 +47,33 @@ export function withChatMarkdownBaseUri(markdown: IMarkdownString, workingDirect
 export function isBackboardGeneratedImage(uri: URI): boolean {
 	return uri.scheme === Schemas.https
 		&& uri.authority.toLocaleLowerCase() === BACKBOARD_GENERATED_IMAGE_HOST
-		&& uri.path.startsWith(BACKBOARD_GENERATED_IMAGE_PATH);
+		&& BACKBOARD_GENERATED_IMAGE_PATH.test(uri.path);
+}
+
+/** Generated clips live in their own bucket folder; see the video tool docs. */
+export function isBackboardGeneratedVideo(uri: URI): boolean {
+	return uri.scheme === Schemas.https
+		&& uri.authority.toLocaleLowerCase() === BACKBOARD_GENERATED_IMAGE_HOST
+		&& BACKBOARD_GENERATED_VIDEO_PATH.test(uri.path);
+}
+
+/**
+ * Keeps the remote-image privacy boundary intact while allowing media produced
+ * by Backboard itself, plus the local copies an agent saved into the workspace.
+ */
+function isPlayableClip(uri: URI): boolean {
+	if (isBackboardGeneratedVideo(uri)) {
+		return true;
+	}
+	const isLocal = uri.scheme === Schemas.file
+		|| uri.scheme === Schemas.vscodeFileResource
+		|| uri.scheme === Schemas.vscodeRemoteResource;
+	return isLocal && generatedVideoExtension.test(uri.path);
+}
+
+/** Both generated media kinds are allowed past the remote-image barrier. */
+export function isBackboardGeneratedMedia(uri: URI): boolean {
+	return isBackboardGeneratedImage(uri) || isBackboardGeneratedVideo(uri);
 }
 
 const nonPlainTextMarkdownSyntax = /[\\`*_[\]<>|&$~]/;
@@ -114,7 +147,7 @@ export function getChatMarkdownRenderOptions(options?: MarkdownRenderOptions): M
 			},
 			...options?.sanitizerConfig,
 			allowedLinkSchemes: { augment: [product.urlProtocol, 'copilot-skill', Schemas.vscodeBrowser, AGENT_HOST_SCHEME] },
-			remoteImageIsAllowed: isBackboardGeneratedImage,
+			remoteImageIsAllowed: isBackboardGeneratedMedia,
 		}
 	};
 }
@@ -159,7 +192,38 @@ export class ChatContentMarkdownRenderer implements IMarkdownRenderer {
 				child.replaceWith($('p', undefined, child.textContent));
 			}
 		}
-		return this.attachCustomHover(result);
+		return this.attachCustomHover(this.upgradeGeneratedVideos(result));
+	}
+
+	/**
+	 * Backboard returns generated videos as markdown image syntax. Swap those
+	 * nodes for a real player so a clip is watchable inline instead of rendering
+	 * as a broken bitmap. Only Backboard-hosted clips and local files are
+	 * upgraded: arbitrary remote media stays behind the sanitizer's barrier.
+	 */
+	private upgradeGeneratedVideos(result: IRenderedMarkdown): IRenderedMarkdown {
+		for (const image of [...result.element.querySelectorAll('img')]) {
+			const src = image.getAttribute('src');
+			if (!src) { continue; }
+			let uri: URI;
+			try {
+				uri = URI.parse(src);
+			} catch {
+				continue;
+			}
+			if (!isPlayableClip(uri)) { continue; }
+			const playableSrc = FileAccess.uriToBrowserUri(uri).toString(true);
+			const video = $('video.generated-video', {
+				controls: 'true',
+				preload: 'metadata',
+				playsinline: 'true',
+				src: playableSrc,
+			});
+			const label = image.getAttribute('alt');
+			if (label) { video.setAttribute('aria-label', label); }
+			image.replaceWith(video);
+		}
+		return result;
 	}
 
 	private attachCustomHover(result: IRenderedMarkdown): IRenderedMarkdown {

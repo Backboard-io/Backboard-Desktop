@@ -5,6 +5,7 @@ import { qSessionDir } from "../../config/paths.ts";
 import { fingerprint, PROMPT_VERSION } from "../../config/runtimeIdentity.ts";
 import { createRuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import { toPromptProfileId } from "../../prompts/profiles/ids.ts";
+import { buildGenerativeMediaPrompt } from "../../prompts/system/generativeMedia.ts";
 import { getSystemPrompt } from "../../prompts/system/index.tsx";
 import { TODO_NOT_CALLED_REMINDER } from "../../prompts/todoReminders.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
@@ -425,6 +426,10 @@ export class AgentController {
 					...skillPromptContext,
 					computerUseEnabled: config.isComputerUseEnabled,
 					browserUseEnabled: config.isBrowserUseEnabled,
+					mediaGenerationPrompt: buildGenerativeMediaPrompt({
+						imageModel: config.selectedImageModel,
+						videoModel: config.selectedVideoModel,
+					}),
 					clientToolsEnabled: this.deps.registry
 						.list()
 						.some((tool) => tool instanceof ClientProxyTool),
@@ -479,8 +484,12 @@ export class AgentController {
 				workspaceId:
 					config.memory === "off" ? undefined : config.getWorkspaceId(),
 				imageGeneration: config.isImageGenerationEnabled,
+				imageModel: config.selectedImageModel,
+				videoGeneration: config.isVideoGenerationEnabled,
+				videoModel: config.selectedVideoModel,
 				openRouterProvider: config.selectedOpenRouterProvider,
 				generatedMediaDir: join(config.cwd, "generated-images"),
+				generatedVideoDir: join(config.cwd, "generated-videos"),
 				thinking: undefined,
 				thinkingResolver,
 				requestKind: "user",

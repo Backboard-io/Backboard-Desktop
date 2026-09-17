@@ -488,6 +488,93 @@
 	flex-shrink: 0;
 }
 
+.interactive-session .chat-question-carousel-container.chat-edit-video-approval {
+	max-height: none;
+	overflow: visible;
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, var(--vscode-editor-background));
+	border-radius: 16px;
+}
+
+.interactive-session .chat-edit-video-card {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 16px;
+}
+
+.interactive-session .chat-edit-video-title {
+	font-size: 16px;
+	font-weight: 600;
+	line-height: 22px;
+}
+
+.interactive-session .chat-edit-video-preview {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-height: 40px;
+}
+
+.interactive-session .chat-edit-video-thumb {
+	width: 44px;
+	height: 44px;
+	border-radius: 8px;
+	object-fit: cover;
+	flex-shrink: 0;
+	background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+}
+
+.interactive-session .chat-edit-video-prompt {
+	flex: 1;
+	min-width: 0;
+	color: var(--vscode-descriptionForeground);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.interactive-session .chat-edit-video-rows {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding-top: 4px;
+	border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+}
+
+.interactive-session .chat-edit-video-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.interactive-session .chat-edit-video-label {
+	color: var(--vscode-descriptionForeground);
+}
+
+.interactive-session .chat-edit-video-value,
+.interactive-session .chat-edit-video-select {
+	color: var(--vscode-foreground);
+	font-weight: 500;
+}
+
+.interactive-session .chat-edit-video-select {
+	appearance: none;
+	background: transparent;
+	border: 0;
+	color: inherit;
+	font: inherit;
+	text-align: right;
+	padding: 0;
+	cursor: pointer;
+}
+
+.interactive-session .chat-edit-video-approve {
+	width: 100%;
+	margin-top: 4px;
+	border-radius: 999px !important;
+}
+
 .interactive-session .chat-question-carousel-container .chat-question-input-scrollable {
 	flex: 0 1 auto;
 	min-height: 0;

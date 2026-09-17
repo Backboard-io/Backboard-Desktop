@@ -3,11 +3,15 @@ import type {
 	AssistantInfo,
 	BackboardResponse,
 	BackboardThread,
+	GenerateVideoRequest,
+	GenerateVideoResult,
+	ImageModelsListResponse,
 	ModelsListResponse,
 	ModelThinkingMetadataResponse,
 	ProviderEvent,
 	SendMessageRequest,
 	SubmitToolOutputsRequest,
+	VideoModelsListResponse,
 } from "./backboard/types.ts";
 
 export interface RequestOptions {
@@ -99,6 +103,18 @@ export interface AgentClient {
 	): Promise<ModelThinkingMetadataResponse>;
 
 	listModels(options?: RequestOptions): Promise<ModelsListResponse>;
+
+	/** Live image-generation catalog; absent on non-Backboard clients. */
+	listImageModels?(options?: RequestOptions): Promise<ImageModelsListResponse>;
+
+	/** Live video-generation catalog; absent on non-Backboard clients. */
+	listVideoModels?(options?: RequestOptions): Promise<VideoModelsListResponse>;
+
+	/** Stateless Backboard video generation; absent on non-Backboard clients. */
+	generateVideo?(
+		request: GenerateVideoRequest,
+		options?: RequestOptions,
+	): Promise<GenerateVideoResult>;
 
 	listAssistants(
 		options?: RequestOptions,

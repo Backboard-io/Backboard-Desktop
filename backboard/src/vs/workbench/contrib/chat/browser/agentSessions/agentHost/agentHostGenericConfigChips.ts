@@ -41,6 +41,14 @@ export interface IAgentHostGenericConfigOption {
 	show(anchor?: HTMLElement): void;
 	/** Static enum metadata for slider-style editors; `undefined` for non-enum properties. */
 	getEnumInfo(): { values: string[]; labels: string[]; descriptions: (string | undefined)[]; current: string | undefined } | undefined;
+	/**
+	 * Live values for `enumDynamic` properties (the image/video model
+	 * catalogs), or `undefined` when the property has a static enum. Resolves
+	 * to the seed enum if the catalog request fails.
+	 */
+	getDynamicEnumInfo?(refresh?: boolean): Promise<{ values: string[]; labels: string[]; descriptions: (string | undefined)[]; current: string | undefined }> | undefined;
+	/** Current value as the host sees it, for confirming a just-applied selection. */
+	getCurrentValue?(): unknown | undefined;
 	/** Applies a value directly, bypassing the list popup (used by slider-style editors). */
 	setValue(value: string): void;
 }
@@ -76,6 +84,9 @@ const composerCapabilityProperties = new Set([
 	'notify',
 	'imageGeneration',
 	'images',
+	// Image and video generation are exposed in the composer as model pickers.
+	'imageModel',
+	'videoModel',
 ]);
 
 function getComposerActivationValue(property: string, schema: SessionConfigPropertySchema): string | undefined {
@@ -211,6 +222,8 @@ export class AgentHostGenericConfigChips extends Disposable {
 				deactivationValue: getComposerDeactivationValue(property, schema),
 				show: (anchor?: HTMLElement) => chip.show(anchor),
 				getEnumInfo: () => chip.getEnumInfo(),
+				getDynamicEnumInfo: (refresh?: boolean) => chip.getDynamicEnumInfo(refresh),
+				getCurrentValue: () => chip.getCurrentValue(),
 				setValue: value => chip.setValue(value),
 			});
 		}

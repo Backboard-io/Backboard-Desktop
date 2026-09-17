@@ -1,5 +1,3 @@
-import { AgentSpawnBatchTool } from "./AgentSpawnBatchTool.tsx";
-import { AgentCancelTool } from "./AgentCancelTool.tsx";
 import {
 	createRuntimeThinkingResolver,
 	resolveRuntimeThinking,
@@ -12,6 +10,8 @@ import { ClientProxyTool } from "../core/tools/ClientToolBridge.ts";
 import type { Tool } from "../core/tools/Tool.ts";
 import { ToolRegistry } from "../core/tools/ToolRegistry.ts";
 import { subagent as subagentPrompt } from "../prompts/system/subagent.tsx";
+import { AgentCancelTool } from "./AgentCancelTool.tsx";
+import { AgentSpawnBatchTool } from "./AgentSpawnBatchTool.tsx";
 import { AgentSpawnTool } from "./AgentSpawnTool.tsx";
 import { AgentTool } from "./AgentTool.tsx";
 import {
@@ -30,6 +30,7 @@ import { ExecuteTool } from "./ExecuteTool.tsx";
 import { FetchUrlTool } from "./FetchUrlTool.tsx";
 import { FindMcpTool } from "./FindMcpTool.tsx";
 import { FindSkillTool } from "./FindSkillTool.tsx";
+import { GenerateVideoTool } from "./GenerateVideoTool.tsx";
 import { GlobTool } from "./GlobTool.tsx";
 import { GrepTool } from "./GrepTool.tsx";
 import { ReadTool } from "./ReadTool.tsx";
@@ -63,10 +64,23 @@ function createBaseTools(): Tool[] {
 export function createDefaultTools(deps?: DefaultToolDeps): Tool[] {
 	const base = createBaseTools();
 	if (!deps) return base;
-	const agentTasks = deps.agentTaskManager ?? new AgentTaskManager({ workerWorkspaces: deps.workerWorkspaceManager });
+	const agentTasks =
+		deps.agentTaskManager ??
+		new AgentTaskManager({ workerWorkspaces: deps.workerWorkspaceManager });
 	const agent = buildAgentTool({ ...deps, agentTaskManager: agentTasks }, base);
 	const tools: Tool[] = [
 		...base,
+		new GenerateVideoTool({
+			getModel: () => deps.config.selectedVideoModel,
+			generate: (request, options) => {
+				if (!deps.client.generateVideo) {
+					throw new Error(
+						"Video generation requires a signed-in Backboard account.",
+					);
+				}
+				return deps.client.generateVideo(request, options);
+			},
+		}),
 		agent,
 		new AgentSpawnTool(agent, agentTasks),
 		new AgentSpawnBatchTool(agent, agentTasks),

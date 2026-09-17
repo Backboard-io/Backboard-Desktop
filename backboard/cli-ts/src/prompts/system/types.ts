@@ -14,6 +14,8 @@ export interface SystemPromptOptions {
 	hookContext?: string;
 	/** Reminder segment shown until the session's first TodoWrite call. */
 	todoReminderPrompt?: string;
+	/** Which built-in image/video tools the composer enabled, and their models. */
+	mediaGenerationPrompt?: string;
 	startupEnvironmentPrompt?: string;
 	/** Authoritative prior turns when the current provider thread is a branch. */
 	conversationContext?: string;

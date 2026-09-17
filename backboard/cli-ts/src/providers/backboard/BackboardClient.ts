@@ -21,6 +21,10 @@ import type {
 	AssistantInfo,
 	BackboardResponse,
 	BackboardThread,
+	GeneratedMediaInfo,
+	GenerateVideoRequest,
+	GenerateVideoResult,
+	ImageModelsListResponse,
 	ModelCatalogItem,
 	ModelsListResponse,
 	ModelThinkingMetadataResponse,
@@ -29,6 +33,7 @@ import type {
 	ProvidersListResponse,
 	SendMessageRequest,
 	SubmitToolOutputsRequest,
+	VideoModelsListResponse,
 } from "./types.ts";
 
 export type {
@@ -184,6 +189,29 @@ export class BackboardClient implements AgentClient {
 		return this.post<BackboardResponse>("/threads/messages", req, options);
 	}
 
+	async generateVideo(
+		request: GenerateVideoRequest,
+		options: RequestOptions = {},
+	): Promise<GenerateVideoResult> {
+		const response = await this.post<BackboardResponse>(
+			"/threads/messages",
+			{
+				operation: "generate_video",
+				content: request.prompt,
+				video_model_provider: request.video_model_provider,
+				video_model_name: request.video_model_name,
+				...(request.video_config ? { video_config: request.video_config } : {}),
+				stream: false,
+			},
+			options,
+		);
+		const media = generatedVideoFromResponse(response);
+		if (!media) {
+			throw new Error("Backboard did not return a generated video.");
+		}
+		return media;
+	}
+
 	async *runMessage(
 		req: SendMessageRequest,
 		options: RunMessageOptions = {},
@@ -270,6 +298,26 @@ export class BackboardClient implements AgentClient {
 		const query = model ? `?model=${encodeURIComponent(model)}` : "";
 		return this.get<OpenRouterModelProvidersResponse>(
 			`/billing/models/providers${query}`,
+			options,
+		);
+	}
+
+	/** Live image-generation catalog (`GET /models/image/all`). */
+	async listImageModels(
+		options: RequestOptions = {},
+	): Promise<ImageModelsListResponse> {
+		return this.get<ImageModelsListResponse>(
+			"/models/image/all?limit=500",
+			options,
+		);
+	}
+
+	/** Live video-generation catalog (`GET /models/video/all`). */
+	async listVideoModels(
+		options: RequestOptions = {},
+	): Promise<VideoModelsListResponse> {
+		return this.get<VideoModelsListResponse>(
+			"/models/video/all?limit=1000",
 			options,
 		);
 	}
@@ -516,6 +564,49 @@ function modelPageQuery(
 	query.set("skip", String(skip));
 	query.set("limit", String(MODEL_PAGE_LIMIT));
 	return query.toString();
+}
+
+function generatedVideoFromResponse(
+	response: BackboardResponse,
+): GenerateVideoResult | undefined {
+	const media = [
+		...(response.generated_media ?? []),
+		...(response.messages ?? []).flatMap(
+			(message) => message.generated_media ?? [],
+		),
+	];
+	const video =
+		media.find((item) => isVideoMedia(item)) ??
+		media.find((item) => typeof item.url === "string");
+	if (video?.url) {
+		return {
+			url: video.url,
+			...(video.document_id ? { document_id: video.document_id } : {}),
+		};
+	}
+	const fromContent = videoUrlFromText(response.content);
+	return fromContent ? { url: fromContent } : undefined;
+}
+
+function isVideoMedia(item: GeneratedMediaInfo): boolean {
+	const mediaType = item.media_type?.toLowerCase() ?? "";
+	const mimeType = item.mime_type?.toLowerCase() ?? "";
+	if (mediaType.includes("video") || mimeType.startsWith("video/")) {
+		return true;
+	}
+	try {
+		return /\.(?:mp4|webm|mov|m4v)(?:$|\?)/i.test(new URL(item.url).pathname);
+	} catch {
+		return false;
+	}
+}
+
+function videoUrlFromText(content: string | null): string | undefined {
+	if (!content) return undefined;
+	const match =
+		/!\[[^\]]*\]\(\s*(https:\/\/[^)\s]+)\s*\)/i.exec(content) ??
+		/\[[^\]]*\]\(\s*(https:\/\/[^)\s]+)\s*\)/i.exec(content);
+	return match?.[1];
 }
 
 function safeJson(text: string): unknown {

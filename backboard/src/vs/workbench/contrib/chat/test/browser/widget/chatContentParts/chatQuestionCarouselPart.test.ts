@@ -8,7 +8,7 @@ import { mainWindow } from '../../../../../../../base/browser/window.js';
 import { MarkdownString } from '../../../../../../../base/common/htmlContent.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../base/test/common/utils.js';
 import { workbenchInstantiationService } from '../../../../../../test/browser/workbenchTestServices.js';
-import { ChatQuestionCarouselPart, IChatQuestionCarouselOptions } from '../../../../browser/widget/chatContentParts/chatQuestionCarouselPart.js';
+import { ChatQuestionCarouselPart, IChatQuestionCarouselOptions, isGenerateVideoApprovalCarousel } from '../../../../browser/widget/chatContentParts/chatQuestionCarouselPart.js';
 import { IChatQuestionAnswerValue, IChatQuestionCarousel } from '../../../../common/chatService/chatService.js';
 import { IChatContentPartRenderContext } from '../../../../browser/widget/chatContentParts/chatContentParts.js';
 import { ChatQuestionCarouselData } from '../../../../common/model/chatProgressTypes/chatQuestionCarouselData.js';
@@ -51,6 +51,24 @@ suite('ChatQuestionCarouselPart', () => {
 	});
 
 	suite('Basic Rendering', () => {
+			test('renders an Edit Video approval card with quality and duration dropdowns', () => {
+			const carousel = createMockCarousel([
+				{ id: 'answer-0', type: 'singleSelect', title: 'Edit Video', message: 'Keep everything about this shot\n\nModel: Seedance 2.5\n\n![ref](file:///tmp/ref.png)', options: [{ id: 'Approve', label: 'Approve', value: 'Approve' }] },
+				{ id: 'answer-1', type: 'singleSelect', title: 'Duration', message: 'Duration', options: [{ id: '30s', label: '30s', value: '30s' }, { id: '5s', label: '5s', value: '5s' }] },
+				{ id: 'answer-2', type: 'singleSelect', title: 'Quality', message: 'Quality', options: [{ id: '480p', label: '480p', value: '480p' }, { id: '720p', label: '720p', value: '720p' }] },
+				{ id: 'answer-3', type: 'singleSelect', title: 'Native Audio', message: 'Native Audio', options: [{ id: 'On', label: 'On', value: 'On' }, { id: 'Off', label: 'Off', value: 'Off' }] },
+			]);
+			assert.ok(isGenerateVideoApprovalCarousel(carousel));
+			createWidget(carousel);
+
+			assert.ok(widget.domNode.classList.contains('chat-edit-video-approval'));
+			assert.ok(widget.domNode.querySelector('.chat-edit-video-title')?.textContent?.includes('Edit Video'));
+			assert.ok(widget.domNode.querySelector('.chat-edit-video-thumb'));
+			assert.ok(widget.domNode.querySelector('.chat-edit-video-select'));
+			assert.ok(widget.domNode.querySelector('.chat-edit-video-approve'));
+			assert.ok(widget.domNode.textContent?.includes('Seedance 2.5'));
+		});
+
 		test('renders carousel container with proper structure', () => {
 			const carousel = createMockCarousel([
 				{ id: 'q1', type: 'text', title: 'Question 1' }

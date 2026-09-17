@@ -24,6 +24,7 @@ function stubAssistant(): AssistantAccumulator {
 	return {
 		appendDelta: () => {},
 		appendReasoning: () => {},
+		flushAnswer: () => {},
 		flushReasoning: () => {},
 		finalize: () => {},
 		discardPartial: () => {},
@@ -773,6 +774,151 @@ describe("ProviderStreamConsumer", () => {
 		expect(preserved).toBe(1);
 	});
 
+	it("saves a generated video into the project's video folder and emits a tool call", async () => {
+		const projectRoot = await mkdtemp(join(tmpdir(), "backboard-videos-"));
+		const videoDirectory = join(projectRoot, "generated-videos");
+		const videoUrl =
+			"https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-video/e147512d-f009-458f-9e87-35b144a12a55.mp4";
+		const videoBytes = Uint8Array.from([0x00, 0x00, 0x00, 0x18]);
+		let finalizedText = "";
+		const assistant = {
+			appendDelta: () => {},
+			appendReasoning: () => {},
+			flushAnswer: () => {},
+			flushReasoning: () => {},
+			finalize: (_calls: unknown[], text?: string) => {
+				finalizedText = text ?? "";
+			},
+			discardPartial: () => {},
+		} as unknown as AssistantAccumulator;
+
+		const bus = new EventBus();
+		const startedTools: string[] = [];
+		const resultDetails = new Map<string, string | undefined>();
+		bus.on("tool:start", (event) => startedTools.push(event.name));
+		bus.on("tool:result", (event) =>
+			resultDetails.set(event.name, event.detail),
+		);
+
+		try {
+			const consumer = new ProviderStreamConsumer(
+				bus,
+				new Session("sess_test"),
+				{
+					videoGeneration: true,
+					generatedMediaDir: join(projectRoot, "generated-images"),
+					generatedVideoDir: videoDirectory,
+					fetch: async () =>
+						new Response(videoBytes, {
+							headers: { "content-type": "video/mp4" },
+						}),
+				},
+			);
+			await consumer.consumeWithRetry(
+				() =>
+					streamOf([
+						{ kind: "assistant_delta", text: "Here's your clip." },
+						{
+							kind: "media",
+							payload: { url: videoUrl, prompt: "a rolling ball" },
+						},
+						{ kind: "completed", finalText: "Here's your clip." },
+					]),
+				assistant,
+				new AbortController().signal,
+			);
+
+			expect(finalizedText).toContain("Saved to `generated-videos/");
+			expect(finalizedText).toContain(videoUrl);
+			const files = await readdir(videoDirectory);
+			expect(files).toHaveLength(1);
+			const filename = files[0];
+			expect(filename).toMatch(/^generated-[a-f0-9]{12}\.mp4$/);
+			if (!filename) throw new Error("generated video was not saved");
+			expect(
+				(await readFile(join(videoDirectory, filename))).byteLength,
+			).toBeGreaterThan(0);
+
+			expect(startedTools).toContain("generate_video");
+			expect(resultDetails.get("generate_video")).toContain(videoUrl);
+		} finally {
+			await rm(projectRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("classifies a clip from media_type when the stored URL has no extension", async () => {
+		const projectRoot = await mkdtemp(join(tmpdir(), "backboard-videos-"));
+		const videoDirectory = join(projectRoot, "generated-videos");
+		const imageDirectory = join(projectRoot, "generated-images");
+		// Document-download URLs carry no extension; only the media metadata
+		// identifies the clip.
+		const videoUrl =
+			"https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-video/e147512d";
+		let finalizedText = "";
+		const assistant = {
+			appendDelta: () => {},
+			appendReasoning: () => {},
+			flushAnswer: () => {},
+			flushReasoning: () => {},
+			finalize: (_calls: unknown[], text?: string) => {
+				finalizedText = text ?? "";
+			},
+			discardPartial: () => {},
+		} as unknown as AssistantAccumulator;
+
+		const bus = new EventBus();
+		const startedTools: string[] = [];
+		const resultDetails = new Map<string, string | undefined>();
+		bus.on("tool:start", (event) => startedTools.push(event.name));
+		bus.on("tool:result", (event) =>
+			resultDetails.set(event.name, event.detail),
+		);
+
+		try {
+			const consumer = new ProviderStreamConsumer(
+				bus,
+				new Session("sess_test"),
+				{
+					videoGeneration: true,
+					generatedMediaDir: imageDirectory,
+					generatedVideoDir: videoDirectory,
+					fetch: async () =>
+						new Response(Uint8Array.from([0x00, 0x00, 0x00, 0x18]), {
+							headers: { "content-type": "video/mp4" },
+						}),
+				},
+			);
+			await consumer.consumeWithRetry(
+				() =>
+					streamOf([
+						{
+							kind: "media",
+							payload: {
+								media: {
+									url: videoUrl,
+									media_type: "video",
+									mime_type: "video/mp4",
+								},
+							},
+						},
+						{ kind: "completed", finalText: "Done." },
+					]),
+				assistant,
+				new AbortController().signal,
+			);
+
+			expect(startedTools).toContain("generate_video");
+			expect(resultDetails.get("generate_video")).toContain(
+				"![Generated video]",
+			);
+			expect(await readdir(videoDirectory)).toHaveLength(1);
+			expect(finalizedText).toContain("Saved to `generated-videos/");
+			expect(await readdir(imageDirectory).catch(() => [])).toHaveLength(0);
+		} finally {
+			await rm(projectRoot, { recursive: true, force: true });
+		}
+	});
+
 	it("normalizes generated image markup and saves the image in the project", async () => {
 		const projectRoot = await mkdtemp(join(tmpdir(), "backboard-images-"));
 		const directory = join(projectRoot, "generated-images");
@@ -785,6 +931,7 @@ describe("ProviderStreamConsumer", () => {
 		const assistant = {
 			appendDelta: (text: string) => deltas.push(text),
 			appendReasoning: () => {},
+			flushAnswer: () => {},
 			flushReasoning: () => {},
 			finalize: (_calls: unknown[], text?: string) => {
 				finalizedText = text ?? "";
@@ -852,6 +999,7 @@ describe("ProviderStreamConsumer", () => {
 		const assistant = {
 			appendDelta: () => {},
 			appendReasoning: () => {},
+			flushAnswer: () => {},
 			flushReasoning: () => {},
 			finalize: (_calls: unknown[], text?: string) => {
 				finalizedText = text ?? "";

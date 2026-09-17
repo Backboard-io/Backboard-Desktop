@@ -283,7 +283,8 @@ function getBackboardCapabilityIconClass(ref: IDynamicVariable): string | undefi
 		case 'notifications':
 		case 'notify': return 'backboard-capability-editor-icon-notifications';
 		case 'imageGeneration':
-		case 'images': return 'backboard-capability-editor-icon-image-generation';
+		case 'images':
+		case 'imageModel': return 'backboard-capability-editor-icon-image-generation';
 	}
 	return undefined;
 }

@@ -66,8 +66,12 @@ export interface AgentLoopDeps {
 	memoryProfile: MemoryProfile;
 	workspaceId?: string;
 	imageGeneration?: boolean;
+	imageModel?: { provider: string; name: string };
+	videoGeneration?: boolean;
+	videoModel?: { provider: string; name: string };
 	openRouterProvider?: string;
 	generatedMediaDir?: string;
+	generatedVideoDir?: string;
 	thinking: ThinkingConfig | null | undefined;
 	thinkingResolver?: RuntimeThinkingResolver;
 	requestKind?: ThinkingRequestKind;
@@ -123,7 +127,9 @@ export class AgentLoop {
 
 		const consumer = new ProviderStreamConsumer(bus, session, {
 			imageGeneration: this.deps.imageGeneration,
+			videoGeneration: this.deps.videoGeneration,
 			generatedMediaDir: this.deps.generatedMediaDir,
+			generatedVideoDir: this.deps.generatedVideoDir,
 			...(this.deps.requestKind === "subagent"
 				? {
 						idleTimeoutMs: SUBAGENT_PROVIDER_IDLE_TIMEOUT_MS,

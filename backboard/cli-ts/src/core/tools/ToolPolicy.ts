@@ -17,6 +17,7 @@ export interface ToolPolicySnapshot {
 	computerUseEnabled: boolean;
 	browserUseEnabled: boolean;
 	skillDiscoveryEnabled: boolean;
+	videoGenerationEnabled: boolean;
 }
 
 const SKILL_DISCOVERY_TOOLS = ["find_skill", "find_mcp"];
@@ -51,6 +52,7 @@ export class ToolPolicy {
 		const excluded = new Set(this.excludedToolNames);
 		if (!this.snapshot.computerUseEnabled) excluded.add("computer");
 		if (!this.snapshot.browserUseEnabled) excluded.add("browser");
+		if (!this.snapshot.videoGenerationEnabled) excluded.add("generate_video");
 		if (!this.snapshot.skillDiscoveryEnabled) {
 			for (const name of SKILL_DISCOVERY_TOOLS) excluded.add(name);
 		}
@@ -63,6 +65,12 @@ export class ToolPolicy {
 			return false;
 		}
 		if (canonicalName === "browser" && !this.snapshot.browserUseEnabled) {
+			return false;
+		}
+		if (
+			canonicalName === "generate_video" &&
+			!this.snapshot.videoGenerationEnabled
+		) {
 			return false;
 		}
 		if (

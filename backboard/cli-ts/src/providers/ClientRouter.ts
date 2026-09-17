@@ -11,12 +11,16 @@ import type {
 	AssistantInfo,
 	BackboardResponse,
 	BackboardThread,
+	GenerateVideoRequest,
+	GenerateVideoResult,
+	ImageModelsListResponse,
 	ModelCatalogItem,
 	ModelsListResponse,
 	ModelThinkingMetadataResponse,
 	ProviderEvent,
 	SendMessageRequest,
 	SubmitToolOutputsRequest,
+	VideoModelsListResponse,
 } from "./backboard/types.ts";
 import { byokAdapterFor } from "./byok/registry.ts";
 
@@ -197,7 +201,6 @@ export class ClientRouter implements AgentClient {
 			const source = clients[index]?.source;
 			if (result?.status !== "fulfilled" || !source) continue;
 			for (const model of result.value.models) {
-				if (isSubscriptionProvider(model.provider) && !this.subscriptionForProvider(model.provider)) continue;
 				if (seen.has(modelKey(model))) continue;
 				seen.add(modelKey(model));
 				models.push({ ...model, source });
@@ -211,6 +214,39 @@ export class ClientRouter implements AgentClient {
 		filter?: { name?: string },
 	): Promise<AssistantInfo[]> {
 		return this.active().listAssistants(options, filter);
+	}
+
+	/**
+	 * Image/video generation catalogs live only on the Backboard backend,
+	 * so these forward there rather than merging across clients.
+	 */
+	async listImageModels(
+		options?: RequestOptions,
+	): Promise<ImageModelsListResponse> {
+		const backboard = this.backboard();
+		if (!backboard?.listImageModels) return { models: [], total: 0 };
+		return backboard.listImageModels(options);
+	}
+
+	async listVideoModels(
+		options?: RequestOptions,
+	): Promise<VideoModelsListResponse> {
+		const backboard = this.backboard();
+		if (!backboard?.listVideoModels) return { models: [], total: 0 };
+		return backboard.listVideoModels(options);
+	}
+
+	async generateVideo(
+		request: GenerateVideoRequest,
+		options?: RequestOptions,
+	): Promise<GenerateVideoResult> {
+		const backboard = this.backboard();
+		if (!backboard?.generateVideo) {
+			throw new Error(
+				"Video generation requires a signed-in Backboard account.",
+			);
+		}
+		return backboard.generateVideo(request, options);
 	}
 
 	createAssistant(
@@ -289,7 +325,7 @@ export class ClientRouter implements AgentClient {
 					: this.backboard();
 		if (!client) {
 			throw new Error(
-				`No backend can serve ${formatModel(model)}. Choose a Backboard or API key model.`,
+				`No backend can serve ${formatModel(model)}. Sign in with Backboard, connect the required subscription, or add a key with /keys.`,
 			);
 		}
 		return client;
@@ -302,7 +338,7 @@ export class ClientRouter implements AgentClient {
 		const knownSubscription = knownSubscriptionForThread(threadId);
 		if (knownSubscription) {
 			throw new Error(
-				`${knownSubscription.label} subscriptions are currently unavailable. Choose a Backboard or API key model.`,
+				`This thread requires a connected ${knownSubscription.label} subscription.`,
 			);
 		}
 		if (threadId.startsWith("byok_") && this.deps.byok) return this.deps.byok;

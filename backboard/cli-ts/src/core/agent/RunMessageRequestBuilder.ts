@@ -19,6 +19,15 @@ export interface RunMessageRequestContext {
 	workspaceId?: string;
 	/** Enables Backboard's built-in image generation for the turn. */
 	imageGeneration?: boolean;
+	/** Image model to use; falls back to the built-in default when omitted. */
+	imageModel?: { provider: string; name: string };
+	/** Enables Backboard's built-in video generation for the turn. */
+	videoGeneration?: boolean;
+	/**
+	 * Video model to use. Video generation has no universal default model, so
+	 * the turn only enables it when an explicit model was selected.
+	 */
+	videoModel?: { provider: string; name: string };
 	/** Pins an OpenRouter upstream; undefined leaves routing automatic. */
 	openRouterProvider?: string;
 	/**
@@ -63,10 +72,16 @@ export function buildRunMessageRequest(
 		...(context.imageGeneration
 			? {
 					image_generation: "auto",
-					image_model_provider: DEFAULT_IMAGE_MODEL_PROVIDER,
-					image_model_name: DEFAULT_IMAGE_MODEL_NAME,
+					image_model_provider:
+						context.imageModel?.provider ?? DEFAULT_IMAGE_MODEL_PROVIDER,
+					image_model_name:
+						context.imageModel?.name ?? DEFAULT_IMAGE_MODEL_NAME,
 				}
 			: {}),
+		// Video generation is the local `generate_video` function tool. Do not
+		// also send `video_generation: "auto"` on the conversation turn — that
+		// would inject a second hosted tool with the same name and the model
+		// would curl the HTTP API instead of calling ours.
 		tools: context.tools,
 	};
 }

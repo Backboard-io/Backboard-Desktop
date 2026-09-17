@@ -1341,6 +1341,41 @@ suite('ChatThinkingContentPart', () => {
 			]);
 		});
 
+		test('core generateVideo keeps its native card and running shell outside the folded work group', () => {
+			const part = createCursorPart('Producing the clip');
+			const coreTool = {
+				...createCursorTool('generate_video', 'Generate Video', 'call-core-video'),
+				toolSpecificData: {
+					kind: 'coreTool',
+					toolKind: 'generateVideo',
+					input: { prompt: 'A cat singing', duration: 8, resolution: '720p' },
+				},
+			} as IChatToolInvocationSerialized;
+			const generatingShell = $('div.chat-core-tool-card-generating', { 'aria-hidden': 'true' });
+			const nativeCard = $('section.chat-core-tool-card.chat-core-tool-card-generateVideo.chat-core-tool-card-running', {},
+				$('button.chat-core-tool-card-header', { type: 'button', 'aria-expanded': 'false' }, 'Generate Video'),
+				generatingShell);
+			part.appendItem(() => ({ domNode: nativeCard }), coreTool.toolId, coreTool);
+
+			const row = nativeCard.closest<HTMLElement>('.chat-thinking-tool-wrapper');
+			assert.ok(row, 'Expected the video card to stay mounted in its own tool row');
+			assert.deepStrictEqual({
+				coreRow: row.classList.contains('chat-thinking-core-tool-row'),
+				directNativeCard: row.querySelector(':scope > .chat-core-tool-card') === nativeCard,
+				syntheticSummary: row.querySelector(':scope > .chat-thinking-work-row-summary'),
+				activityGroupAncestor: row.closest('.chat-thinking-work-group'),
+				activityGroupHeaders: part.domNode.querySelectorAll('.chat-thinking-group-header').length,
+				shellMounted: generatingShell.isConnected && generatingShell.closest('.chat-thinking-work-group-body') === null,
+			}, {
+				coreRow: true,
+				directNativeCard: true,
+				syntheticSummary: null,
+				activityGroupAncestor: null,
+				activityGroupHeaders: 0,
+				shellMounted: true,
+			});
+		});
+
 		test('consecutive core reads share one compact panel and reasoning starts a new panel', () => {
 			const part = createCursorPart('Reading related files');
 			const first = appendNativeCoreRead(part, 'stack-first');

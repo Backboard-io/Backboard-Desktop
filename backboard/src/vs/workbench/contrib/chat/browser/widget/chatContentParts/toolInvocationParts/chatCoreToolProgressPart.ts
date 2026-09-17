@@ -295,6 +295,30 @@ export function createCoreToolCardViewModel(data: IChatCoreToolInvocationData): 
 				uiTruncated: common.uiTruncated || candidates.length > MAX_ITEMS,
 			};
 		}
+		case 'generateVideo': {
+			const prompt = firstString(input, ['prompt']) ?? firstString(output, ['label']);
+			const duration = firstNumber(input, ['duration']);
+			const resolution = firstString(input, ['resolution']);
+			const nativeAudio = input.generate_audio;
+			const model = firstString(input, ['model_label', 'model_name']);
+			const url = firstString(output, ['url']);
+			const metrics = [
+				duration !== undefined ? { label: localize('chat.coreTool.generateVideo.duration', "Duration"), value: localize('chat.coreTool.generateVideo.durationValue', "{0}s", duration) } : undefined,
+				resolution ? { label: localize('chat.coreTool.generateVideo.resolution', "Resolution"), value: resolution } : undefined,
+				nativeAudio === true || nativeAudio === false ? { label: localize('chat.coreTool.generateVideo.audio', "Native Audio"), value: nativeAudio ? localize('chat.coreTool.generateVideo.audioOn', "On") : localize('chat.coreTool.generateVideo.audioOff', "Off") } : undefined,
+				model ? { label: localize('chat.coreTool.generateVideo.model', "Model"), value: model } : undefined,
+			].filter((metric): metric is ICoreToolCardMetric => !!metric);
+			return {
+				...common,
+				title: localize('chat.coreTool.generateVideo.title', "Generate Video"),
+				summary: prompt,
+				icon: Codicon.deviceCameraVideo,
+				metrics,
+				items: metrics.map(metric => ({ title: metric.label, detail: metric.value })),
+				preview: prompt ? textPreview(localize('chat.coreTool.generateVideo.prompt', "Prompt"), prompt) : undefined,
+				emptyMessage: !url && common.hasOutput ? localize('chat.coreTool.generateVideo.empty', "No video was returned.") : undefined,
+			};
+		}
 	}
 }
 
@@ -505,6 +529,13 @@ function renderCoreToolCard(view: ICoreToolCardViewModel, invocation: IInvocatio
 	lifecycleStatus.setAttribute('aria-live', 'polite');
 	lifecycleStatus.textContent = localize('chat.coreTool.lifecycleStatus', "{0}: {1}", view.title, outcomeLabel(outcome));
 	card.appendChild(lifecycleStatus);
+
+	if (view.toolKind === 'generateVideo' && outcome === 'running') {
+		const generating = document.createElement('div');
+		generating.classList.add('chat-core-tool-card-generating');
+		generating.setAttribute('aria-hidden', 'true');
+		card.appendChild(generating);
+	}
 
 	if (outcome === 'error' && errorMessage) {
 		const error = document.createElement('div');

@@ -14,6 +14,7 @@ function snapshot(
 		computerUseEnabled: true,
 		browserUseEnabled: true,
 		skillDiscoveryEnabled: true,
+		videoGenerationEnabled: true,
 		...overrides,
 	};
 }
@@ -36,6 +37,16 @@ describe("ToolPolicy skill-discovery gate", () => {
 		const excluded = policy.schemaExcludedNames();
 		expect(excluded).toContain("find_skill");
 		expect(excluded).toContain("find_mcp");
+	});
+
+	it("hides generate_video until a composer video model is selected", () => {
+		const off = new ToolPolicy(snapshot({ videoGenerationEnabled: false }));
+		expect(off.isRuntimeAllowed("generate_video")).toBe(false);
+		expect(off.schemaExcludedNames()).toContain("generate_video");
+
+		const on = new ToolPolicy(snapshot({ videoGenerationEnabled: true }));
+		expect(on.isRuntimeAllowed("GenerateVideo")).toBe(true);
+		expect(on.schemaExcludedNames()).not.toContain("generate_video");
 	});
 
 	it("allows find_skill/find_mcp when discovery is enabled", () => {
