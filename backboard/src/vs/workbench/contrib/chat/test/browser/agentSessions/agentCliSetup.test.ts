@@ -63,6 +63,7 @@ suite('Agent CLI setup', () => {
 			{} as never, {} as never,
 			{ info: (message: string) => notifications.push(message), error: (message: string) => notifications.push(message) } as never,
 			{} as never, {} as never, { error: () => {} } as never,
+			{} as never,
 		);
 		await service.beginSetup(CLAUDE_SUBSCRIPTION_SETUP_ID);
 		assert.deepStrictEqual({ commands, notifications }, { commands: ['claudeSubscription.check', 'claudeSubscription.enable'], notifications: ['connected'] });
