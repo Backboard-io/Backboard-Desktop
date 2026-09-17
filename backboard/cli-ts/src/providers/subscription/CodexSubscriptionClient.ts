@@ -260,7 +260,32 @@ function usageFromResponse(response: JsonObject): ProviderUsage | null {
 		typeof usage.output_tokens === "number" ? usage.output_tokens : undefined;
 	const totalTokens =
 		typeof usage.total_tokens === "number" ? usage.total_tokens : undefined;
-	return { inputTokens, outputTokens, totalTokens };
+	// The Responses API counts cached prompt tokens inside `input_tokens`;
+	// surface the split so the context meter can show it like Backboard's.
+	const details = isObject(usage.input_tokens_details)
+		? usage.input_tokens_details
+		: undefined;
+	const cachedTokens =
+		typeof details?.cached_tokens === "number"
+			? details.cached_tokens
+			: undefined;
+	const model =
+		typeof response.model === "string" && response.model.trim()
+			? response.model.trim()
+			: undefined;
+	return {
+		inputTokens,
+		outputTokens,
+		totalTokens,
+		...(cachedTokens === undefined ? {} : { cachedTokens }),
+		// Window occupancy is a level, not a billing sum: the next request
+		// resends this prompt plus this reply, so match the level Backboard
+		// reports (output included) and keep auto-compaction on the same
+		// measurement for every backend.
+		contextTokens: totalTokens ?? inputTokens,
+		provider: "openai-subscription",
+		...(model ? { model } : {}),
+	};
 }
 
 function subscriptionToolOutput(output: string): SubscriptionToolOutput {
@@ -600,6 +625,7 @@ export class CodexSubscriptionClient implements AgentClient {
 			name,
 			provider: "openai-subscription",
 			model_type: "llm",
+			supports_vision: true,
 			supports_thinking: true,
 			// Use the advertised default window, not the optional maximum window.
 			context_limit: (() => {

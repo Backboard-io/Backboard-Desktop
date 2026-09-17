@@ -67,6 +67,46 @@ describe("context windows", () => {
 		).toBe(1_048_576);
 	});
 
+	it("maps subscription model ids to their real windows", () => {
+		// The subscription catalogs report these per turn; this fallback must not
+		// resolve their ids through the generic vendor patterns (a Claude
+		// subscription "sonnet" would become 128k, a 1M Opus 128k, and Codex
+		// 400k instead of its advertised 272k).
+		expect(
+			contextWindowFor({
+				provider: "anthropic-subscription",
+				model: "default",
+			}),
+		).toBe(1_000_000);
+		expect(
+			contextWindowFor({
+				provider: "anthropic-subscription",
+				model: "opus[1m]",
+			}),
+		).toBe(1_000_000);
+		expect(
+			contextWindowFor({
+				provider: "anthropic-subscription",
+				model: "claude-fable-5-1[1m]",
+			}),
+		).toBe(1_000_000);
+		expect(
+			contextWindowFor({
+				provider: "anthropic-subscription",
+				model: "sonnet",
+			}),
+		).toBe(200_000);
+		expect(
+			contextWindowFor({ provider: "anthropic-subscription", model: "haiku" }),
+		).toBe(200_000);
+		expect(
+			contextWindowFor({
+				provider: "openai-subscription",
+				model: "gpt-5.6-sol",
+			}),
+		).toBe(272_000);
+	});
+
 	it("falls back conservatively for an unknown model", () => {
 		// Over-estimating would let a conversation sail past the real limit and
 		// hard-fail mid-task, which is worse than compressing early.

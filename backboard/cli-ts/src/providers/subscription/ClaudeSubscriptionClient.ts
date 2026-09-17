@@ -426,6 +426,7 @@ export class ClaudeSubscriptionClient implements AgentClient {
 			...(model.resolvedModel ? { resolved_model: model.resolvedModel } : {}),
 			supported_effort_levels: supportedClaudeEffortLevels(model, model.value),
 			supports_adaptive_thinking: model.supportsAdaptiveThinking === true,
+			supports_vision: true,
 			supports_thinking: true,
 			thinking_controls:
 				supportedClaudeEffortLevels(model, model.value).length > 0
@@ -1098,14 +1099,22 @@ function usageFromResult(
 	const modelUsage = modelEntry?.[1];
 	const inputTokens = message.usage.input_tokens;
 	const outputTokens = message.usage.output_tokens;
+	const cacheRead = message.usage.cache_read_input_tokens;
+	const cacheWrite = message.usage.cache_creation_input_tokens;
 	return {
 		inputTokens,
 		outputTokens,
 		totalTokens: inputTokens + outputTokens,
-		cachedTokens: message.usage.cache_read_input_tokens,
-		cacheWriteTokens: message.usage.cache_creation_input_tokens,
+		cachedTokens: cacheRead,
+		cacheWriteTokens: cacheWrite,
 		costUsd: message.total_cost_usd,
-		contextTokens: modelUsage?.inputTokens,
+		// Window occupancy is a level, not a billing sum: Anthropic reports the
+		// cached prompt portions separately from the uncached tail, and the next
+		// request resends this prompt plus this reply. Reporting input alone
+		// under-counts cache-heavy sessions and stops auto-compaction from ever
+		// firing, leaving Claude Code's internal compaction in charge instead of
+		// the CLI's. Match the level Backboard reports (output included).
+		contextTokens: inputTokens + cacheRead + cacheWrite + outputTokens,
 		contextLimit: modelUsage?.contextWindow,
 		provider: PROVIDER,
 		model: modelEntry?.[0],

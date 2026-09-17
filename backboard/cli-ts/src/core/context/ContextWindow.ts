@@ -4,8 +4,9 @@ import type { ModelRef } from "../../config/defaults.ts";
  * Context-window sizes for direct vendor models.
  *
  * Backboard reports `context_limit` per model in its catalog and again in the
- * per-turn `context_usage` payload, so this table only covers BYOK, where no
- * such endpoint exists. Patterns are ordered most-specific first and matched
+ * per-turn `context_usage` payload, so this table only covers backends without
+ * such an endpoint: BYOK, plus the subscription transports' own model ids as a
+ * pre-turn fallback. Patterns are ordered most-specific first and matched
  * against the lowercased model id.
  */
 const WINDOW_PATTERNS: ReadonlyArray<{ match: RegExp; tokens: number }> = [
@@ -32,9 +33,24 @@ const WINDOW_PATTERNS: ReadonlyArray<{ match: RegExp; tokens: number }> = [
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 
 export function contextWindowFor(model: ModelRef): number {
+	const provider = model.provider.trim().toLowerCase();
 	const rawName = model.model.trim().toLowerCase();
+	// Subscription transports own their catalogs and re-report their windows
+	// per turn; these mirrors only serve the pre-turn estimate when the catalog
+	// lookup is unavailable. They must not fall through to the generic vendor
+	// patterns: Claude's subscription ids ("default", "sonnet", "haiku") would
+	// resolve to the 128k default instead of their real 1M/200k windows, and
+	// Codex's advertised default window is 272k, not the generic GPT-5 400k.
+	if (provider === "anthropic-subscription") {
+		return /\[1m\]|\b1m\b/.test(rawName) || rawName === "default"
+			? 1_000_000
+			: 200_000;
+	}
+	if (provider === "openai-subscription") {
+		return /^gpt-5/.test(rawName) ? 272_000 : DEFAULT_CONTEXT_WINDOW;
+	}
 	const name =
-		model.provider.trim().toLowerCase() === "openrouter"
+		provider === "openrouter"
 			? (rawName.split("/").at(-1) ?? rawName)
 			: rawName;
 	for (const { match, tokens } of WINDOW_PATTERNS) {
