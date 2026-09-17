@@ -1,4 +1,3 @@
-import { isProviderAvailable } from "./releaseFeatures.ts";
 import { canonicalToolName } from "../core/tools/names.ts";
 import { ToolPolicy } from "../core/tools/ToolPolicy.ts";
 import {
@@ -79,6 +78,11 @@ export class Config {
 	private skillDiscoveryEnabled = false;
 	private notifyEnabled = false;
 	private imageGenerationEnabled = false;
+	/** Selected image model as `provider/name`; undefined keeps the built-in default. */
+	private imageModel: { provider: string; name: string } | undefined;
+	private videoGenerationEnabled = false;
+	/** Selected video model as `provider/name`; video generation has no default model. */
+	private videoModel: { provider: string; name: string } | undefined;
 	private openRouterProvider: string | undefined;
 	private verboseEnabled = true;
 	private readonly currentMemoryProfile: MemoryProfile;
@@ -106,12 +110,9 @@ export class Config {
 			options.homeDir !== undefined || options.env === undefined;
 		const persistedConfig =
 			options.homeDir !== undefined || options.env === undefined
-				? readBackboardConfig(options.homeDir, false)
+				? readBackboardConfig(options.homeDir)
 				: {};
 
-		if (persistedConfig.model && !isProviderAvailable(persistedConfig.model.provider)) {
-			delete persistedConfig.model;
-		}
 		const profileName = this.flags.profile ?? DEFAULTS.profile;
 		this.profile = getProfile(profileName);
 
@@ -150,10 +151,7 @@ export class Config {
 				claudeSubscriptionOnlyDefault ??
 				keyOnlyDefault ??
 				this.profile.model);
-		if (!isProviderAvailable(this.currentModel.provider)) {
-			throw new Error("Subscriptions are currently unavailable. Choose a Backboard or API key model.");
-		}
-		this.successfulModelRefs = (persistedConfig.successfulModels ?? []).filter(model => isProviderAvailable(model.provider));
+		this.successfulModelRefs = persistedConfig.successfulModels ?? [];
 		this.currentModelProfile = resolveModelProfile(this.currentModel);
 		this.currentFormat = this.flags.format
 			? parseOutputFormat(this.flags.format)
@@ -186,9 +184,6 @@ export class Config {
 	}
 
 	setModel(ref: ModelRef): void {
-		if (!isProviderAvailable(ref.provider)) {
-			throw new Error("Subscriptions are currently unavailable. Choose a Backboard or API key model.");
-		}
 		this.currentModel = ref;
 		this.currentModelProfile = resolveModelProfile(ref);
 	}
@@ -213,7 +208,7 @@ export class Config {
 			),
 		].slice(0, 10);
 		if (!this.recoveryPersistenceEnabled) return;
-		const existing = readBackboardConfig(this.persistedConfigHomeDir, false);
+		const existing = readBackboardConfig(this.persistedConfigHomeDir);
 		await saveBackboardConfig(
 			{ ...existing, successfulModels: this.successfulModelRefs },
 			this.persistedConfigHomeDir,
@@ -271,6 +266,8 @@ export class Config {
 			computerUseEnabled: this.computerUseEnabled,
 			browserUseEnabled: this.browserUseEnabled,
 			skillDiscoveryEnabled: this.skillDiscoveryEnabled,
+			videoGenerationEnabled:
+				this.videoGenerationEnabled && this.videoModel !== undefined,
 		});
 	}
 
@@ -320,6 +317,30 @@ export class Config {
 
 	setImageGenerationEnabled(enabled: boolean): void {
 		this.imageGenerationEnabled = enabled;
+	}
+
+	get selectedImageModel(): { provider: string; name: string } | undefined {
+		return this.imageModel;
+	}
+
+	setImageModel(model: { provider: string; name: string } | undefined): void {
+		this.imageModel = model;
+	}
+
+	get isVideoGenerationEnabled(): boolean {
+		return this.videoGenerationEnabled;
+	}
+
+	setVideoGenerationEnabled(enabled: boolean): void {
+		this.videoGenerationEnabled = enabled;
+	}
+
+	get selectedVideoModel(): { provider: string; name: string } | undefined {
+		return this.videoModel;
+	}
+
+	setVideoModel(model: { provider: string; name: string } | undefined): void {
+		this.videoModel = model;
 	}
 
 	get selectedOpenRouterProvider(): string | undefined {
@@ -372,7 +393,7 @@ export class Config {
 	}
 
 	async saveRuntimeSelection(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir, false);
+		const existing = readBackboardConfig(this.persistedConfigHomeDir);
 		await saveBackboardConfig(
 			{
 				...existing,
@@ -392,7 +413,7 @@ export class Config {
 	}
 
 	async saveNotifyPreference(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir, false);
+		const existing = readBackboardConfig(this.persistedConfigHomeDir);
 		await saveBackboardConfig(
 			{
 				...existing,
@@ -403,7 +424,7 @@ export class Config {
 	}
 
 	async saveVerbosePreference(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir, false);
+		const existing = readBackboardConfig(this.persistedConfigHomeDir);
 		await saveBackboardConfig(
 			{
 				...existing,

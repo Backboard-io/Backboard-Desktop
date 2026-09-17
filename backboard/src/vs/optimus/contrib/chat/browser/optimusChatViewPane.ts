@@ -3,8 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { renderBackboardAuthGate } from '../../../../workbench/contrib/chat/browser/backboardAuthSetup.js';
-import { IBackboardAuthService } from '../../../../workbench/contrib/chat/common/backboardAuth.js';
 import '../../../../workbench/contrib/chat/browser/widget/media/chatPanelCursorLook.css';
 import { $, addDisposableListener, append, EventType } from '../../../../base/browser/dom.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
@@ -97,7 +95,6 @@ export class OptimusChatViewPane extends ViewPane implements IChatResourceNaviga
 		@ICommandService private readonly commandService: ICommandService,
 		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
-		@IBackboardAuthService private readonly authService: IBackboardAuthService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 		this.canGoBackFromSubagentKey = CanGoBackFromSubagentContext.bindTo(contextKeyService);
@@ -174,7 +171,6 @@ export class OptimusChatViewPane extends ViewPane implements IChatResourceNaviga
 		// Keep the Editor host hierarchy so its full panel styles apply, including
 		// the recent-chat welcome surface and bottom-anchored composer.
 		container.classList.add('optimus-chat-view', 'chat-viewpane');
-		this._register(renderBackboardAuthGate(container, this.commandService, this.contextKeyService, this.authService));
 
 		const header = append(container, $('.optimus-chat-folder-header'));
 		this.folderRow = append(header, $('.optimus-chat-header-folder.new-session-workspace-picker-container'));

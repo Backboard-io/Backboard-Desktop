@@ -358,28 +358,76 @@ describe("Config", () => {
 		});
 	});
 
-	it("rejects subscription-only credentials from disk and environment", async () => {
+	it("selects the subscription catalog default for a subscription-only install", async () => {
 		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
-		try {
-			await saveBackboardConfig({ chatgptSubscriptionAuthFile: path.join(homeDir, "auth.json"), claudeSubscriptionEnabled: true }, homeDir);
-			await withBackboardEnv({ BACKBOARD_CLAUDE_SUBSCRIPTION: "true", BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE: path.join(homeDir, "auth.json") }, () => {
-				expect(() => new Config({ argv: [], homeDir })).toThrow();
-			});
-		} finally { await rm(homeDir, { recursive: true, force: true }); }
+		await saveBackboardConfig(
+			{ chatgptSubscriptionAuthFile: path.join(homeDir, "chatgpt-auth.json") },
+			homeDir,
+		);
+
+		const config = new Config({ argv: [], homeDir });
+
+		expect(config.modelString).toBe("openai-subscription/auto");
+		await rm(homeDir, { recursive: true, force: true });
 	});
 
-	it("discards saved subscription defaults and recovery models", async () => {
+	it("selects Claude's recommended live default for a Claude-subscription-only install", async () => {
 		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await saveBackboardConfig({ claudeSubscriptionEnabled: true }, homeDir);
+
+		const config = new Config({ argv: [], homeDir });
+
+		expect(config.modelString).toBe("anthropic-subscription/default");
+		await rm(homeDir, { recursive: true, force: true });
+	});
+
+	it("enables the Claude subscription through the environment", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		const original = process.env.BACKBOARD_CLAUDE_SUBSCRIPTION;
 		try {
-			await saveBackboardConfig({ model: { provider: "anthropic-subscription", model: "opus" }, successfulModels: [{ provider: "openai-subscription", model: "auto" }, { provider: "openai", model: "gpt-5.5" }] }, homeDir);
-			const config = new Config({ argv: [], homeDir, env });
-			expect(config.modelString).toBe("openai/gpt-5.5");
-			expect(config.successfulModels).toEqual([{ provider: "openai", model: "gpt-5.5" }]);
-			for (const provider of ["openai-subscription", "anthropic-subscription"]) {
-				expect(() => config.setModel({ provider, model: "auto" })).toThrow("Subscriptions are currently unavailable");
-				expect(() => new Config({ argv: ["--model", `${provider}/auto`], homeDir, env })).toThrow("Subscriptions are currently unavailable");
-			}
-		} finally { await rm(homeDir, { recursive: true, force: true }); }
+			process.env.BACKBOARD_CLAUDE_SUBSCRIPTION = "true";
+			await withBackboardEnv({}, () => {
+				const config = new Config({ argv: [], homeDir });
+				expect(config.auth.claudeSubscription).toEqual({ enabled: true });
+				expect(config.modelString).toBe("anthropic-subscription/default");
+			});
+		} finally {
+			setEnv("BACKBOARD_CLAUDE_SUBSCRIPTION", original);
+			await rm(homeDir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps ChatGPT as the deterministic default when both subscriptions are enabled", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await saveBackboardConfig(
+			{
+				chatgptSubscriptionAuthFile: path.join(homeDir, "chatgpt-auth.json"),
+				claudeSubscriptionEnabled: true,
+			},
+			homeDir,
+		);
+
+		const config = new Config({ argv: [], homeDir });
+
+		expect(config.modelString).toBe("openai-subscription/auto");
+		await rm(homeDir, { recursive: true, force: true });
+	});
+
+	it("honors a saved selection when both subscriptions are enabled", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await saveBackboardConfig(
+			{
+				chatgptSubscriptionAuthFile: path.join(homeDir, "chatgpt-auth.json"),
+				claudeSubscriptionEnabled: true,
+				model: { provider: "anthropic-subscription", model: "opus" },
+			},
+			homeDir,
+		);
+
+		const config = new Config({ argv: [], homeDir });
+
+		expect(config.modelString).toBe("anthropic-subscription/opus");
+		await rm(homeDir, { recursive: true, force: true });
 	});
 
 	it("derives model profiles without changing memory profiles", () => {
@@ -837,13 +885,9 @@ describe("resolveApiUrl", () => {
 });
 
 async function withBackboardEnv(
-	values: { apiKey?: string; apiUrl?: string; BACKBOARD_CLAUDE_SUBSCRIPTION?: string; BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE?: string },
+	values: { apiKey?: string; apiUrl?: string },
 	run: () => Promise<void> | void,
 ): Promise<void> {
-	const originalClaude = process.env.BACKBOARD_CLAUDE_SUBSCRIPTION;
-	const originalChatGpt = process.env.BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE;
-	setEnv("BACKBOARD_CLAUDE_SUBSCRIPTION", values.BACKBOARD_CLAUDE_SUBSCRIPTION);
-	setEnv("BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE", values.BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE);
 	const originalKey = process.env.BACKBOARD_API_KEY;
 	const originalUrl = process.env.BACKBOARD_API_URL;
 
@@ -853,8 +897,6 @@ async function withBackboardEnv(
 	try {
 		await run();
 	} finally {
-		setEnv("BACKBOARD_CLAUDE_SUBSCRIPTION", originalClaude);
-		setEnv("BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE", originalChatGpt);
 		setEnv("BACKBOARD_API_KEY", originalKey);
 		setEnv("BACKBOARD_API_URL", originalUrl);
 	}

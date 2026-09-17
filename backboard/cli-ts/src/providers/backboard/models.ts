@@ -1,4 +1,3 @@
-import { isProviderAvailable } from "../../config/releaseFeatures.ts";
 import type { AgentClient } from "../AgentClient.ts";
 import { MODEL_CACHE_TTL_MS } from "./constants.ts";
 import { normalizeSelectableModels } from "./modelCatalog.ts";
@@ -60,5 +59,5 @@ async function fetchFreshModels(
 	client: Pick<AgentClient, "listModels">,
 ): Promise<ModelInfo[]> {
 	const catalog = await client.listModels();
-	return normalizeSelectableModels(catalog.models.filter(model => isProviderAvailable(model.provider)));
+	return normalizeSelectableModels(catalog.models);
 }

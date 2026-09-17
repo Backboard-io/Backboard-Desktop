@@ -110,8 +110,11 @@ export function getConfigIcon(property: string, value: unknown | undefined): The
 	if (property === 'notifications') {
 		return Codicon.bell;
 	}
-	if (property === 'imageGeneration') {
+	if (property === 'imageGeneration' || property === 'imageModel') {
 		return Codicon.symbolColor;
+	}
+	if (property === 'videoModel') {
+		return Codicon.deviceCameraVideo;
 	}
 	if (property === ClaudeSessionConfigKey.FastMode) {
 		return value === false || value === 'false' ? Codicon.circleSlash : Codicon.zap;

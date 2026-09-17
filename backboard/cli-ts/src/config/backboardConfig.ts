@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { chmod, mkdir, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { readSubscriptionConfig, saveSubscriptionConfig } from "./subscriptionConfig.ts";
 import { errorMessage } from "../utils/errors.ts";
 import type { JsonValue } from "../utils/JsonTypes.ts";
 import type {
@@ -26,9 +25,7 @@ export function backboardConfigPath(homeDir = os.homedir()): string {
 
 export function readBackboardConfig(
 	homeDir = os.homedir(),
-	includeSubscriptions = true,
 ): BackboardConfigFile {
-	const subscriptions = includeSubscriptions ? readSubscriptionConfig(homeDir) : {};
 	const file = backboardConfigPath(homeDir);
 
 	try {
@@ -38,7 +35,7 @@ export function readBackboardConfig(
 			parsed === null ||
 			Array.isArray(parsed)
 		) {
-			return subscriptions;
+			return {};
 		}
 		const config = parsed as BackboardConfigJson;
 
@@ -46,7 +43,15 @@ export function readBackboardConfig(
 			apiKey: typeof config.apiKey === "string" ? config.apiKey : undefined,
 			apiUrl:
 				typeof config.apiUrl === "string" ? config.apiUrl.trim() : undefined,
-			...subscriptions,
+			chatgptSubscriptionAuthFile:
+				typeof config.chatgptSubscriptionAuthFile === "string" &&
+				config.chatgptSubscriptionAuthFile.trim()
+					? config.chatgptSubscriptionAuthFile.trim()
+					: undefined,
+			claudeSubscriptionEnabled:
+				typeof config.claudeSubscriptionEnabled === "boolean"
+					? config.claudeSubscriptionEnabled
+					: undefined,
 			model: readModelConfig(config),
 			successfulModels: readSuccessfulModels(config),
 			thinking: readThinkingConfig(config),
@@ -56,7 +61,7 @@ export function readBackboardConfig(
 			verbose: typeof config.verbose === "boolean" ? config.verbose : undefined,
 		};
 	} catch (err) {
-		if ((err as { code?: string }).code === "ENOENT") return subscriptions;
+		if ((err as { code?: string }).code === "ENOENT") return {};
 		throw new Error(`Failed to read ${file}: ${errorMessage(err)}`);
 	}
 }
@@ -200,9 +205,7 @@ export async function saveBackboardConfig(
 
 	await mkdir(dir, { recursive: true, mode: 0o700 });
 	await chmod(dir, 0o700).catch(() => undefined);
-	const { chatgptSubscriptionAuthFile, claudeSubscriptionEnabled, ...remaining } = config;
-	saveSubscriptionConfig({ chatgptSubscriptionAuthFile, claudeSubscriptionEnabled }, homeDir);
-	await writeFile(file, `${JSON.stringify(remaining, null, 2)}\n`, {
+	await writeFile(file, `${JSON.stringify(config, null, 2)}\n`, {
 		mode: 0o600,
 	});
 	await chmod(file, 0o600).catch(() => undefined);

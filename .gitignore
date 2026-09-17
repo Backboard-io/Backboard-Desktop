@@ -55,3 +55,7 @@ node_modules/
 /backboard/mission-ide-launch-video/
 /backboard/.launch.log
 /backboard/launch-err*.log
+1Password Emergency Kit A3-RHBE37-my.pdf
+
+# Videos produced by the generate_video tool are local artifacts.
+/generated-videos/

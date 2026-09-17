@@ -4,8 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/optimusGridPart.css';
-import { renderBackboardAuthGate } from '../../../workbench/contrib/chat/browser/backboardAuthSetup.js';
-import { IBackboardAuthService } from '../../../workbench/contrib/chat/common/backboardAuth.js';
 import { $, addDisposableListener, append, DragAndDropObserver, EventHelper, EventType } from '../../../base/browser/dom.js';
 import { localize } from '../../../nls.js';
 import { ProgressBar } from '../../../base/browser/ui/progressbar/progressbar.js';
@@ -171,9 +169,8 @@ export class OptimusGridPart extends Part {
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@ICommandService private readonly commandService: ICommandService,
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
-		@IContextKeyService private readonly contextKeyService: IContextKeyService,
+		@IContextKeyService contextKeyService: IContextKeyService,
 		@IContextMenuService private readonly contextMenuService: IContextMenuService,
-		@IBackboardAuthService private readonly authService: IBackboardAuthService,
 	) {
 		super(
 			Parts.SESSIONS_PART,
@@ -453,7 +450,6 @@ export class OptimusGridPart extends Part {
 
 		this.refreshCards();
 
-		this._register(renderBackboardAuthGate(contentArea, this.commandService, this.contextKeyService, this.authService));
 		return contentArea;
 	}
 

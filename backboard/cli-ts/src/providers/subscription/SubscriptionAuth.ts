@@ -7,7 +7,6 @@ import {
 	readBackboardConfig,
 	saveBackboardConfig,
 } from "../../config/backboardConfig.ts";
-import { subscriptionAuthPath } from "../../config/subscriptionConfig.ts";
 import { openDefaultBrowser } from "../../core/oauth/LoopbackOAuth.ts";
 import { acquireFileLease } from "../../utils/FileLease.ts";
 import { ensureDir, renameOverPreservingDestination } from "../../utils/fs.ts";
@@ -53,7 +52,7 @@ export interface SubscriptionLoginOptions {
 }
 
 export function defaultSubscriptionAuthFile(homeDir = homedir()): string {
-	return subscriptionAuthPath(homeDir);
+	return join(homeDir, ".backboard", "chatgpt-auth.json");
 }
 
 function isObject(value: unknown): value is JsonObject {

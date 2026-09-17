@@ -60,7 +60,7 @@ export interface ResolveAuthOptions {
 }
 
 export function resolveAuth(options: ResolveAuthOptions = {}): AuthState {
-	const fileConfig = readBackboardConfig(options.homeDir, false);
+	const fileConfig = readBackboardConfig(options.homeDir);
 	const envApiKey = process.env.BACKBOARD_API_KEY;
 	const apiKey = isUsableApiKey(envApiKey) ? envApiKey : fileConfig.apiKey;
 	const apiUrl = resolveApiUrl(fileConfig.apiUrl);
