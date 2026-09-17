@@ -10,6 +10,8 @@ import { localize } from '../../../../nls.js';
 import { IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { bindContextKey } from '../../../../platform/observable/common/platformObservableUtils.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
+import { IAgentHostCustomizationService } from '../../chat/browser/agentSessions/agentHost/agentHostCustomizationService.js';
+import { IChatWidgetService } from '../../chat/browser/chat.js';
 import { IMcpService, LazyCollectionState, McpConnectionState, McpServerCacheState } from './mcpTypes.js';
 
 
@@ -25,6 +27,12 @@ export namespace McpContextKeys {
 	 * @description This key is used to track the presence of servers with errors in the MCP context.
 	 */
 	export const hasServersWithErrors = new RawContextKey<boolean>('mcp.hasServersWithErrors', undefined, { type: 'boolean', description: localize('mcp.hasServersWithErrors.description', "Indicates whether there are any MCP servers with errors.") });
+	/**
+	 * Whether the focused chat session exposes MCP servers of its own (e.g. an
+	 * agent-host session whose runtime owns the servers). Drives the composer's
+	 * MCP chip so users can connect or disconnect a server for that session.
+	 */
+	export const hasAgentHostServers = new RawContextKey<boolean>('mcp.hasAgentHostServers', false, { type: 'boolean', description: localize('mcp.hasAgentHostServers.description', "Indicates whether the active chat session exposes its own MCP servers.") });
 	export const toolsCount = new RawContextKey<number>('mcp.toolsCount', undefined, { type: 'number', description: localize('mcp.toolsCount.description', "Context key that has the number of registered MCP tools") });
 }
 
@@ -36,12 +44,31 @@ export class McpContextKeysController extends Disposable implements IWorkbenchCo
 	constructor(
 		@IMcpService mcpService: IMcpService,
 		@IContextKeyService contextKeyService: IContextKeyService,
+		@IChatWidgetService chatWidgetService: IChatWidgetService,
+		@IAgentHostCustomizationService agentHostCustomizations: IAgentHostCustomizationService,
 	) {
 		super();
 
 		const ctxServerCount = McpContextKeys.serverCount.bindTo(contextKeyService);
 		const ctxToolsCount = McpContextKeys.toolsCount.bindTo(contextKeyService);
 		const ctxHasUnknownTools = McpContextKeys.hasUnknownTools.bindTo(contextKeyService);
+		const ctxHasAgentHostServers = McpContextKeys.hasAgentHostServers.bindTo(contextKeyService);
+
+		const updateAgentHostServers = () => {
+			const sessionResource = chatWidgetService.lastFocusedWidget?.viewModel?.sessionResource;
+			let hasServers = false;
+			if (sessionResource) {
+				try {
+					hasServers = agentHostCustomizations.getMcpServers(sessionResource).length > 0;
+				} catch {
+					hasServers = false;
+				}
+			}
+			ctxHasAgentHostServers.set(hasServers);
+		};
+		this._store.add(agentHostCustomizations.onDidChangeCustomizations(() => updateAgentHostServers()));
+		this._store.add(chatWidgetService.onDidChangeFocusedSession(() => updateAgentHostServers()));
+		updateAgentHostServers();
 
 		this._store.add(bindContextKey(McpContextKeys.hasServersWithErrors, contextKeyService, r => mcpService.servers.read(r).some(c => c.connectionState.read(r).state === McpConnectionState.Kind.Error)));
 

@@ -58,6 +58,17 @@ import { ToolRegistry } from "../core/tools/ToolRegistry.ts";
 import { buildStartupEnvironmentPrompt } from "../prompts/system/startupEnvironment.ts";
 import { BackboardError } from "../providers/backboard/errors.ts";
 import { createAgentClient } from "../providers/createAgentClient.ts";
+import {
+	disconnectClaudeSubscription,
+	enableClaudeSubscription,
+	isClaudeAiSubscriptionStatus,
+	loginWithClaudeSubscription,
+	readClaudeSubscriptionStatus,
+} from "../providers/subscription/ClaudeSubscriptionAuth.ts";
+import {
+	loginWithChatGptSubscription,
+	logoutChatGptSubscription,
+} from "../providers/subscription/SubscriptionAuth.ts";
 import { createDefaultTools } from "../tools/index.ts";
 import { App } from "../ui/App.tsx";
 import { AuthScreen } from "../ui/AuthScreen.tsx";
@@ -69,6 +80,7 @@ import { createTheme, setTheme } from "../ui/theme/theme.ts";
 import { errorMessage } from "../utils/errors.ts";
 import { shortId } from "../utils/id.ts";
 import { pluralize } from "../utils/string.ts";
+import { runKeysValidateCommand } from "./keysValidate.ts";
 
 const HELP = `${APP_DISPLAY_NAME} · coding agent
 
@@ -82,6 +94,7 @@ Usage:
   ${APP_COMMAND_NAME} claude-subscription enable
   ${APP_COMMAND_NAME} claude-subscription logout
   ${APP_COMMAND_NAME} claude-subscription status --json
+  ${APP_COMMAND_NAME} keys validate --provider <id>   (key on stdin; prints one JSON line)
 
 Options:
   --model <provider/model>   Model to use (e.g. openai/gpt-5.5)
@@ -134,17 +147,44 @@ async function main(): Promise<void> {
 		return;
 	}
 	const earlyFlags = parseFlags(argv);
-	if ((earlyFlags.subscriptionLogin || earlyFlags.subscriptionLogout || earlyFlags.claudeSubscriptionLogin || earlyFlags.claudeSubscriptionEnable || earlyFlags.claudeSubscriptionLogout || earlyFlags.claudeSubscriptionStatus)) {
-		process.stderr.write("Subscriptions are currently unavailable. Sign in with Backboard or add a provider API key.\n");
+	if (process.platform === "win32" && (earlyFlags.subscriptionLogin || earlyFlags.claudeSubscriptionLogin || earlyFlags.claudeSubscriptionEnable)) {
+		process.stderr.write("BYOS subscriptions are not supported on Windows. Sign in with Backboard or add a provider API key.\n");
 		process.exitCode = 1;
 		return;
 	}
 	if (earlyFlags.help) {
-		process.stdout.write(HELP.split("\n").filter(line => !line.includes("subscription")).join("\n"));
+		process.stdout.write(process.platform === "win32" ? HELP.split("\n").filter(line => !line.includes("subscription")).join("\n") : HELP);
 		return;
 	}
 	if (earlyFlags.version) {
 		process.stdout.write(`${APP_DISPLAY_NAME} ${APP_VERSION}\n`);
+		return;
+	}
+	if (earlyFlags.subscriptionLogin) {
+		const didLogin = await runSubscriptionLoginCommand();
+		if (!didLogin) process.exitCode = 1;
+		return;
+	}
+	if (earlyFlags.subscriptionLogout) {
+		await runSubscriptionLogoutCommand();
+		return;
+	}
+	if (earlyFlags.claudeSubscriptionLogin) {
+		const didLogin = await runClaudeSubscriptionLoginCommand();
+		if (!didLogin) process.exitCode = 1;
+		return;
+	}
+	if (earlyFlags.claudeSubscriptionEnable) {
+		const didEnable = await runClaudeSubscriptionEnableCommand();
+		if (!didEnable) process.exitCode = 1;
+		return;
+	}
+	if (earlyFlags.claudeSubscriptionLogout) {
+		await runClaudeSubscriptionLogoutCommand();
+		return;
+	}
+	if (earlyFlags.claudeSubscriptionStatus) {
+		await runClaudeSubscriptionStatusCommand();
 		return;
 	}
 	if (earlyFlags.login) {
@@ -154,6 +194,15 @@ async function main(): Promise<void> {
 	}
 	if (earlyFlags.logout) {
 		await runLogoutCommand();
+		return;
+	}
+	if (earlyFlags.keysValidate) {
+		// Never constructs Config: it must work before any credential exists
+		// and must never touch ~/.backboard/keys.json.
+		process.exitCode = await runKeysValidateCommand(
+			earlyFlags.provider,
+			readPromptFromStdin,
+		);
 		return;
 	}
 	if (earlyFlags.serve) {
@@ -576,6 +625,74 @@ async function runLoginCommand(): Promise<boolean> {
 
 async function runLogoutCommand(): Promise<void> {
 	process.stdout.write(`${await logoutSavedCredentials()}\n`);
+}
+
+async function runSubscriptionLoginCommand(): Promise<boolean> {
+	process.stdout.write("Starting ChatGPT subscription login...\n");
+	try {
+		const message = await loginWithChatGptSubscription({
+			onAuthUrl: (url) => {
+				process.stdout.write(
+					`If the browser does not open, visit this URL:\n${url}\n\nWaiting for approval...\n`,
+				);
+			},
+		});
+		process.stdout.write(`${message}\n`);
+		return true;
+	} catch (error) {
+		process.stderr.write(`${errorMessage(error)}\n`);
+		return false;
+	}
+}
+
+async function runSubscriptionLogoutCommand(): Promise<void> {
+	process.stdout.write(`${await logoutChatGptSubscription()}\n`);
+}
+
+async function runClaudeSubscriptionLoginCommand(): Promise<boolean> {
+	process.stdout.write(
+		"Starting Claude subscription login with Claude Code...\n",
+	);
+	try {
+		process.stdout.write(`${await loginWithClaudeSubscription()}\n`);
+		return true;
+	} catch (error) {
+		process.stderr.write(`${errorMessage(error)}\n`);
+		return false;
+	}
+}
+
+async function runClaudeSubscriptionEnableCommand(): Promise<boolean> {
+	try {
+		process.stdout.write(`${await enableClaudeSubscription()}\n`);
+		return true;
+	} catch (error) {
+		process.stderr.write(`${errorMessage(error)}\n`);
+		return false;
+	}
+}
+
+async function runClaudeSubscriptionLogoutCommand(): Promise<void> {
+	process.stdout.write(`${await disconnectClaudeSubscription()}\n`);
+}
+
+async function runClaudeSubscriptionStatusCommand(): Promise<void> {
+	try {
+		const status = await readClaudeSubscriptionStatus();
+		process.stdout.write(
+			`${JSON.stringify({
+				connected: isClaudeAiSubscriptionStatus(status),
+				loggedIn: status.loggedIn,
+				authMethod: status.authMethod,
+				apiProvider: status.apiProvider,
+				executable: status.executable,
+			})}\n`,
+		);
+	} catch (error) {
+		process.stdout.write(
+			`${JSON.stringify({ connected: false, error: errorMessage(error) })}\n`,
+		);
+	}
 }
 
 async function runHeadless(

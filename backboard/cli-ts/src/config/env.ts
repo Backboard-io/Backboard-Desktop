@@ -99,7 +99,7 @@ export function loadEnv(options: LoadEnvOptions = {}): BackboardEnv {
 		};
 	}
 
-	const fileConfig = readBackboardConfig(options.homeDir, false);
+	const fileConfig = readBackboardConfig(options.homeDir);
 	const apiKey = fileConfig.apiKey;
 	const apiUrl = resolveApiUrl(fileConfig.apiUrl);
 

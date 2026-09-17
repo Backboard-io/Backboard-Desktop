@@ -175,6 +175,9 @@ class AgentViewStore {
 	private state: AppState;
 	private readonly listeners = new Set<StoreListener>();
 	private unsubscribeBus: (() => void) | null = null;
+	/** Bus-driven actions waiting to be folded into state on the next microtask. */
+	private pendingActions: Action[] = [];
+	private flushScheduled = false;
 
 	constructor(
 		private readonly bus: EventBus,
@@ -207,7 +210,7 @@ class AgentViewStore {
 		this.listeners.add(listener);
 		if (this.listeners.size === 1) {
 			this.unsubscribeBus = this.bus.onAny((event) => {
-				this.dispatch({ type: "event", event });
+				this.enqueue({ type: "event", event });
 			});
 		}
 
@@ -220,12 +223,37 @@ class AgentViewStore {
 		};
 	};
 
+	/**
+	 * Batches updates into one render per microtask. A single provider frame
+	 * commonly emits several events (delta, usage, child progress,diagnostics);
+	 * notifying React for each one re-renders the whole App per event. Folding
+	 * them in arrival order keeps one render per tick without delaying any
+	 * update past the current task, and keeps direct dispatches ordered
+	 * relative to bus events.
+	 */
+	private enqueue(action: Action): void {
+		this.pendingActions.push(action);
+		if (this.flushScheduled) return;
+		this.flushScheduled = true;
+		queueMicrotask(() => {
+			this.flushScheduled = false;
+			const actions = this.pendingActions;
+			this.pendingActions = [];
+			let changed = false;
+			for (const pending of actions) {
+				const next = rootReducer(this.state, pending);
+				if (next === this.state) continue;
+				this.state = next;
+				changed = true;
+			}
+			if (!changed) return;
+			for (const listener of this.listeners) {
+				listener();
+			}
+		});
+	}
+
 	dispatch(action: Action): void {
-		const next = rootReducer(this.state, action);
-		if (next === this.state) return;
-		this.state = next;
-		for (const listener of this.listeners) {
-			listener();
-		}
+		this.enqueue(action);
 	}
 }

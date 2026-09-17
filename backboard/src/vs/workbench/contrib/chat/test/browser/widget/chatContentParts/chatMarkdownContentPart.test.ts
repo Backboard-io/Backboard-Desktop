@@ -17,6 +17,7 @@ import { IHoverService } from '../../../../../../../platform/hover/browser/hover
 import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { TestConfigurationService } from '../../../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { IMarkdownRenderer, IMarkdownRendererService } from '../../../../../../../platform/markdown/browser/markdownRenderer.js';
+import { IUserInteractionService, MockUserInteractionService } from '../../../../../../../platform/userInteraction/browser/userInteractionService.js';
 import { workbenchInstantiationService } from '../../../../../../test/browser/workbenchTestServices.js';
 import { IChatContentPartRenderContext } from '../../../../browser/widget/chatContentParts/chatContentParts.js';
 import { ChatMarkdownContentPart } from '../../../../browser/widget/chatContentParts/chatMarkdownContentPart.js';
@@ -26,7 +27,8 @@ import { IChatOutputRendererService, type RenderedOutputPart } from '../../../..
 import { IChatOutputPartStateCache, IOutputPartState } from '../../../../browser/widget/chatContentParts/chatOutputPartStateCache.js';
 import { IChatResponseViewModel } from '../../../../common/model/chatViewModel.js';
 import { IChatContentInlineReference } from '../../../../common/chatService/chatService.js';
-import { ChatConfiguration } from '../../../../common/constants.js';
+import { ChatConfiguration, ChatModeKind } from '../../../../common/constants.js';
+import { ChatEditorOptions } from '../../../../browser/widget/chatOptions.js';
 import { IAiEditTelemetryService } from '../../../../../editTelemetry/browser/telemetry/aiEditTelemetry/aiEditTelemetryService.js';
 import { IViewDescriptorService } from '../../../../../../common/views.js';
 import { IDisposableReference } from '../../../../browser/widget/chatContentParts/chatCollections.js';
@@ -685,6 +687,72 @@ suite('ChatMarkdownContentPart', () => {
 		assert.strictEqual(renderedCodeBlocks[0].text, 'const deferred = true;');
 	});
 
+	function useRealEditorPool(): void {
+		instantiationService.stub(IUserInteractionService, new MockUserInteractionService());
+		const options = store.add(instantiationService.createInstance(ChatEditorOptions, undefined, 'editor.foreground', 'editor.background', 'editor.background'));
+		editorPool = store.add(instantiationService.createInstance(EditorPool, options, {
+			container: mainWindow.document.body,
+			getListLength: () => 1,
+			currentChatMode: () => ChatModeKind.Agent,
+		}, undefined, true));
+		const config = instantiationService.get(IConfigurationService) as TestConfigurationService;
+		config.setUserConfiguration(ChatConfiguration.IncrementalRendering, true);
+		config.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'off');
+		config.setUserConfiguration(ChatConfiguration.IncrementalRenderingStyle, 'none');
+		config.setUserConfiguration(ChatConfiguration.EnableMath, false);
+	}
+
+	test('streaming JSON keeps live editor models without clearing completed or growing blocks', async () => {
+		useRealEditorPool();
+		const context = createRenderContext(false);
+		const markdown = '```json\n{"stable":true}\n```\n\n```json\n{\n  "first": 1';
+		const part = createMarkdownPart(markdown, context, true);
+		mainWindow.document.body.appendChild(part.domNode);
+		store.add(toDisposable(() => part.domNode.remove()));
+		const editors = [...editorPool.inUse()];
+		const modelValues: string[] = [];
+		for (const editor of editors) {
+			store.add(editor.editor.getModel()!.onDidChangeContent(() => modelValues.push(editor.editor.getModel()!.getValue())));
+		}
+
+		const appended = `${markdown},\n  "second": 2\n}\n\`\`\``;
+		part.tryIncrementalUpdate({ kind: 'markdownContent', content: new MarkdownString(appended) });
+		await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+		(context.element as { isComplete: boolean }).isComplete = true;
+		part.updateStreamRate(100, true);
+		await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+
+		assert.deepStrictEqual({
+			sameEditors: [...editorPool.inUse()].every((editor, index) => editor === editors[index]),
+			modelValues,
+			contents: editors.map(editor => editor.editor.getModel()!.getValue()),
+		}, {
+			sameEditors: true,
+			modelValues: ['{\n  "first": 1,\n  "second": 2\n}'],
+			contents: ['{"stable":true}', '{\n  "first": 1,\n  "second": 2\n}'],
+		});
+
+		part.dispose();
+		assert.deepStrictEqual({
+			inUse: [...editorPool.inUse()].length,
+			contents: editors.map(editor => editor.editor.getModel()!.getValue()),
+		}, { inUse: 0, contents: ['', ''] });
+	});
+
+	test('switching to long streaming plaintext releases retained code editors', async () => {
+		useRealEditorPool();
+		const markdown = '```json\n{"stable":true}\n```\n\n';
+		const part = createMarkdownPart(markdown, createRenderContext(false), true);
+		const editor = [...editorPool.inUse()][0];
+		part.tryIncrementalUpdate({ kind: 'markdownContent', content: new MarkdownString(markdown + 'x'.repeat(16_000)) });
+		await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
+		assert.deepStrictEqual({
+			plaintext: !!part.domNode.querySelector('.chat-markdown-streaming-plaintext'),
+			inUse: [...editorPool.inUse()].length,
+			model: editor.editor.getModel()!.getValue(),
+		}, { plaintext: true, inUse: 0, model: '' });
+	});
+
 	test('mounts existing streaming text immediately without replaying from empty', () => {
 		const configService = instantiationService.get(IConfigurationService) as TestConfigurationService;
 		configService.setUserConfiguration(ChatConfiguration.IncrementalRendering, true);
@@ -724,6 +792,7 @@ suite('ChatMarkdownContentPart', () => {
 
 		assert.ok(part.domNode.querySelector('.chat-markdown-streaming-plaintext'));
 		assert.strictEqual(part.domNode.textContent, markdown, 'existing long text should be visible on the mounting frame');
+		assert.ok(part.domNode.querySelector('.chat-markdown-streaming-plaintext .chat-streaming-caret'), 'the streaming frontier should carry a glow marker');
 
 		(context.element as { isComplete: boolean }).isComplete = true;
 		part.updateStreamRate(100, true);

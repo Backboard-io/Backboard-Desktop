@@ -47,6 +47,7 @@ import { AgentHostModePicker } from './agentHostModePicker.js';
 import { MobileAgentHostModePicker } from './mobile/mobileAgentHostModePicker.js';
 import { AgentHostPermissionPickerDelegate, isWellKnownAutoApproveSchema, isWellKnownClaudePermissionModeSchema, isWellKnownModeSchema } from './agentHostPermissionPickerDelegate.js';
 import { SessionConfigKey } from '../../../../../platform/agentHost/common/sessionConfigKeys.js';
+import { isBackboardOnlyConfigProperty, isKeyBilledModelId } from '../../../../../platform/agentHost/common/byokProviders.js';
 import { AgentHostClaudePermissionModePicker } from './agentHostClaudePermissionModePicker.js';
 import { ClaudeSessionConfigKey } from '../../../../../platform/agentHost/common/claudeSessionConfigKeys.js';
 
@@ -110,8 +111,11 @@ export function getConfigIcon(property: string, value: unknown | undefined): The
 	if (property === 'notifications') {
 		return Codicon.bell;
 	}
-	if (property === 'imageGeneration') {
+	if (property === 'imageGeneration' || property === 'imageModel') {
 		return Codicon.symbolColor;
+	}
+	if (property === 'videoModel') {
+		return Codicon.deviceCameraVideo;
 	}
 	if (property === ClaudeSessionConfigKey.FastMode) {
 		return value === false || value === 'false' ? Codicon.circleSlash : Codicon.zap;
@@ -276,7 +280,9 @@ export class AgentHostSessionConfigPicker extends Disposable {
 		super();
 
 		this._register(autorun(reader => {
-			this._session.read(reader);
+			// The model decides which chips apply (Backboard-only features are
+			// hidden for key-billed models), so re-render on model changes too.
+			this._session.read(reader)?.modelId.read(reader);
 			this._renderConfigPickers();
 		}));
 
@@ -424,6 +430,11 @@ export class AgentHostSessionConfigPicker extends Disposable {
 	 * see {@link _isReadOnlyChip}.
 	 */
 	protected _shouldRenderProperty(property: string, schema: SessionConfigPropertySchema, isNewSession: boolean): boolean {
+		if (isBackboardOnlyConfigProperty(property) && isKeyBilledModelId(this._session.get()?.modelId.get())) {
+			// Memory and image generation are Backboard services; a request billed
+			// to the user's own key never reaches them.
+			return false;
+		}
 		return isNewSession || !!schema.sessionMutable;
 	}
 

@@ -14,10 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import { sha256Hex } from "../src/core/checkpoints/blobStore.ts";
-import {
-	CheckpointStore,
-	MAX_CAPTURE_BYTES,
-} from "../src/core/checkpoints/CheckpointStore.ts";
+import { CheckpointStore } from "../src/core/checkpoints/CheckpointStore.ts";
 import type { SessionPaths } from "../src/core/session/SessionStore.ts";
 import { canonicalPhysicalPath } from "../src/utils/pathLocks.ts";
 
@@ -480,10 +477,11 @@ describe("CheckpointStore", () => {
 		expect(store.redoTarget()).toBeNull();
 	});
 
-	it("journals a too_large skip for oversized files and reports them non-revertible", async () => {
+	it("captures and reverts a file larger than the former pre-image cap", async () => {
 		const { bus, store } = makeStore();
 		const file = join(work, "huge.bin");
-		await writeFile(file, Buffer.alloc(MAX_CAPTURE_BYTES + 1));
+		const original = Buffer.alloc(2 * 1024 * 1024, 7);
+		await writeFile(file, original);
 
 		startTurn(bus, "t1");
 		await store.recordPreImage(file, ctx("t1", "c1"), { tool: "Write" });
@@ -493,24 +491,13 @@ describe("CheckpointStore", () => {
 
 		const checkpoints = store.listCheckpoints();
 		expect(checkpoints).toHaveLength(1);
-		expect(checkpoints[0]?.skippedFiles).toEqual([
-			await canonicalPhysicalPath(file),
-		]);
+		expect(checkpoints[0]?.skippedFiles).toEqual([]);
 
 		const plan = await store.planRestore("t1");
-		expect(plan.entries).toEqual([
-			{
-				path: await canonicalPhysicalPath(file),
-				action: "skip-too-large",
-				diverged: false,
-			},
-		]);
+		expect(plan.entries[0]?.action).toBe("write");
 
-		const result = await store.restore(plan, { skipDiverged: false });
-		expect(result.skipped).toEqual([
-			{ path: await canonicalPhysicalPath(file), reason: "too_large" },
-		]);
-		expect(await readFile(file, "utf8")).toBe("shrunk"); // untouched
+		await undoLatest(store);
+		expect(await readFile(file)).toEqual(original);
 	}, 30_000);
 
 	it("canonicalizes a symlink capture and restores its target without clobbering the link", async () => {
@@ -660,22 +647,25 @@ describe("CheckpointStore", () => {
 		expect(await readFile(file, "utf8")).toBe("v0");
 	});
 
-	it("refuses an uncapturable pre-image when requireRevertible is set", async () => {
+	it("captures a pre-image for requireRevertible even when the file is large", async () => {
 		const { bus, store } = makeStore();
 		const file = join(work, "huge.bin");
-		await writeFile(file, Buffer.alloc(MAX_CAPTURE_BYTES + 1), "utf8");
+		const original = Buffer.alloc(2 * 1024 * 1024, 9);
+		await writeFile(file, original);
 
 		startTurn(bus, "t1");
-		await expect(
-			store.recordPreImage(file, ctx("t1", "c1"), {
-				tool: "ApplyPatch",
-				requireRevertible: true,
-			}),
-		).rejects.toThrow(/could not be rolled back/);
+		// No size cap: a large pre-image is captured rather than refused.
+		await store.recordPreImage(file, ctx("t1", "c1"), {
+			tool: "ApplyPatch",
+			requireRevertible: true,
+		});
+		await writeFile(file, "small", "utf8");
+		await store.recordPostImage(file, ctx("t1", "c1"), Buffer.from("small"));
 		endTurn(bus, "t1");
 
-		// No skip entry was journaled: the turn stays empty and unlisted.
-		expect(store.listCheckpoints()).toEqual([]);
+		expect(store.listCheckpoints()).toHaveLength(1);
+		await undoLatest(store);
+		expect(await readFile(file)).toEqual(original);
 	}, 30_000);
 
 	it("skips a path whose restore fails and still completes the undo", async () => {

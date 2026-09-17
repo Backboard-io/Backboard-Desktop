@@ -8,7 +8,7 @@ import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { assertSnapshot } from '../../../../../../base/test/common/snapshot.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
-import { ChatContentMarkdownRenderer, isBackboardGeneratedImage, withChatMarkdownBaseUri } from '../../../browser/widget/chatContentMarkdownRenderer.js';
+import { ChatContentMarkdownRenderer, isBackboardGeneratedImage, isBackboardGeneratedVideo, withChatMarkdownBaseUri } from '../../../browser/widget/chatContentMarkdownRenderer.js';
 import { workbenchInstantiationService } from '../../../../../test/browser/workbenchTestServices.js';
 
 suite('ChatMarkdownRenderer', () => {
@@ -183,11 +183,74 @@ suite('ChatMarkdownRenderer', () => {
 		assert.strictEqual(result.element.textContent, '');
 	});
 
-	test('only the Backboard generated-image HTTPS path is allowlisted', () => {
+	test('Backboard generated videos render as an inline player instead of an image', () => {
+		// The stored bucket path is `generated-video/` (singular), as returned by
+		// the video tool; rendering must not depend on the plural project folder.
+		const videoUrl = 'https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-video/e147512d-f009-458f-9e87-35b144a12a55.mp4';
+		const md = new MarkdownString(`Here's your video.\n\n![Generated video](${videoUrl})\n\nSaved to \`generated-videos/generated-c362705e55d2.mp4\`.`);
+		const result = store.add(testRenderer.render(md));
+		const video = result.element.querySelector('video');
+
+		assert.ok(video, `Expected a video player in: ${result.element.outerHTML}`);
+		assert.strictEqual(result.element.querySelector('img'), null);
+		assert.strictEqual(video!.getAttribute('src'), videoUrl);
+		assert.strictEqual(video!.getAttribute('aria-label'), 'Generated video');
+		assert.ok(video!.hasAttribute('controls'), 'Generated clips must be playable inline.');
+	});
+
+	test('a plural generated-videos URL also renders as a player', () => {
+		const videoUrl = 'https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-videos/clip.mp4';
+		const result = store.add(testRenderer.render(new MarkdownString(`![a rolling ball](${videoUrl})`)));
+
+		assert.ok(result.element.querySelector('video'), `Expected a video player in: ${result.element.outerHTML}`);
+	});
+
+	test('a clip saved into the workspace renders as a player', () => {
+		const markdown = withChatMarkdownBaseUri(
+			new MarkdownString('![cat](generated-videos/cat-walking-5s.mp4)'),
+			URI.file('/workspace/project'),
+		);
+		const result = store.add(testRenderer.render(markdown));
+		const video = result.element.querySelector('video');
+
+		assert.ok(video, `Expected a video player in: ${result.element.outerHTML}`);
+		assert.ok((video!.getAttribute('src') ?? '').endsWith('/workspace/project/generated-videos/cat-walking-5s.mp4'), video!.getAttribute('src') ?? '');
+		assert.strictEqual(result.element.querySelector('img'), null);
+	});
+
+	test('a remote clip on another host is neither rendered nor upgraded', () => {
+		const result = store.add(testRenderer.render(new MarkdownString('![clip](https://cdn.example.com/clip.mp4)')));
+
+		assert.strictEqual(result.element.querySelector('video'), null);
+		assert.strictEqual(result.element.querySelector('img'), null);
+	});
+
+	test('a singular generated-image URL survives the remote-media barrier', () => {
+		const imageUrl = 'https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-image/e147512d-f009-458f-9e87-35b144a12a55.png';
+		const result = store.add(testRenderer.render(new MarkdownString(`![Generated image](${imageUrl})`)));
+		const image = result.element.querySelector('img');
+
+		assert.ok(image, `Expected an image in: ${result.element.outerHTML}`);
+		assert.strictEqual(image!.getAttribute('src'), imageUrl);
+	});
+
+	test('a non-Backboard image is still not upgraded to a player', () => {
+		const md = new MarkdownString('![clip](https://example.com/generated-videos/clip.mp4)');
+		const result = store.add(testRenderer.render(md));
+
+		assert.strictEqual(result.element.querySelector('video'), null);
+	});
+
+	test('only the Backboard generated-media HTTPS paths are allowlisted', () => {
 		assert.strictEqual(isBackboardGeneratedImage(URI.parse('https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-images/dog.jpg')), true);
+		assert.strictEqual(isBackboardGeneratedImage(URI.parse('https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-image/dog.jpg')), true);
 		assert.strictEqual(isBackboardGeneratedImage(URI.parse('http://backboard-prod.s3.ca-central-1.amazonaws.com/generated-images/dog.jpg')), false);
 		assert.strictEqual(isBackboardGeneratedImage(URI.parse('https://backboard-prod.s3.ca-central-1.amazonaws.com/private/dog.jpg')), false);
 		assert.strictEqual(isBackboardGeneratedImage(URI.parse('https://example.com/generated-images/dog.jpg')), false);
+		assert.strictEqual(isBackboardGeneratedVideo(URI.parse('https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-video/clip.mp4')), true);
+		assert.strictEqual(isBackboardGeneratedVideo(URI.parse('https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-videos/clip.mp4')), true);
+		assert.strictEqual(isBackboardGeneratedVideo(URI.parse('https://example.com/generated-video/clip.mp4')), false);
+		assert.strictEqual(isBackboardGeneratedVideo(URI.parse('https://backboard-prod.s3.ca-central-1.amazonaws.com/private/clip.mp4')), false);
 	});
 
 	test('code block ending at end of content does not leak body tag', async () => {

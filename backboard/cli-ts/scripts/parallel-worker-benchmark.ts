@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /** Opt-in offline subagent replay with real isolation, integration, and durable undo. */
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	access,
 	mkdir,
@@ -264,7 +264,7 @@ export async function runWorkerReplayTrial(options: WorkerReplayOptions) {
 	const replay = new WorkerReplay(modelDelayMs, options.parentEdit === true);
 	const runner = new SubAgentRunner({
 		client: replay,
-		getModel: () => ({ provider: "offline", model: "replay" }),
+		getRoute: () => ({ provider: "offline", model: "replay" }),
 		memory: "off",
 		memoryProfile: "code",
 		getThinking: async () => null,

@@ -15,6 +15,7 @@ import {
 } from "../src/core/permissions/PermissionRules.ts";
 import type { OpenAITool } from "../src/core/tools/schema.ts";
 import type { Tool } from "../src/core/tools/Tool.ts";
+import type { AgentClient } from "../src/providers/AgentClient.ts";
 import {
 	BackboardClient,
 	type RequestOptions,
@@ -25,6 +26,7 @@ import type {
 	SendMessageRequest,
 	SubmitToolOutputsRequest,
 } from "../src/providers/backboard/types.ts";
+import { ClientRouter } from "../src/providers/ClientRouter.ts";
 import { TodoWriteTool } from "../src/tools/TodoWriteTool.tsx";
 import { WriteTool } from "../src/tools/WriteTool.tsx";
 import { TEST_BACKBOARD_ENV, TEST_MODEL } from "./helpers/agent.ts";
@@ -75,6 +77,10 @@ class CompletingClient extends BackboardClient {
 class RepeatingToolCallClient extends CompletingClient {
 	toolOutputRequests: SubmitToolOutputsRequest[] = [];
 
+	constructor(private readonly rounds = Number.POSITIVE_INFINITY) {
+		super();
+	}
+
 	override async *runMessage(): AsyncIterable<ProviderEvent> {
 		yield { kind: "thread", threadId: "thr_sub" };
 		yield {
@@ -89,11 +95,50 @@ class RepeatingToolCallClient extends CompletingClient {
 	): AsyncIterable<ProviderEvent> {
 		this.toolOutputRequests.push(req);
 		const round = this.toolOutputRequests.length;
+		if (round >= this.rounds) {
+			yield {
+				kind: "assistant_delta",
+				text: "finished after repeated tool use",
+			};
+			yield { kind: "completed" };
+			return;
+		}
 		yield {
 			kind: "requires_action",
 			runId: `run_${round}`,
 			calls: [{ id: `call_${round}`, name: "Read", input: {} }],
 		};
+	}
+}
+
+/**
+ * Subscription backends own their thread ids (stable prefixes) and have no
+ * assistant records, so a worker turn must land on the subscription client
+ * for both the initial message and every tool-output continuation.
+ */
+class SubscriptionWorkerClient {
+	readonly messageRequests: SendMessageRequest[] = [];
+	readonly toolOutputRequests: SubmitToolOutputsRequest[] = [];
+	readonly capabilities = { assistants: false, threads: true, memory: true };
+
+	constructor(private readonly threadId: string) {}
+
+	async *runMessage(req: SendMessageRequest): AsyncIterable<ProviderEvent> {
+		this.messageRequests.push(req);
+		yield { kind: "thread", threadId: this.threadId };
+		yield {
+			kind: "requires_action",
+			runId: "run_0",
+			calls: [{ id: "call_0", name: "Read", input: {} }],
+		};
+	}
+
+	async *runToolOutputs(
+		req: SubmitToolOutputsRequest,
+	): AsyncIterable<ProviderEvent> {
+		this.toolOutputRequests.push(req);
+		yield { kind: "assistant_delta", text: "subscription worker report" };
+		yield { kind: "completed" };
 	}
 }
 
@@ -130,7 +175,7 @@ class RelativeWriteClient extends CompletingClient {
 function runnerWith(client: BackboardClient, tools: Tool[]): SubAgentRunner {
 	return new SubAgentRunner({
 		client,
-		getModel: () => TEST_MODEL,
+		getRoute: () => ({ ...TEST_MODEL, source: "byok" }),
 		memory: "off",
 		memoryProfile: "code",
 		getThinking: async () => undefined,
@@ -162,6 +207,27 @@ describe("SubAgentRunner", () => {
 		expect(client.messageRequests[0]?.system_prompt).toBe(
 			"you are a sub-agent",
 		);
+		// The worker bills to the route its parent captured, never to a guess.
+		expect(client.messageRequests[0]?.source).toBe("byok");
+	});
+
+	it("uses the submitting turn's route even when a worker starts after the picker changes", async () => {
+		const client = new CompletingClient();
+		const runner = runnerWith(client, []);
+		await runner.run({
+			route: { provider: "google", model: "gemini-2.5-flash", source: "byok" },
+			prompt: "report",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+		expect(
+			client.messageRequests.map((request) => [
+				request.llm_provider,
+				request.model_name,
+				request.source,
+			]),
+		).toEqual([["google", "gemini-2.5-flash", "byok"]]);
 	});
 
 	it("propagates the depth into the sub-agent tool context", async () => {
@@ -442,8 +508,8 @@ describe("SubAgentRunner", () => {
 		expect(client.messageRequests[0]?.tools).toEqual([]);
 	});
 
-	it("stops worker agents after the tool round cap", async () => {
-		const client = new RepeatingToolCallClient();
+	it("runs worker agents past the former tool round cap", async () => {
+		const client = new RepeatingToolCallClient(25);
 		const runner = runnerWith(client, [
 			new TestTool({ name: "Read", readOnly: true }),
 		]);
@@ -455,9 +521,9 @@ describe("SubAgentRunner", () => {
 			parentSignal: new AbortController().signal,
 		});
 
-		expect(result.status).toBe("failed");
-		expect(result.toolRounds).toBe(20);
-		expect(client.toolOutputRequests).toHaveLength(20);
+		expect(result.status).toBe("completed");
+		expect(result.toolRounds).toBeGreaterThan(20);
+		expect(client.toolOutputRequests.length).toBeGreaterThan(20);
 	});
 
 	it("records worker child events when trace logging is configured", async () => {
@@ -738,5 +804,69 @@ describe("SubAgentRunner", () => {
 		expect(result.fileEdits?.[0]?.path).toBe("/coordinator/project/src/a.ts");
 		expect(result.title).toBe("Wrote /coordinator/project/src/a.ts");
 		expect(result.detail).toBe("Updated /coordinator/project/src/a.ts");
+	});
+
+	it("routes worker sub-agent turns to the selected subscription backend", async () => {
+		const routes = [
+			{
+				provider: "anthropic-subscription",
+				model: "default",
+				threadPrefix: "claude_sub_",
+			},
+			{
+				provider: "openai-subscription",
+				model: "gpt-5.6-sol",
+				threadPrefix: "sub_",
+			},
+		] as const;
+
+		for (const route of routes) {
+			const subscription = new SubscriptionWorkerClient(
+				`${route.threadPrefix}worker`,
+			);
+			// A signed-in Backboard backend stays available so the router had a
+			// choice; the worker turn must still land on the subscription client.
+			const backboard = new CompletingClient();
+			const router = new ClientRouter({
+				backboard: backboard as unknown as AgentClient,
+				subscriptions: {
+					[route.provider]: {
+						client: subscription as unknown as AgentClient,
+						threadPrefix: route.threadPrefix,
+					},
+				},
+				getModel: () => ({ provider: route.provider, model: route.model }),
+				hasBackboardAuth: () => true,
+				hasKeyFor: () => false,
+			});
+			const runner = new SubAgentRunner({
+				client: router,
+				getRoute: () => ({ provider: route.provider, model: route.model }),
+				memory: "off",
+				memoryProfile: "code",
+				getThinking: async () => undefined,
+				systemPrompt: "you are a sub-agent",
+				toolFactory: () => [new TestTool({ name: "Read", readOnly: true })],
+			});
+
+			const result = await runner.run({
+				prompt: "inspect the module",
+				depth: 1,
+				parentCwd: process.cwd(),
+				parentSignal: new AbortController().signal,
+			});
+
+			expect(result.status).toBe("completed");
+			expect(result.report).toBe("subscription worker report");
+			expect(subscription.messageRequests).toHaveLength(1);
+			expect(subscription.messageRequests[0]?.llm_provider).toBe(
+				route.provider,
+			);
+			expect(subscription.messageRequests[0]?.model_name).toBe(route.model);
+			expect(subscription.toolOutputRequests[0]?.thread_id).toBe(
+				`${route.threadPrefix}worker`,
+			);
+			expect(backboard.messageRequests).toHaveLength(0);
+		}
 	});
 });

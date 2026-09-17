@@ -634,7 +634,12 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 	}
 
 	override focus(options?: { mode: FocusMode }): void {
-		if (this.isReady && !this.isActiveMode) {
+		// A notify focus (dock bounce + badge) must not surface a background
+		// mode's view: the user has not asked to switch, and raising it here
+		// would present that mode when the app is later activated from the
+		// dock, replacing the mode they were working in. User-initiated
+		// focuses (Transfer/Force) still raise the mode's view.
+		if (options?.mode !== FocusMode.Notify && this.isReady && !this.isActiveMode) {
 			this.activateMode();
 		}
 		super.focus(options);

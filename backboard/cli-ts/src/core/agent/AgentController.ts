@@ -5,11 +5,13 @@ import { qSessionDir } from "../../config/paths.ts";
 import { fingerprint, PROMPT_VERSION } from "../../config/runtimeIdentity.ts";
 import { createRuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import { toPromptProfileId } from "../../prompts/profiles/ids.ts";
+import { buildGenerativeMediaPrompt } from "../../prompts/system/generativeMedia.ts";
 import { getSystemPrompt } from "../../prompts/system/index.tsx";
 import { TODO_NOT_CALLED_REMINDER } from "../../prompts/todoReminders.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
 import { BackboardError } from "../../providers/backboard/errors.ts";
 import { normalizeSelectableModels } from "../../providers/backboard/modelCatalog.ts";
+import type { ModelRoute } from "../../providers/backboard/types.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import { shortId } from "../../utils/id.ts";
 import type { EventBus } from "../bus/EventBus.ts";
@@ -330,6 +332,12 @@ export class AgentController {
 		},
 	): Promise<TurnStatus> {
 		const { bus, session, config } = this.deps;
+		const route: Readonly<ModelRoute> = Object.freeze({
+			...config.model,
+			source: config.modelSource,
+		});
+		const modelProfile = config.modelProfile;
+		const thinkingIntent = config.thinkingIntent;
 		this.abortController = new AbortController();
 		const signal = this.abortController.signal;
 		const turn = new Turn(options.turnId);
@@ -380,7 +388,7 @@ export class AgentController {
 			session.addMessage(userMessage(text));
 			turnStarted = true;
 
-			const ctx = this.buildContext(signal);
+			const ctx = { ...this.buildContext(signal), modelRoute: route };
 			// All four are independent of each other: assistant resolution and
 			// thinking metadata are network round-trips, the skill scan reads
 			// only the skill catalog + filesystem, and the tool sync talks to
@@ -403,9 +411,12 @@ export class AgentController {
 								tools: this.baseTools(),
 								signal,
 							}),
-					createRuntimeThinkingResolver(config, this.deps.client),
+					createRuntimeThinkingResolver(
+						{ model: route, modelSource: route.source, thinkingIntent },
+						this.deps.client,
+					),
 				]);
-			const promptProfile = toPromptProfileId(config.modelProfile.name);
+			const promptProfile = toPromptProfileId(modelProfile.name);
 			const tools = config.toolPolicy.visibleSchemas(
 				this.deps.registry,
 				[],
@@ -419,12 +430,16 @@ export class AgentController {
 			// disappears as soon as TodoWrite runs mid-turn.
 			const buildTurnSystemPrompt = () =>
 				getSystemPrompt({
-					layout: config.modelProfile.systemPromptLayout,
+					layout: modelProfile.systemPromptLayout,
 					profile: promptProfile,
 					enabledTools,
 					...skillPromptContext,
 					computerUseEnabled: config.isComputerUseEnabled,
 					browserUseEnabled: config.isBrowserUseEnabled,
+					mediaGenerationPrompt: buildGenerativeMediaPrompt({
+						imageModel: config.selectedImageModel,
+						videoModel: config.selectedVideoModel,
+					}),
 					clientToolsEnabled: this.deps.registry
 						.list()
 						.some((tool) => tool instanceof ClientProxyTool),
@@ -446,6 +461,10 @@ export class AgentController {
 				_current: ModelRef,
 				attemptedModelKeys: ReadonlySet<string>,
 			): Promise<ModelRef | null> => {
+				// A key-billed turn has exactly one place to go: no other model may
+				// be billed to the key on its behalf, and Backboard must not pay
+				// for a turn the user routed to their own key.
+				if (route.source === "byok") return null;
 				fallbackCandidatesPromise ??= this.deps.client
 					.listModels({ signal })
 					.then((catalog) =>
@@ -473,14 +492,19 @@ export class AgentController {
 				systemPrompt,
 				refreshSystemPrompt: buildTurnSystemPrompt,
 				assistantId,
-				model: config.model,
+				model: { provider: route.provider, model: route.model },
+				source: route.source,
 				memory: config.memory,
 				memoryProfile: config.memoryProfile,
 				workspaceId:
 					config.memory === "off" ? undefined : config.getWorkspaceId(),
 				imageGeneration: config.isImageGenerationEnabled,
+				imageModel: config.selectedImageModel,
+				videoGeneration: config.isVideoGenerationEnabled,
+				videoModel: config.selectedVideoModel,
 				openRouterProvider: config.selectedOpenRouterProvider,
 				generatedMediaDir: join(config.cwd, "generated-images"),
+				generatedVideoDir: join(config.cwd, "generated-videos"),
 				thinking: undefined,
 				thinkingResolver,
 				requestKind: "user",
@@ -498,8 +522,12 @@ export class AgentController {
 				resolveCapacityFallback,
 				onModelSucceeded: async (model) => {
 					try {
-						if (modelKey(model) !== modelKey(config.model)) {
-							config.setModel({ ...model });
+						if (
+							modelKey(model) !== modelKey(route) &&
+							modelKey(config.model) === modelKey(route) &&
+							config.modelSource === route.source
+						) {
+							config.setModel({ ...model }, route.source);
 							await config.saveRecoverySelection();
 						}
 						await config.recordSuccessfulModel(model);

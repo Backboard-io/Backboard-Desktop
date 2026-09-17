@@ -63,6 +63,7 @@ class FakeClient {
 	listModelsCount = 0;
 	threadSource: "byok" | "backboard" = "backboard";
 	listAssistantsDelayMs = 0;
+	onRunMessage?: () => void;
 	assistantRequests: Array<{
 		name: string;
 		system_prompt: string;
@@ -157,6 +158,7 @@ class FakeClient {
 		req: SendMessageRequest,
 		options?: { attachmentFilePaths?: string[] },
 	): AsyncIterable<ProviderEvent> {
+		this.onRunMessage?.();
 		this.messageRequests.push(req);
 		this.messageAttachmentPaths.push(options?.attachmentFilePaths);
 		yield* this.first;
@@ -334,6 +336,55 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(client.messageRequests).toHaveLength(0);
 		await ctrl.dispose();
 	});
+	for (const stage of ["preparing", "generating"] as const) {
+		it(`pins the route during ${stage} and keeps a newer selection on completion`, async () => {
+			const client = new FakeClient(
+				[
+					{ kind: "thread", threadId: "byok_route" },
+					{ kind: "assistant_delta", text: "done" },
+					{ kind: "completed" },
+				],
+				[],
+			);
+			client.threadSource = "byok";
+			client.listAssistantsDelayMs = 20;
+			const { ctrl, config } = controllerWith(
+				client,
+				new TestTool({ name: "Echo", readOnly: true }),
+				[],
+				{ finalVerificationNudge: false },
+			);
+			config.setModel({ provider: "openai", model: "gpt-4.1" }, "byok");
+			if (stage === "generating") {
+				client.onRunMessage = () =>
+					config.setModel(
+						{ provider: "google", model: "gemini-2.5-flash" },
+						"byok",
+					);
+			}
+			const running = ctrl.submit("hello");
+			if (stage === "preparing")
+				config.setModel(
+					{ provider: "google", model: "gemini-2.5-flash" },
+					"byok",
+				);
+			await running;
+			expect({
+				requests: client.messageRequests.map((req) => [
+					req.llm_provider,
+					req.model_name,
+					req.source,
+				]),
+				selection: config.modelString,
+				source: config.modelSource,
+			}).toEqual({
+				requests: [["openai", "gpt-4.1", "byok"]],
+				selection: "google/gemini-2.5-flash",
+				source: "byok",
+			});
+		});
+	}
+
 	it("emits turn:start and accepted prompt before assistant setup finishes", async () => {
 		const client = new FakeClient(
 			[
@@ -398,6 +449,32 @@ describe("AgentController loop (mocked Backboard)", () => {
 				.filter((event) => event.type === "turn:status")
 				.map((event) => event.phase),
 		).toEqual(["preparing", "generating", "generating"]);
+	});
+
+	it("stamps the turn's billing route on the message and every continuation", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Echo", input: {} }],
+				},
+			],
+			[{ kind: "assistant_delta", text: "all done" }, { kind: "completed" }],
+		);
+		const { ctrl, config } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+		config.setModel({ provider: "openai", model: "gpt-5.5" }, "byok");
+
+		expect(await ctrl.submit("do it")).toBe("completed");
+
+		expect(client.messageRequests.map((req) => req.source)).toEqual(["byok"]);
+		expect(client.toolOutputRequests.map((req) => req.source)).toEqual([
+			"byok",
+		]);
 	});
 
 	it("does not resolve a completed turn before checkpoint finalization is durable", async () => {
@@ -532,6 +609,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				yield { kind: "thread", threadId: "thr_1" };
 				yield { kind: "tool_started", id: "c1", name: "Echo" };
@@ -625,6 +703,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				if (this.messageRequests.length === 1) {
 					yield { kind: "thread", threadId: "thr_1" };
@@ -781,6 +860,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				yield { kind: "thread", threadId: "thr_1" };
 				yield {
@@ -819,6 +899,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				if (this.messageRequests.length === 1) {
 					yield {
@@ -868,6 +949,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				if (req.model_name !== "z-ai/glm-5.3") {
 					yield {
@@ -904,6 +986,64 @@ describe("AgentController loop (mocked Backboard)", () => {
 		).toBeTrue();
 	});
 
+	it("never falls back to another model on a key-billed turn", async () => {
+		class KeyBilledCapacityClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async listModels(): Promise<ModelsListResponse> {
+				this.listModelsCount++;
+				return {
+					models: [
+						{
+							name: "z-ai/glm-5.3",
+							provider: "openrouter",
+							model_type: "llm",
+						},
+					],
+					total: 1,
+				};
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				yield { kind: "failed", error: "No endpoints found for gpt-5.5." };
+			}
+		}
+		const client = new KeyBilledCapacityClient();
+		const { ctrl, config, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+		config.setModel({ provider: "openai", model: "gpt-5.5" }, "byok");
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("failed");
+		// Only the key-billed model was ever asked for, only on the key's route,
+		// and no catalog was consulted for a substitute.
+		expect(
+			new Set(
+				client.messageRequests.map(
+					(request) => `${request.model_name}:${request.source}`,
+				),
+			),
+		).toEqual(new Set(["gpt-5.5:byok"]));
+		expect(client.listModelsCount).toBe(0);
+		expect(config.modelString).toBe("openai/gpt-5.5");
+		expect(
+			events.some(
+				(event) =>
+					event.type === "system:warning" &&
+					event.message.includes("retrying with"),
+			),
+		).toBeFalse();
+	});
+
 	it("retries with thinking off when a provider rejects thinking", async () => {
 		class ThinkingFallbackClient extends FakeClient {
 			constructor() {
@@ -913,6 +1053,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				if (req.thinking !== null) {
 					yield {
@@ -952,6 +1093,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				yield { kind: "thread", threadId: "thr_retry" };
 				yield {
@@ -1003,6 +1145,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				yield {
 					kind: "failed",
@@ -1432,6 +1575,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 			override async *runMessage(
 				req: SendMessageRequest,
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				yield { kind: "thread", threadId: "thr_1" };
 				yield {
@@ -1954,6 +2098,7 @@ describe("AgentController attachment file paths", () => {
 				req: SendMessageRequest,
 				options?: { attachmentFilePaths?: string[] },
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				this.messageAttachmentPaths.push(options?.attachmentFilePaths);
 				if (this.messageRequests.length === 1) {
@@ -1997,6 +2142,7 @@ describe("AgentController attachment file paths", () => {
 				req: SendMessageRequest,
 				options?: { attachmentFilePaths?: string[] },
 			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
 				this.messageRequests.push(req);
 				this.messageAttachmentPaths.push(options?.attachmentFilePaths);
 				if (this.messageRequests.length === 1) {

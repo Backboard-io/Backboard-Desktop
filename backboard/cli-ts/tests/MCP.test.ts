@@ -778,6 +778,138 @@ describe("MCP config", () => {
 		expect(connectCalls).toEqual([true, true]);
 	});
 
+	it("reconciles the live MCP server set pushed by the IDE", async () => {
+		const root = await tempDir();
+		const initial = serverConfig({ name: "keep", url: "https://keep.example.com/mcp" });
+		const removed = serverConfig({ name: "drop", url: "https://drop.example.com/mcp" });
+		const manager = new McpClientManager(
+			{ timeoutMs: 1_000, servers: [initial, removed], warnings: [] },
+			root,
+		);
+
+		const opened: string[] = [];
+		const closed: string[] = [];
+		let nextToolName = 0;
+		Object.assign(manager as unknown as { connector: unknown }, {
+			connector: {
+				connect: async (server: McpServerConfig) => {
+					opened.push(server.name);
+					const toolName = `tool${nextToolName++}`;
+					return {
+						connection: {
+							server,
+							client: {} as Client,
+							transport: {
+								close: async () => {
+									closed.push(server.name);
+								},
+							},
+							tools: new Map(),
+							prompts: new Map(),
+							resources: new Map(),
+							updatedResourceUris: new Set(),
+							subscribedResourceUris: new Set(),
+							capabilities: { tools: {} },
+						},
+						tools: [
+							{
+								serverName: server.name,
+								toolName,
+								description: "",
+								inputSchema: { type: "object" },
+								timeoutMs: 1_000,
+								call: async () => ({ content: [] }),
+							},
+						],
+						status: {
+							name: server.name,
+							type: server.type,
+							configSources: [],
+							status: "connected",
+							toolNames: [],
+							capabilities: { tools: {} },
+							promptNames: [],
+							resourceUris: [],
+							updatedResourceUris: [],
+							subscribedResourceUris: [],
+						},
+						warnings: [],
+					};
+				},
+			},
+		});
+
+		// First push: `drop` is gone, `keep` is unchanged, `fresh` is new.
+		await manager.initialize(new AbortController().signal);
+		const first = await manager.setServers(
+			{
+				keep: { type: "streamable-http", url: "https://keep.example.com/mcp" },
+				fresh: { command: "node", args: ["server.js"] },
+			},
+			new AbortController().signal,
+		);
+		expect(closed).toEqual(["drop"]);
+		expect(opened.filter((name) => name === "fresh")).toHaveLength(1);
+		expect(first.tools.map((tool) => tool.registeredName)).toEqual([
+			"mcp__fresh__tool2",
+		]);
+		expect(first.removedToolNames).toEqual(["mcp__drop__tool1"]);
+		expect(manager.listServerStatuses().map((status) => status.name)).toEqual([
+			"keep",
+			"fresh",
+		]);
+
+		// Second push: identical set — nothing reconnects.
+		const second = await manager.setServers(
+			{
+				keep: { type: "streamable-http", url: "https://keep.example.com/mcp" },
+				fresh: { command: "node", args: ["server.js"] },
+			},
+			new AbortController().signal,
+		);
+		expect(opened.filter((name) => name === "fresh")).toHaveLength(1);
+		expect(second.tools).toEqual([]);
+		expect(second.removedToolNames).toEqual([]);
+
+		// Forced reconnect drops and re-adds the server's tools.
+		const forced = await manager.setServers(
+			{
+				keep: { type: "streamable-http", url: "https://keep.example.com/mcp" },
+				fresh: { command: "node", args: ["server.js"] },
+			},
+			new AbortController().signal,
+			{ forceNames: ["fresh"] },
+		);
+		expect(opened.filter((name) => name === "fresh")).toHaveLength(2);
+		expect(forced.removedToolNames).toEqual(["mcp__fresh__tool2"]);
+	});
+
+	it("keeps disabled servers out of the live connection set", async () => {
+		const manager = new McpClientManager(
+			{ timeoutMs: 1_000, servers: [], warnings: [] },
+			await tempDir(),
+		);
+		let connectCount = 0;
+		Object.assign(manager as unknown as { connector: unknown }, {
+			connector: {
+				connect: async () => {
+					connectCount += 1;
+					throw new Error("disabled servers must not connect");
+				},
+			},
+		});
+
+		const result = await manager.setServers(
+			{ off: { command: "node", disabled: true } },
+			new AbortController().signal,
+		);
+		expect(connectCount).toBe(0);
+		expect(result.warnings).toEqual([]);
+		expect(manager.listServerStatuses()).toEqual([
+			expect.objectContaining({ name: "off", status: "disabled" }),
+		]);
+	});
+
 	it("does not wait indefinitely for stuck MCP transports during shutdown", async () => {
 		const server = serverConfig({ name: "stuck", type: "http" });
 		const manager = new McpClientManager(

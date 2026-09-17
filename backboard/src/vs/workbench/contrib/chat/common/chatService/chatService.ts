@@ -1145,7 +1145,8 @@ export type ChatCoreToolKind =
 	| 'computer'
 	| 'browser'
 	| 'findSkill'
-	| 'findMcp';
+	| 'findMcp'
+	| 'generateVideo';
 
 export interface IChatToolResourcesInvocationData {
 	readonly kind: 'resources';

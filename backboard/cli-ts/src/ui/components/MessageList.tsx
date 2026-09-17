@@ -1,5 +1,6 @@
 import { Box, Text } from "ink";
 import type React from "react";
+import { memo } from "react";
 import type {
 	RenderTranscriptItem,
 	TranscriptItem,
@@ -28,7 +29,9 @@ type ToolTranscriptItem = Extract<TranscriptItem, { kind: "tool" }>;
 // Tool grouping happens in the store when completed tools are drained into
 // the static transcript (see state/toolGrouping.ts) - grouping here at render
 // time would rewrite items already printed by <Static> and drop them.
-export function MessageList({ items }: Props): React.ReactElement {
+export const MessageList = memo(function MessageList({
+	items,
+}: Props): React.ReactElement {
 	return (
 		<Box flexDirection="column">
 			{items.map((item) => (
@@ -36,9 +39,11 @@ export function MessageList({ items }: Props): React.ReactElement {
 			))}
 		</Box>
 	);
-}
+});
 
-export function Item({
+// Memoized because App re-renders on every bus event; transcript items are
+// immutable once created, so referential equality means "skip this subtree".
+export const Item = memo(function Item({
 	item,
 }: {
 	item: RenderTranscriptItem;
@@ -81,7 +86,7 @@ export function Item({
 				</Box>
 			);
 	}
-}
+});
 
 function noticeColor(level: "info" | "warning" | "error"): string {
 	if (level === "error") return theme.error;

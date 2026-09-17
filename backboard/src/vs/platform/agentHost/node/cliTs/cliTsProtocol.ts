@@ -16,6 +16,16 @@
 /** Permission modes exposed by the public Backboard R-CLI. */
 export type CliTsPermissionMode = 'manual' | 'acceptEdits' | 'auto' | 'bypass';
 
+/** Explicit billing route attached to a model selection (mirrors cli-ts `ModelSource`). */
+export type CliTsModelSource = 'backboard' | 'byok' | 'subscription';
+
+/**
+ * Advertised in the `serve:ready` payload by runtimes that accept host-managed
+ * provider keys and explicit billing routes. An older packaged runtime lacks
+ * it, and key-billed turns must then fail closed instead of routing elsewhere.
+ */
+export const CLI_TS_HOST_MANAGED_BYOK_CAPABILITY = 'host-managed-byok-v2';
+
 /** Critical-path phase names emitted by cli-ts for structured performance logs. */
 export type CliTsPerformanceTimingPhase =
 	| 'provider_first_event'
@@ -63,6 +73,33 @@ export interface CliTsClientToolResultPayload {
 	readonly error?: string;
 }
 
+/** One MCP server entry pushed to cli-ts (`.backboard/mcp.json` shape). */
+export interface CliTsMcpServerEntry {
+	readonly type?: 'stdio' | 'http' | 'streamable-http' | 'sse';
+	readonly disabled?: boolean;
+	readonly command?: string;
+	readonly args?: readonly string[];
+	readonly env?: Readonly<Record<string, string>>;
+	readonly cwd?: string;
+	readonly url?: string;
+	readonly headers?: Readonly<Record<string, string>>;
+}
+
+/** One MCP server runtime state reported by a `serve:mcp` record. */
+export interface CliTsMcpServerStatus {
+	readonly name: string;
+	readonly type?: string;
+	readonly status?: 'connected' | 'needs_authentication' | 'error' | 'disabled';
+	readonly message?: string;
+	readonly toolNames?: readonly string[];
+}
+
+/** Payload of a `serve:mcp` response. */
+export interface CliTsMcpListPayload {
+	readonly servers?: readonly CliTsMcpServerStatus[];
+	readonly warnings?: readonly string[];
+}
+
 /** One control operation, written to the serve process's stdin as one JSON line. */
 export type CliTsServeControl =
 	| {
@@ -81,6 +118,8 @@ export type CliTsServeControl =
 		/** Hidden per-turn guidance appended to the runtime system prompt. */
 		readonly systemContext?: string;
 		readonly model?: string;
+		/** Billing route for `model`; a host-managed runtime requires it whenever `model` is sent. */
+		readonly source?: CliTsModelSource;
 		readonly thinking?: string;
 		readonly excludedTools?: readonly string[];
 		readonly permission?: CliTsPermissionMode;
@@ -95,18 +134,49 @@ export type CliTsServeControl =
 		readonly notify?: boolean;
 		/** Enables Backboard's built-in image tool for this turn. */
 		readonly imageGeneration?: boolean;
+		/** Selected image model as `provider/name`; `off` clears the selection. */
+		readonly imageModel?: string;
+		/** Enables Backboard's built-in video tool for this turn. */
+		readonly videoGeneration?: boolean;
+		/** Selected video model as `provider/name`; `off` clears the selection. */
+		readonly videoModel?: string;
 		/** Pins an OpenRouter upstream; absent uses automatic routing. */
 		readonly openRouterProvider?: string;
 		/** IDE-executed tools advertised to the model; absent clears them. */
 		readonly clientTools?: readonly CliTsClientToolDefinition[];
 	}
 	| { readonly op: 'steer'; readonly requestId?: string; readonly prompt: string; readonly systemContext?: string }
+	| { readonly op: 'waitForIdle'; readonly requestId: string }
 	| { readonly op: 'warmup'; readonly requestId?: string }
 	| { readonly op: 'cancel'; readonly requestId?: string }
 	| { readonly op: 'respondInput'; readonly id: string; readonly answers: readonly string[] }
 	| { readonly op: 'clientToolResult'; readonly id: string; readonly result?: CliTsClientToolResultPayload; readonly error?: string }
-	| { readonly op: 'setModel'; readonly requestId?: string; readonly model: string }
+	| { readonly op: 'setModel'; readonly requestId?: string; readonly model: string; readonly source?: CliTsModelSource }
+	| {
+		/**
+		 * Replaces the session's IDE-owned MCP server set. Servers missing from
+		 * the payload are disconnected; unchanged servers keep running. Servers
+		 * configured directly in `.backboard/mcp.json` are layered underneath.
+		 */
+		readonly op: 'setMcpServers';
+		readonly requestId?: string;
+		readonly servers: Readonly<Record<string, CliTsMcpServerEntry>>;
+		/** Server names to reconnect even when their configuration is unchanged. */
+		readonly force?: readonly string[];
+	}
+	| {
+		/**
+		 * The host's complete provider-key snapshot; an absent provider is a
+		 * removal. Written first after every spawn and again on every change.
+		 */
+		readonly op: 'setCredentials';
+		readonly requestId?: string;
+		readonly revision: number;
+		readonly providerKeys: readonly { readonly provider: string; readonly key: string }[];
+	}
 	| { readonly op: 'listModels'; readonly requestId: string }
+	| { readonly op: 'listImageModels'; readonly requestId: string }
+	| { readonly op: 'listVideoModels'; readonly requestId: string }
 	| { readonly op: 'listTools'; readonly requestId: string }
 	| { readonly op: 'listSkills'; readonly requestId: string }
 	| { readonly op: 'archiveWorkers'; readonly requestId: string }
@@ -274,6 +344,8 @@ export interface CliTsReadyPayload {
 	readonly sessionId?: string;
 	readonly cwd?: string;
 	readonly model?: string;
+	/** Protocol features this runtime supports; see {@link CLI_TS_HOST_MANAGED_BYOK_CAPABILITY}. */
+	readonly capabilities?: readonly string[];
 }
 
 export function isCliTsRecord(value: unknown): value is CliTsRecord {

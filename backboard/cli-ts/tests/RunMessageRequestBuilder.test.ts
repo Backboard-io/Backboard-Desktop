@@ -20,6 +20,22 @@ describe("buildRunMessageRequest", () => {
 		});
 	});
 
+	it("carries the captured billing route and omits it when there is none", () => {
+		const context = {
+			session: new Session("sess_test"),
+			tools: [],
+			systemPrompt: "system",
+			model: { provider: "openai", model: "gpt-5.5" },
+			memory: "off" as const,
+			memoryProfile: "code" as const,
+		};
+
+		expect(
+			buildRunMessageRequest("hello", { ...context, source: "byok" }).source,
+		).toBe("byok");
+		expect("source" in buildRunMessageRequest("hello", context)).toBe(false);
+	});
+
 	it("adds image-generation fields only when the toggle is on", () => {
 		const context = {
 			session: new Session("sess_test"),
@@ -42,6 +58,58 @@ describe("buildRunMessageRequest", () => {
 		expect(on.image_generation).toBe("auto");
 		expect(on.image_model_provider).toBe("google");
 		expect(on.image_model_name).toBe("gemini-3.1-flash-image");
+	});
+
+	it("uses the selected image model instead of the built-in default", () => {
+		const context = {
+			session: new Session("sess_test"),
+			tools: [],
+			systemPrompt: "system",
+			model: { provider: "openai", model: "gpt-5.5" },
+			memory: "off" as const,
+			memoryProfile: "code" as const,
+		};
+
+		const selected = buildRunMessageRequest("hello", {
+			...context,
+			imageGeneration: true,
+			imageModel: {
+				provider: "openrouter",
+				name: "google/gemini-3.1-flash-image",
+			},
+		});
+		expect(selected.image_generation).toBe("auto");
+		expect(selected.image_model_provider).toBe("openrouter");
+		expect(selected.image_model_name).toBe("google/gemini-3.1-flash-image");
+	});
+
+	it("adds video-generation fields only when a video model is selected", () => {
+		const context = {
+			session: new Session("sess_test"),
+			tools: [],
+			systemPrompt: "system",
+			model: { provider: "openai", model: "gpt-5.5" },
+			memory: "off" as const,
+			memoryProfile: "code" as const,
+		};
+
+		// Video generation has no universal default model, so the enabled flag
+		// alone must not put video fields on the wire.
+		const enabledWithoutModel = buildRunMessageRequest("hello", {
+			...context,
+			videoGeneration: true,
+		});
+		expect(enabledWithoutModel.video_generation).toBeUndefined();
+		expect(enabledWithoutModel.video_model_name).toBeUndefined();
+
+		const selected = buildRunMessageRequest("hello", {
+			...context,
+			videoGeneration: true,
+			videoModel: { provider: "openrouter", name: "google/veo-3.1" },
+		});
+		// Conversation turns expose generate_video as a local function tool.
+		expect(selected.video_generation).toBeUndefined();
+		expect(selected.video_model_name).toBeUndefined();
 	});
 
 	it("pins a selected OpenRouter upstream and otherwise leaves routing automatic", () => {

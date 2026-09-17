@@ -165,6 +165,45 @@ describe("CodexSubscriptionClient", () => {
 		}
 	}
 
+	it("reports measured window occupancy and the cache split in usage events", async () => {
+		const client = new CodexSubscriptionClient({
+			authFile,
+			fetchImpl: (async () =>
+				eventStream([
+					{
+						type: "response.completed",
+						response: {
+							model: "gpt-5.6-sol",
+							usage: {
+								input_tokens: 100,
+								input_tokens_details: { cached_tokens: 80 },
+								output_tokens: 20,
+								total_tokens: 120,
+							},
+						},
+					},
+				])) as unknown as typeof fetch,
+		});
+		const events: ProviderEvent[] = [];
+		for await (const event of client.runMessage({
+			content: "hello",
+			model_name: "gpt-5.6-sol",
+		})) {
+			events.push(event);
+		}
+		const usage = events.find((event) => event.kind === "usage")?.usage;
+		expect(usage).toEqual({
+			inputTokens: 100,
+			outputTokens: 20,
+			totalTokens: 120,
+			cachedTokens: 80,
+			// Occupancy matches the level Backboard reports: prompt + output.
+			contextTokens: 120,
+			provider: "openai-subscription",
+			model: "gpt-5.6-sol",
+		});
+	});
+
 	it("preserves default subscription context windows rather than optional maximums", async () => {
 		const client = new CodexSubscriptionClient({
 			authFile,

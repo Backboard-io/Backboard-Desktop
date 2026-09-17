@@ -36,6 +36,7 @@ import { CodeBlockPart } from './chatContentParts/codeBlockPart.js';
 import { ChatListDelegate, ChatListItemRenderer, IChatListItemTemplate, IChatRendererDelegate } from './chatListRenderer.js';
 import { ChatEditorOptions } from './chatOptions.js';
 import { ChatPendingDragController } from './chatPendingDragAndDrop.js';
+import { activePromptIndex, ChatPromptDotRail, IChatPromptDot } from './chatPromptDotRail.js';
 
 export interface IChatListWidgetStyles {
 	listForeground?: string;
@@ -192,6 +193,11 @@ export class ChatListWidget extends Disposable {
 	private _suppressAutoScroll: boolean = false;
 	private _settingChangeCounter: number = 0;
 	private _visibleChangeCount: number = 0;
+	private readonly _promptDotRail: ChatPromptDotRail | undefined;
+	private _promptDotRailUpdateScheduled = false;
+	private _promptDotRailPrompts: IChatRequestViewModel[] = [];
+	private _promptDotRailOffsets: number[] = [];
+	private _promptDotRailJumpIndex: number | undefined;
 
 	private readonly _container: HTMLElement;
 	private readonly _scrollDownButton: Button;
@@ -477,6 +483,17 @@ export class ChatListWidget extends Disposable {
 			this.scrollToEnd();
 		}));
 
+		// Prompt dot rail: one dot per user prompt on the left edge. Clicking a
+		// dot jumps to the start of that prompt, and scrolling over the rail scrolls
+		// the transcript so the window can be walked through the whole conversation.
+		if (!container.closest('.quick-input-widget')) {
+			this._promptDotRail = this._register(new ChatPromptDotRail(container));
+			this._register(this._promptDotRail.onDidClickPrompt(index => this.jumpToPrompt(index)));
+			this._register(this._promptDotRail.onDidScroll(deltaY => this.scrollByRail(deltaY)));
+			this._register(this.onDidScroll(() => this.schedulePromptDotRailUpdate()));
+			this._register(this.onDidChangeContentHeight(() => this.schedulePromptDotRailUpdate()));
+		}
+
 		// Wire up tree events
 
 		// Handle content height changes (fires high-level event, internal scroll handling)
@@ -542,6 +559,138 @@ export class ChatListWidget extends Disposable {
 		const atBottom = this.isScrolledToBottom || this._scrollLock;
 		this._scrollDownButton.element.style.display = atBottom ? 'none' : '';
 		this._container.classList.toggle('chat-list-at-bottom', atBottom);
+	}
+
+	private schedulePromptDotRailUpdate(): void {
+		if (!this._promptDotRail || this._promptDotRailUpdateScheduled) {
+			return;
+		}
+		this._promptDotRailUpdateScheduled = true;
+		dom.scheduleAtNextAnimationFrame(dom.getWindow(this._container), () => {
+			this._promptDotRailUpdateScheduled = false;
+			this.updatePromptDotRail();
+		});
+	}
+
+	private updatePromptDotRail(): void {
+		if (!this._promptDotRail) {
+			return;
+		}
+		const items = this.getItems();
+		const prompts: IChatRequestViewModel[] = [];
+		const promptItemIndices: number[] = [];
+		items.forEach((item, index) => {
+			if (isRequestVM(item) && !item.pendingKind) {
+				prompts.push(item);
+				promptItemIndices.push(index);
+			}
+		});
+		this._promptDotRailPrompts = prompts;
+
+		if (prompts.length < 2) {
+			this._promptDotRailOffsets = [];
+			this._promptDotRailJumpIndex = undefined;
+			this._promptDotRail.update([], 0);
+			return;
+		}
+
+		// Offsets of the rows currently in the DOM (content coordinates). Rows are
+		// virtualized, so prompts whose rows are not rendered get an interpolated
+		// offset from the nearest rendered neighbors.
+		const rowsTop = this._container.querySelector('.monaco-list-rows')?.getBoundingClientRect().top ?? 0;
+		const knownOffsets = new Map<number, number>();
+		this._container.querySelectorAll<HTMLElement>('.monaco-list-row[data-index]').forEach(row => {
+			const index = Number(row.getAttribute('data-index'));
+			if (Number.isInteger(index) && index >= 0 && index < items.length) {
+				knownOffsets.set(index, row.getBoundingClientRect().top - rowsTop);
+			}
+		});
+		const offsets = promptItemIndices.map(itemIndex => {
+			const exact = knownOffsets.get(itemIndex);
+			if (exact !== undefined) {
+				return exact;
+			}
+			let prevIndex = -1, prevOffset = 0, nextIndex = -1, nextOffset = 0;
+			for (const [index, offset] of knownOffsets) {
+				if (index < itemIndex && index > prevIndex) {
+					prevIndex = index;
+					prevOffset = offset;
+				}
+				if (index > itemIndex && (nextIndex === -1 || index < nextIndex)) {
+					nextIndex = index;
+					nextOffset = offset;
+				}
+			}
+			if (prevIndex === -1 && nextIndex === -1) {
+				return 0;
+			}
+			if (prevIndex === -1) {
+				return nextOffset;
+			}
+			if (nextIndex === -1) {
+				return prevOffset;
+			}
+			const t = (itemIndex - prevIndex) / (nextIndex - prevIndex);
+			return prevOffset + t * (nextOffset - prevOffset);
+		});
+
+		const dots: IChatPromptDot[] = prompts.map(prompt => ({
+			id: prompt.id,
+			label: prompt.messageText.length > 100 ? `${prompt.messageText.slice(0, 100)}…` : prompt.messageText,
+		}));
+		this._promptDotRailOffsets = offsets;
+		this._promptDotRail.update(dots, activePromptIndex(offsets, this._tree.scrollTop));
+		// A jump that landed while its prompt row was still virtualized is corrected
+		// here, against the freshly measured offset.
+		if (this._promptDotRailJumpIndex !== undefined) {
+			const pending = this._promptDotRailJumpIndex;
+			this._promptDotRailJumpIndex = undefined;
+			this.scrollToPromptRow(pending);
+		}
+	}
+
+	private get maxScrollTop(): number {
+		return Math.max(0, this._tree.scrollHeight - this._tree.renderHeight);
+	}
+
+	/**
+	 * Jump to a prompt picked on the dot rail: scroll it to the top of the
+	 * viewport, then correct the position once the row has been measured.
+	 */
+	private jumpToPrompt(index: number): void {
+		this.setScrollLock(false);
+		this._promptDotRailJumpIndex = index;
+		this.scrollToPromptRow(index);
+		this.updateScrollDownButtonVisibility();
+	}
+
+	/**
+	 * Scroll a prompt's row to the top of the viewport. Rows outside the render
+	 * window have no element to reveal, so the offset the rail computed for the
+	 * prompt is the primary target and `reveal` refines it when available.
+	 */
+	private scrollToPromptRow(index: number): void {
+		const offset = this._promptDotRailOffsets[index];
+		if (typeof offset === 'number' && Number.isFinite(offset)) {
+			this._tree.scrollTop = Math.min(Math.max(offset, 0), this.maxScrollTop);
+		}
+		const prompt = this._promptDotRailPrompts[index];
+		if (prompt && this._tree.hasElement(prompt)) {
+			this._tree.reveal(prompt, 0);
+		}
+	}
+
+	/**
+	 * Scroll the transcript from a wheel gesture over the dot rail, so the dot
+	 * window can be walked through prompts the viewport has scrolled past.
+	 */
+	private scrollByRail(deltaY: number): void {
+		if (!Number.isFinite(deltaY) || deltaY === 0) {
+			return;
+		}
+		this.setScrollLock(false);
+		this._tree.scrollTop = Math.min(Math.max(this._tree.scrollTop + deltaY, 0), this.maxScrollTop);
+		this.updateScrollDownButtonVisibility();
 	}
 
 	/**
@@ -700,6 +849,7 @@ export class ChatListWidget extends Disposable {
 			}
 		}
 		this.updateLastItemMinHeight();
+		this.schedulePromptDotRailUpdate();
 		if (perfEnabled) {
 			logChatPerf(this.logService, 'list.refresh', {
 				session: this._viewModel.sessionResource.toString(),

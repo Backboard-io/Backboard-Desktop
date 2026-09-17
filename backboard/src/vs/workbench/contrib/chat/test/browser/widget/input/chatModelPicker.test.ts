@@ -14,7 +14,7 @@ import { GalleryMcpServerStatus, IGalleryMcpServer } from '../../../../../../../
 import { McpServerType } from '../../../../../../../platform/mcp/common/mcpPlatformTypes.js';
 import { StateType } from '../../../../../../../platform/update/common/update.js';
 import { buildModelPickerItems, getControlModelsForEntitlement, getModelPickerAccessibilityProvider } from '../../../../browser/widget/input/chatModelPicker.js';
-import { buildCombinedModelSections, COMBINED_MODEL_SECTION_ALL, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_RECOMMENDED, formatModelLabel, formatModelProviderDetail, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
+import { buildCombinedModelSections, byokFooterForSection, COMBINED_MODEL_SECTION_ALL, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_RECOMMENDED, formatModelLabel, formatModelProviderDetail, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, isKeyBilledModel, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
 import { buildMcpMarketplaceItems, buildSkillsLibraryItems, createMcpMarketplaceItemsFromCatalog, getHiddenMcpMarketplaceCatalogEntries, IMcpMarketplaceCatalogEntry, mcpItemMatchesInstalledServer, McpMarketplaceModalItem, resolveMcpMarketplaceItems, parseSkillsShHtml, splitSkillsShId } from '../../../../browser/widget/input/skillsLibrary.js';
 import { IModelPickerSetupCandidate } from '../../../../browser/widget/input/modelPickerActionItem.js';
 import { filterModelsForSession } from '../../../../browser/widget/input/chatModelSelectionLogic.js';
@@ -86,6 +86,49 @@ suite('combined model provider sections', () => {
 		assert.strictEqual(formatModelLabel('us.anthropic.claude-sonnet-4-6'), 'Claude Sonnet 4.6');
 	});
 
+	test('lists key-billed models in their own section and gates them on a connected key', () => {
+		const withMetadata = (id: string, name: string, detail: string, auth?: ILanguageModelChatMetadata['auth']) => {
+			const base = createModel(id, name, 'agent-host-backboard');
+			return { ...base, metadata: { ...base.metadata, detail, auth } };
+		};
+		const connected = withMetadata('openai-key/gpt-5.5', 'GPT-5.5', 'OpenAI API Key', { providerLabel: 'OpenAI API Key', accountLabel: 'Connected' });
+		// The key is connected but its catalog lacks this model.
+		const unavailable = withMetadata('openai-key/gpt-5-mini', 'GPT-5 Mini', 'OpenAI API Key', { providerLabel: 'OpenAI API Key', statusLabel: 'Not available with this key' });
+		const keyless = withMetadata('anthropic-key/claude-opus-5', 'Claude Opus 5', 'Anthropic API Key', { providerLabel: 'Anthropic API Key' });
+		const backboard = withMetadata('openai/gpt-5.5', 'GPT-5.5', 'OpenAI');
+		const models = [connected, unavailable, keyless, backboard];
+
+		const sections = buildCombinedModelSections(models);
+		assert.deepStrictEqual({
+			sections: sections.filter(section => section.kind === 'provider').map(section => [section.id, section.label, section.modelCount]),
+			keyBilled: models.map(isKeyBilledModel),
+			// A key-billed row is usable only while its key is connected; the
+			// disconnected one stays reachable from its own section.
+			searchResults: modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_ALL, true).map(model => model.metadata.id),
+			ownSection: modelsForCombinedModelSection(models, 'provider:anthropic-key').map(model => model.metadata.id),
+			details: [formatModelProviderDetail(connected), formatModelProviderDetail(unavailable), formatModelProviderDetail(keyless), formatModelProviderDetail(backboard)],
+			icons: [providerIconKeyForCombinedModelSection('provider:openai-key'), providerIconKeyForCombinedModelSection('provider:anthropic-key')],
+			footers: [
+				byokFooterForSection('provider:openai')?.label,
+				byokFooterForSection('provider:openai-key')?.label,
+				byokFooterForSection('provider:google'),
+				byokFooterForSection(COMBINED_MODEL_SECTION_ALL),
+			],
+		}, {
+			sections: [
+				['provider:anthropic-key', 'Anthropic API Key', 1],
+				['provider:openai', 'OpenAI', 1],
+				['provider:openai-key', 'OpenAI API Key', 2],
+			],
+			keyBilled: [true, true, true, false],
+			searchResults: ['openai-key/gpt-5.5', 'openai/gpt-5.5'],
+			ownSection: ['anthropic-key/claude-opus-5'],
+			details: ['Billed to your OpenAI API key', 'Not available with this key', 'API key required', 'OpenAI'],
+			icons: ['open-ai', 'anthropic'],
+			footers: ['Use your own OpenAI key…', 'Manage API keys…', undefined, undefined],
+		});
+	});
+
 	test('uses the API-supplied serving-provider detail for OpenRouter models', () => {
 		const openRouterModel = {
 			...createModel('openrouter/z-ai/glm-4.7', 'z-ai/glm-4.7', 'agent-host-backboard'),
@@ -98,29 +141,7 @@ suite('combined model provider sections', () => {
 		assert.strictEqual(formatModelProviderDetail(openRouterModel, 'DeepInfra'), 'OpenRouter · DeepInfra');
 	});
 
-	for (const connected of [true, false]) {
-		test(`Windows hides subscription sections and search results with connected=${connected}`, () => {
-			const subscriptions = ['openai-subscription/gpt-5.6-sol', 'anthropic-subscription/sonnet'].map(id => {
-				const model = createModel(id, id, 'agent-host-backboard');
-				return connected ? { ...model, metadata: { ...model.metadata, auth: { providerLabel: id, accountLabel: 'Connected' } } } : model;
-			});
-			const apiModels = [
-				createModel('openai/gpt-5.6-sol', 'GPT', 'agent-host-backboard'),
-				createModel('anthropic/claude-sonnet-5', 'Claude', 'agent-host-backboard'),
-			];
-			const models = [...subscriptions, ...apiModels];
-			const sections = buildCombinedModelSections(models, true);
-			assert.ok(sections.every(section => section.kind !== 'subscription'));
-			assert.strictEqual(sections.find(section => section.id === COMBINED_MODEL_SECTION_ALL)?.modelCount, 2);
-			for (const section of [COMBINED_MODEL_SECTION_ALL, COMBINED_MODEL_SECTION_RECOMMENDED, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_CHATGPT]) {
-				assert.ok(modelsForCombinedModelSection(models, section, false, true).every(model => apiModels.includes(model)));
-				assert.deepStrictEqual(modelsForCombinedModelSection(models, section, true, true), apiModels);
-			}
-			assert.strictEqual(buildCombinedModelSections(models, false).filter(section => section.kind === 'subscription').length, 0);
-		});
-	}
-
-	test('excludes cached ChatGPT subscription models', () => {
+	test('keeps ChatGPT subscription models in a dedicated section', () => {
 		const chatGpt = {
 			...createModel('openai-subscription/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard'),
 			metadata: {
@@ -135,16 +156,16 @@ suite('combined model provider sections', () => {
 			{ ...createModel('openai/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard'), metadata: { ...createModel('openai/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard').metadata, detail: 'OpenAI' } },
 		];
 
-		const sections = buildCombinedModelSections(models, false);
+		const sections = buildCombinedModelSections(models);
 		const chatGptSection = sections.find(section => section.id === COMBINED_MODEL_SECTION_CHATGPT);
 
-		assert.strictEqual(chatGptSection, undefined);
+		assert.deepStrictEqual(chatGptSection, { id: COMBINED_MODEL_SECTION_CHATGPT, label: 'ChatGPT', modelCount: 1, kind: 'subscription' });
 		assert.strictEqual(sections.filter(section => section.label === 'OpenAI (ChatGPT Subscription)').length, 0);
-		assert.deepStrictEqual(modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_CHATGPT, false, false), []);
+		assert.deepStrictEqual(modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_CHATGPT), [chatGpt]);
 		assert.strictEqual(isChatGptSubscriptionConnected(models), true);
 	});
 
-	test('excludes cached Claude subscriptions while preserving Anthropic API models', () => {
+	test('keeps Claude subscription models separate from Anthropic API models', () => {
 		const claude = {
 			...createModel('anthropic-subscription/sonnet', 'Claude Sonnet', 'agent-host-backboard'),
 			metadata: {
@@ -162,15 +183,20 @@ suite('combined model provider sections', () => {
 		};
 		const models = [claude, anthropic];
 
-		const sections = buildCombinedModelSections(models, false);
+		const sections = buildCombinedModelSections(models);
 
-		assert.strictEqual(sections.find(section => section.id === COMBINED_MODEL_SECTION_CLAUDE), undefined);
-		assert.deepStrictEqual(modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_CLAUDE, false, false), []);
+		assert.deepStrictEqual(sections.find(section => section.id === COMBINED_MODEL_SECTION_CLAUDE), {
+			id: COMBINED_MODEL_SECTION_CLAUDE,
+			label: 'Claude',
+			modelCount: 1,
+			kind: 'subscription',
+		});
+		assert.deepStrictEqual(modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_CLAUDE), [claude]);
 		assert.strictEqual(formatModelProviderDetail(claude), 'Claude subscription');
 		assert.strictEqual(isClaudeSubscriptionConnected(models), true);
 	});
 
-	test('does not recommend even connected subscription models', () => {
+	test('only recommends connected subscription models', () => {
 		const unconnectedChatGpt = createModel('openai-subscription/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard');
 		const connectedChatGpt = {
 			...createModel('openai-subscription/gpt-5.6-terra', 'GPT-5.6 Terra', 'agent-host-backboard'),
@@ -190,14 +216,14 @@ suite('combined model provider sections', () => {
 		const recommendedApiModel = createModel('openai/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard');
 		const models = [unconnectedChatGpt, connectedChatGpt, unconnectedClaude, connectedClaude, recommendedApiModel];
 
-		const recommended = modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_RECOMMENDED, false, false);
-		const recommendedSection = buildCombinedModelSections(models, false).find(section => section.id === COMBINED_MODEL_SECTION_RECOMMENDED);
+		const recommended = modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_RECOMMENDED);
+		const recommendedSection = buildCombinedModelSections(models).find(section => section.id === COMBINED_MODEL_SECTION_RECOMMENDED);
 		const onlyUnconnectedSubscriptionModels = modelsForCombinedModelSection(
 			[unconnectedChatGpt, unconnectedClaude],
 			COMBINED_MODEL_SECTION_RECOMMENDED,
 		);
 
-		assert.deepStrictEqual(recommended, [recommendedApiModel]);
+		assert.deepStrictEqual(recommended, [connectedChatGpt, connectedClaude, recommendedApiModel]);
 		assert.strictEqual(recommendedSection?.modelCount, recommended.length);
 		assert.deepStrictEqual(onlyUnconnectedSubscriptionModels, []);
 	});
@@ -210,6 +236,39 @@ suite('combined model provider sections', () => {
 		assert.deepStrictEqual(
 			modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_RECOMMENDED, true),
 			models,
+		);
+	});
+
+	test('search hides subscription models until their subscription is connected', () => {
+		const libraryOpus = createModel('anthropic/claude-opus-5', 'Claude Opus 5', 'agent-host-backboard');
+		const unconnectedClaudeOpus = createModel('anthropic-subscription/opus[1m]', 'Claude Opus 5 (1M)', 'agent-host-backboard');
+		const unconnectedChatGpt = createModel('openai-subscription/gpt-5.6-sol', 'GPT-5.6 Sol', 'agent-host-backboard');
+		const connectedChatGpt = {
+			...createModel('openai-subscription/gpt-5.6-terra', 'GPT-5.6 Terra', 'agent-host-backboard'),
+			metadata: {
+				...createModel('openai-subscription/gpt-5.6-terra', 'GPT-5.6 Terra', 'agent-host-backboard').metadata,
+				auth: { providerLabel: 'ChatGPT', accountLabel: 'Connected' },
+			},
+		};
+		const models = [unconnectedClaudeOpus, libraryOpus, unconnectedChatGpt, connectedChatGpt];
+
+		// Searching from a library section only offers models that can be used right away.
+		assert.deepStrictEqual(
+			modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_RECOMMENDED, true),
+			[libraryOpus, connectedChatGpt],
+		);
+		assert.deepStrictEqual(
+			modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_ALL, true),
+			[libraryOpus, connectedChatGpt],
+		);
+		// Searching while browsing a disconnected subscription keeps that subscription's models visible.
+		assert.deepStrictEqual(
+			modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_CLAUDE, true),
+			[unconnectedClaudeOpus, libraryOpus, connectedChatGpt],
+		);
+		assert.deepStrictEqual(
+			modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_CHATGPT, true),
+			[libraryOpus, unconnectedChatGpt, connectedChatGpt],
 		);
 	});
 });

@@ -148,6 +148,12 @@ function getConfigIcon(property: string, value: unknown | undefined): ThemeIcon 
 	if (property === 'imageGeneration') {
 		return isToggledOff(value) ? Codicon.circleSlash : Codicon.symbolColor;
 	}
+	if (property === 'imageModel') {
+		return isToggledOff(value) ? Codicon.circleSlash : Codicon.symbolColor;
+	}
+	if (property === 'videoModel') {
+		return isToggledOff(value) ? Codicon.circleSlash : Codicon.deviceCameraVideo;
+	}
 	if (property === 'memoryMode') {
 		return isToggledOff(value) ? Codicon.circleSlash : Codicon.database;
 	}
@@ -205,7 +211,7 @@ function isSelectedValue(currentValue: unknown | undefined, itemValue: string): 
 }
 
 function normalizeConfigValueForSchema(schema: SessionConfigPropertySchema, value: unknown | undefined): unknown | undefined {
-	if (schema.enum && typeof value === 'string' && !schema.enum.includes(value)) {
+	if (!schema.enumDynamic && schema.enum && typeof value === 'string' && !schema.enum.includes(value)) {
 		return schema.default;
 	}
 	return value;
@@ -780,6 +786,25 @@ export class AgentHostChatInputPicker extends Disposable {
 		};
 	}
 
+	/**
+	 * Live values for an `enumDynamic` property, fetched from the agent host the
+	 * same way the picker popup does. Returns `undefined` for static enums (and
+	 * before the schema has resolved) so callers can render the seed enum
+	 * immediately without showing a loading row.
+	 */
+	getDynamicEnumInfo(refresh?: boolean): Promise<{ values: string[]; labels: string[]; descriptions: (string | undefined)[]; current: string | undefined }> | undefined {
+		const ctx = this._readContext();
+		if (!ctx || !ctx.schema.enumDynamic) {
+			return undefined;
+		}
+		return this._getItems(ctx.schema, undefined, refresh).then(items => ({
+			values: items.map(item => item.value),
+			labels: items.map(item => item.label),
+			descriptions: items.map(item => item.description),
+			current: typeof ctx.value === 'string' ? ctx.value : undefined,
+		}));
+	}
+
 	/** Applies a value directly, bypassing the list popup (used by custom editors like the reasoning slider). */
 	setValue(value: string): void {
 		const ctx = this._readContext();
@@ -812,7 +837,7 @@ export class AgentHostChatInputPicker extends Disposable {
 		return ctx.value !== normalizeConfigValueForSchema(ctx.schema, ctx.schema.default);
 	}
 
-	private async _getItems(schema: SessionConfigPropertySchema, query?: string): Promise<readonly IConfigPickerItem[]> {
+	private async _getItems(schema: SessionConfigPropertySchema, query?: string, refresh?: boolean): Promise<readonly IConfigPickerItem[]> {
 		if (schema.type === 'boolean') {
 			return [
 				{ value: 'true', label: localize('agentHostChatInputPicker.boolean.true', "On") },
@@ -828,6 +853,7 @@ export class AgentHostChatInputPicker extends Disposable {
 					provider: backendSession.scheme,
 					property: this._property,
 					query,
+					refresh,
 					workingDirectory: this._readWorkingDirectory(),
 					config: this._readCurrentValues(),
 				});
@@ -926,6 +952,8 @@ export class AgentHostChatInputPickerActionViewItem extends BaseActionViewItem {
 	}
 
 	getEnumInfo() { return this._picker.getEnumInfo(); }
+	getDynamicEnumInfo(refresh?: boolean) { return this._picker.getDynamicEnumInfo(refresh); }
+	getCurrentValue() { return this._picker.getCurrentValue(); }
 	setValue(value: string): void { this._picker.setValue(value); }
 
 	show(anchor?: HTMLElement): void {

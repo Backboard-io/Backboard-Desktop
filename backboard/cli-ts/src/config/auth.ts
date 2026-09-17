@@ -6,6 +6,7 @@ import type {
 	ByokProviderId,
 	ResolvedProviderKey,
 } from "../core/keys/ProviderKeyTypes.ts";
+import { isTruthy } from "../utils/envFlags.ts";
 import { readBackboardConfig } from "./backboardConfig.ts";
 import { type BackboardEnv, resolveApiUrl } from "./env.ts";
 import { supportsSubscriptions } from "./releaseFeatures.ts";
@@ -25,6 +26,17 @@ export const CHATGPT_SUBSCRIPTION_AUTH_FILE_ENV =
 	"BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE";
 
 export const CLAUDE_SUBSCRIPTION_ENV = "BACKBOARD_CLAUDE_SUBSCRIPTION";
+
+/**
+ * Set by the IDE on every runtime it spawns. Provider keys then arrive only
+ * from the host over the serve protocol and `~/.backboard/keys.json` is never
+ * read, so a key added in the CLI cannot silently bill IDE turns.
+ */
+export const HOST_MANAGED_KEYS_ENV = "BACKBOARD_HOST_MANAGED_KEYS";
+
+export function hostManagedProviderKeys(): boolean {
+	return isTruthy(process.env[HOST_MANAGED_KEYS_ENV]);
+}
 
 export interface ChatGptSubscriptionAuth {
 	authFile: string;
@@ -60,7 +72,7 @@ export interface ResolveAuthOptions {
 }
 
 export function resolveAuth(options: ResolveAuthOptions = {}): AuthState {
-	const fileConfig = readBackboardConfig(options.homeDir, false);
+	const fileConfig = readBackboardConfig(options.homeDir);
 	const envApiKey = process.env.BACKBOARD_API_KEY;
 	const apiKey = isUsableApiKey(envApiKey) ? envApiKey : fileConfig.apiKey;
 	const apiUrl = resolveApiUrl(fileConfig.apiUrl);
@@ -79,8 +91,11 @@ export function resolveAuth(options: ResolveAuthOptions = {}): AuthState {
 		claudeSubscription: supportsSubscriptions(options.platform) && claudeSubscriptionEnabled ? { enabled: true } : null,
 		// Env vars are deliberately not consulted: a provider key becomes usable
 		// only by being added through the BYOK flow or `/keys`, so what the CLI
-		// bills to is always something the user chose explicitly.
-		providerKeys: enabledProviderKeys(readProviderKeys(options.homeDir)),
+		// bills to is always something the user chose explicitly. A host-managed
+		// runtime receives its keys from the IDE instead (Config.setHostProviderKeys).
+		providerKeys: hostManagedProviderKeys()
+			? []
+			: enabledProviderKeys(readProviderKeys(options.homeDir)),
 	};
 }
 

@@ -4,12 +4,7 @@ import { lstat, readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { errorMessage } from "../../utils/errors.ts";
 import { type BlobStore, sha256Hex } from "./blobStore.ts";
-import { MAX_CAPTURE_BYTES } from "./CheckpointStore.ts";
 
-/** Workspaces with more files than this are too big to snapshot per command. */
-export const MAX_INDEX_FILES = 25_000;
-/** Total bytes of captured content above which shell capture shuts off. */
-export const MAX_INDEX_BYTES = 500 * 1024 * 1024;
 /**
  * Files whose mtime falls within this window before the previous refresh are
  * "racy" (the git racy-index problem): a same-size in-place rewrite landing in
@@ -47,10 +42,10 @@ export interface IndexEntry {
 	size: number;
 	mtimeMs: number;
 	mode: number;
-	/** Absent for files over MAX_CAPTURE_BYTES (`tooLarge`). */
 	hash?: string;
 	/** The content behind `hash` is in the blob store (restorable). */
 	stored?: boolean;
+	/** Legacy oversized-file marker; no longer set now that size caps are gone. */
 	tooLarge?: boolean;
 }
 
@@ -78,8 +73,7 @@ export interface WorkspaceDiff {
  * re-reads/re-hashes files whose (size, mtimeMs) changed — plus "racy" files
  * whose mtime is too close to the previous refresh to be trusted — the blob
  * write for a changed file doubles as its pre-image capture. Symlinks are never
- * followed, deny-listed directories are never entered, and blowing either
- * scale cap permanently disables the index rather than slowing every command.
+ * followed and deny-listed directories are never entered.
  */
 export class WorkspaceIndex {
 	private readonly entries: WorkspaceSnapshot = new Map();
@@ -125,7 +119,6 @@ export class WorkspaceIndex {
 		if (this.disabledReason) return null;
 
 		const next: WorkspaceSnapshot = new Map();
-		let capturedBytes = 0;
 		for (const path of paths) {
 			let stats: Awaited<ReturnType<typeof lstat>>;
 			try {
@@ -144,15 +137,6 @@ export class WorkspaceIndex {
 				prevRefreshAt,
 			);
 			if (entry === null) continue;
-			if (!entry.tooLarge) {
-				capturedBytes += entry.size;
-				if (capturedBytes > MAX_INDEX_BYTES) {
-					this.disable(
-						`workspace exceeds the ${MAX_INDEX_BYTES}-byte capture cap`,
-					);
-					return null;
-				}
-			}
 			next.set(key, entry);
 		}
 		this.entries.clear();
@@ -202,10 +186,6 @@ export class WorkspaceIndex {
 		if (ripgrepPaths) {
 			for (const path of ripgrepPaths) {
 				paths.push(resolve(dir, path));
-				if (paths.length > MAX_INDEX_FILES) {
-					this.disable(`workspace exceeds the ${MAX_INDEX_FILES}-file cap`);
-					return;
-				}
 			}
 			return;
 		}
@@ -233,10 +213,6 @@ export class WorkspaceIndex {
 				await this.walkWithoutIgnoreFiles(path, paths);
 			} else if (dirent.isFile()) {
 				paths.push(path);
-				if (paths.length > MAX_INDEX_FILES) {
-					this.disable(`workspace exceeds the ${MAX_INDEX_FILES}-file cap`);
-					return;
-				}
 			}
 			// Sockets/FIFOs/devices: never indexed.
 		}
@@ -263,7 +239,6 @@ export class WorkspaceIndex {
 			mtimeMs: stats.mtimeMs,
 			mode: stats.mode & 0o777,
 		};
-		if (stats.size > MAX_CAPTURE_BYTES) return { ...base, tooLarge: true };
 		const cached = this.entries.get(indexPathKey(path));
 		if (
 			cached &&

@@ -7,13 +7,24 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as readline from 'readline';
+import { DeferredPromise } from '../../../../base/common/async.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { FileAccess } from '../../../../base/common/network.js';
 import { dirname, join } from '../../../../base/common/path.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
+import { localize } from '../../../../nls.js';
 import { ILogService } from '../../../log/common/log.js';
 import { bridgeConfig } from './backboardRuntimeShared.js';
-import { type CliTsAgentEvent, type CliTsRecord, type CliTsServeControl, isCliTsRecord } from './cliTsProtocol.js';
+import { CLI_TS_HOST_MANAGED_BYOK_CAPABILITY, type CliTsAgentEvent, type CliTsReadyPayload, type CliTsRecord, type CliTsServeControl, isCliTsRecord } from './cliTsProtocol.js';
+
+/** Tells cli-ts that provider keys come only from the host, never from `~/.backboard/keys.json`. */
+const HOST_MANAGED_KEYS_ENV = 'BACKBOARD_HOST_MANAGED_KEYS';
+
+/** How long a child asked to shut down gets before it is killed. */
+const SHUTDOWN_GRACE_MS = 2000;
+
+/** The `setCredentials` control minus the request id the process assigns. */
+export type CliTsCredentialSnapshot = Omit<Extract<CliTsServeControl, { op: 'setCredentials' }>, 'requestId'>;
 
 interface PendingServeRequest {
 	readonly resolve: (record: CliTsRecord) => void;
@@ -168,21 +179,47 @@ export function resolveCliTsInvocation(logService: ILogService): CliTsInvocation
 	throw new Error(`cli-ts binary not found. Build it with: npm --prefix extensions/backboard run package-cli-ts (looked at ${candidates.join(', ')})`);
 }
 
+export interface CliTsCommandOptions {
+	/**
+	 * Text written to the child's stdin, then closed. The only sanctioned way
+	 * to hand a secret to a one-shot command: never argv, never the environment,
+	 * and never logged here.
+	 */
+	readonly stdin?: string;
+	/** Kills the child and rejects when it runs longer than this. */
+	readonly timeoutMs?: number;
+}
+
 /** Runs a one-shot cli-ts command using the same executable as IDE sessions. */
-export function runCliTsCommand(logService: ILogService, args: readonly string[]): Promise<string> {
+export function runCliTsCommand(logService: ILogService, args: readonly string[], options: CliTsCommandOptions = {}): Promise<string> {
 	const invocation = resolveCliTsInvocation(logService);
 	return new Promise<string>((resolve, reject) => {
 		const child = spawn(invocation.command, [...invocation.args, ...args], {
 			cwd: process.cwd(),
 			env: { ...process.env, ...cliTsCredentialEnv() },
-			stdio: ['ignore', 'pipe', 'pipe'],
+			stdio: ['pipe', 'pipe', 'pipe'],
 		});
 		let stdout = '';
 		let stderr = '';
+		let timedOut = false;
+		const timer = options.timeoutMs !== undefined
+			? setTimeout(() => {
+				timedOut = true;
+				child.kill('SIGKILL');
+			}, options.timeoutMs)
+			: undefined;
 		child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
 		child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-		child.once('error', reject);
+		child.once('error', error => {
+			clearTimeout(timer);
+			reject(error);
+		});
 		child.once('exit', code => {
+			clearTimeout(timer);
+			if (timedOut) {
+				reject(new Error(`Backboard CLI command timed out after ${options.timeoutMs}ms`));
+				return;
+			}
 			if (code === 0) {
 				resolve(stdout.trim());
 				return;
@@ -190,6 +227,10 @@ export function runCliTsCommand(logService: ILogService, args: readonly string[]
 			const detail = stderr.trim() || stdout.trim() || `exit code ${code ?? 'unknown'}`;
 			reject(new Error(`Backboard CLI command failed: ${detail}`));
 		});
+		// stdin is always a pipe so the child never inherits the host's. It is
+		// closed immediately when there is nothing to hand over.
+		child.stdin.on('error', () => { /* the exit handler reports the failure */ });
+		child.stdin.end(options.stdin ?? '');
 	});
 }
 
@@ -204,6 +245,23 @@ export interface CliTsServeProcessOptions {
 	readonly onEvent: (event: CliTsAgentEvent) => void;
 	/** Called once when the process exits (for any reason). */
 	readonly onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
+	/**
+	 * Called once when the process reports `serve:ready`, i.e. it is about to
+	 * read control lines. Used to push state the process cannot read from disk
+	 * (the IDE-owned MCP server set) into a freshly started run.
+	 */
+	readonly onReady?: () => void;
+	/**
+	 * The host's credential snapshot for this runtime. It is written after
+	 * every spawn, once the child has announced itself and proved it honours
+	 * host-managed keys, and every request or notification waits until the
+	 * child has acknowledged it. A runtime without the capability never
+	 * receives the snapshot; every request addressed to it fails with an
+	 * update message instead.
+	 */
+	readonly credentialSnapshot?: () => CliTsCredentialSnapshot;
+	readonly readyTimeoutMs?: number;
+	readonly credentialAckTimeoutMs?: number;
 }
 
 /**
@@ -224,6 +282,19 @@ export class CliTsServeProcess extends Disposable {
 	private spawnedCommand = '';
 	/** On-disk identity of the executable at spawn time. */
 	private spawnedInvocationFingerprint: string | undefined;
+	/** Settles with the `serve:ready` payload of the current child, or rejects when it dies first. */
+	private ready: DeferredPromise<CliTsReadyPayload> | undefined;
+	/** Resolves once the current child may receive traffic; rejects when it never can. */
+	private gate: Promise<void> = Promise.resolve();
+	/** Settles when the current child has exited. */
+	private exit: DeferredPromise<void> | undefined;
+	/** Set once the startup credential snapshot was written to the current child. */
+	private snapshotWritten = false;
+	private gateOpened = false;
+	/** Why the host ended the child; reported instead of the generic exit message. */
+	private terminationReason: string | undefined;
+	/** The failure that ended the current child, for traffic released after it. */
+	private lastFailure: Error | undefined;
 
 	constructor(
 		private readonly logService: ILogService,
@@ -234,6 +305,16 @@ export class CliTsServeProcess extends Disposable {
 
 	get isRunning(): boolean {
 		return this.child !== null && !this.exited;
+	}
+
+	/**
+	 * Resolves once the running child has announced itself. Spawns the child if
+	 * needed. Callers that must know the runtime's capabilities before sending
+	 * a turn wait on this; ordinary turns need not.
+	 */
+	whenReady(): Promise<CliTsReadyPayload> {
+		this.ensureProcess();
+		return this.ready!.p;
 	}
 
 	/** True when a rebuild or path override replaced the running executable. */
@@ -249,43 +330,118 @@ export class CliTsServeProcess extends Disposable {
 		this.ensureProcess();
 	}
 
+	/**
+	 * True once the startup credential snapshot has been written to the running
+	 * child. From then on a changed snapshot must be pushed explicitly; before
+	 * that, the startup handshake reads the host's keys when the child becomes
+	 * ready, so a change made meanwhile is already part of its snapshot.
+	 */
+	get credentialSnapshotWritten(): boolean {
+		return this.isRunning && this.snapshotWritten;
+	}
+
+	/** Resolves once the current child has exited; immediately when none is running. */
+	whenExited(): Promise<void> {
+		return this.exit && this.isRunning ? this.exit.p : Promise.resolve();
+	}
+
 	override dispose(): void {
 		const child = this.child;
 		if (child && !this.exited) {
 			// Ask for a clean shutdown; the exit handler rejects any leftovers.
-			try {
-				child.stdin.write(`${JSON.stringify({ op: 'dispose' } satisfies CliTsServeControl)}\n`);
-			} catch {
-				// stdin may already be gone; SIGKILL below still applies.
-			}
-			const killHandle = setTimeout(() => child.kill('SIGKILL'), 2000);
-			child.once('exit', () => clearTimeout(killHandle));
+			this.shutdown(child);
 		}
 		this.child = null;
 		this.rejectAll(new Error('cli-ts serve process disposed.'));
 		super.dispose();
 	}
 
-	/** Sends a correlated control op and resolves with its serve response record. */
-	request(control: CliTsServeControl & { requestId: string }): Promise<CliTsRecord> {
-		const child = this.ensureProcess();
-		return new Promise<CliTsRecord>((resolve, reject) => {
-			this.pending.set(control.requestId, { resolve, reject });
-			child.stdin.write(`${JSON.stringify(control)}\n`);
-		});
+	/**
+	 * Ends the child now, without waiting for its work. Requests it still owes
+	 * an answer to, including the turn it was running, fail with `reason`
+	 * instead of the generic exit message. The next request spawns a fresh
+	 * child, which receives the current credential snapshot on startup.
+	 */
+	terminate(reason: string): void {
+		const child = this.child;
+		if (!child || this.exited) {
+			return;
+		}
+		this.terminationReason = reason;
+		const failure = new Error(reason);
+		this.lastFailure = failure;
+		this.rejectAll(failure);
+		if (this.ready) { this.settleReady(this.ready, failure); }
+		this.logService.warn(`[cli-ts] terminating serve process: ${reason}`);
+		this.shutdown(child);
 	}
 
-	/** Sends a fire-and-forget control op (responses, cancel). */
+	/**
+	 * Sends a correlated control op and resolves with its serve response
+	 * record. Traffic waits for the startup handshake of the child it is
+	 * addressed to, in call order.
+	 */
+	async request(control: CliTsServeControl & { requestId: string }): Promise<CliTsRecord> {
+		const child = this.ensureProcess();
+		await this.gate;
+		return this.send(child, control);
+	}
+
+	/** Sends a fire-and-forget control op (responses, cancel), queued like a request. */
 	notify(control: CliTsServeControl): void {
 		if (!this.isRunning) {
 			return;
 		}
-		this.ensureProcess().stdin.write(`${JSON.stringify(control)}\n`);
+		if (control.op === 'cancel' && !this.gateOpened) {
+			this.terminate(localize('cliTsProcess.startupCancelled', "Runtime startup cancelled."));
+			return;
+		}
+		const child = this.ensureProcess();
+		this.gate.then(() => this.write(child, control), () => undefined);
 	}
 
 	/** Generates a request id for correlated ops. */
 	nextRequestId(): string {
 		return generateUuid();
+	}
+
+	private send(child: ChildProcessWithoutNullStreams, control: CliTsServeControl & { requestId: string }): Promise<CliTsRecord> {
+		return new Promise<CliTsRecord>((resolve, reject) => {
+			this.pending.set(control.requestId, { resolve, reject });
+			if (!this.write(child, control)) {
+				this.pending.delete(control.requestId);
+				reject(this.lastFailure ?? new Error('cli-ts serve process exited before the request could be sent.'));
+			}
+		}).then(record => {
+			if (control.op === 'setCredentials') {
+				const payload = record.payload as { op?: string; revision?: number } | undefined;
+				if (record.type !== 'serve:ack' || payload?.op !== control.op || payload.revision !== control.revision) {
+					const message = localize('cliTsProcess.invalidCredentialAck', "Runtime returned an invalid credential acknowledgement. Retry to restart it.");
+					this.terminate(message);
+					throw new Error(message);
+				}
+			}
+			return record;
+		});
+	}
+
+	/** Writes one control line to `child`, but only while it is still the live child. */
+	private write(child: ChildProcessWithoutNullStreams, control: CliTsServeControl): boolean {
+		if (child !== this.child || this.exited || this.terminationReason) {
+			return false;
+		}
+		child.stdin.write(`${JSON.stringify(control)}\n`);
+		return true;
+	}
+
+	private shutdown(child: ChildProcessWithoutNullStreams): void {
+		try {
+			child.stdin.write(`${JSON.stringify({ op: 'dispose' } satisfies CliTsServeControl)}\n`);
+		} catch {
+			// stdin may already be gone; SIGKILL below still applies.
+		}
+		const killHandle = setTimeout(() => child.kill('SIGKILL'), SHUTDOWN_GRACE_MS);
+		child.once('exit', () => clearTimeout(killHandle));
 	}
 
 	private ensureProcess(): ChildProcessWithoutNullStreams {
@@ -310,6 +466,9 @@ export class CliTsServeProcess extends Disposable {
 		// Keep cli-ts's per-session logs/scratch out of the user's workspace so
 		// they never show up as agent file edits in the Changes/Review view.
 		env['BACKBOARD_SESSION_ROOT'] = join(os.homedir(), '.backboard_ide', 'cli-ts-sessions');
+		// Provider keys reach the runtime only through the bootstrap snapshot on
+		// stdin; the user's CLI key file must never bill an IDE turn.
+		env[HOST_MANAGED_KEYS_ENV] = '1';
 		if (this.options.sessionId) {
 			env['BACKBOARD_SESSION_ID'] = this.options.sessionId;
 		}
@@ -327,6 +486,16 @@ export class CliTsServeProcess extends Disposable {
 			stdio: ['pipe', 'pipe', 'pipe'],
 		});
 		this.child = child;
+		this.snapshotWritten = false;
+		this.gateOpened = false;
+		this.terminationReason = undefined;
+		this.lastFailure = undefined;
+		const ready = new DeferredPromise<CliTsReadyPayload>();
+		this.ready = ready;
+		const exit = new DeferredPromise<void>();
+		this.exit = exit;
+		// A broken pipe (the child died mid-write) must not take the host down.
+		child.stdin.on('error', error => this.logService.warn(`[cli-ts] stdin error: ${error.message}`));
 		const reader = readline.createInterface({ input: child.stdout });
 		reader.on('line', line => this.handleLine(line));
 		child.stderr.on('data', (chunk: Buffer) => {
@@ -342,17 +511,77 @@ export class CliTsServeProcess extends Disposable {
 		child.on('error', error => {
 			this.logService.error(`[cli-ts] process error: ${error.message}`);
 			this.exited = true;
-			this.rejectAll(new Error(`cli-ts serve process failed to start: ${error.message}`));
+			const failure = new Error(`cli-ts serve process failed to start: ${error.message}`);
+			this.lastFailure = failure;
+			this.rejectAll(failure);
+			this.settleReady(ready, failure);
+			exit.complete();
 			this.options.onExit?.(null, null);
 		});
 		child.on('exit', (code, signal) => {
 			this.logService.warn(`[cli-ts] serve process exited code=${code} signal=${signal}`);
 			this.exited = true;
 			this.child = null;
-			this.rejectAll(new Error(this.describeUnexpectedExit(code, signal)));
+			const failure = new Error(this.describeUnexpectedExit(code, signal));
+			this.lastFailure = failure;
+			this.rejectAll(failure);
+			this.settleReady(ready, failure);
+			exit.complete();
 			this.options.onExit?.(code, signal);
 		});
+		const gate = this.openGate(child, ready.p);
+		// A child started only to prewarm may never be awaited; its rejection
+		// must not surface as unhandled. Traffic observes it through request().
+		gate.catch(() => undefined);
+		this.gate = gate;
 		return child;
+	}
+
+	/**
+	 * The startup handshake: wait for `serve:ready`, refuse a runtime that does
+	 * not honour host-managed keys, then hand over the credential snapshot and
+	 * wait for its acknowledgement. Only then may ordinary traffic flow, so a
+	 * turn can never start on a runtime that still reads its own key file or
+	 * holds a stale key set. Nothing is sent to a runtime that fails the check.
+	 */
+	private async openGate(child: ChildProcessWithoutNullStreams, ready: Promise<CliTsReadyPayload>): Promise<void> {
+		const snapshot = this.options.credentialSnapshot;
+		if (!snapshot) {
+			this.gateOpened = true;
+			return;
+		}
+		try {
+			const payload = await this.startupDeadline(ready, this.options.readyTimeoutMs ?? 30_000, localize('cliTsProcess.readyTimeout', "Runtime did not become ready. Retry to restart it."));
+			if (!payload.capabilities?.includes(CLI_TS_HOST_MANAGED_BYOK_CAPABILITY)) {
+				throw new Error(localize('cliTsProcess.runtimeTooOld', "The bundled Backboard runtime does not support the current API key protocol. Update Backboard, or rebuild it with: npm --prefix extensions/backboard run package-cli-ts"));
+			}
+			const control = { ...snapshot(), requestId: this.nextRequestId() };
+			this.snapshotWritten = true;
+			await this.startupDeadline(this.send(child, control), this.options.credentialAckTimeoutMs ?? 5_000, localize('cliTsProcess.credentialTimeout', "Runtime did not acknowledge its API keys. Retry to restart it."));
+			this.gateOpened = true;
+		} catch (error) {
+			this.terminate(error instanceof Error ? error.message : String(error));
+			throw error;
+		}
+	}
+
+	private async startupDeadline<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			return await Promise.race([promise, new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new Error(message)), milliseconds);
+			})]);
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	private settleReady(ready: DeferredPromise<CliTsReadyPayload>, failure: Error): void {
+		if (!ready.isSettled) {
+			// Nobody may be waiting; an unobserved rejection must not surface.
+			ready.p.catch(() => undefined);
+			ready.error(failure);
+		}
 	}
 
 	/**
@@ -363,6 +592,9 @@ export class CliTsServeProcess extends Disposable {
 	 * with SIGKILL. Re-signing during packaging fixes it.
 	 */
 	private describeUnexpectedExit(code: number | null, signal: NodeJS.Signals | null): string {
+		if (this.terminationReason) {
+			return this.terminationReason;
+		}
 		const where = `${this.spawnedCommand} (code=${code ?? 'null'} signal=${signal ?? 'null'})`;
 		if (!this.sawOutput) {
 			const stderr = this.stderrTail.length ? ` Last stderr: ${this.stderrTail.join(' | ')}` : '';
@@ -406,6 +638,15 @@ export class CliTsServeProcess extends Disposable {
 	private handleServeRecord(record: CliTsRecord): void {
 		if (record.type === 'serve:ready') {
 			this.logService.info(`[cli-ts] serve ready: ${JSON.stringify(record.payload)}`);
+			const payload = (record.payload && typeof record.payload === 'object' ? record.payload : {}) as CliTsReadyPayload;
+			if (this.ready && !this.ready.isSettled) {
+				this.ready.complete(payload);
+			}
+			try {
+				this.options.onReady?.();
+			} catch (error) {
+				this.logService.warn(`[cli-ts] onReady callback failed: ${error instanceof Error ? error.message : String(error)}`);
+			}
 			return;
 		}
 		const requestId = record.requestId;

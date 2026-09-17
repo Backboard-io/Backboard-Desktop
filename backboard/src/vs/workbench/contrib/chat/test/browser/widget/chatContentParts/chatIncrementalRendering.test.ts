@@ -383,6 +383,50 @@ suite('IncrementalDOMMorpher', () => {
 		}
 	});
 
+	suite('streaming soft focus', () => {
+
+		const softFocus = (domNode: HTMLElement) => Array.from(domNode.children)
+			.map(child => child.classList.contains('chat-smooth-streaming-tail'));
+
+		test('softens the last block while streaming and clears it on completion', async () => {
+			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'paragraph');
+			const domNode = mainWindow.document.createElement('div');
+			const morpher = createMorpher(domNode);
+			morpher.setRenderCallback(() => {
+				domNode.replaceChildren(
+					mainWindow.document.createElement('p'),
+					mainWindow.document.createElement('p'),
+				);
+			});
+			morpher.seed('');
+			morpher.tryMorph('first paragraph\n\nsecond paragraph');
+			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
+
+			assert.deepStrictEqual(softFocus(domNode), [false, true]);
+
+			morpher.updateStreamRate(100, true);
+			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
+
+			assert.deepStrictEqual(softFocus(domNode), [false, false], 'completed text must settle into focus');
+		});
+
+		test('does not soften a trailing code block', async () => {
+			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'paragraph');
+			const domNode = mainWindow.document.createElement('div');
+			const morpher = createMorpher(domNode);
+			morpher.setRenderCallback(() => {
+				const codeBlock = mainWindow.document.createElement('div');
+				codeBlock.classList.add('interactive-result-code-block');
+				domNode.replaceChildren(mainWindow.document.createElement('p'), codeBlock);
+			});
+			morpher.seed('');
+			morpher.tryMorph('prose\n\n```\ncode\n```');
+			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
+
+			assert.deepStrictEqual(softFocus(domNode), [false, false]);
+		});
+	});
+
 	suite('dispose', () => {
 
 		test('clears pending state on dispose', () => {

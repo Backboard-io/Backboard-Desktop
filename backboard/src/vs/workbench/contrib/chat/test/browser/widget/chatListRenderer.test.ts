@@ -34,7 +34,7 @@ suite('ChatListRenderer', () => {
 			formatBackboardWorkTimer(608000, false),
 			formatBackboardWorkTimer(608000, true),
 			formatBackboardWorkTimer(-100, true),
-		], ['Working for 0s', 'Working for 10m 8s', 'Worked for 10m 8s', 'Worked for 0s']);
+		], ['Working for 0s', 'Working for 10m 8s', 'Worked', 'Worked']);
 	});
 
 	test('worker wait chrome is suppressed without suppressing other tools', () => {

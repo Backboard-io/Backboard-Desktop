@@ -147,6 +147,7 @@ suite('ChatCoreToolProgressPart', () => {
 			'browser',
 			'findSkill',
 			'findMcp',
+			'generateVideo',
 		] as const;
 
 		assert.deepStrictEqual(
@@ -236,6 +237,7 @@ suite('ChatCoreToolProgressPart', () => {
 			{ kind: 'coreTool', toolKind: 'browser', input: { actions: [{ action: 'navigate', url: 'https://example.com/docs' }] }, output: { results: [{ success: true }] } },
 			{ kind: 'coreTool', toolKind: 'findSkill', input: { skill: 'testing' }, output: { candidates: [{ name: 'test-helper' }] } },
 			{ kind: 'coreTool', toolKind: 'findMcp', input: { server: 'issues' }, output: { candidates: [{ title: 'GitHub' }] } },
+			{ kind: 'coreTool', toolKind: 'generateVideo', input: { prompt: 'A cat singing', duration: 30, resolution: '480p', generate_audio: true, model_label: 'Seedance 2.5' }, output: { url: 'https://example.com/clip.mp4' } },
 		];
 
 		assert.deepStrictEqual(cards.map(data => {
@@ -257,6 +259,7 @@ suite('ChatCoreToolProgressPart', () => {
 			{ toolKind: 'browser', title: 'Browser actions', summary: 'example.com/docs', detail: 'Navigate' },
 			{ toolKind: 'findSkill', title: 'Find a skill', summary: 'testing', detail: 'test-helper' },
 			{ toolKind: 'findMcp', title: 'Find an MCP server', summary: 'issues', detail: 'GitHub' },
+			{ toolKind: 'generateVideo', title: 'Generate Video', summary: 'A cat singing', detail: 'A cat singing' },
 		]);
 	});
 
@@ -534,6 +537,32 @@ suite('ChatCoreToolProgressPart', () => {
 
 		assert.strictEqual(viewModel.items?.[0]?.state, 'complete');
 		assert.strictEqual(viewModel.summary, '1 / 1 tasks done');
+	});
+
+	test('paints a breathing video shell while generate_video is running', () => {
+		const running = createPart({
+			kind: 'coreTool',
+			toolKind: 'generateVideo',
+			input: { prompt: 'A cat and a dog singing', duration: 8, resolution: '720p', generate_audio: true, model_label: 'Seedance 2.5' },
+		}, { isComplete: false });
+		const complete = createPart({
+			kind: 'coreTool',
+			toolKind: 'generateVideo',
+			input: { prompt: 'A cat and a dog singing', duration: 8, resolution: '720p', generate_audio: true, model_label: 'Seedance 2.5' },
+			output: { url: 'https://example.com/clip.mp4' },
+		});
+
+		assert.deepStrictEqual({
+			running: running.domNode.classList.contains('chat-core-tool-card-running'),
+			shell: !!running.domNode.querySelector('.chat-core-tool-card-generating'),
+			complete: complete.domNode.classList.contains('chat-core-tool-card-complete'),
+			completeShell: !!complete.domNode.querySelector('.chat-core-tool-card-generating'),
+		}, {
+			running: true,
+			shell: true,
+			complete: true,
+			completeShell: false,
+		});
 	});
 
 	test('does not claim the existing terminal or Write render paths', () => {

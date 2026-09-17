@@ -29,7 +29,6 @@ import { ISessionsProvidersService } from '../../../sessions/services/sessions/b
 import { SessionView } from '../../../sessions/browser/parts/sessionView.js';
 import { IChat, ISession, SessionStatus } from '../../../sessions/services/sessions/common/session.js';
 import { IActiveSession, ISessionsChangeEvent, ISessionsManagementService } from '../../../sessions/services/sessions/common/sessionsManagement.js';
-import { IBackboardAuthService } from '../../../workbench/contrib/chat/common/backboardAuth.js';
 import { ChatListWidget } from '../../../workbench/contrib/chat/browser/widget/chatListWidget.js';
 import { IChatService, IChatModelReference, IChatToolInvocationSerialized } from '../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { IChatModel, IChatResponseModel, IChatProgressResponseContent, IChatChangeEvent, ChatResponseModelChangeReason, IResponse, IChatRequestModel } from '../../../workbench/contrib/chat/common/model/chatModel.js';
@@ -86,7 +85,6 @@ suite('Optimus dashboard', () => {
 		instantiation.stub(IWorkbenchLayoutService, new TestLayoutService());
 		instantiation.stub(ICommandService, { executeCommand: async id => { commands.push(id); } });
 		instantiation.stub(IContextKeyService, new MockContextKeyService());
-		instantiation.stub(IBackboardAuthService, { refresh: async () => undefined });
 		instantiation.stub(IContextMenuService, new TestContextMenuService());
 		instantiation.stub(ILogService, new NullLogService());
 		instantiation.stub(ISessionsProvidersService, { getProvider: () => undefined });

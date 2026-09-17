@@ -1,9 +1,18 @@
-import { isProviderAvailable } from "./releaseFeatures.ts";
+import type {
+	ByokProviderId,
+	ResolvedProviderKey,
+} from "../core/keys/ProviderKeyTypes.ts";
 import { canonicalToolName } from "../core/tools/names.ts";
 import { ToolPolicy } from "../core/tools/ToolPolicy.ts";
+import type { ModelSource } from "../providers/backboard/types.ts";
+import {
+	CredentialChangedError,
+	type ProviderCredential,
+} from "../providers/byok/ProviderCredential.ts";
 import {
 	type AuthState,
 	hasAnyCredentials,
+	hostManagedProviderKeys,
 	NO_CREDENTIALS_MESSAGE,
 	resolveAuth,
 } from "./auth.ts";
@@ -70,6 +79,11 @@ export class Config {
 	private workspaceId: string | null = null;
 
 	private currentModel: ModelRef;
+	/** Explicit billing route for the live model; only set by a host-managed runtime. */
+	private currentModelSource: ModelSource | undefined;
+	/** Keys pushed by the IDE host; they replace file keys on every auth refresh. */
+	private readonly credentialGenerations = new Map<ByokProviderId, number>();
+	private hostProviderKeys: ResolvedProviderKey[] | null = null;
 	private successfulModelRefs: ModelRef[];
 	private currentModelProfile: ModelProfile;
 	private readonly currentFormat: OutputFormat;
@@ -79,6 +93,11 @@ export class Config {
 	private skillDiscoveryEnabled = false;
 	private notifyEnabled = false;
 	private imageGenerationEnabled = false;
+	/** Selected image model as `provider/name`; undefined keeps the built-in default. */
+	private imageModel: { provider: string; name: string } | undefined;
+	private videoGenerationEnabled = false;
+	/** Selected video model as `provider/name`; video generation has no default model. */
+	private videoModel: { provider: string; name: string } | undefined;
 	private openRouterProvider: string | undefined;
 	private verboseEnabled = true;
 	private readonly currentMemoryProfile: MemoryProfile;
@@ -106,12 +125,9 @@ export class Config {
 			options.homeDir !== undefined || options.env === undefined;
 		const persistedConfig =
 			options.homeDir !== undefined || options.env === undefined
-				? readBackboardConfig(options.homeDir, false)
+				? readBackboardConfig(options.homeDir)
 				: {};
 
-		if (persistedConfig.model && !isProviderAvailable(persistedConfig.model.provider)) {
-			delete persistedConfig.model;
-		}
 		const profileName = this.flags.profile ?? DEFAULTS.profile;
 		this.profile = getProfile(profileName);
 
@@ -150,10 +166,7 @@ export class Config {
 				claudeSubscriptionOnlyDefault ??
 				keyOnlyDefault ??
 				this.profile.model);
-		if (!isProviderAvailable(this.currentModel.provider)) {
-			throw new Error("Subscriptions are currently unavailable. Choose a Backboard or API key model.");
-		}
-		this.successfulModelRefs = (persistedConfig.successfulModels ?? []).filter(model => isProviderAvailable(model.provider));
+		this.successfulModelRefs = persistedConfig.successfulModels ?? [];
 		this.currentModelProfile = resolveModelProfile(this.currentModel);
 		this.currentFormat = this.flags.format
 			? parseOutputFormat(this.flags.format)
@@ -185,12 +198,77 @@ export class Config {
 		return formatModel(this.currentModel);
 	}
 
-	setModel(ref: ModelRef): void {
-		if (!isProviderAvailable(ref.provider)) {
-			throw new Error("Subscriptions are currently unavailable. Choose a Backboard or API key model.");
-		}
+	/**
+	 * Selects the live model. `source` is the explicit billing route a host-managed
+	 * runtime attaches to every selection; omitting it clears the route, so a
+	 * recovery fallback never inherits a key-billed source it did not ask for.
+	 */
+	setModel(ref: ModelRef, source?: ModelSource): void {
 		this.currentModel = ref;
+		this.currentModelSource = source;
 		this.currentModelProfile = resolveModelProfile(ref);
+	}
+
+	/** The explicit billing route for the live model, if the host attached one. */
+	get modelSource(): ModelSource | undefined {
+		return this.currentModelSource;
+	}
+
+	/** True when provider keys come only from the IDE host (BACKBOARD_HOST_MANAGED_KEYS). */
+	get hostManagedProviderKeys(): boolean {
+		return hostManagedProviderKeys();
+	}
+
+	/**
+	 * Replaces the provider keys with the host's snapshot. The snapshot is the
+	 * whole set, so an absent provider is a removal. Read at request time by the
+	 * BYOK client and the router, so no client is rebuilt.
+	 */
+	setHostProviderKeys(keys: readonly ResolvedProviderKey[]): void {
+		this.updateCredentialGenerations(keys);
+		this.hostProviderKeys = keys.map((entry) => ({ ...entry }));
+		this.auth = { ...this.auth, providerKeys: this.hostProviderKeys };
+	}
+
+	/** Captures a lease, invalidated synchronously by every key mutation. */
+	providerCredential(provider: ByokProviderId): ProviderCredential | null {
+		const key = this.auth.providerKeys.find(
+			(entry) => entry.provider === provider,
+		)?.key;
+		if (!key) return null;
+		const generation = this.credentialGenerations.get(provider) ?? 0;
+		return {
+			key,
+			generation,
+			assertCurrent: () => {
+				if (
+					(this.credentialGenerations.get(provider) ?? 0) !== generation ||
+					this.auth.providerKeys.find((entry) => entry.provider === provider)
+						?.key !== key
+				) {
+					throw new CredentialChangedError(provider);
+				}
+			},
+		};
+	}
+
+	private updateCredentialGenerations(
+		keys: readonly ResolvedProviderKey[],
+	): void {
+		const providers = new Set(
+			[...this.auth.providerKeys, ...keys].map((entry) => entry.provider),
+		);
+		for (const provider of providers) {
+			if (
+				this.auth.providerKeys.find((entry) => entry.provider === provider)
+					?.key !== keys.find((entry) => entry.provider === provider)?.key
+			) {
+				this.credentialGenerations.set(
+					provider,
+					(this.credentialGenerations.get(provider) ?? 0) + 1,
+				);
+			}
+		}
 	}
 
 	/** Working models, newest first, for automatic recovery from provider capacity. */
@@ -213,7 +291,7 @@ export class Config {
 			),
 		].slice(0, 10);
 		if (!this.recoveryPersistenceEnabled) return;
-		const existing = readBackboardConfig(this.persistedConfigHomeDir, false);
+		const existing = readBackboardConfig(this.persistedConfigHomeDir);
 		await saveBackboardConfig(
 			{ ...existing, successfulModels: this.successfulModelRefs },
 			this.persistedConfigHomeDir,
@@ -271,6 +349,8 @@ export class Config {
 			computerUseEnabled: this.computerUseEnabled,
 			browserUseEnabled: this.browserUseEnabled,
 			skillDiscoveryEnabled: this.skillDiscoveryEnabled,
+			videoGenerationEnabled:
+				this.videoGenerationEnabled && this.videoModel !== undefined,
 		});
 	}
 
@@ -320,6 +400,30 @@ export class Config {
 
 	setImageGenerationEnabled(enabled: boolean): void {
 		this.imageGenerationEnabled = enabled;
+	}
+
+	get selectedImageModel(): { provider: string; name: string } | undefined {
+		return this.imageModel;
+	}
+
+	setImageModel(model: { provider: string; name: string } | undefined): void {
+		this.imageModel = model;
+	}
+
+	get isVideoGenerationEnabled(): boolean {
+		return this.videoGenerationEnabled;
+	}
+
+	setVideoGenerationEnabled(enabled: boolean): void {
+		this.videoGenerationEnabled = enabled;
+	}
+
+	get selectedVideoModel(): { provider: string; name: string } | undefined {
+		return this.videoModel;
+	}
+
+	setVideoModel(model: { provider: string; name: string } | undefined): void {
+		this.videoModel = model;
 	}
 
 	get selectedOpenRouterProvider(): string | undefined {
@@ -372,7 +476,7 @@ export class Config {
 	}
 
 	async saveRuntimeSelection(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir, false);
+		const existing = readBackboardConfig(this.persistedConfigHomeDir);
 		await saveBackboardConfig(
 			{
 				...existing,
@@ -392,7 +496,7 @@ export class Config {
 	}
 
 	async saveNotifyPreference(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir, false);
+		const existing = readBackboardConfig(this.persistedConfigHomeDir);
 		await saveBackboardConfig(
 			{
 				...existing,
@@ -403,7 +507,7 @@ export class Config {
 	}
 
 	async saveVerbosePreference(): Promise<void> {
-		const existing = readBackboardConfig(this.persistedConfigHomeDir, false);
+		const existing = readBackboardConfig(this.persistedConfigHomeDir);
 		await saveBackboardConfig(
 			{
 				...existing,
@@ -426,9 +530,17 @@ export class Config {
 	 * running session picks them up without a restart.
 	 */
 	refreshAuth(): AuthState {
+		const previous = this.auth;
 		this.auth = resolveAuth(
 			this.homeDir === undefined ? {} : { homeDir: this.homeDir },
 		);
+		if (this.hostProviderKeys) {
+			this.auth = { ...this.auth, providerKeys: this.hostProviderKeys };
+		}
+		const refreshed = this.auth;
+		this.auth = previous;
+		this.updateCredentialGenerations(refreshed.providerKeys);
+		this.auth = refreshed;
 		const next = this.auth.backboard ?? anonymousEnv();
 		this.env.apiKey = next.apiKey;
 		this.env.apiUrl = next.apiUrl;

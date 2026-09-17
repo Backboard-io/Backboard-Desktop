@@ -12,10 +12,10 @@ import { AgentController } from "../core/agent/AgentController.ts";
 import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
 import { AgentTaskStore } from "../core/agent/AgentTaskStore.ts";
 import { EventBus } from "../core/bus/EventBus.ts";
-import { createWorkerSnapshotMutation } from "../core/checkpoints/WorkerSnapshotMutation.ts";
-import { EditorRewind } from "../core/checkpoints/EditorRewind.ts";
 import { CheckpointManager } from "../core/checkpoints/CheckpointManager.ts";
 import { CheckpointStore } from "../core/checkpoints/CheckpointStore.ts";
+import { EditorRewind } from "../core/checkpoints/EditorRewind.ts";
+import { createWorkerSnapshotMutation } from "../core/checkpoints/WorkerSnapshotMutation.ts";
 import { HookController, loadHookConfig } from "../core/hooks/index.ts";
 import { LspService, resolveLspFlags } from "../core/lsp/index.ts";
 import {
@@ -23,6 +23,8 @@ import {
 	McpClientManager,
 	McpController,
 	McpToolRegistrar,
+	type McpServerConfig,
+	type McpServerFileEntry,
 } from "../core/mcp/index.ts";
 import {
 	buildPermissionContext,
@@ -41,15 +43,17 @@ import { GitWorktreeManager } from "../core/workspaces/GitWorktreeManager.ts";
 import { WorkerWorkspaceManager } from "../core/workspaces/WorkerWorkspaceManager.ts";
 import { WorkerWorkspaceStore } from "../core/workspaces/WorkerWorkspaceStore.ts";
 import { buildStartupEnvironmentPrompt } from "../prompts/system/startupEnvironment.ts";
+import type { ModelSource } from "../providers/backboard/types.ts";
 import { createAgentClient } from "../providers/createAgentClient.ts";
 import { createDefaultTools } from "../tools/index.ts";
 import { errorMessage } from "../utils/errors.ts";
 import { shortId } from "../utils/id.ts";
-import type {
-	ServeControl,
-	ServeFileAttachment,
-	ServeRecord,
-	ServeRecordType,
+import {
+	SERVE_CAPABILITIES,
+	type ServeControl,
+	type ServeFileAttachment,
+	type ServeRecord,
+	type ServeRecordType,
 } from "./ServeTypes.ts";
 import { parseControlLine } from "./serveControl.ts";
 import { buildServeConversationContext } from "./serveConversationContext.ts";
@@ -340,6 +344,30 @@ export async function runServe(argv: string[]): Promise<void> {
 	let rewinding = false;
 	const pendingOps = new Set<Promise<void>>();
 	let disposing = false;
+	let credentialRevision = -1;
+	let credentialSnapshot = "";
+	// A host that manages keys must state the route with every selection, and
+	// may not move the live model to another billing source while a turn is
+	// running: a selection takes effect only after the whole task is idle.
+	const assertRouteAllowed = (
+		model: string | undefined,
+		source: ModelSource | undefined,
+	): void => {
+		if (model === undefined) return;
+		if (config.hostManagedProviderKeys && source === undefined) {
+			throw new Error(
+				"A billing source is required for model selections in host-managed mode",
+			);
+		}
+		if (
+			(controller.isRunning || agentTaskManager.hasActiveTasks) &&
+			(model !== config.modelString || source !== config.modelSource)
+		) {
+			throw new Error(
+				"The model or billing source cannot change while a turn or its workers are running; wait for them to finish",
+			);
+		}
+	};
 	const handleControl = async (control: ServeControl): Promise<void> => {
 		switch (control.op) {
 			case "prepareRewind":
@@ -382,6 +410,10 @@ export async function runServe(argv: string[]): Promise<void> {
 			case "submit": {
 				if (rewinding) throw new Error("Wait for file restoration to finish");
 				editorRewind.assertReady();
+				assertRouteAllowed(control.model, control.source);
+				if (control.threadId && session.threadId === null) {
+					session.threadId = control.threadId;
+				}
 				if (control.skills?.length) {
 					await selectSkillsByName(control.skills);
 				}
@@ -400,7 +432,7 @@ export async function runServe(argv: string[]): Promise<void> {
 					onStart: async () => {
 						config.refreshAuth();
 						if (control.model !== undefined) {
-							config.setModel(parseModel(control.model));
+							config.setModel(parseModel(control.model), control.source);
 						}
 						if (control.thinking !== undefined) {
 							config.setThinking(parseThinking(control.thinking));
@@ -425,6 +457,15 @@ export async function runServe(argv: string[]): Promise<void> {
 						}
 						if (control.imageGeneration !== undefined) {
 							config.setImageGenerationEnabled(control.imageGeneration);
+						}
+						if (control.imageModel !== undefined) {
+							config.setImageModel(parseGenerativeModelRef(control.imageModel));
+						}
+						if (control.videoGeneration !== undefined) {
+							config.setVideoGenerationEnabled(control.videoGeneration);
+						}
+						if (control.videoModel !== undefined) {
+							config.setVideoModel(parseGenerativeModelRef(control.videoModel));
 						}
 						config.setOpenRouterProvider(control.openRouterProvider);
 						// Sent on every turn; an absent list clears prior client
@@ -454,6 +495,11 @@ export async function runServe(argv: string[]): Promise<void> {
 				}
 				return;
 			}
+			case "waitForIdle":
+				await controller.waitForIdle();
+				await workerWorkspaceManager.waitForIdle();
+				writeRecord("serve:ack", control.requestId, { op: "waitForIdle" });
+				return;
 			case "warmup":
 				// Process startup itself is the main warm-up. A model request also
 				// establishes DNS/TLS without creating remote assistant state.
@@ -477,18 +523,100 @@ export async function runServe(argv: string[]): Promise<void> {
 				);
 				return;
 			case "setModel":
-				config.setModel(parseModel(control.model));
+				assertRouteAllowed(control.model, control.source);
+				config.setModel(parseModel(control.model), control.source);
 				writeRecord("serve:ack", control.requestId, {
 					op: "setModel",
 					model: config.modelString,
+					...(config.modelSource ? { source: config.modelSource } : {}),
 				});
 				return;
+			case "setMcpServers": {
+				// The IDE owns MCP configuration for the session and pushes the
+				// full set on every change. Servers it no longer lists are
+				// disconnected; untouched servers keep their live connection.
+				// Servers configured directly in `.backboard/mcp.json` stay
+				// available: the push layers on top of the files on disk.
+				const configured = await loadMcpConfig({
+					cwd: config.cwd,
+					paths: config.mcpConfigPaths,
+				});
+				const servers: Record<string, McpServerFileEntry> = {};
+				for (const server of configured.servers) {
+					if (server.disabled) continue;
+					servers[server.name] = mcpConfigToFileEntry(server);
+				}
+				for (const [name, entry] of Object.entries(control.servers)) {
+					servers[name] = entry;
+				}
+				const result = await mcpManager.setServers(
+					servers,
+					new AbortController().signal,
+					{
+						forceNames: control.force,
+						configSource: {
+							scope: "user",
+							path: config.mcpConfigPaths.user,
+						},
+					},
+				);
+				mcpToolRegistrar.applyRefresh(result);
+				writeRecord("serve:mcp", control.requestId, {
+					servers: mcpManager.listServerStatuses(),
+					warnings: result.warnings,
+				});
+				return;
+			}
+			case "setCredentials": {
+				const snapshot = JSON.stringify(
+					[...control.providerKeys].sort((a, b) =>
+						a.provider.localeCompare(b.provider),
+					),
+				);
+				if (
+					control.revision < credentialRevision ||
+					(control.revision === credentialRevision &&
+						snapshot !== credentialSnapshot)
+				) {
+					throw new Error("Stale or conflicting credential revision");
+				}
+				credentialRevision = control.revision;
+				credentialSnapshot = snapshot;
+				// Synchronous on purpose: stdin lines are dispatched in order but
+				// handlers run concurrently, so only the synchronous prefix of a
+				// handler is guaranteed to precede the next line's work.
+				config.setHostProviderKeys(
+					control.providerKeys.map(({ provider, key }) => ({ provider, key })),
+				);
+				writeRecord("serve:ack", control.requestId, {
+					op: "setCredentials",
+					revision: control.revision,
+					providers: control.providerKeys.map((entry) => entry.provider),
+				});
+				return;
+			}
 			case "listModels":
 				config.refreshAuth();
 				writeRecord(
 					"serve:models",
 					control.requestId,
 					await client.listModels(),
+				);
+				return;
+			case "listImageModels":
+				config.refreshAuth();
+				writeRecord(
+					"serve:imageModels",
+					control.requestId,
+					(await client.listImageModels?.()) ?? { models: [], total: 0 },
+				);
+				return;
+			case "listVideoModels":
+				config.refreshAuth();
+				writeRecord(
+					"serve:videoModels",
+					control.requestId,
+					(await client.listVideoModels?.()) ?? { models: [], total: 0 },
 				);
 				return;
 			case "listTools":
@@ -576,6 +704,7 @@ export async function runServe(argv: string[]): Promise<void> {
 		cwd: config.cwd,
 		model: config.modelString,
 		upstream: "Backboard-io/Backboard-R-CLI",
+		capabilities: [...SERVE_CAPABILITIES],
 		runtime,
 	});
 
@@ -609,6 +738,48 @@ export async function runServe(argv: string[]): Promise<void> {
 	if (!disposing) controller.cancel({ clearQueue: true });
 	await Promise.allSettled([...pendingOps]);
 	await flush();
+}
+
+/**
+ * Parses a `provider/name` selection into the pair Backboard expects.
+ * Provider names never contain a slash, so splitting on the first one keeps
+ * OpenRouter video ids (e.g. `openrouter/google/veo-3.1`) intact.
+ */
+/**
+ * Converts a normalized MCP config back into the on-disk entry shape, used
+ * when re-reading `.backboard/mcp.json` servers into a `setMcpServers` push.
+ */
+function mcpConfigToFileEntry(server: McpServerConfig): McpServerFileEntry {
+	if (server.type === "stdio") {
+		return {
+			type: "stdio",
+			...(server.command ? { command: server.command } : {}),
+			args: [...server.args],
+			...(Object.keys(server.env).length > 0 ? { env: { ...server.env } } : {}),
+			...(server.cwd ? { cwd: server.cwd } : {}),
+		};
+	}
+	return {
+		type: "streamable-http",
+		...(server.url ? { url: server.url } : {}),
+		...(Object.keys(server.headers).length > 0
+			? { headers: { ...server.headers } }
+			: {}),
+	};
+}
+
+function parseGenerativeModelRef(
+	value: string,
+): { provider: string; name: string } | undefined {
+	const trimmed = value.trim();
+	const separator = trimmed.indexOf("/");
+	if (separator <= 0 || separator === trimmed.length - 1) {
+		return undefined;
+	}
+	return {
+		provider: trimmed.slice(0, separator),
+		name: trimmed.slice(separator + 1),
+	};
 }
 
 function parseMaxWorkers(value: string | undefined): number {

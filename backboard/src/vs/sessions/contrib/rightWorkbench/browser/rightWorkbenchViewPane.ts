@@ -75,6 +75,7 @@ import { OptimusChatViewPane } from '../../../../optimus/contrib/chat/browser/op
 import { buildReviewTreeChildren, IReviewResource, isReviewResource, ReviewTreeDelegate, ReviewTreeElement, ReviewTreeRenderer, ReviewTreeSorter } from './reviewTree.js';
 import { onDidRequestModeEmitter, pendingModeRequest, setPendingModeRequest, type RightWorkbenchMode, type IRightWorkbenchModeRequest, type IRightWorkbenchModeEntry } from './rightWorkbench.js';
 import { createRightWorkbenchReviewContextKey, RightWorkbenchReviewContext } from './rightWorkbenchReviewContext.js';
+import { RightWorkbenchReviewSource } from './rightWorkbenchReviewSource.js';
 import { RightWorkbenchBrowserSuggestions, normalizeRightWorkbenchUrl } from './rightWorkbenchBrowserSuggestions.js';
 import { RightWorkbenchEditorPool } from './rightWorkbenchEditorPool.js';
 
@@ -118,6 +119,7 @@ interface IRightWorkbenchTabState {
 }
 
 export class RightWorkbenchViewPane extends ViewPane {
+	private readonly reviewSource: RightWorkbenchReviewSource;
 
 	private readonly tabOpenSequencer = new Sequencer();
 	private readonly domStore = this._register(new DisposableStore());
@@ -217,7 +219,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private get useSimpleRightWorkbench(): boolean {
-		return !this.environmentService.isOptimusWindow;
+		// Focused Advanced chats reuse Simple's launcher, tabs, and Review
+		// surface. The editor-style tool rail stays on the dashboard only.
+		return !this.useEditorSidebar;
 	}
 
 	constructor(
@@ -250,6 +254,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 		this.editorPool = this._register(this.instantiationService.createInstance(RightWorkbenchEditorPool));
+		this.reviewSource = this._register(instantiationService.createInstance(RightWorkbenchReviewSource));
 		this.editorSidebarFolderUri = this.readStoredEditorSidebarFolder();
 		this.reviewLoadFullFiles = !this.useSimpleRightWorkbench;
 		this.reviewWordDiffs = this.useSimpleRightWorkbench;
@@ -1786,11 +1791,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 		review.classList.remove('sessions-right-workbench-review-empty-state');
 		this.reviewEmptyElement?.remove();
 		this.reviewEmptyElement = undefined;
-		// A stacked review must reopen when its file set changes, even when the
-		// selected file stays the same.
-		if (this.useSimpleRightWorkbench && (this.reviewResources.length !== reviewResources.length || this.reviewResources.some((resource, index) => resource.key !== reviewResources[index].key))) {
-			this.openedReviewResourceKey = undefined;
-		}
+		// The stacked diff's source updates its file list in place. Only a change
+		// of selection or review context needs to open/reveal an editor.
 		this.reviewResources = reviewResources;
 		const selectedReviewResource = this.getSelectedReviewResource(reviewResources);
 		const filteredResources = this.getFilteredReviewResources();
@@ -1853,12 +1855,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private toSessionReviewResources(changes: readonly ISessionFileChange[], generation: number): IReviewResource[] {
 		const resources = new Map<string, IReviewResource>();
-		const multiDiffResources = changes.map(change => ({
-			original: { resource: change.originalUri },
-			modified: { resource: isIChatSessionFileChange2(change) ? change.modifiedUri ?? change.uri : change.modifiedUri },
-			goToFileResource: isIChatSessionFileChange2(change) ? change.uri : change.modifiedUri,
-		}));
-		const multiDiffSource = URI.from({ scheme: 'right-workbench-review', path: `/${encodeURIComponent(this.reviewContext.resourceKey)}`, query: JSON.stringify(multiDiffResources) });
+		const multiDiffSource = this.useSimpleRightWorkbench ? this.reviewSource.update(changes, generation) : undefined;
 		for (const change of changes) {
 			const uri = isIChatSessionFileChange2(change) ? change.uri : change.modifiedUri;
 			resources.set(uri.toString(), {
@@ -1872,7 +1869,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 					if (this.useSimpleRightWorkbench) {
 						return !!await this.openReviewEditorInEmbeddedHost({
 							multiDiffSource,
-							resources: multiDiffResources,
 							label: localize('rightWorkbench.threadChanges', "Thread changes"),
 							isTransient: true,
 							options: { pinned: true, viewState: { revealData: { resource: { original: change.originalUri, modified: modifiedUri } } } },

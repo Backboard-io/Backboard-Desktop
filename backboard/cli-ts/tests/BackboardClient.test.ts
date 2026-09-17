@@ -20,19 +20,38 @@ describe("BackboardClient streaming transport", () => {
 		let posts = 0;
 		globalThis.fetch = (async () => {
 			posts++;
-			return new Response(workerIdentityMismatch.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join(""));
+			return new Response(
+				workerIdentityMismatch
+					.map((frame) => `data: ${JSON.stringify(frame)}\n\n`)
+					.join(""),
+			);
 		}) as unknown as typeof fetch;
-		const client = new BackboardClient({ apiKey: "test", apiUrl: "https://api.example.test" });
+		const client = new BackboardClient({
+			apiKey: "test",
+			apiUrl: "https://api.example.test",
+		});
 		const events = [];
 		for await (const event of client.runToolOutputs({
-			thread_id: "synthetic_thread", run_id: "synthetic_run",
-			tool_outputs: [{ tool_call_id: "previous_successful_call", output: "ok" }], tools: [],
-		})) events.push(event);
+			thread_id: "synthetic_thread",
+			run_id: "synthetic_run",
+			tool_outputs: [
+				{ tool_call_id: "previous_successful_call", output: "ok" },
+			],
+			tools: [],
+		}))
+			events.push(event);
 		expect(posts).toBe(1);
-		expect(events.filter(event => event.kind === "requires_action" || event.kind === "completed")).toEqual([]);
+		expect(
+			events.filter(
+				(event) =>
+					event.kind === "requires_action" || event.kind === "completed",
+			),
+		).toEqual([]);
 		expect(events.at(-1)).toEqual({
 			kind: "failed",
-			error: expect.stringContaining("changed tool name from agent_spawn to glob"),
+			error: expect.stringContaining(
+				"changed tool name from agent_spawn to glob",
+			),
 			retryable: false,
 		});
 	});
@@ -100,6 +119,51 @@ describe("BackboardClient streaming transport", () => {
 			tools: [],
 			stream: true,
 		});
+	});
+
+	it("never puts the billing route on the wire", async () => {
+		const bodies: Record<string, unknown>[] = [];
+		globalThis.fetch = (async (
+			_input: Parameters<typeof fetch>[0],
+			init?: Parameters<typeof fetch>[1],
+		) => {
+			bodies.push(JSON.parse(String(init?.body)));
+			return new Response(
+				JSON.stringify({ thread_id: "t", content: "", status: "COMPLETED" }),
+				{ status: 200 },
+			);
+		}) as unknown as typeof fetch;
+		const client = new BackboardClient({
+			apiKey: "test",
+			apiUrl: "https://api.example.test",
+		});
+
+		await client.sendMessage({ content: "hi", source: "byok" });
+		for await (const _event of client.runMessage({
+			content: "hi",
+			source: "byok",
+		})) {
+			// drain
+		}
+		for await (const _event of client.runToolOutputs({
+			thread_id: "t",
+			run_id: "r",
+			tool_outputs: [],
+			source: "byok",
+		})) {
+			// drain
+		}
+		for await (const _event of client.runToolOutputs({
+			thread_id: "t",
+			tool_outputs: [],
+			source: "byok",
+		})) {
+			// drain
+		}
+
+		expect(bodies).toHaveLength(4);
+		expect(bodies.filter((body) => "source" in body)).toEqual([]);
+		expect(bodies[0]).toEqual({ content: "hi" });
 	});
 
 	it("announces a streamed Write before its arguments finish", async () => {

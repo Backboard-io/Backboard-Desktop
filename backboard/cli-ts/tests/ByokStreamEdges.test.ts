@@ -4,7 +4,7 @@ import type {
 	ProviderEvent,
 	SendMessageRequest,
 } from "../src/providers/backboard/types.ts";
-import { requiresDisabledToolReasoning } from "../src/providers/byok/adapters/OpenAIAdapter.ts";
+import { requiresDisabledToolReasoning } from "../src/providers/byok/adapters/OpenAIModelRegistry.ts";
 import { ByokClient } from "../src/providers/byok/ByokClient.ts";
 
 const originalFetch = globalThis.fetch;
@@ -263,7 +263,7 @@ describe("OpenAI tool reasoning compatibility", () => {
 
 		await collect(
 			client().runMessage({
-				...request("openai", "gpt-5.6-sol"),
+				...request("openai", "gpt-5.6"),
 				tools: [],
 				thinking: { effort: "high" },
 			}),
@@ -276,20 +276,38 @@ describe("OpenAI tool reasoning compatibility", () => {
 
 describe("Gemini abnormal finishes", () => {
 	it("keeps id-less calls unique across simultaneous workers and later rounds", async () => {
-		stubStream([`data: ${JSON.stringify({ candidates: [{
-			content: { parts: [
-				{ functionCall: { name: "read_file", args: { path: "a.ts" } } },
-				{ functionCall: { name: "read_file", args: { path: "b.ts" } } },
-				{ functionCall: { id: "provider-owned-id", name: "read_file", args: { path: "c.ts" } } },
-			] }, finishReason: "STOP",
-		}] })}`]);
-		const run = () => collect(client().runMessage(request("google", "gemini-2.5-flash")));
+		stubStream([
+			`data: ${JSON.stringify({
+				candidates: [
+					{
+						content: {
+							parts: [
+								{ functionCall: { name: "read_file", args: { path: "a.ts" } } },
+								{ functionCall: { name: "read_file", args: { path: "b.ts" } } },
+								{
+									functionCall: {
+										id: "provider-owned-id",
+										name: "read_file",
+										args: { path: "c.ts" },
+									},
+								},
+							],
+						},
+						finishReason: "STOP",
+					},
+				],
+			})}`,
+		]);
+		const run = () =>
+			collect(client().runMessage(request("google", "gemini-2.5-flash")));
 		const streams = await Promise.all([run(), run()]);
 		streams.push(await run());
 		const localIds: string[] = [];
 		for (const events of streams) {
-			const ready = events.flatMap(event => event.kind === "tool_ready" ? [event.call] : []);
-			const final = events.find(event => event.kind === "requires_action");
+			const ready = events.flatMap((event) =>
+				event.kind === "tool_ready" ? [event.call] : [],
+			);
+			const final = events.find((event) => event.kind === "requires_action");
 			expect(final).toMatchObject({ kind: "requires_action", calls: ready });
 			expect(ready[2]?.id).toBe("provider-owned-id");
 			for (const call of ready.slice(0, 2)) {

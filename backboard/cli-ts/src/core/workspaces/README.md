@@ -97,12 +97,11 @@ files permitted by `.gitignore`. Untracked `node_modules`, `.cache`, `.next`,
 `.turbo`, `.venv`, `__pycache__`, `.backboard`, and `.backboard_ide` trees are
 excluded. Git metadata is always excluded. Tracked files remain included even
 when ignored. Symbolic links and special files are refused explicitly. The
-snapshot refuses more than 100,000 source files, 1 GiB total, or 16 MiB per file;
-it never silently cuts a source inventory at a cap. Storage must be outside the
+snapshot bounds neither the number of source files nor their size; a large
+source inventory is never silently cut. Storage must be outside the
 coordinator to prevent recursive copying. Private Git attributes disable content
 filters and line-ending conversion so binary and CRLF bytes remain exact.
-The larger baseline capacity does not expand worker integration limits: results
-remain limited to 10,000 changed files and 256 MiB of combined before/after bytes.
+Worker integration applies no file-count or byte ceiling to captured results.
 
 A snapshot integration derives file changes from immutable private Git objects,
 checks current coordinator bytes and executable modes against baseline/result,

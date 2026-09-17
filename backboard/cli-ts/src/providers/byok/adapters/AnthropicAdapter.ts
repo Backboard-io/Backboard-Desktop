@@ -13,6 +13,14 @@ import type {
 } from "../ByokTypes.ts";
 import { getJson, postSseJson } from "../httpStream.ts";
 import {
+	credentialKey,
+	type ProviderCredential,
+} from "../ProviderCredential.ts";
+import {
+	decodeProviderMetadata,
+	encodeProviderMetadata,
+} from "../ProviderMetadata.ts";
+import {
 	thinkingBudgetTokens,
 	thinkingLevel,
 	usesNativeAdaptiveThinking,
@@ -64,6 +72,77 @@ interface PendingToolBlock {
 	json: string;
 }
 
+/**
+ * A thinking block exactly as Anthropic emitted it. With extended thinking on,
+ * the assistant turn that requested tools must be replayed with these blocks
+ * unmodified (signature included) when the tool results go back, or the API
+ * rejects the continuation.
+ */
+type AnthropicThinkingBlock =
+	| { type: "thinking"; thinking: string; signature: string }
+	| { type: "redacted_thinking"; data: string };
+
+interface AnthropicThinkingMetadata {
+	model: string;
+	thinking: AnthropicThinkingBlock[];
+}
+
+/** Families that predate extended thinking; the API rejects `thinking` for them. */
+const NO_THINKING_PATTERNS: readonly RegExp[] = [
+	/^claude-3-5-/,
+	/^claude-3-(?:opus|sonnet|haiku)/,
+	/^claude-2/,
+	/^claude-instant/,
+];
+
+export function supportsAnthropicThinking(model: string): boolean {
+	const name = model.trim().toLowerCase();
+	return !NO_THINKING_PATTERNS.some((pattern) => pattern.test(name));
+}
+
+/** Serializes captured thinking blocks for `ByokMessage.providerMetadata`. */
+function thinkingMetadata(
+	model: string,
+	blocks: readonly AnthropicThinkingBlock[],
+): string | undefined {
+	if (blocks.length === 0) return undefined;
+	const metadata: AnthropicThinkingMetadata = { model, thinking: [...blocks] };
+	return encodeProviderMetadata("anthropic", model, metadata);
+}
+
+function parseThinkingMetadata(
+	raw: string | undefined,
+): AnthropicThinkingMetadata | null {
+	if (!raw) return null;
+	try {
+		const parsed = JSON.parse(raw) as Partial<AnthropicThinkingMetadata>;
+		if (
+			typeof parsed !== "object" ||
+			parsed === null ||
+			typeof parsed.model !== "string" ||
+			!Array.isArray(parsed.thinking)
+		) {
+			return null;
+		}
+		const thinking = parsed.thinking.filter(
+			(block): block is AnthropicThinkingBlock =>
+				typeof block === "object" &&
+				block !== null &&
+				((block.type === "thinking" &&
+					typeof block.thinking === "string" &&
+					typeof block.signature === "string" &&
+					block.signature.length > 0) ||
+					(block.type === "redacted_thinking" &&
+						typeof block.data === "string")),
+		);
+		return thinking.length > 0 ? { model: parsed.model, thinking } : null;
+	} catch {
+		// Metadata written by another adapter (Gemini signatures) or an older
+		// build: replay nothing rather than send blocks Anthropic never issued.
+		return null;
+	}
+}
+
 export const anthropicAdapter: ProviderAdapter = {
 	id: "anthropic",
 	label: "Anthropic",
@@ -71,10 +150,10 @@ export const anthropicAdapter: ProviderAdapter = {
 	keyHint: "sk-ant-...",
 
 	looksLikeKey(key) {
-		return /^sk-ant-[\w-]{20,}$/.test(key.trim());
+		return /^sk-ant-[\w-]{20,}$/.test(credentialKey(key).trim());
 	},
 
-	async validateKey(key, signal) {
+	async validateKey(key, signal, transport) {
 		// A models list is the cheapest authenticated GET: it costs no tokens
 		// and still fails closed on a bad key.
 		await getJson<AnthropicModelsResponse>(
@@ -82,25 +161,34 @@ export const anthropicAdapter: ProviderAdapter = {
 			headers(key),
 			"anthropic",
 			signal,
+			key,
+			transport,
 		);
 	},
 
-	async listModels(key, signal) {
+	async listModels(key, signal, transport) {
 		const response = await getJson<AnthropicModelsResponse>(
 			`${API_BASE}/models?limit=1000`,
 			headers(key),
 			"anthropic",
 			signal,
+			key,
+			transport,
 		);
 		const models: ModelCatalogItem[] = [];
 		for (const model of response.data ?? []) {
 			if (!model.id) continue;
+			const thinking = supportsAnthropicThinking(model.id);
 			models.push({
 				name: model.id,
 				provider: "anthropic",
 				model_type: "llm",
+				...(model.display_name ? { display_name: model.display_name } : {}),
 				last_updated: model.created_at ?? null,
-				supports_thinking: true,
+				supports_thinking: thinking,
+				// An empty list tells the picker not to offer reasoning controls
+				// this adapter would never honour.
+				...(thinking ? {} : { supported_effort_levels: [] }),
 				context_limit: contextWindowFor({
 					provider: "anthropic",
 					model: model.id,
@@ -110,8 +198,8 @@ export const anthropicAdapter: ProviderAdapter = {
 		return models;
 	},
 
-	supportsThinking() {
-		return true;
+	supportsThinking(model) {
+		return supportsAnthropicThinking(model);
 	},
 
 	stream(request, key) {
@@ -119,13 +207,16 @@ export const anthropicAdapter: ProviderAdapter = {
 	},
 };
 
-function headers(key: string): Record<string, string> {
-	return { "x-api-key": key.trim(), "anthropic-version": API_VERSION };
+function headers(key: ProviderCredential): Record<string, string> {
+	return {
+		"x-api-key": credentialKey(key).trim(),
+		"anthropic-version": API_VERSION,
+	};
 }
 
 async function* streamAnthropic(
 	request: ByokStreamRequest,
-	key: string,
+	key: ProviderCredential,
 ): AsyncIterable<ProviderEvent> {
 	const maxTokens = maxOutputTokensFor(
 		request.model,
@@ -143,11 +234,13 @@ async function* streamAnthropic(
 				cache_control: EPHEMERAL,
 			},
 		],
-		messages: toAnthropicMessages(request.messages),
+		messages: toAnthropicMessages(request.messages, request.model),
 		stream: true,
 	};
 	if (request.tools.length > 0) body.tools = toAnthropicTools(request.tools);
-	applyAnthropicThinking(body, request, maxTokens);
+	if (supportsAnthropicThinking(request.model)) {
+		applyAnthropicThinking(body, request, maxTokens);
+	}
 
 	yield {
 		kind: "thinking_resolved",
@@ -163,6 +256,10 @@ async function* streamAnthropic(
 
 	const blocks = new Map<number, PendingToolBlock>();
 	const toolCalls: ProviderToolCall[] = [];
+	// Thinking blocks are captured verbatim, in stream order, so a tool
+	// continuation can replay them exactly as issued.
+	const pendingThinking = new Map<number, AnthropicThinkingBlock>();
+	const thinkingBlocks: AnthropicThinkingBlock[] = [];
 	let inputTokens = 0;
 	let outputTokens = 0;
 	let cachedTokens = 0;
@@ -173,6 +270,8 @@ async function* streamAnthropic(
 	const sseRequest: Parameters<typeof postSseJson>[0] = {
 		url: `${API_BASE}/messages`,
 		headers: headers(key),
+		credential: key,
+		transport: request.transport,
 		body,
 		provider: "anthropic",
 	};
@@ -202,8 +301,25 @@ async function* streamAnthropic(
 		if (type === "content_block_start") {
 			const index = numberOf(event.index);
 			const block = event.content_block as
-				| { type?: string; id?: string; name?: string }
+				| { type?: string; id?: string; name?: string; data?: unknown }
 				| undefined;
+			if (index !== null && block?.type === "thinking") {
+				pendingThinking.set(index, {
+					type: "thinking",
+					thinking: "",
+					signature: "",
+				});
+				yield { kind: "activity" };
+				continue;
+			}
+			if (index !== null && block?.type === "redacted_thinking") {
+				pendingThinking.set(index, {
+					type: "redacted_thinking",
+					data: typeof block.data === "string" ? block.data : "",
+				});
+				yield { kind: "activity" };
+				continue;
+			}
 			if (index === null || block?.type !== "tool_use") {
 				yield { kind: "activity" };
 				continue;
@@ -234,6 +350,7 @@ async function* streamAnthropic(
 						type?: string;
 						text?: string;
 						thinking?: string;
+						signature?: string;
 						partial_json?: string;
 				  }
 				| undefined;
@@ -245,11 +362,24 @@ async function* streamAnthropic(
 				yield { kind: "assistant_delta", text: delta.text };
 				continue;
 			}
+			const thinkingBlock =
+				index === null ? undefined : pendingThinking.get(index);
 			if (delta.type === "thinking_delta" && delta.thinking) {
+				if (thinkingBlock?.type === "thinking") {
+					thinkingBlock.thinking += delta.thinking;
+				}
 				yield { kind: "reasoning_delta", text: delta.thinking };
 				continue;
 			}
-			// signature_delta is opaque continuation state, not display text.
+			// signature_delta is opaque continuation state, not display text; it
+			// is what makes the block replayable.
+			if (delta.type === "signature_delta") {
+				if (thinkingBlock?.type === "thinking" && delta.signature) {
+					thinkingBlock.signature += delta.signature;
+				}
+				yield { kind: "activity" };
+				continue;
+			}
 			if (delta.type === "input_json_delta" && index !== null) {
 				const pending = blocks.get(index);
 				if (!pending) {
@@ -269,6 +399,20 @@ async function* streamAnthropic(
 		if (type === "content_block_stop") {
 			const index = numberOf(event.index);
 			if (index === null) {
+				yield { kind: "activity" };
+				continue;
+			}
+			const finishedThinking = pendingThinking.get(index);
+			if (finishedThinking) {
+				pendingThinking.delete(index);
+				// A thinking block without its signature cannot be verified on
+				// replay, so it is dropped rather than sent back altered.
+				if (
+					finishedThinking.type === "redacted_thinking" ||
+					finishedThinking.signature
+				) {
+					thinkingBlocks.push(finishedThinking);
+				}
 				yield { kind: "activity" };
 				continue;
 			}
@@ -358,10 +502,20 @@ async function* streamAnthropic(
 	// out of room after emitting complete calls still has work to schedule.
 	if (toolCalls.length > 0) {
 		yield { kind: "usage", usage };
-		yield { kind: "requires_action", runId: null, calls: toolCalls };
+		const providerMetadata = thinkingMetadata(request.model, thinkingBlocks);
+		yield {
+			kind: "requires_action",
+			runId: null,
+			calls: toolCalls,
+			...(providerMetadata ? { providerMetadata } : {}),
+		};
 		return;
 	}
-	yield { kind: "completed", usage };
+	yield {
+		kind: "completed",
+		usage,
+		providerMetadata: thinkingMetadata(request.model, thinkingBlocks),
+	};
 }
 
 /**
@@ -467,8 +621,11 @@ function toAnthropicTools(tools: readonly OpenAITool[]): unknown[] {
  * transcript at full input price each time. With it, each leg writes only the
  * delta past the previous breakpoint and reads everything before it.
  */
-function toAnthropicMessages(messages: readonly ByokMessage[]): unknown[] {
-	const rendered = renderMessages(messages);
+export function toAnthropicMessages(
+	messages: readonly ByokMessage[],
+	model: string,
+): unknown[] {
+	const rendered = renderMessages(messages, model);
 	const last = rendered.at(-1);
 	if (last) {
 		const lastBlock = last.content.at(-1);
@@ -482,7 +639,10 @@ interface RenderedMessage {
 	content: Array<Record<string, unknown>>;
 }
 
-function renderMessages(messages: readonly ByokMessage[]): RenderedMessage[] {
+function renderMessages(
+	messages: readonly ByokMessage[],
+	model: string,
+): RenderedMessage[] {
 	const out: RenderedMessage[] = [];
 	for (const message of messages) {
 		if (message.role === "user") {
@@ -491,6 +651,21 @@ function renderMessages(messages: readonly ByokMessage[]): RenderedMessage[] {
 		}
 		if (message.role === "assistant") {
 			const content: Array<Record<string, unknown>> = [];
+			// Replay the turn's thinking blocks unchanged, and only for the model
+			// that produced them: signatures are model-bound, and a different model
+			// would reject them. Dropping them keeps the visible history intact.
+			const thinking = parseThinkingMetadata(
+				JSON.stringify(
+					decodeProviderMetadata(
+						message.providerMetadata,
+						"anthropic",
+						model ?? "",
+					),
+				),
+			);
+			if (thinking && thinking.model === model) {
+				for (const block of thinking.thinking) content.push({ ...block });
+			}
 			if (message.content)
 				content.push({ type: "text", text: message.content });
 			for (const call of message.toolCalls) {

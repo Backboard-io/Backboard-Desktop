@@ -93,7 +93,6 @@ function setOptimusRightPanelWidth(layoutService: IWorkbenchLayoutService): void
 function showOptimusCenter(layoutService: IWorkbenchLayoutService): void {
 	layoutService.setPartHidden(false, Parts.SESSIONS_PART);
 	layoutService.setPartHidden(true, Parts.EDITOR_PART);
-	layoutService.setPartHidden(true, Parts.PANEL_PART);
 }
 
 async function revealOptimusWorkspace(layoutService: IWorkbenchLayoutService, commandService: ICommandService): Promise<void> {
@@ -263,7 +262,9 @@ class OptimusLayoutContribution extends Disposable implements IWorkbenchContribu
 			this.ensureRightPanelWidth();
 		}));
 		this._register(this.layoutService.onDidChangePartVisibility(e => {
-			if ((e.partId === Parts.EDITOR_PART || e.partId === Parts.PANEL_PART) && e.visible) {
+			// Keep the board in the centre, but leave the bottom panel alone so
+			// a focused chat's terminal toggle can stay open.
+			if (e.partId === Parts.EDITOR_PART && e.visible) {
 				this.ensureOptimusCenter();
 			}
 			if (e.partId === Parts.AUXILIARYBAR_PART && e.visible) {
@@ -282,6 +283,7 @@ class OptimusLayoutContribution extends Disposable implements IWorkbenchContribu
 		this.layoutService.setPartHidden(false, Parts.SIDEBAR_PART);
 		this.layoutService.setAuxiliaryBarMaximized(false);
 		this.layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
+		this.layoutService.setPartHidden(true, Parts.PANEL_PART);
 		this.ensureOptimusCenter();
 	}
 
@@ -398,15 +400,21 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 
 	private mountControls(): void {
 		const root = this.layoutService.mainContainer;
-		const target = root.querySelector(this.isFocusedSession()
-			? '.optimus-focused-session-header .sessions-panel-header-right'
-			: '.optimus-dashboard-controls');
-		if (target && this.chrome.parentElement !== target) {
-			target.appendChild(this.chrome);
-		}
+		const focused = this.isFocusedSession();
 		const sidebarVisible = this.layoutService.isVisible(Parts.SIDEBAR_PART);
 		const rightVisible = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART);
-		const leftTarget = root.querySelector(this.isFocusedSession()
+		// Focused chats already have the Simple session toolbar (environment,
+		// terminal, right panel). Parking Optimus chrome there duplicated the
+		// close control as a stray X on the title row.
+		if (focused) {
+			this.chrome.remove();
+		} else {
+			const target = root.querySelector('.optimus-dashboard-controls');
+			if (target && this.chrome.parentElement !== target) {
+				target.appendChild(this.chrome);
+			}
+		}
+		const leftTarget = root.querySelector(focused
 			? '.optimus-focused-session-header .sessions-panel-header-left'
 			: '.optimus-dashboard-primary');
 		if (leftTarget && this.leftControls.parentElement !== leftTarget) {
@@ -434,8 +442,12 @@ class OptimusChromeContribution extends Disposable implements IWorkbenchContribu
 		};
 		placePanelButton(this.sidebarButton, sidebarVisible, '.sidebar-part-header .sessions-panel-header-right',
 			localize('optimusChrome.closeLeft', "Close Left Panel"), localize('optimusChrome.openLeft', "Open Left Panel"));
-		placePanelButton(this.secondaryButton, rightVisible, '.part.auxiliarybar .sessions-right-workbench-editor-activity, .part.auxiliarybar .sessions-right-workbench-header',
-			localize('optimusChrome.closeRight', "Close Right Panel"), localize('optimusChrome.openRight', "Open Right Panel"));
+		if (focused) {
+			this.secondaryButton.remove();
+		} else {
+			placePanelButton(this.secondaryButton, rightVisible, '.part.auxiliarybar .sessions-right-workbench-editor-activity, .part.auxiliarybar .sessions-right-workbench-header',
+				localize('optimusChrome.closeRight', "Close Right Panel"), localize('optimusChrome.openRight', "Open Right Panel"));
+		}
 		this.chrome.style.display = this.modeButton.parentElement === this.chrome || this.panelActions.childElementCount > 0 ? '' : 'none';
 	}
 

@@ -156,6 +156,7 @@ const BACKBOARD_CORE_TOOL_KINDS: ReadonlySet<ChatCoreToolKind> = new Set([
 	'browser',
 	'findSkill',
 	'findMcp',
+	'generateVideo',
 ]);
 
 /**

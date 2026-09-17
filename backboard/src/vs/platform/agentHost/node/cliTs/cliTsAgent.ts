@@ -4,8 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { AgentRewindRequest, IAgentRewindBuffer, IAgentRewindResult } from '../../common/agentRewind.js';
-import { isBackboardProviderAvailable } from '../../common/backboardSubscriptions.js';
-import { isWindows } from '../../../../base/common/platform.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -24,7 +22,12 @@ import { ActionType, type ChatAction, type SessionAction } from '../../common/st
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
 import { buildSubagentSessionUri, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, FileEditKind, MessageAttachmentKind, MessageKind, parseSubagentSessionUri, ResponsePartKind, SessionStatus, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type ToolResultFileEditContent, type Turn } from '../../common/state/sessionState.js';
-import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
+import { IAgentPluginManager, type ISyncedCustomization } from '../../common/agentPluginManager.js';
+import { McpServerStatus, type Customization, type McpServerState } from '../../common/state/protocol/channels-session/state.js';
+import { McpCustomizationController } from '../shared/mcpCustomizationController.js';
+import { parsePlugin } from '../../../agentPlugins/common/pluginParsers.js';
+import { IFileService } from '../../../files/common/files.js';
+import { McpServerType, type IMcpServerConfiguration } from '../../../mcp/common/mcpPlatformTypes.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
 import { IAgentHostCheckpointService } from '../../common/agentHostCheckpointService.js';
 import { type IFileEditRecord, ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
@@ -32,13 +35,119 @@ import { buildSessionDbUri, FileEditTracker } from '../shared/fileEditTracker.js
 import { isClaudeLoggedIn } from '../shared/agentLoginProbes.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { IAgentHostGitService, META_DIFF_BASE_BRANCH } from '../agentHostGitService.js';
-import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, backboardModelInfos, backboardMultitaskSystemContext, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
+import { BYOK_COMMANDS, BYOK_GENERATION_ARG, BYOK_KEY_ARG, BYOK_PROVIDER_ARG, BYOK_PROVIDERS, byokProviderDefinition, type ByokProviderId, isByokProviderId, isKeyBilledProvider, keyBilledProviderId, parseBillingRoute, routeProviderFamily, vendorOfProvider } from '../../common/byokProviders.js';
+import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_GENERATIVE_MEDIA_OFF, BACKBOARD_IMAGE_MODEL_CONFIG_KEY, BACKBOARD_MODE_PLAN, BACKBOARD_VIDEO_MODEL_CONFIG_KEY, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, type BridgeModel, backboardModelInfos, backboardMultitaskSystemContext, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
 
 /** cli-ts tool name excluded from the turn when Web Search is toggled off. */
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
-import { CliTsServeProcess, runCliTsCommand } from './cliTsProcess.js';
-import type { CliTsRecord, CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsPermissionMode, CliTsTurnStatus, CliTsWorkerIntegrationChange, CliTsWorkerIntegrationSnapshot, CliTsWorkerState } from './cliTsProtocol.js';
+import { type CliTsCredentialSnapshot, CliTsServeProcess, runCliTsCommand } from './cliTsProcess.js';
+import type { CliTsRecord, CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsMcpListPayload, CliTsMcpServerEntry, CliTsMcpServerStatus, CliTsPermissionMode, CliTsTurnStatus, CliTsWorkerIntegrationChange, CliTsWorkerIntegrationSnapshot, CliTsWorkerState } from './cliTsProtocol.js';
+
+/** Formats a selected generative model for the serve control, or `off`. */
+function generativeModelSelection(model: { provider: string; name: string } | undefined): string {
+	return model ? `${model.provider}/${model.name}` : BACKBOARD_GENERATIVE_MEDIA_OFF;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Maps one catalog row to a `provider/name` picker item. Image catalogs expose
+ * `name`; video catalogs expose the OpenRouter model `id` alongside `name`.
+ */
+function generativeModelCompletionItem(
+	model: Record<string, unknown>,
+	property: string,
+): { value: string; label: string } | undefined {
+	const provider = typeof model.provider === 'string' ? model.provider.trim() : '';
+	const identifier = property === BACKBOARD_VIDEO_MODEL_CONFIG_KEY
+		? (typeof model.id === 'string' ? model.id : typeof model.name === 'string' ? model.name : '')
+		: (typeof model.name === 'string' ? model.name : '');
+	const name = identifier.trim();
+	if (!provider || !name) {
+		return undefined;
+	}
+	const display = typeof model.name === 'string' && model.name.trim() ? model.name.trim() : name;
+	return { value: `${provider}/${name}`, label: display };
+}
+
+/**
+ * Maps a cli-ts MCP runtime status onto the protocol's server lifecycle
+ * state. The runtime reports `needs_authentication` for remote servers that
+ * require a token; without RFC 9728 metadata from the IDE-managed config the
+ * state is surfaced as an error the user can act on from the server list.
+ */
+function mcpServerStateFromRuntime(status: CliTsMcpServerStatus): McpServerState {
+	switch (status.status) {
+		case 'connected':
+			return { kind: McpServerStatus.Ready };
+		case 'disabled':
+			return { kind: McpServerStatus.Stopped };
+		case 'needs_authentication':
+			return {
+				kind: McpServerStatus.Error,
+				error: { errorType: 'mcp-server-auth-required', message: status.message ?? 'MCP server requires authentication.' },
+			};
+		case 'error':
+			return {
+				kind: McpServerStatus.Error,
+				error: { errorType: 'mcp-server-failed', message: status.message ?? 'MCP server failed to start.' },
+			};
+		default:
+			return { kind: McpServerStatus.Starting };
+	}
+}
+
+/**
+ * Converts a workbench MCP server configuration into the `.backboard/mcp.json`
+ * entry shape the runtime reads. Variable references are rewritten from the
+ * VS Code forms (`${input:NAME}`, `${env:NAME}`) to the CLI's `${NAME}` so an
+ * environment variable of the same name still resolves at connect time.
+ */
+function mcpEntryFromConfiguration(configuration: IMcpServerConfiguration): CliTsMcpServerEntry | undefined {
+	if (configuration.type === McpServerType.LOCAL) {
+		if (!configuration.command) {
+			return undefined;
+		}
+		const env = configuration.env ? mcpEnvToCliEnv(configuration.env) : undefined;
+		return {
+			type: 'stdio',
+			command: rewriteMcpVariables(configuration.command),
+			...(configuration.args ? { args: configuration.args.map(rewriteMcpVariables) } : {}),
+			...(env && Object.keys(env).length > 0 ? { env } : {}),
+			...(configuration.cwd ? { cwd: configuration.cwd } : {}),
+		};
+	}
+	if (!configuration.url) {
+		return undefined;
+	}
+	const headers = configuration.headers ? mcpEnvToCliEnv(configuration.headers) : undefined;
+	return {
+		type: 'streamable-http',
+		url: rewriteMcpVariables(configuration.url),
+		...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
+	};
+}
+
+function mcpEnvToCliEnv(source: Record<string, string | number | null>): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const [key, value] of Object.entries(source)) {
+		if (value === null) {
+			continue;
+		}
+		env[key] = rewriteMcpVariables(String(value));
+	}
+	return env;
+}
+
+/** Rewrites VS Code MCP variable syntax to the CLI's environment syntax. */
+function rewriteMcpVariables(value: string): string {
+	return value
+		.replace(/\$\{input:([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}/g, (_match, name: string, _defaultExpr: string | undefined, fallback: string) => fallback !== undefined ? `\${${name}:-${fallback}}` : `\${${name}}`)
+		.replace(/\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => `\${${name}}`);
+}
 
 const CLI_TS_STORE_VERSION = 1;
 const CHATGPT_SUBSCRIPTION_PROVIDER = 'openai-subscription';
@@ -49,6 +158,26 @@ const CLAUDE_SUBSCRIPTION_ENABLE_COMMAND = 'claudeSubscription.enable';
 const CLI_TS_META_WORKTREE_BRANCH = 'backboard.worktree.branchName';
 const CLI_TS_META_WORKTREE_PATH = 'backboard.worktree.path';
 const CLI_TS_META_WORKTREE_REPOSITORY_ROOT = 'backboard.worktree.repositoryRoot';
+/** Upper bound for one `keys validate` round trip (cli-ts caps the vendor call at 15 s). */
+const CLI_TS_KEY_VALIDATION_TIMEOUT_MS = 20_000;
+/** How long a running serve process may take to acknowledge a credential snapshot. */
+const CLI_TS_CREDENTIAL_ACK_TIMEOUT_MS = 5_000;
+
+/** Outcome of pushing a credential snapshot to the running serve processes. */
+interface CliTsCredentialPush {
+	/** Processes that applied the snapshot. */
+	readonly acknowledged: number;
+	/** Processes ended because they did not apply it in time, or that had already exited. */
+	readonly terminated: number;
+	/** Processes that neither acknowledged nor could be confirmed gone. */
+	readonly unconfirmed: number;
+	readonly total: number;
+}
+
+/** Outcome of `cli-ts keys validate`, with the key already scrubbed from any message. */
+type CliTsKeyValidation =
+	| { readonly ok: true; readonly models: readonly BridgeModel[] }
+	| { readonly ok: false; readonly category: string; readonly error: string };
 
 function jwtExpiration(token: string): number | undefined {
 	const encoded = token.split('.')[1];
@@ -69,7 +198,7 @@ export function hasUsableChatGptSubscriptionLogin(homeDir = os.homedir(), now = 
 		const envAuthFile = process.env['BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE']?.trim();
 		let configuredAuthFile = '';
 		try {
-			const config = JSON.parse(fs.readFileSync(path.join(homeDir, '.backboard_ide', 'subscriptions.json'), 'utf8')) as { chatgptSubscriptionAuthFile?: unknown };
+			const config = JSON.parse(fs.readFileSync(path.join(homeDir, '.backboard', 'config.json'), 'utf8')) as { chatgptSubscriptionAuthFile?: unknown };
 			configuredAuthFile = typeof config.chatgptSubscriptionAuthFile === 'string' ? config.chatgptSubscriptionAuthFile.trim() : '';
 		} catch {
 			// An explicit env override remains usable on a fresh install with no config.
@@ -108,12 +237,18 @@ export function isClaudeSubscriptionModel(modelId: string | undefined): boolean 
 	return modelId?.startsWith(`${CLAUDE_SUBSCRIPTION_PROVIDER}/`) ?? false;
 }
 
+/**
+ * The billing family of a model id's provider prefix. Every key-billed vendor
+ * collapses to `byok`: those conversations are provider-neutral, so switching
+ * between two key-billed vendors keeps the thread while any move between a
+ * key route and another route is a provider change.
+ */
 function providerFromModelId(modelId: string | undefined): string | undefined {
 	if (!modelId) {
 		return undefined;
 	}
 	const separator = modelId.indexOf('/');
-	return separator > 0 ? modelId.slice(0, separator).trim().toLowerCase() : undefined;
+	return separator > 0 ? routeProviderFamily(modelId.slice(0, separator)) : undefined;
 }
 
 /**
@@ -133,7 +268,9 @@ export function requiresProviderThreadHandoff(threadId: string | undefined, prev
 		? CLAUDE_SUBSCRIPTION_PROVIDER
 		: threadId.startsWith('sub_')
 			? CHATGPT_SUBSCRIPTION_PROVIDER
-			: undefined;
+			: threadId.startsWith('byok_')
+				? 'byok'
+				: undefined;
 	if (threadProvider) {
 		return threadProvider !== nextProvider;
 	}
@@ -141,9 +278,9 @@ export function requiresProviderThreadHandoff(threadId: string | undefined, prev
 	if (previousProvider) {
 		return previousProvider !== nextProvider;
 	}
-	// Backboard and BYOK threads never use a subscription prefix, so a restored
-	// unprefixed thread cannot be adopted by either subscription transport.
-	return nextProvider === CHATGPT_SUBSCRIPTION_PROVIDER || nextProvider === CLAUDE_SUBSCRIPTION_PROVIDER;
+	// A Backboard thread has no prefix, so a restored unprefixed thread cannot
+	// be adopted by a subscription transport or by the user's own key.
+	return nextProvider === CHATGPT_SUBSCRIPTION_PROVIDER || nextProvider === CLAUDE_SUBSCRIPTION_PROVIDER || nextProvider === 'byok';
 }
 
 /** Fail fast when Claude Code's renewable first-party login is unavailable. */
@@ -180,6 +317,39 @@ function withSubscriptionConnectionStates(
 }
 
 /**
+ * Publishes, per key-billed model, whether its vendor currently holds a
+ * validated key. Key-billed rows stay listed after a key is removed so a
+ * session pinned to one keeps its selection visible (labelled as unavailable)
+ * instead of being silently moved to another model. No key material is ever
+ * exposed here.
+ */
+export function withByokKeyStates(
+	models: readonly IAgentModelInfo[],
+	heldVendors: ReadonlySet<string>,
+	availableByVendor: ReadonlyMap<string, ReadonlySet<string>>,
+): IAgentModelInfo[] {
+	return models.map(model => {
+		const separator = model.id.indexOf('/');
+		const provider = separator > 0 ? model.id.slice(0, separator) : undefined;
+		if (!provider || !isKeyBilledProvider(provider)) {
+			return model;
+		}
+		const vendor = vendorOfProvider(provider);
+		// Until a key's catalog has been discovered nothing is known against the
+		// row, so it stays usable; a discovered catalog is authoritative.
+		const available = availableByVendor.get(vendor);
+		return {
+			...model,
+			_meta: {
+				...model._meta,
+				byokKeyConfigured: heldVendors.has(vendor),
+				byokModelAvailable: available === undefined || available.has(model.id.slice(separator + 1)),
+			},
+		};
+	});
+}
+
+/**
  * One ordered, restorable piece of a completed turn's response. Markdown and
  * reasoning content accumulates during the live turn (hence mutable); tool
  * parts capture the compact completion facts needed to rebuild a real
@@ -188,7 +358,7 @@ function withSubscriptionConnectionStates(
  */
 type CliTsWorkerWorkspace = NonNullable<CliTsAgentEvent['workspace']>;
 
-type CliTsBackboardToolKind = 'read' | 'grep' | 'glob' | 'fetchUrl' | 'webSearch' | 'todo' | 'computer' | 'browser' | 'findSkill' | 'findMcp';
+type CliTsBackboardToolKind = 'read' | 'grep' | 'glob' | 'fetchUrl' | 'webSearch' | 'todo' | 'computer' | 'browser' | 'findSkill' | 'findMcp' | 'generateVideo';
 
 interface CliTsToolUiState {
 	readonly kind: CliTsBackboardToolKind;
@@ -377,6 +547,9 @@ interface CliTsSession {
 	sourceWorkingDirectory?: URI;
 	worktree?: CliTsWorktree;
 	model?: ModelSelection;
+	activeModel?: ModelSelection;
+	modelChangeRevision?: number;
+	appliedModelRevision?: number;
 	config?: Record<string, unknown>;
 	title?: string;
 	threadId?: string;
@@ -408,6 +581,20 @@ interface CliTsSession {
 	cancelBeforeSubmit?: boolean;
 	/** Client tools pushed by the active IDE client via {@link CliTsAgent.setClientTools}. */
 	clientTools?: { readonly clientId: string; readonly tools: readonly ToolDefinition[] };
+	/**
+	 * IDE-owned MCP servers for this session, keyed by server name, in the
+	 * `.backboard/mcp.json` shape the runtime understands. Pushed to the serve
+	 * process on every change and re-pushed whenever a process starts.
+	 */
+	mcpServers?: Record<string, CliTsMcpServerEntry>;
+	/** Server names the user disconnected for this session (composer toggle). */
+	mcpDisabled?: Set<string>;
+	/** Last runtime state reported by the serve process, keyed by server name. */
+	mcpRuntimeStates?: Map<string, McpServerState>;
+	/** Serializes MCP pushes so overlapping syncs cannot interleave. */
+	mcpPush?: Promise<void>;
+	/** Publishes MCP server customizations for this session. */
+	mcpController?: McpCustomizationController;
 	/** Whether the current turn runs with Full Access (client tool calls auto-confirm). */
 	turnAutoApproves?: boolean;
 	/** Client tool calls forwarded to the IDE and awaiting a result. */
@@ -465,7 +652,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 	readonly onDidMaterializeSession = this._onDidMaterializeSession.event;
 
 	/**
-	 * Hydrates the previous live Backboard API result from disk,
+	 * Starts with the locally-authenticated ChatGPT and Claude subscription routes,
+	 * immediately hydrates the previous live Backboard API result from disk,
 	 * and refreshes from the backend once a serve process is up. API catalog
 	 * providers such as OpenRouter are never supplemented from a compiled list.
 	 */
@@ -473,7 +661,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		'cliTsModels',
 		withSubscriptionConnectionStates(
 			backboardModelInfos(BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
-			false,
+			hasUsableChatGptSubscriptionLogin(),
 			false,
 		),
 	);
@@ -488,11 +676,34 @@ export class CliTsAgent extends Disposable implements IAgent {
 	private _modelsRefreshed = false;
 	private _modelRefreshPromise: Promise<void> | undefined;
 	private readonly _modelRefreshProcess = this._register(new MutableDisposable<CliTsServeProcess>());
+	/** Short-lived catalog process for the composer's image/video model pickers. */
+	private readonly _generativeCatalogProcess = this._register(new MutableDisposable<CliTsServeProcess>());
+	/** Cached image/video catalogs so the composer pickers open instantly. Keyed by config property. */
+	private readonly _generativeCatalogCache = new Map<string, { items: { value: string; label: string }[]; fetchedAt: number }>();
+	private readonly _generativeCatalogPending = new Map<string, Promise<{ value: string; label: string }[]>>();
 	private _rgDir: Promise<string | undefined> | undefined;
 	private _chatGptSubscriptionLoginPromise: Promise<void> | undefined;
 	private _claudeSubscriptionEnablePromise: Promise<void> | undefined;
 	private _claudeSubscriptionConnected = false;
 	private _claudeSubscriptionStatusRevision = 0;
+	/** Validated provider keys pushed by the IDE. Held in memory only; never persisted or logged. */
+	private readonly _providerKeys = new Map<ByokProviderId, string>();
+	/** The newest key-change generation applied per provider; older ones are refused. */
+	private readonly _providerKeyGenerations = new Map<ByokProviderId, number>();
+	/** Vendor catalogs discovered with a key. Model names only; cached so rows survive restarts. */
+	private readonly _byokCatalog = new Map<ByokProviderId, BridgeModel[]>();
+	/** Model names the vendor's current key can reach; absent until its catalog was discovered. */
+	private readonly _byokAvailability = new Map<ByokProviderId, Set<string>>();
+	/** Successful validations waiting for the IDE to persist and activate the key. */
+	private readonly _pendingValidation = new Map<ByokProviderId, { readonly key: string; readonly models: readonly BridgeModel[] }>();
+	/** One background catalog discovery per vendor. */
+	private readonly _byokDiscovery = new Map<ByokProviderId, Promise<void>>();
+	/** Monotonic revision of the credential snapshot; acks echo it. */
+	private _credentialRevision = 0;
+	/** The Backboard API catalog as last reported by a serve process, key-billed rows stripped. */
+	private _lastServeModels: readonly BridgeModel[] = [];
+	/** How long a running serve process gets to acknowledge a credential change. */
+	private _credentialAckTimeoutMs = CLI_TS_CREDENTIAL_ACK_TIMEOUT_MS;
 
 	constructor(
 		@ILogService private readonly _logService: ILogService,
@@ -501,6 +712,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 		@IAgentHostCheckpointService private readonly _checkpointService: IAgentHostCheckpointService,
 		@IAgentHostGitService private readonly _gitService: IAgentHostGitService,
+		@IAgentPluginManager private readonly _pluginManager: IAgentPluginManager,
+		@IFileService private readonly _fileService: IFileService,
 	) {
 		super();
 		this._hydrateModelsFromCache();
@@ -524,30 +737,86 @@ export class CliTsAgent extends Disposable implements IAgent {
 	 */
 	private _hydrateModelsFromCache(): void {
 		try {
-			const raw = JSON.parse(fs.readFileSync(this._modelsCachePath(), 'utf8')) as { apiUrl?: string; models?: unknown[] };
-			if ((raw.apiUrl ?? '') !== this._currentApiUrl()) {
-				return;
+			const raw = JSON.parse(fs.readFileSync(this._modelsCachePath(), 'utf8')) as { apiUrl?: string; models?: unknown[]; byok?: Record<string, unknown> };
+			// Key-billed catalogs are vendor-owned and independent of the API URL.
+			// They are names only: whether a row is usable is decided by which keys
+			// the IDE pushes after startup and what the last discovery could reach,
+			// never by the cache alone.
+			for (const [provider, entry] of Object.entries(raw.byok ?? {})) {
+				if (!isByokProviderId(provider)) {
+					continue;
+				}
+				// Older caches stored the rows alone; availability is then unknown
+				// until the key's catalog is discovered again.
+				const record = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as { rows?: unknown; available?: unknown } : undefined;
+				const rows = Array.isArray(entry) ? entry : record?.rows;
+				if (Array.isArray(rows)) {
+					this._byokCatalog.set(provider, rows.filter(isBridgeModel));
+				}
+				if (Array.isArray(record?.available)) {
+					this._byokAvailability.set(provider, new Set(record.available.filter((name): name is string => typeof name === 'string')));
+				}
 			}
-			const models = (Array.isArray(raw.models) ? raw.models : []).filter(isBridgeModel);
-			if (models.length) {
-				this._models.set(withSubscriptionConnectionStates(
-					backboardModelInfos(models, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
-					false,
-					this._claudeSubscriptionConnected,
-				), undefined);
+			if ((raw.apiUrl ?? '') === this._currentApiUrl()) {
+				this._lastServeModels = (Array.isArray(raw.models) ? raw.models : []).filter(isBridgeModel);
 			}
 		} catch {
 			// First run or unreadable cache — the bundled fallback stays.
 		}
+		this._publishModels();
 	}
 
-	private _persistModelsCache(models: readonly unknown[]): void {
+	private _persistModelsCache(): void {
 		try {
 			fs.mkdirSync(path.dirname(this._modelsCachePath()), { recursive: true });
-			fs.writeFileSync(this._modelsCachePath(), `${JSON.stringify({ apiUrl: this._currentApiUrl(), models }, null, '\t')}\n`, 'utf8');
+			const byok = Object.fromEntries([...this._byokCatalog].map(([provider, rows]) => {
+				const available = this._byokAvailability.get(provider);
+				return [provider, { rows, ...(available ? { available: [...available] } : {}) }];
+			}));
+			fs.writeFileSync(this._modelsCachePath(), `${JSON.stringify({ apiUrl: this._currentApiUrl(), models: this._lastServeModels, byok }, null, '\t')}\n`, 'utf8');
 		} catch (error) {
 			this._logService.info(`[cli-ts] could not persist models cache: ${error instanceof Error ? error.message : String(error)}`);
 		}
+	}
+
+	/**
+	 * Recomputes the published catalog: the Backboard API rows, the key-billed
+	 * rows under their `-key` provider ids, and the bundled subscription routes,
+	 * each stamped with its connection state. Key-billed rows are listed
+	 * whenever a catalog is known, and `byokKeyConfigured` says whether they are
+	 * usable right now.
+	 */
+	private _publishModels(): void {
+		const keyRows: BridgeModel[] = [];
+		for (const [provider, rows] of this._byokCatalog) {
+			for (const row of rows) {
+				keyRows.push({ ...row, provider: keyBilledProviderId(provider) });
+			}
+		}
+		const infos = withByokKeyStates(
+			withSubscriptionConnectionStates(
+				backboardModelInfos(this._lastServeModels, keyRows, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
+				hasUsableChatGptSubscriptionLogin(),
+				this._claudeSubscriptionConnected,
+			),
+			new Set(this._providerKeys.keys()),
+			this._byokAvailability,
+		);
+		this._models.set(infos.length ? infos : [fallbackModel()], undefined);
+	}
+
+	/**
+	 * Records what the vendor's current key can reach. Rows discovered earlier
+	 * stay in the catalog so a session pinned to one keeps a visible selection;
+	 * only their availability changes. The union is what the picker lists.
+	 */
+	private _recordByokCatalog(provider: ByokProviderId, models: readonly BridgeModel[]): void {
+		const merged = new Map((this._byokCatalog.get(provider) ?? []).map(row => [row.name, row] as const));
+		for (const row of models) {
+			merged.set(row.name, row);
+		}
+		this._byokCatalog.set(provider, [...merged.values()]);
+		this._byokAvailability.set(provider, new Set(models.map(row => row.name)));
 	}
 
 	/**
@@ -589,15 +858,12 @@ export class CliTsAgent extends Disposable implements IAgent {
 		};
 	}
 
-	async executeCommand(command: string, _windows = isWindows): Promise<IAgentCommandResult> {
-		if (command.startsWith('chatgptSubscription.') || command.startsWith('claudeSubscription.')) {
-			throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
-		}
+	async executeCommand(command: string, args?: Readonly<Record<string, unknown>>): Promise<IAgentCommandResult> {
 		switch (command) {
 			case 'models.refresh':
 				this._modelRefreshPromise ??= this._refreshModelCatalog().finally(() => { this._modelRefreshPromise = undefined; });
 				await this._modelRefreshPromise;
-				return { message: localize('cliTsAgent.modelsOnly.refreshed', "Models refreshed.") };
+				return { message: localize('cliTsAgent.models.refreshed', "Models and subscriptions refreshed.") };
 			case CHATGPT_SUBSCRIPTION_LOGIN_COMMAND:
 				await this._ensureChatGptSubscriptionLogin(true);
 				return {
@@ -616,15 +882,256 @@ export class CliTsAgent extends Disposable implements IAgent {
 				return {
 					message: localize('cliTsAgent.claudeSubscription.connected', "Claude subscription connected to the Backboard harness."),
 				};
+			case BYOK_COMMANDS.validate:
+				return this._validateProviderKeyCommand(args);
+			case BYOK_COMMANDS.set:
+				return this._setProviderKeyCommand(args);
+			case BYOK_COMMANDS.remove:
+				return this._removeProviderKeyCommand(args);
+			case BYOK_COMMANDS.status:
+				return this._providerKeyStatusCommand();
 			default:
 				throw new Error(`Unsupported Backboard command: ${command}`);
 		}
 	}
 
-	private async _ensureChatGptSubscriptionLogin(force: boolean): Promise<void> {
-		if (!isBackboardProviderAvailable(CHATGPT_SUBSCRIPTION_PROVIDER)) {
-			throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
+	// ---- provider keys (BYOK) ------------------------------------------------
+	//
+	// The IDE owns the secrets. It validates a key here first, persists it in
+	// its own secret storage, then activates it here; every activation pushes
+	// the whole snapshot to the running serve processes. Nothing in this class
+	// writes a key to disk or to a log.
+
+	private _byokCommandArgs(args: Readonly<Record<string, unknown>> | undefined, requireKey: boolean): { provider: ByokProviderId; key: string | undefined } {
+		const provider = args?.[BYOK_PROVIDER_ARG];
+		if (!isByokProviderId(provider)) {
+			throw new Error(localize('cliTsAgent.byok.unsupportedProvider', "API keys are not supported for provider '{0}'.", String(provider)));
 		}
+		const rawKey = args?.[BYOK_KEY_ARG];
+		const key = typeof rawKey === 'string' ? rawKey.trim() : undefined;
+		if (requireKey && !key) {
+			throw new Error(localize('cliTsAgent.byok.keyMissing', "Enter a {0} API key.", byokProviderDefinition(provider).label));
+		}
+		return { provider, key };
+	}
+
+	private async _validateProviderKeyCommand(args: Readonly<Record<string, unknown>> | undefined): Promise<IAgentCommandResult> {
+		const { provider, key } = this._byokCommandArgs(args, true);
+		const label = byokProviderDefinition(provider).label;
+		const result = await this._validateProviderKey(provider, key!);
+		if (!result.ok) {
+			this._logService.info(`[cli-ts] ${provider} key rejected during validation (${result.category})`);
+			return { message: result.error, data: { ok: false, category: result.category, error: result.error } };
+		}
+		this._pendingValidation.set(provider, { key: key!, models: result.models });
+		return {
+			message: localize('cliTsAgent.byok.validated', "{0} key verified.", label),
+			data: { ok: true, modelCount: result.models.length },
+		};
+	}
+
+	/**
+	 * Applies the store's per-provider generation: a change older than the
+	 * newest one already applied is refused, so a slow replacement can never
+	 * undo a later removal (or the other way round). Equal generations are the
+	 * same change again and go through; a missing one is an older caller.
+	 */
+	private _applyProviderKeyGeneration(provider: ByokProviderId, args: Readonly<Record<string, unknown>> | undefined): void {
+		const generation = args?.[BYOK_GENERATION_ARG];
+		if (generation === undefined) {
+			return;
+		}
+		if (typeof generation !== 'number' || !Number.isInteger(generation) || generation < 0) {
+			throw new Error(localize('cliTsAgent.byok.badGeneration', "Invalid key change generation."));
+		}
+		const newest = this._providerKeyGenerations.get(provider);
+		if (newest !== undefined && generation < newest) {
+			throw new Error(localize('cliTsAgent.byok.staleGeneration', "This {0} key change was superseded by a newer one.", byokProviderDefinition(provider).label));
+		}
+		this._providerKeyGenerations.set(provider, generation);
+	}
+
+	private async _setProviderKeyCommand(args: Readonly<Record<string, unknown>> | undefined): Promise<IAgentCommandResult> {
+		const { provider, key } = this._byokCommandArgs(args, true);
+		this._applyProviderKeyGeneration(provider, args);
+		const pending = this._pendingValidation.get(provider);
+		this._pendingValidation.delete(provider);
+		this._providerKeys.set(provider, key!);
+		if (pending && pending.key === key) {
+			this._recordByokCatalog(provider, pending.models);
+		} else {
+			// Activated without a fresh validation (window start): the key is usable
+			// immediately and the catalog fills in when discovery completes.
+			void this._discoverByokCatalog(provider, key!);
+		}
+		this._credentialRevision++;
+		this._publishModels();
+		this._persistModelsCache();
+		const push = await this._pushCredentials();
+		return {
+			message: localize('cliTsAgent.byok.connected', "{0} key connected.", byokProviderDefinition(provider).label),
+			data: { connected: push.unconfirmed === 0, revision: this._credentialRevision, acknowledged: push.acknowledged, terminated: push.terminated, running: push.total },
+		};
+	}
+
+	private async _removeProviderKeyCommand(args: Readonly<Record<string, unknown>> | undefined): Promise<IAgentCommandResult> {
+		const { provider } = this._byokCommandArgs(args, false);
+		this._applyProviderKeyGeneration(provider, args);
+		this._providerKeys.delete(provider);
+		this._pendingValidation.delete(provider);
+		this._credentialRevision++;
+		// The catalog stays so sessions pinned to these models keep a visible,
+		// clearly unavailable selection instead of being moved elsewhere.
+		this._publishModels();
+		const label = byokProviderDefinition(provider).label;
+		// The key left this map before the push, so nothing new can be sent with
+		// it; the push makes sure no running turn keeps using it either.
+		const push = await this._pushCredentials();
+		if (push.unconfirmed > 0) {
+			throw new Error(localize('cliTsAgent.byok.removeUnconfirmed', "The {0} key was removed, but {1} running session(s) could not confirm dropping it. Restart Backboard to be sure no session still uses it.", label, push.unconfirmed));
+		}
+		return {
+			message: localize('cliTsAgent.byok.removed', "{0} key removed.", label),
+			data: { revision: this._credentialRevision, acknowledged: push.acknowledged, terminated: push.terminated, running: push.total },
+		};
+	}
+
+	private _providerKeyStatusCommand(): IAgentCommandResult {
+		const providers: Record<string, { held: boolean; discovered: boolean }> = {};
+		for (const definition of BYOK_PROVIDERS) {
+			providers[definition.id] = {
+				held: this._providerKeys.has(definition.id),
+				discovered: (this._byokCatalog.get(definition.id)?.length ?? 0) > 0,
+			};
+		}
+		return { message: '', data: { providers, revision: this._credentialRevision } };
+	}
+
+	/**
+	 * Runs `cli-ts keys validate` with the key on the child's stdin. The
+	 * runtime answers with one JSON line and never echoes the key. Overridden
+	 * in tests.
+	 */
+	private async _validateProviderKey(provider: ByokProviderId, key: string): Promise<CliTsKeyValidation> {
+		const output = await runCliTsCommand(this._logService, ['keys', 'validate', '--provider', provider], { stdin: key, timeoutMs: CLI_TS_KEY_VALIDATION_TIMEOUT_MS });
+		const line = output.trim().split('\n').at(-1) ?? '';
+		let parsed: { ok?: unknown; category?: unknown; error?: unknown; models?: unknown };
+		try {
+			parsed = JSON.parse(line) as typeof parsed;
+		} catch {
+			throw new Error(localize('cliTsAgent.byok.unreadableValidation', "The Backboard runtime returned an unreadable key validation result. Update Backboard and try again."));
+		}
+		if (parsed.ok === true) {
+			return { ok: true, models: (Array.isArray(parsed.models) ? parsed.models : []).filter(isBridgeModel) };
+		}
+		return {
+			ok: false,
+			category: typeof parsed.category === 'string' ? parsed.category : 'provider-error',
+			error: typeof parsed.error === 'string' && parsed.error
+				? parsed.error
+				: localize('cliTsAgent.byok.validationFailed', "The {0} key could not be verified.", byokProviderDefinition(provider).label),
+		};
+	}
+
+	private _discoverByokCatalog(provider: ByokProviderId, key: string): Promise<void> {
+		const inFlight = this._byokDiscovery.get(provider);
+		if (inFlight) {
+			return inFlight;
+		}
+		const run = this._validateProviderKey(provider, key)
+			.then(result => {
+				if (this._providerKeys.get(provider) !== key) {
+					return; // replaced or removed while discovering
+				}
+				if (result.ok) {
+					this._recordByokCatalog(provider, result.models);
+					this._publishModels();
+					this._persistModelsCache();
+				} else {
+					this._logService.info(`[cli-ts] ${provider} key catalog discovery deferred (${result.category})`);
+				}
+			})
+			.catch(error => {
+				this._logService.warn(`[cli-ts] ${provider} key catalog discovery failed: ${error instanceof Error ? error.message : String(error)}`);
+			})
+			.finally(() => {
+				this._byokDiscovery.delete(provider);
+			});
+		this._byokDiscovery.set(provider, run);
+		return run;
+	}
+
+	private _credentialControl(): CliTsCredentialSnapshot {
+		return {
+			op: 'setCredentials',
+			revision: this._credentialRevision,
+			providerKeys: [...this._providerKeys].map(([provider, key]) => ({ provider, key })),
+		};
+	}
+
+	/**
+	 * Pushes the current snapshot to every serve process that has completed
+	 * its startup handshake; one still starting reads the host's keys when it
+	 * becomes ready, so the change is already part of its own snapshot. A
+	 * process that does not acknowledge in time is terminated: it may still
+	 * hold a revoked key or lack a new one, and nothing else may be sent to it.
+	 * The push is complete only when every process acknowledged or is gone.
+	 */
+	private async _pushCredentials(): Promise<CliTsCredentialPush> {
+		const running = [...this._sessions.values()]
+			.map(session => session.proc)
+			.filter((proc): proc is CliTsServeProcess => !!proc?.credentialSnapshotWritten);
+		const revision = this._credentialRevision;
+		const outcomes = await Promise.all(running.map(async proc => {
+			const acknowledged = await raceTimeout(
+				proc.request({ ...this._credentialControl(), requestId: proc.nextRequestId() }).then(() => true, () => false),
+				this._credentialAckTimeoutMs,
+			);
+			if (acknowledged) {
+				return 'acknowledged';
+			}
+			if (proc.isRunning) {
+				this._logService.warn(`[cli-ts] a serve process did not acknowledge credential revision ${revision} in time; terminating it`);
+				proc.terminate(localize('cliTsAgent.byok.runtimeRestarted', "Runtime restarted after a credential change."));
+			}
+			const exited = await raceTimeout(proc.whenExited().then(() => true), this._credentialAckTimeoutMs);
+			return exited ? 'terminated' : 'unconfirmed';
+		}));
+		const count = (outcome: string) => outcomes.filter(candidate => candidate === outcome).length;
+		const push = { acknowledged: count('acknowledged'), terminated: count('terminated'), unconfirmed: count('unconfirmed'), total: running.length };
+		if (push.unconfirmed > 0) {
+			this._logService.error(`[cli-ts] ${push.unconfirmed} of ${push.total} serve processes could not be confirmed to hold credential revision ${revision}`);
+		}
+		return push;
+	}
+
+	private _assertProviderKeyHeld(vendor: string): void {
+		if (isByokProviderId(vendor) && this._providerKeys.has(vendor)) {
+			return;
+		}
+		const label = isByokProviderId(vendor) ? byokProviderDefinition(vendor).label : vendor;
+		throw new Error(localize('cliTsAgent.byok.keyRequired', "No {0} API key is connected. Add one under API Keys to use this model.", label));
+	}
+
+	/**
+	 * The current key's discovered catalog is authoritative: a selection it
+	 * lacks (a replacement key with narrower access, say) is refused here, so
+	 * the picker's "not available" state and the send outcome always agree.
+	 */
+	private _assertByokModelAvailable(vendor: string, model: string): void {
+		if (!isByokProviderId(vendor)) {
+			return;
+		}
+		const available = this._byokAvailability.get(vendor);
+		if (available === undefined || available.has(model)) {
+			return;
+		}
+		const label = byokProviderDefinition(vendor).label;
+		throw new Error(localize('cliTsAgent.byok.modelUnavailable', "{0} is not available with the connected {1} API key. Pick another {1} API Key model or replace the key.", model, label));
+	}
+
+
+	private async _ensureChatGptSubscriptionLogin(force: boolean): Promise<void> {
 		if (!force && hasUsableChatGptSubscriptionLogin()) {
 			return;
 		}
@@ -653,9 +1160,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	private async _requireClaudeSubscriptionLogin(): Promise<void> {
-		if (!isBackboardProviderAvailable(CLAUDE_SUBSCRIPTION_PROVIDER)) {
-			throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
-		}
 		try {
 			await assertUsableClaudeSubscriptionLogin();
 			this._setClaudeSubscriptionConnectionState(true);
@@ -665,7 +1169,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		}
 	}
 
-	private async _refreshClaudeSubscriptionConnectionState(probe: () => Promise<boolean> = async () => false): Promise<void> {
+	private async _refreshClaudeSubscriptionConnectionState(probe: () => Promise<boolean> = isClaudeLoggedIn): Promise<void> {
 		const revision = ++this._claudeSubscriptionStatusRevision;
 		const connected = await probe();
 		if (revision === this._claudeSubscriptionStatusRevision) {
@@ -820,11 +1324,78 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	async sessionConfigCompletions(params: IAgentSessionConfigCompletionsParams): Promise<SessionConfigCompletionsResult> {
+		if (params.property === BACKBOARD_IMAGE_MODEL_CONFIG_KEY || params.property === BACKBOARD_VIDEO_MODEL_CONFIG_KEY) {
+			return this._generativeModelCompletions(params.property, params.query, params.refresh);
+		}
 		if (params.property !== SessionConfigKey.Branch || !params.workingDirectory) {
 			return { items: [] };
 		}
 		const branches = await this._gitService.getBranches(params.workingDirectory, { query: params.query, limit: 200 });
 		return { items: branches.map(branch => ({ value: branch, label: branch })) };
+	}
+
+	/**
+	 * Live image/video catalog for the composer pickers. Dynamic completions
+	 * replace the static enum, so the Off entry is supplied here.
+	 */
+	private async _generativeModelCompletions(property: string, query: string | undefined, refresh?: boolean): Promise<SessionConfigCompletionsResult> {
+		const offItem = { value: BACKBOARD_GENERATIVE_MEDIA_OFF, label: localize('cliTsAgent.generativeMedia.off', "Off") };
+		const items = await this._generativeCatalogItems(property, refresh);
+		const filter = query?.trim().toLowerCase();
+		const filtered = filter
+			? items.filter(item => item.value.toLowerCase().includes(filter) || item.label.toLowerCase().includes(filter))
+			: items;
+		return { items: [offItem, ...filtered.slice(0, 200)] };
+	}
+
+	/**
+	 * Full (unfiltered) catalog items for one property, cached in memory so
+	 * reopening a picker is instant. Entries are reused for 10 minutes and
+	 * refetched eagerly when the picker's refresh button is used. Failed
+	 * fetches are not cached, so a later open retries.
+	 */
+	private _generativeCatalogItems(property: string, refresh?: boolean): Promise<{ value: string; label: string }[]> {
+		const cached = refresh ? undefined : this._generativeCatalogCache.get(property);
+		if (cached && Date.now() - cached.fetchedAt < 10 * 60 * 1000) {
+			return Promise.resolve(cached.items);
+		}
+		const pending = this._generativeCatalogPending.get(property);
+		if (pending) {
+			return pending;
+		}
+		const fetch = this._fetchGenerativeCatalog(property)
+			.then(items => {
+				this._generativeCatalogCache.set(property, { items, fetchedAt: Date.now() });
+				return items;
+			})
+			.finally(() => {
+				this._generativeCatalogPending.delete(property);
+			});
+		this._generativeCatalogPending.set(property, fetch);
+		return fetch;
+	}
+
+	private async _fetchGenerativeCatalog(property: string): Promise<{ value: string; label: string }[]> {
+		// A short-lived catalog process reads current credentials and avoids
+		// touching the provider routers owned by running conversations.
+		const proc = new CliTsServeProcess(this._logService, { onEvent: () => { } });
+		this._generativeCatalogProcess.value = proc;
+		try {
+			const op = property === BACKBOARD_IMAGE_MODEL_CONFIG_KEY ? 'listImageModels' : 'listVideoModels';
+			const record = await raceTimeout(proc.request({ op, requestId: proc.nextRequestId() }), 30_000);
+			const payload = record?.payload as { models?: unknown[] } | undefined;
+			const items = (Array.isArray(payload?.models) ? payload.models : [])
+				.filter(isPlainRecord)
+				.map(model => generativeModelCompletionItem(model, property))
+				.filter((item): item is { value: string; label: string } => item !== undefined);
+			return items;
+		} catch (error) {
+			this._logService.warn(`[cli-ts] Failed to load the ${property} catalog: ${error instanceof Error ? error.message : String(error)}`);
+			// Serve the stale cache rather than an empty picker when a refresh fails.
+			return this._generativeCatalogCache.get(property)?.items ?? [];
+		} finally {
+			this._generativeCatalogProcess.clear();
+		}
 	}
 
 	sendMessage(sessionUri: URI, prompt: string, attachments?: readonly MessageAttachment[], turnId?: string): Promise<void> {
@@ -1011,6 +1582,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		if (session.archived) {
 			throw new Error(`Cannot send to archived Backboard session: ${session.sessionUri.toString()}`);
 		}
+		await this._applyPendingModel(session);
 		if (session.pendingProviderHandoff) {
 			this._prepareProviderHandoff(session, session.model?.id);
 		}
@@ -1076,8 +1648,23 @@ export class CliTsAgent extends Disposable implements IAgent {
 		// on the first frame.
 		this._fireStatus(session, turn, localize('cliTsAgent.status.preparing', "Preparing…"));
 		try {
-			if (!isBackboardProviderAvailable(settings.provider)) {
-				throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
+			if (settings.provider === CHATGPT_SUBSCRIPTION_PROVIDER) {
+				if (!hasUsableChatGptSubscriptionLogin()) {
+					this._fireStatus(session, turn, localize('cliTsAgent.status.waitingForChatGptLogin', "Waiting for ChatGPT sign-in…"));
+				}
+				await this._ensureChatGptSubscriptionLogin(false);
+			} else if (settings.provider === CLAUDE_SUBSCRIPTION_PROVIDER) {
+				this._fireStatus(session, turn, localize('cliTsAgent.status.checkingClaudeLogin', "Checking Claude sign-in…"));
+				await this._requireClaudeSubscriptionLogin();
+			} else if (settings.source === 'byok') {
+				this._assertProviderKeyHeld(settings.provider);
+				this._assertByokModelAvailable(settings.provider, settings.model);
+			}
+			if (session.threadId?.startsWith('byok_') && settings.source !== 'byok') {
+				// A conversation started on the user's key (possibly by an older
+				// build that read the CLI key file) must not continue on Backboard
+				// just because the restored selection is a Backboard model.
+				throw new Error(localize('cliTsAgent.byok.threadRequiresKey', "This conversation was started with your own API key. Select an API Key model to continue it, or start a new session."));
 			}
 			// Resolve folder/worktree isolation from the latest live config before
 			// starting a process or capturing the session baseline. The checkpoint
@@ -1093,11 +1680,14 @@ export class CliTsAgent extends Disposable implements IAgent {
 			}
 			await session.baselineCapture;
 			const rgDir = await this._resolveRgDir();
+			// Whatever the route, the submit below waits for the runtime's startup
+			// handshake: an older runtime that would read its own key file, or one
+			// that has not applied the current key snapshot, never receives it.
 			const proc = this._ensureProcess(session, rgDir);
 			if (session.cancelBeforeSubmit) {
 				return;
 			}
-			this._logService.info(`[cli-ts] turn_start session=${session.sessionId} model=${settings.provider}/${settings.model} permission=${permission} cwd=${session.workingDirectory?.fsPath ?? '(missing)'}`);
+			this._logService.info(`[cli-ts] turn_start session=${session.sessionId} model=${settings.provider}/${settings.model} source=${settings.source} permission=${permission} cwd=${session.workingDirectory?.fsPath ?? '(missing)'}`);
 			const inheritedConversationContext = [
 				session.providerHandoffContext,
 				!session.threadId ? session.forkContext : undefined,
@@ -1114,6 +1704,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 				// memory. serve only adopts it while it has no thread binding.
 				...(session.threadId ? { threadId: session.threadId } : {}),
 				model: `${settings.provider}/${settings.model}`,
+				// The route is explicit on every turn: the runtime never infers
+				// billing from which keys happen to be present.
+				source: settings.source,
 				permission,
 				// Always send the semantic state. In particular, `off` must reach the
 				// persistent serve process so a previous turn's thinking config is reset.
@@ -1125,6 +1718,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 				browserUse: settings.browserUse,
 				notify: settings.notifications,
 				imageGeneration: settings.imageGeneration,
+				// Always sent so returning a picker to Off clears a previously
+				// selected generation model on the persistent serve process.
+				imageModel: generativeModelSelection(settings.imageModel),
+				videoGeneration: settings.videoGeneration,
+				videoModel: generativeModelSelection(settings.videoModel),
 				openRouterProvider: settings.openRouterProvider,
 				excludedTools,
 				// Advertise IDE-executed tools (integrated browser, tasks, …).
@@ -1515,34 +2113,53 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	async changeModel(sessionUri: URI, model: ModelSelection): Promise<void> {
-		if (!isBackboardProviderAvailable(providerFromModelId(model.id) ?? '')) {
-			throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
-		}
 		const session = this._session(sessionUri);
-		const previousModelId = session.model?.id;
+		session.activeModel ??= session.model;
 		session.model = model;
+		session.modelChangeRevision = (session.modelChangeRevision ?? 0) + 1;
+		const owner = session.turn ?? session.subagentTurnOwners.values().next().value;
+		if (owner) {
+			this._fire(session.sessionUri, { type: ActionType.ChatResponsePart, turnId: owner.turnId, part: {
+				kind: ResponsePartKind.SystemNotification,
+				content: localize('cliTsAgent.pendingModel', "{0}: Applies after current work finishes", model.id),
+			} });
+		}
+		// The selection is visible immediately; applying it is serialized with
+		// sends and waits for detached workers as well as their parent turn.
+		void this._queueSessionOperation(session, () => this._applyPendingModel(session)).catch(error => {
+			this._logService.warn(`[cli-ts] model change pending: ${error instanceof Error ? error.message : String(error)}`);
+		});
+	}
+
+	private async _applyPendingModel(session: CliTsSession): Promise<void> {
+		if (session.modelChangeRevision === undefined || session.appliedModelRevision === session.modelChangeRevision) {
+			return;
+		}
+		if (session.proc?.isRunning) {
+			await session.proc.request({ op: 'waitForIdle', requestId: session.proc.nextRequestId() });
+		}
+		if (session.disposed) { return; }
+		// Read only after the barrier: repeated selections coalesce to the latest.
+		const model = session.model;
+		if (!model?.id) { return; }
+		const revision = session.modelChangeRevision;
 		if (isChatGptSubscriptionModel(model.id)) {
 			await this._ensureChatGptSubscriptionLogin(false);
 		} else if (isClaudeSubscriptionModel(model.id)) {
 			await this._requireClaudeSubscriptionLogin();
 		}
-		const previousProvider = providerFromModelId(previousModelId);
-		const nextProvider = providerFromModelId(model.id);
-		const providerChanged = !!previousProvider && !!nextProvider && previousProvider !== nextProvider;
-		if (session.turn && providerChanged) {
-			// Let the in-flight provider finish cleanly. sendMessage is sequenced
-			// behind it and performs the handoff before the next request starts.
-			session.pendingProviderHandoff = true;
-			this._logService.info(`[cli-ts] deferred provider handoff until the active turn completes session=${session.sessionId} from=${previousModelId} to=${model.id}`);
-			return;
-		}
+		if (revision !== session.modelChangeRevision) { return this._applyPendingModel(session); }
+		const previousModelId = session.activeModel?.id;
 		if (requiresProviderThreadHandoff(session.threadId, previousModelId, model.id)) {
 			this._prepareProviderHandoff(session, model.id, previousModelId);
-			return;
+		} else if (session.proc?.isRunning) {
+			const route = parseBillingRoute(model.id);
+			await session.proc.request({ op: 'setModel', model: route ? `${route.provider}/${route.model}` : model.id,
+				...(route ? { source: route.source } : {}), requestId: session.proc.nextRequestId() });
 		}
-		if (session.proc?.isRunning && model.id) {
-			session.proc.notify({ op: 'setModel', model: model.id });
-		}
+		session.activeModel = model;
+		session.appliedModelRevision = revision;
+		this._writeStore();
 	}
 
 	private _prepareProviderHandoff(session: CliTsSession, nextModelId: string | undefined, previousModelId?: string): void {
@@ -1638,8 +2255,36 @@ export class CliTsAgent extends Disposable implements IAgent {
 		return true;
 	}
 
-	async setClientCustomizations(_session: URI, _clientId: string, _customizations: ClientPluginCustomization[]): Promise<ISyncedCustomization[]> {
-		return [];
+	/**
+	 * Receives the IDE's customization refs and pushes the MCP servers they
+	 * carry into this session's serve process.
+	 *
+	 * Backboard sessions are configured from the IDE (marketplace installs,
+	 * the seeded Backboard docs server, and the user's `.backboard/mcp.json`),
+	 * so the runtime never reads MCP configuration on its own. The servers are
+	 * stored on the session and re-applied whenever a new serve process starts.
+	 */
+	async setClientCustomizations(session: URI, clientId: string, customizations: ClientPluginCustomization[]): Promise<ISyncedCustomization[]> {
+		const entry = this._sessions.get(AgentSession.id(session));
+		if (!entry || entry.disposed) {
+			return [];
+		}
+		const synced = await this._pluginManager.syncCustomizations(clientId, customizations);
+		entry.mcpServers = await this._extractSyncedMcpServers(synced);
+		// Publish before connecting so the composer lists every server (still
+		// starting) rather than only the ones that came up.
+		this._getOrCreateMcpController(entry).applyAll(this._mcpServerStates(entry));
+		await this._pushMcpServers(entry);
+		return synced;
+	}
+
+	async getSessionCustomizations(session: URI): Promise<readonly Customization[]> {
+		const entry = this._sessions.get(AgentSession.id(session));
+		if (!entry) {
+			return [];
+		}
+		this._getOrCreateMcpController(entry).applyAll(this._mcpServerStates(entry));
+		return this._getOrCreateMcpController(entry).topLevelCustomizations();
 	}
 
 	setClientTools(session: URI, clientId: string | undefined, tools: ToolDefinition[]): void {
@@ -1669,7 +2314,32 @@ export class CliTsAgent extends Disposable implements IAgent {
 		session.proc.notify({ op: 'clientToolResult', id: toolCallId, result: clientToolResultToWire(result) });
 	}
 
-	setCustomizationEnabled(_id: string, _enabled: boolean): void {
+	/**
+	 * Connects or disconnects an MCP server for this session. The composer's
+	 * server list dispatches this per session customization; disabling marks
+	 * the server as `disabled` in the pushed set (the runtime closes the
+	 * connection but keeps the configuration), enabling forces a reconnect.
+	 */
+	setCustomizationEnabled(id: string, enabled: boolean): void {
+		for (const session of this._sessions.values()) {
+			const controller = session.mcpController;
+			const customization = controller?.topLevelCustomizations().find(candidate => candidate.id === id);
+			if (!customization || !session.mcpServers || !Object.hasOwn(session.mcpServers, customization.name)) {
+				continue;
+			}
+			const disabled = session.mcpDisabled ??= new Set<string>();
+			if (enabled) {
+				disabled.delete(customization.name);
+			} else {
+				disabled.add(customization.name);
+			}
+			this._getOrCreateMcpController(session).applyOne({
+				name: customization.name,
+				state: enabled ? { kind: McpServerStatus.Starting } : { kind: McpServerStatus.Stopped },
+			});
+			void this._pushMcpServers(session, enabled ? [customization.name] : []);
+			return;
+		}
 	}
 
 	async shutdown(): Promise<void> {
@@ -1716,6 +2386,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 		session.fileEdits?.dbRef.dispose();
 		session.fileEdits = undefined;
 		session.pendingInputs?.clear();
+		session.mcpController?.dispose();
+		session.mcpController = undefined;
+		session.mcpRuntimeStates = undefined;
 	}
 
 	// ---- session plumbing ---------------------------------------------------
@@ -2065,9 +2738,126 @@ export class CliTsAgent extends Disposable implements IAgent {
 			onExit: () => {
 				session.pendingInputs.clear();
 			},
+			// A new process starts from disk only; re-push the IDE-owned MCP
+			// server set as soon as it can read control lines.
+			onReady: () => {
+				void this._pushMcpServers(session);
+			},
+			// Every spawn (first start, lazy request, crash respawn) completes the
+			// credential handshake, empty snapshot included, before its first
+			// request line.
+			credentialSnapshot: () => this._credentialControl(),
 		});
 		session.proc = proc;
 		return proc;
+	}
+
+	// ---- MCP servers pushed by the IDE -------------------------------------
+
+	private _getOrCreateMcpController(session: CliTsSession): McpCustomizationController {
+		if (!session.mcpController) {
+			session.mcpController = new McpCustomizationController({
+				providerId: this.id,
+				sessionId: session.sessionId,
+				resolveChildId: () => undefined,
+				emit: action => this._fire(session.sessionUri, action),
+				isServerEnabled: name => session.mcpDisabled?.has(name) !== true,
+			});
+		}
+		return session.mcpController;
+	}
+
+	/** Current published state for every IDE-owned server on the session. */
+	private _mcpServerStates(session: CliTsSession): { name: string; state: McpServerState }[] {
+		return Object.keys(session.mcpServers ?? {}).map(name => ({
+			name,
+			state: session.mcpDisabled?.has(name)
+				? { kind: McpServerStatus.Stopped } as McpServerState
+				: session.mcpRuntimeStates?.get(name) ?? { kind: McpServerStatus.Starting },
+		}));
+	}
+
+	/**
+	 * Pushes the session's IDE-owned MCP servers to the serve process. No-op
+	 * while no process is running: the set is re-pushed on `serve:ready`.
+	 * Pushes are serialized per session so overlapping syncs cannot apply a
+	 * stale set after a newer one.
+	 */
+	private async _pushMcpServers(session: CliTsSession, forceNames: readonly string[] = []): Promise<void> {
+		const previous = session.mcpPush ?? Promise.resolve();
+		const next = previous.catch(() => undefined).then(async () => {
+			const proc = session.proc;
+			if (!proc?.isRunning || session.disposed) {
+				return;
+			}
+			const servers: Record<string, CliTsMcpServerEntry> = {};
+			for (const [name, entry] of Object.entries(session.mcpServers ?? {})) {
+				servers[name] = session.mcpDisabled?.has(name) ? { ...entry, disabled: true } : entry;
+			}
+			try {
+				const record = await proc.request({
+					op: 'setMcpServers',
+					requestId: proc.nextRequestId(),
+					servers,
+					...(forceNames.length > 0 ? { force: [...forceNames] } : {}),
+				});
+				const payload = record.payload as CliTsMcpListPayload | undefined;
+				this._applyMcpStatuses(session, payload?.servers ?? []);
+			} catch (error) {
+				this._logService.warn(`[cli-ts] Failed to push MCP servers to session ${session.sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+				// Surface the failure in the composer instead of leaving the
+				// servers stuck in "starting".
+				this._applyMcpStatuses(session, Object.keys(session.mcpServers ?? {}).map(name => ({
+					name,
+					status: 'error' as const,
+					message: error instanceof Error ? error.message : String(error),
+				})));
+			}
+		});
+		session.mcpPush = next;
+		await next;
+	}
+
+	/** Publishes the runtime's server states as session customizations. */
+	private _applyMcpStatuses(session: CliTsSession, statuses: readonly CliTsMcpServerStatus[]): void {
+		if (statuses.length === 0) {
+			return;
+		}
+		const controller = this._getOrCreateMcpController(session);
+		const states = session.mcpRuntimeStates ??= new Map<string, McpServerState>();
+		for (const status of statuses) {
+			states.set(status.name, mcpServerStateFromRuntime(status));
+		}
+		for (const [name, state] of states) {
+			if (session.mcpServers && Object.hasOwn(session.mcpServers, name)) {
+				controller.applyOne({ name, state });
+			}
+		}
+	}
+
+	/**
+	 * Reads the MCP servers out of the plugin directories the client synced,
+	 * i.e. the servers the IDE offers this session.
+	 */
+	private async _extractSyncedMcpServers(synced: readonly ISyncedCustomization[]): Promise<Record<string, CliTsMcpServerEntry>> {
+		const servers: Record<string, CliTsMcpServerEntry> = {};
+		for (const item of synced) {
+			if (!item.pluginDir) {
+				continue;
+			}
+			try {
+				const parsed = await parsePlugin(item.pluginDir, this._fileService, undefined, os.homedir());
+				for (const server of parsed.mcpServers) {
+					const entry = mcpEntryFromConfiguration(server.configuration);
+					if (entry) {
+						servers[server.name] = entry;
+					}
+				}
+			} catch (error) {
+				this._logService.warn(`[cli-ts] Failed to read MCP servers from synced customization '${item.pluginDir.toString()}': ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		return servers;
 	}
 
 	private async _requestWorkerLifecycle(session: CliTsSession, op: 'archiveWorkers' | 'unarchiveWorkers' | 'deleteWorkers'): Promise<void> {
@@ -2111,7 +2901,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 	private async _refreshModelCatalog(): Promise<void> {
 		await this._refreshClaudeSubscriptionConnectionState();
-		this._models.set(withChatGptSubscriptionConnectionState(this._models.get(), false), undefined);
+		this._models.set(withChatGptSubscriptionConnectionState(this._models.get(), hasUsableChatGptSubscriptionLogin()), undefined);
 		// A short-lived catalog process reads current credentials and avoids touching
 		// the provider routers or processes owned by running conversations.
 		const proc = new CliTsServeProcess(this._logService, { onEvent: () => { } });
@@ -2146,18 +2936,21 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 	private _applyModelCatalog(record: CliTsRecord): boolean {
 		const payload = record.payload as { models?: unknown[] } | undefined;
-		const models = (Array.isArray(payload?.models) ? payload.models : []).filter(isBridgeModel);
+		const models = (payload?.models ?? []).filter(isBridgeModel);
 		if (models.length) {
-			// The Backboard API is authoritative for catalog providers. Only the
-			// Release filtering applies to both live and bundled catalog entries.
-			const infos = withSubscriptionConnectionStates(
-				backboardModelInfos(models, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
-				false,
-				this._claudeSubscriptionConnected,
-			);
-			this._models.set(infos.length ? infos : [fallbackModel()], undefined);
+			// A key-billed row the IDE did not push means the runtime read a key
+			// from somewhere else; that must never happen in a host-managed runtime.
+			const unexpected = models.filter(model => model.source === 'byok' && !(isByokProviderId(model.provider) && this._providerKeys.has(model.provider)));
+			if (unexpected.length) {
+				this._logService.warn(`[cli-ts] runtime listed ${unexpected.length} key-billed models without a host-provided key (${[...new Set(unexpected.map(model => model.provider))].join(', ')}); ignoring them`);
+			}
+			// The Backboard API is authoritative for catalog providers; key-billed
+			// rows come from the host's own discovery, and the subscription
+			// routes are supplemented locally.
+			this._lastServeModels = models.filter(model => model.source !== 'byok');
+			this._publishModels();
 			// Persist for instant hydration on the next window start.
-			this._persistModelsCache(models);
+			this._persistModelsCache();
 			return true;
 		}
 		return false;
@@ -3097,6 +3890,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 				}
 				const questions: ChatInputQuestion[] = specs.map((spec, index) => {
 					const id = `answer-${index}`;
+					const videoApproval = spec.header === 'Edit Video'
+						|| spec.header === 'Duration'
+						|| spec.header === 'Quality'
+						|| spec.header === 'Native Audio';
 					return spec.options.length
 						? {
 							id,
@@ -3105,7 +3902,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 							message: spec.question,
 							required: true,
 							options: spec.options.map(option => ({ id: option, label: option })),
-							allowFreeformInput: true,
+							allowFreeformInput: !videoApproval,
 						}
 						: {
 							id,
@@ -4289,6 +5086,7 @@ const CLI_TS_BACKBOARD_TOOL_KINDS = new Set<CliTsBackboardToolKind>([
 	'browser',
 	'findSkill',
 	'findMcp',
+	'generateVideo',
 ]);
 
 function cliTsToolUiState(value: unknown): CliTsToolUiState | undefined {

@@ -3,8 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { isWindows } from '../../../../base/common/platform.js';
-import { isBackboardProviderAvailable } from '../../common/backboardSubscriptions.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -12,6 +10,7 @@ import { localize } from '../../../../nls.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { IAgentModelInfo } from '../../common/agentService.js';
 import { createAgentModelPricingMeta } from '../../common/agentModelPricing.js';
+import { billingRouteForProvider, BYOK_KEY_PROVIDER_SUFFIX, isKeyBilledProvider, type ModelRouteSource, vendorOfProvider } from '../../common/byokProviders.js';
 import type { ResolveSessionConfigResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection } from '../../common/state/protocol/state.js';
 
@@ -35,20 +34,22 @@ const HIDDEN_MODEL_PROVIDERS = new Set(['featherless', 'elevenlabs', 'eleven-lab
 const SANDBOX_PROVIDER_ORDER = new Map<string, number>([
 	['aws-bedrock', 0],
 	['anthropic', 1],
-	['anthropic-subscription', 2],
-	['openai', 3],
-	['openai-subscription', 4],
-	['google', 5],
-	['xai', 6],
-	['x-ai', 6],
-	['cohere', 7],
-	['cerebras', 8],
-	['mistral', 9],
-	['deepseek', 10],
-	['openrouter', 11],
-	['lmstudio', 12],
-	['lm-studio', 12],
-	['ollama', 13],
+	['anthropic-key', 2],
+	['anthropic-subscription', 3],
+	['openai', 4],
+	['openai-key', 5],
+	['openai-subscription', 6],
+	['google', 7],
+	['xai', 8],
+	['x-ai', 8],
+	['cohere', 9],
+	['cerebras', 10],
+	['mistral', 11],
+	['deepseek', 12],
+	['openrouter', 13],
+	['lmstudio', 14],
+	['lm-studio', 14],
+	['ollama', 15],
 ]);
 
 const BACKBOARD_INTENSITY_CONFIG_KEY = 'intensity';
@@ -58,6 +59,18 @@ const BACKBOARD_COMPUTER_USE_CONFIG_KEY = 'computerUse';
 const BACKBOARD_BROWSER_USE_CONFIG_KEY = 'browserUse';
 const BACKBOARD_NOTIFICATIONS_CONFIG_KEY = 'notifications';
 const BACKBOARD_IMAGE_GENERATION_CONFIG_KEY = 'imageGeneration';
+/** Selected image model as `provider/name`; `off` disables image generation. */
+export const BACKBOARD_IMAGE_MODEL_CONFIG_KEY = 'imageModel';
+const BACKBOARD_VIDEO_GENERATION_CONFIG_KEY = 'videoGeneration';
+/** Selected video model as `provider/name`; `off` disables video generation. */
+export const BACKBOARD_VIDEO_MODEL_CONFIG_KEY = 'videoModel';
+/** Composer value that turns image or video generation off. */
+export const BACKBOARD_GENERATIVE_MEDIA_OFF = 'off';
+/**
+ * Built-in image model used when image generation is on without an explicit
+ * pick. Mirrors the CLI harness default in RunMessageRequestBuilder.
+ */
+const DEFAULT_IMAGE_MODEL_SELECTION = 'google/gemini-3.1-flash-image';
 export const BACKBOARD_OPENROUTER_PROVIDER_CONFIG_KEY = 'openRouterProvider';
 export const BACKBOARD_MODE_PLAN = 'plan';
 export const BACKBOARD_MODE_MULTITASK = 'multitask';
@@ -82,6 +95,8 @@ export function backboardMultitaskSystemContext(mode: string): string | undefine
 export interface BridgeModel {
 	readonly provider: string;
 	readonly name: string;
+	/** Which backend listed the model: `byok`, `subscription`, or `backboard` (cli-ts `ModelSource`). */
+	readonly source?: string;
 	readonly modelType?: string;
 	readonly model_type?: string;
 	readonly displayName?: string;
@@ -169,8 +184,11 @@ interface BackboardConfigJson {
 }
 
 export interface BackboardTurnSettings {
+	/** The runtime vendor id; a key-billed selection's `-key` suffix is already stripped. */
 	readonly provider: string;
 	readonly model: string;
+	/** Explicit billing route derived from the selected model id. */
+	readonly source: ModelRouteSource;
 	/** Effective approval mode: plan collapses to manual for gating purposes. */
 	readonly accessMode: string;
 	/** The stored mode value, including `plan` (used for tool exclusion). */
@@ -187,6 +205,12 @@ export interface BackboardTurnSettings {
 	readonly notifications: boolean;
 	/** Whether Backboard's built-in image generation is enabled this turn. */
 	readonly imageGeneration: boolean;
+	/** Selected image model; undefined uses the harness default. */
+	readonly imageModel?: { provider: string; name: string };
+	/** Whether Backboard's built-in video generation is enabled this turn. */
+	readonly videoGeneration: boolean;
+	/** Selected video model; video generation needs an explicit model. */
+	readonly videoModel?: { provider: string; name: string };
 	/** A user-pinned OpenRouter serving provider; undefined keeps automatic routing. */
 	readonly openRouterProvider?: string;
 	readonly config: Record<string, unknown>;
@@ -206,6 +230,10 @@ function isFileNotFoundError(error: unknown): boolean {
 
 function normalizeProviderKey(provider: string | undefined): string {
 	const value = provider?.trim().toLowerCase().replace(/[\s_]+/g, '-') ?? '';
+	if (isKeyBilledProvider(value)) {
+		// Normalize the vendor, keep the billing suffix: `open_ai-key` → `openai-key`.
+		return `${normalizeProviderKey(vendorOfProvider(value))}${BYOK_KEY_PROVIDER_SUFFIX}`;
+	}
 	if (value.includes('openrouter') || value.includes('open-router')) {
 		return 'openrouter';
 	}
@@ -234,7 +262,11 @@ function normalizeProviderKey(provider: string | undefined): string {
 }
 
 function providerLabel(provider: string | undefined): string {
-	switch (normalizeProviderKey(provider)) {
+	const normalized = normalizeProviderKey(provider);
+	if (isKeyBilledProvider(normalized)) {
+		return localize('backboard.provider.keyBilled', "{0} API Key", providerLabel(vendorOfProvider(normalized)));
+	}
+	switch (normalized) {
 		case 'aws-bedrock':
 			return 'AWS Bedrock';
 		case 'anthropic':
@@ -313,7 +345,7 @@ function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 	const openRouterProviders = normalizeOpenRouterProviders(model.openrouter_providers);
 	const configSchema = openRouterProviders.length
 		? openRouterProviderConfigSchema(openRouterProviders)
-		: claudeSubscriptionConfigSchema(model);
+		: effortConfigSchema(model);
 	return {
 		provider: 'backboard',
 		id,
@@ -338,39 +370,61 @@ function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 	};
 }
 
-const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+const EFFORT_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+type EffortLevel = typeof EFFORT_LEVELS[number];
 
-function claudeSubscriptionConfigSchema(model: BridgeModel): IAgentModelInfo['configSchema'] | undefined {
-	if (normalizeProviderKey(model.provider) !== 'anthropic-subscription') {
+/**
+ * A per-model reasoning schema for providers that publish the levels they
+ * honour: the Claude subscription route, and key-billed vendors. A key-billed
+ * model that publishes an empty list gets a single "Off" choice, because its
+ * adapter forces reasoning off for tool requests and the generic slider would
+ * promise a control the request ignores. Models that publish nothing keep the
+ * generic session slider.
+ */
+function effortConfigSchema(model: BridgeModel): IAgentModelInfo['configSchema'] | undefined {
+	const provider = normalizeProviderKey(model.provider);
+	const keyBilled = isKeyBilledProvider(provider);
+	if (provider !== 'anthropic-subscription' && !keyBilled) {
 		return undefined;
 	}
-	const levels = (model.supported_effort_levels ?? [])
-		.filter((level): level is typeof CLAUDE_EFFORT_LEVELS[number] => (CLAUDE_EFFORT_LEVELS as readonly string[]).includes(level));
+	if (model.supported_effort_levels === undefined) {
+		return undefined;
+	}
+	let levels = model.supported_effort_levels
+		.filter((level): level is EffortLevel => (EFFORT_LEVELS as readonly string[]).includes(level));
 	if (levels.length === 0) {
-		return undefined;
+		if (!keyBilled) {
+			return undefined;
+		}
+		levels = ['off'];
 	}
-	const labels: Record<typeof CLAUDE_EFFORT_LEVELS[number], string> = {
+	const labels: Record<EffortLevel, string> = {
+		off: localize('backboard.claude.effort.off', "Off"),
 		low: localize('backboard.claude.effort.low', "Low"),
 		medium: localize('backboard.claude.effort.medium', "Medium"),
 		high: localize('backboard.claude.effort.high', "High"),
 		xhigh: localize('backboard.claude.effort.xhigh', "X-High"),
 		max: localize('backboard.claude.effort.max', "Max"),
 	};
-	const descriptions: Record<typeof CLAUDE_EFFORT_LEVELS[number], string> = {
+	const descriptions: Record<EffortLevel, string> = {
+		off: localize('backboard.claude.effort.off.description', "This model does not support reasoning controls for tool-using requests."),
 		low: localize('backboard.claude.effort.low.description', "Fastest response for short, scoped work."),
 		medium: localize('backboard.claude.effort.medium.description', "Lower token use for routine work."),
 		high: localize('backboard.claude.effort.high.description', "Balanced capability and token use; Claude's default."),
 		xhigh: localize('backboard.claude.effort.xhigh.description', "Deeper reasoning for difficult coding and agentic work."),
 		max: localize('backboard.claude.effort.max.description', "Maximum reasoning depth for the most demanding tasks."),
 	};
+	const preferred: EffortLevel = keyBilled ? 'medium' : 'high';
 	return {
 		type: 'object',
 		properties: {
 			[BACKBOARD_INTENSITY_CONFIG_KEY]: {
 				type: 'string',
 				title: localize('backboard.claude.effort.title', "Reasoning effort"),
-				description: localize('backboard.claude.effort.description', "Controls Claude's adaptive reasoning effort for this model."),
-				default: levels.includes('high') ? 'high' : levels[0],
+				description: keyBilled
+					? localize('backboard.keyBilled.effort.description', "Reasoning levels this model accepts through your own API key.")
+					: localize('backboard.claude.effort.description', "Controls Claude's adaptive reasoning effort for this model."),
+				default: levels.includes(preferred) ? preferred : levels[0],
 				enum: levels,
 				enumLabels: levels.map(level => labels[level]),
 				enumDescriptions: levels.map(level => descriptions[level]),
@@ -421,13 +475,22 @@ function openRouterProviderConfigSchema(providers: readonly BridgeOpenRouterProv
 }
 
 function inferBackboardModelSupportsVision(model: BridgeModel): boolean {
-	const id = `${normalizeProviderKey(model.provider)}/${model.name}`.toLowerCase();
+	const provider = normalizeProviderKey(model.provider);
+	// Locally-authenticated subscription routes serve Claude/GPT families that
+	// accept image input, but their live catalog entries do not always declare
+	// the capability (and their names are aliases like `default`/`haiku` that no
+	// family pattern matches). Treat the route as vision-capable so pasted
+	// images are not flagged as unsupported.
+	if (provider === 'anthropic-subscription' || provider === 'openai-subscription') {
+		return true;
+	}
+	const id = [provider, model.name, model.displayName, model.display_name, model.resolved_model]
+		.filter((part): part is string => typeof part === 'string' && part.length > 0)
+		.join(' ')
+		.toLowerCase();
 	return id.includes('gpt-4o')
 		|| id.includes('gpt-5')
-		|| id.includes('claude-3')
-		|| id.includes('claude-sonnet-4')
-		|| id.includes('claude-opus-4')
-		|| id.includes('claude-haiku-4')
+		|| id.includes('claude')
 		|| id.includes('gemini')
 		|| id.includes('grok-4')
 		|| id.includes('mistral-medium-3')
@@ -533,11 +596,7 @@ function mergeBridgeModels(...modelSets: readonly (readonly BridgeModel[])[]): B
 }
 
 export function backboardModelInfos(...modelSets: readonly (readonly BridgeModel[])[]): IAgentModelInfo[] {
-	return backboardModelInfosForPlatform(isWindows, ...modelSets);
-}
-
-export function backboardModelInfosForPlatform(windows: boolean, ...modelSets: readonly (readonly BridgeModel[])[]): IAgentModelInfo[] {
-	const mergedModels = mergeBridgeModels(...modelSets).filter(model => isBackboardProviderAvailable(model.provider, windows));
+	const mergedModels = mergeBridgeModels(...modelSets);
 	return mergedModels
 		.filter(isVisibleBridgeModel)
 		.concat(supplementalBridgeModels(mergedModels))
@@ -701,11 +760,35 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 						default: false,
 						sessionMutable: true,
 					},
-					[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]: {
-						type: 'boolean',
-						title: localize('backboard.config.imageGeneration.title', "Image Generation"),
-						description: localize('backboard.config.imageGeneration.description', "Generate images with Gemini 3.1 Flash Image."),
-						default: false,
+					[BACKBOARD_IMAGE_MODEL_CONFIG_KEY]: {
+						type: 'string',
+						title: localize('backboard.config.imageModel.title', "Image"),
+						description: localize('backboard.config.imageModel.description', "Generate images with the selected Backboard image model."),
+						default: BACKBOARD_GENERATIVE_MEDIA_OFF,
+						enum: [BACKBOARD_GENERATIVE_MEDIA_OFF, DEFAULT_IMAGE_MODEL_SELECTION],
+						enumLabels: [
+							localize('backboard.config.generativeMedia.off', "Off"),
+							'Gemini 3.1 Flash Image',
+						],
+						enumDescriptions: [
+							localize('backboard.config.imageModel.off.description', "Do not generate images."),
+							localize('backboard.config.imageModel.default.description', "Google's Gemini 3.1 Flash Image."),
+						],
+						// The live catalog is too large to enumerate; the enum above is the seed.
+						enumDynamic: true,
+						sessionMutable: true,
+					},
+					[BACKBOARD_VIDEO_MODEL_CONFIG_KEY]: {
+						type: 'string',
+						title: localize('backboard.config.videoModel.title', "Video"),
+						description: localize('backboard.config.videoModel.description', "Generate videos with the selected Backboard video model."),
+						default: BACKBOARD_GENERATIVE_MEDIA_OFF,
+						// Video generation has no universal default model, so live
+						// completions supply every selectable model.
+						enum: [BACKBOARD_GENERATIVE_MEDIA_OFF],
+						enumLabels: [localize('backboard.config.generativeMedia.off', "Off")],
+						enumDescriptions: [localize('backboard.config.videoModel.off.description', "Do not generate videos.")],
+						enumDynamic: true,
 						sessionMutable: true,
 					},
 				},
@@ -728,7 +811,8 @@ function normalizeBackboardConfig(rawConfig: Record<string, unknown> | undefined
 		[BACKBOARD_COMPUTER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_COMPUTER_USE_CONFIG_KEY], false),
 		[BACKBOARD_BROWSER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_BROWSER_USE_CONFIG_KEY], false),
 		[BACKBOARD_NOTIFICATIONS_CONFIG_KEY]: booleanOf(merged[BACKBOARD_NOTIFICATIONS_CONFIG_KEY], false),
-		[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]: normalizeImageGenerationEnabled(merged[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]),
+		[BACKBOARD_IMAGE_MODEL_CONFIG_KEY]: normalizeImageModelSelection(merged[BACKBOARD_IMAGE_MODEL_CONFIG_KEY], merged[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]),
+		[BACKBOARD_VIDEO_MODEL_CONFIG_KEY]: normalizeVideoModelSelection(merged[BACKBOARD_VIDEO_MODEL_CONFIG_KEY], merged[BACKBOARD_VIDEO_GENERATION_CONFIG_KEY]),
 	};
 }
 
@@ -738,9 +822,13 @@ export function createBackboardTurnSettings(
 	model: ModelSelection | undefined,
 ): BackboardTurnSettings {
 	const values = normalizeBackboardConfig(storedConfig, sessionConfig);
-	const parsedModel = parseModelSelection(model) ?? parseModelSelection({ id: DEFAULT_MODEL_ID })!;
+	const selected = parseModelSelection(model) ?? parseModelSelection({ id: DEFAULT_MODEL_ID })!;
+	// The runtime never sees the IDE-side `-key` suffix; it gets the vendor plus
+	// an explicit billing source instead.
+	const parsedModel = billingRouteForProvider(selected.provider, selected.model);
 	const rawMode = stringConfigValue(values, SessionConfigKey.Mode, BACKBOARD_ACCESS_DEFAULT);
-	const imageGeneration = booleanConfigValue(values, BACKBOARD_IMAGE_GENERATION_CONFIG_KEY, false);
+	const imageModel = parseGenerativeModelSelection(stringConfigValue(values, BACKBOARD_IMAGE_MODEL_CONFIG_KEY, BACKBOARD_GENERATIVE_MEDIA_OFF));
+	const videoModel = parseGenerativeModelSelection(stringConfigValue(values, BACKBOARD_VIDEO_MODEL_CONFIG_KEY, BACKBOARD_GENERATIVE_MEDIA_OFF));
 	const configuredOpenRouterProvider = stringValueFromRecord(model?.config?.[BACKBOARD_OPENROUTER_PROVIDER_CONFIG_KEY]);
 	const configuredModelIntensity = stringValueFromRecord(model?.config?.[BACKBOARD_INTENSITY_CONFIG_KEY]);
 	const intensity = configuredModelIntensity
@@ -753,6 +841,7 @@ export function createBackboardTurnSettings(
 	return {
 		provider: parsedModel.provider,
 		model: parsedModel.model,
+		source: parsedModel.source,
 		accessMode: rawMode === BACKBOARD_MODE_PLAN
 			? BACKBOARD_ACCESS_MANUAL
 			: rawMode === BACKBOARD_MODE_MULTITASK
@@ -765,7 +854,12 @@ export function createBackboardTurnSettings(
 		computerUse: booleanConfigValue(values, BACKBOARD_COMPUTER_USE_CONFIG_KEY, false),
 		browserUse: booleanConfigValue(values, BACKBOARD_BROWSER_USE_CONFIG_KEY, false),
 		notifications: booleanConfigValue(values, BACKBOARD_NOTIFICATIONS_CONFIG_KEY, false),
-		imageGeneration,
+		// The wire booleans are derived from the selected models so the composer
+		// has a single source of truth (the model picker).
+		imageGeneration: imageModel !== undefined,
+		videoGeneration: videoModel !== undefined,
+		...(imageModel ? { imageModel } : {}),
+		...(videoModel ? { videoModel } : {}),
 		...(parsedModel.provider === 'openrouter' && configuredOpenRouterProvider && configuredOpenRouterProvider !== 'auto'
 			? { openRouterProvider: configuredOpenRouterProvider }
 			: {}),
@@ -773,14 +867,38 @@ export function createBackboardTurnSettings(
 	};
 }
 
-function normalizeImageGenerationEnabled(value: unknown): boolean {
-	// Migrate values saved by the short-lived image-model picker back to the
-	// simple toggle. Any selected model means Images was enabled; the runtime
-	// now ignores that id and always uses Gemini 3.1 Flash Image.
-	if (typeof value === 'string' && !['', 'off', 'false', 'disabled'].includes(value.trim().toLowerCase())) {
-		return true;
+function normalizeImageModelSelection(value: unknown, legacyEnabled: unknown): string {
+	const selected = stringValueFromRecord(value);
+	if (selected && selected.toLowerCase() !== BACKBOARD_GENERATIVE_MEDIA_OFF) {
+		return selected;
 	}
-	return booleanOf(value, false);
+	// Sessions saved while Images was a boolean toggle keep the capability on
+	// with the built-in default model instead of silently turning it off.
+	return booleanOf(legacyEnabled, false) ? DEFAULT_IMAGE_MODEL_SELECTION : BACKBOARD_GENERATIVE_MEDIA_OFF;
+}
+
+function normalizeVideoModelSelection(value: unknown, legacyEnabled: unknown): string {
+	const selected = stringValueFromRecord(value);
+	if (selected && selected.toLowerCase() !== BACKBOARD_GENERATIVE_MEDIA_OFF) {
+		return selected;
+	}
+	// Video generation has no universal default model, so a retired boolean
+	// toggle cannot be migrated into an enabled model selection.
+	void legacyEnabled;
+	return BACKBOARD_GENERATIVE_MEDIA_OFF;
+}
+
+/** Splits a `provider/name` selection; provider names never contain a slash. */
+function parseGenerativeModelSelection(value: string | undefined): { provider: string; name: string } | undefined {
+	const trimmed = value?.trim();
+	if (!trimmed || trimmed.toLowerCase() === BACKBOARD_GENERATIVE_MEDIA_OFF) {
+		return undefined;
+	}
+	const separator = trimmed.indexOf('/');
+	if (separator <= 0 || separator === trimmed.length - 1) {
+		return undefined;
+	}
+	return { provider: trimmed.slice(0, separator), name: trimmed.slice(separator + 1) };
 }
 
 function normalizeBackboardIntensity(value: unknown): string {

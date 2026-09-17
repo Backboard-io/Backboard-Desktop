@@ -109,6 +109,7 @@ import { IChatEditingSession, IEditSessionEntryDiff, IModifiedFileEntry, Modifie
 import { ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../common/languageModels.js';
 import { ChatModelConfigurationStore } from './chatModelConfigurationStore.js';
 import { IChatModelInputState, IChatRequestModeInfo, IInputModel, logChangesToStateModel } from '../../../common/model/chatModel.js';
+import { isKeyBilledModelId } from '../../../../../../platform/agentHost/common/byokProviders.js';
 import { filterModelsForSession, findBestMatchingModel, findDefaultModel, hasModelsTargetingSession, isModelValidForSession, mergeModelsWithCache, resolveModelFromSyncState, shouldResetModelToDefault, shouldResetOnModelListChange, shouldRestoreLateArrivingModel, shouldRestorePersistedModel } from './chatModelSelectionLogic.js';
 import { getChatSessionType, LocalChatSessionUri } from '../../../common/model/chatUri.js';
 import { getLatestTurnEditedFiles, IChatResponseViewModel, isResponseVM } from '../../../common/model/chatViewModel.js';
@@ -884,9 +885,15 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			}
 			if (shouldResetOnModelListChange(modelIdentifier, models)) {
 				// Carry the previous selection across pools when targeted models arrive late.
-				const match = findBestMatchingModel(this._currentLanguageModel.get(), models);
+				const current = this._currentLanguageModel.get();
+				const match = findBestMatchingModel(current, models);
 				if (match) {
 					this.setCurrentLanguageModel(match);
+				} else if (current && isKeyBilledModelId(current.metadata.id)) {
+					// A key-billed selection whose row is gone stays selected: the
+					// agent host reports it as unavailable and refuses to send, which
+					// is more honest than silently moving the conversation onto
+					// another billing route.
 				} else {
 					this.setCurrentLanguageModelToDefault();
 				}
@@ -5320,6 +5327,7 @@ function getBackboardGenericOptionIcon(property: string): ThemeIcon {
 			return ThemeIcon.fromId('backboard-capability-notifications');
 		case 'imageGeneration':
 		case 'images':
+		case 'imageModel':
 			return ThemeIcon.fromId('backboard-capability-image-generation');
 		default:
 			return Codicon.layersActive;
@@ -5343,7 +5351,10 @@ function getBackboardActiveOptionLabel(option: IAgentHostGenericConfigOption): s
 			return localize('backboardActiveOption.webSearch', "Web search");
 		case 'imageGeneration':
 		case 'images':
+		case 'imageModel':
 			return localize('backboardActiveOption.images', "Images");
+		case 'videoModel':
+			return localize('backboardActiveOption.video', "Video");
 		default:
 			return option.label;
 	}
@@ -5536,6 +5547,11 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 	}
 
 	private showEnumOption(option: IAgentHostGenericConfigOption): void {
+		const live = option.getDynamicEnumInfo?.();
+		if (live) {
+			this.showModelPicker(option, live);
+			return;
+		}
 		const body = this.openFlow(option.label);
 		this.flowButton(body, localize('composer.back', "Back"), () => this.showDrawer());
 		const info = option.getEnumInfo();
@@ -5547,8 +5563,170 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 					button.setAttribute('aria-pressed', 'true');
 				});
 				button.setAttribute('aria-pressed', String(value === info.current));
+				// Without this the composer regains focus on mousedown and tears the
+				// flow down before the click lands (same trick as the context picker).
+				this.flowDisposables.add(dom.addDisposableListener(button, 'mousedown', event => event.preventDefault()));
 			}
 		}
+	}
+
+	/**
+	 * Model picker for `enumDynamic` catalogs (image and video generation).
+	 * Renders as a single-column modal matching the composer's context menu
+	 * and the model provider routing dialog.
+	 */
+	private showModelPicker(option: IAgentHostGenericConfigOption, live: Promise<{ values: string[]; labels: string[]; descriptions: (string | undefined)[]; current: string | undefined }>): void {
+		const seed = option.getEnumInfo();
+		const body = this.openFlow(option.label);
+		const root = body.parentElement;
+		root?.classList.add('backboard-composer-model-picker');
+		let subtitle: HTMLElement | undefined;
+		const heading = root?.querySelector<HTMLElement>('.backboard-composer-flow-header');
+		if (heading) {
+			const wrap = dom.$('.backboard-composer-model-heading');
+			const title = heading.querySelector('strong');
+			if (title) { wrap.appendChild(title); }
+			subtitle = dom.append(wrap, dom.$('span.backboard-composer-model-subtitle'));
+			heading.insertBefore(wrap, heading.firstChild);
+			// Replace the flow's text close button with an icon toolbar: a
+			// refresh button that re-fetches the model catalog and a close button.
+			heading.querySelector('button')?.remove();
+			const actions = dom.append(heading, dom.$('.backboard-composer-model-actions'));
+			const refresh = dom.append(actions, dom.$('button.backboard-composer-model-close.codicon.codicon-refresh', {
+				type: 'button',
+				'aria-label': localize('composer.models.refresh', "Refresh models"),
+				title: localize('composer.models.refresh', "Refresh models"),
+			})) as HTMLButtonElement;
+			this.flowDisposables.add(dom.addDisposableListener(refresh, 'click', event => {
+				event.stopPropagation();
+				if (refresh.classList.contains('disabled')) { return; }
+				refresh.classList.add('disabled', 'codicon-loading');
+				refresh.classList.remove('codicon-refresh');
+				status.textContent = localize('composer.models.refreshing', "Refreshing models…");
+				const refreshed = option.getDynamicEnumInfo?.(true) ?? Promise.reject(new Error('unavailable'));
+				refreshed.then(next => {
+					if (!root?.isConnected) { return; }
+					if (next.values.length > 0) {
+						applyLive({ values: next.values.map((value, index) => ({ value, label: next.labels[index], description: next.descriptions[index] })), current: next.current });
+					}
+					status.textContent = '';
+				}, (error: unknown) => { status.textContent = String(error); }).finally(() => {
+					if (!refresh.isConnected) { return; }
+					refresh.classList.remove('disabled', 'codicon-loading');
+					refresh.classList.add('codicon-refresh');
+				});
+			}));
+			const close = dom.append(actions, dom.$('button.backboard-composer-model-close.codicon.codicon-close', {
+				type: 'button',
+				'aria-label': localize('composer.close', "Close"),
+				title: localize('composer.close', "Close"),
+			})) as HTMLButtonElement;
+			this.flowDisposables.add(dom.addDisposableListener(close, 'click', event => {
+				event.stopPropagation();
+				this.flowDisposables.clear();
+				this.inputPart.focus();
+			}));
+		}
+
+		const search = dom.append(body, dom.$('input.backboard-composer-model-search')) as HTMLInputElement;
+		search.type = 'text';
+		search.placeholder = localize('composer.models.filter', "Filter models");
+		search.setAttribute('aria-label', localize('composer.models.filterAria', "Filter models"));
+		const list = dom.append(body, dom.$('.backboard-composer-model-list', { role: 'listbox', 'aria-label': option.label }));
+		const status = dom.append(body, dom.$('p.backboard-composer-flow-status', { role: 'status' }));
+
+		const rows = this.flowDisposables.add(new DisposableStore());
+		let items: { value: string; label: string; description?: string }[] = [];
+		let current: string | undefined = seed?.current;
+		let selected = 0;
+
+		const syncSubtitle = (): void => {
+			if (subtitle) {
+				const currentItem = items.find(i => i.value === current);
+				subtitle.textContent = currentItem?.label ?? (current === 'off' || !current ? localize('composer.models.off', "Off") : current);
+			}
+		};
+
+		const renderModels = (): void => {
+			rows.clear();
+			dom.clearNode(list);
+			const query = search.value.trim().toLowerCase();
+			const visible = items.filter(item =>
+				!query || item.label.toLowerCase().includes(query) || item.value.toLowerCase().includes(query)
+			);
+			status.textContent = visible.length || !items.length
+				? ''
+				: localize('composer.models.noMatches', "No models match \"{0}\".", search.value.trim());
+			if (selected >= visible.length) { selected = 0; }
+
+			for (const item of visible) {
+				const isSelected = item.value === current;
+				const row = dom.append(list, dom.$('button.backboard-composer-model-choice', {
+					type: 'button', role: 'option', 'aria-selected': String(isSelected), 'data-value': item.value,
+				})) as HTMLButtonElement;
+				row.classList.toggle('selected', isSelected);
+				row.title = item.description ? `${item.label} — ${item.description}` : item.label;
+
+				const copy = dom.append(row, dom.$('.backboard-composer-model-choice-copy'));
+				dom.append(copy, dom.$('.backboard-composer-model-choice-label', undefined, item.label));
+
+				if (isSelected) {
+					dom.append(row, dom.$('span.codicon.codicon-check.backboard-composer-model-check', { 'aria-hidden': 'true' }));
+				}
+
+				rows.add(dom.addDisposableListener(row, 'pointerdown', event => event.preventDefault()));
+				rows.add(dom.addDisposableListener(row, 'click', event => {
+					event.stopPropagation();
+					current = item.value;
+					option.setValue(item.value);
+					renderModels();
+					syncSubtitle();
+					// Rebuilding the rows drops the focused element; keep the caret in
+					// the filter so keyboard navigation and Escape still work.
+					search.focus();
+				}));
+			}
+		};
+
+		this.flowDisposables.add(dom.addDisposableListener(search, 'input', () => { selected = 0; renderModels(); }));
+		this.flowDisposables.add(dom.addDisposableListener(search, 'keydown', event => {
+			if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.flowDisposables.clear(); this.inputPart.focus(); return; }
+			if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Enter') { return; }
+			event.preventDefault();
+			event.stopPropagation();
+			const rendered = Array.from(list.querySelectorAll<HTMLButtonElement>('.backboard-composer-model-choice'));
+			if (!rendered.length) { return; }
+			if (event.key === 'Enter') { rendered[Math.min(selected, rendered.length - 1)]?.click(); return; }
+			selected = (selected + (event.key === 'ArrowDown' ? 1 : -1) + rendered.length) % rendered.length;
+			rendered.forEach((row, index) => {
+				const isFocused = index === selected;
+				row.classList.toggle('keyboard-focused', isFocused);
+				if (isFocused) {
+					row.scrollIntoView({ block: 'nearest' });
+				}
+			});
+		}));
+
+		if (seed) {
+			items = seed.values.map((value, index) => ({ value, label: seed.labels[index], description: seed.descriptions[index] }));
+			syncSubtitle();
+			renderModels();
+		}
+		const applyLive = (next: { values: { value: string; label: string; description?: string }[]; current: string | undefined }): void => {
+			if (next.values.length > 0) {
+				items = next.values;
+				if (next.current !== undefined) {
+					current = next.current;
+				}
+			}
+			syncSubtitle();
+			renderModels();
+		};
+		void live.then(next => {
+			applyLive({ values: next.values.map((value, index) => ({ value, label: next.labels[index], description: next.descriptions[index] })), current: next.current });
+			status.textContent = '';
+		}, (error: unknown) => { status.textContent = String(error); });
+		search.focus();
 	}
 
 	private openFlow(title: string, menu = false): HTMLElement {
@@ -5874,7 +6052,8 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 				case 'computerUse': case 'cua': return Codicon.deviceDesktop;
 				case 'browserUse': case 'browser': case 'webSearch': case 'web': return Codicon.globe;
 				case 'notifications': case 'notify': return Codicon.bell;
-				case 'imageGeneration': case 'images': return Codicon.fileMedia;
+				case 'imageGeneration': case 'images': case 'imageModel': return Codicon.fileMedia;
+				case 'videoModel': return Codicon.deviceCameraVideo;
 			}
 		}
 		return getBackboardGenericOptionIcon(property);

@@ -10,10 +10,14 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import type { CliTsAgentEvent, CliTsWorkerState, CliTsWorkerIntegrationChange } from '../../node/cliTs/cliTsProtocol.js';
 import { URI } from '../../../../base/common/uri.js';
+import { Schemas } from '../../../../base/common/network.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
+import { FileService } from '../../../files/common/fileService.js';
+import { DiskFileSystemProvider } from '../../../files/node/diskFileSystemProvider.js';
 import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession, type AgentSignal } from '../../common/agentService.js';
 import { ActionType } from '../../common/state/sessionActions.js';
+import { CustomizationType, McpServerStatus } from '../../common/state/protocol/channels-session/state.js';
 import { buildSubagentSessionUri, FileEditKind, ResponsePartKind, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ToolCallResponsePart, type ToolResultFileEditContent } from '../../common/state/sessionState.js';
 import { AgentHostCheckpointService } from '../../node/agentHostCheckpointService.js';
 import { assertUsableClaudeSubscriptionLogin, CliTsAgent, cliTsToolExecutionFailed, getBackboardWorktreeBranchName, getBackboardWorktreesRoot, hasUsableChatGptSubscriptionLogin, isChatGptSubscriptionModel, isClaudeSubscriptionModel, requiresProviderThreadHandoff, withChatGptSubscriptionConnectionState, withClaudeSubscriptionConnectionState } from '../../node/cliTs/cliTsAgent.js';
@@ -25,7 +29,7 @@ import { createSessionDataService, TestDiffComputeService } from '../common/sess
 suite('CliTsAgent tool metadata', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 
-	function createAgent(checkpointService: unknown = {}, sessionDataService: unknown = {}, gitService: unknown = {}, configurationService: unknown = { getSessionConfigValues: () => ({}) }): CliTsAgent {
+	function createAgent(checkpointService: unknown = {}, sessionDataService: unknown = {}, gitService: unknown = {}, configurationService: unknown = { getSessionConfigValues: () => ({}) }, pluginManager: unknown = { syncCustomizations: async () => [] }, fileService: unknown = {}): CliTsAgent {
 		return store.add(new CliTsAgent(
 			new NullLogService(),
 			configurationService as never,
@@ -33,7 +37,38 @@ suite('CliTsAgent tool metadata', () => {
 			{} as never,
 			checkpointService as never,
 			gitService as never,
+			pluginManager as never,
+			fileService as never,
 		));
+	}
+
+	function makeFileService(): FileService {
+		const log = new NullLogService();
+		const service = store.add(new FileService(log));
+		store.add(service.registerProvider(Schemas.file, store.add(new DiskFileSystemProvider(log))));
+		return service;
+	}
+
+	function createMcpSession(sessionUri: URI, onRequest: (control: { op: string; requestId?: string; servers?: Record<string, unknown>; force?: readonly string[] }) => unknown): unknown {
+		return {
+			sessionUri,
+			sessionId: AgentSession.id(sessionUri),
+			createdAt: 0,
+			modifiedAt: 0,
+			materialized: true,
+			disposed: false,
+			subagentTurnOwners: new Map(),
+			completedSubagentToolCallIds: new Set(),
+			pendingClientToolCalls: new Set(),
+			pendingInputs: new Map(),
+			storedTurns: [],
+			storedSubagentTurns: new Map(),
+			proc: {
+				isRunning: true,
+				nextRequestId: () => `request-${Math.random()}`,
+				request: async (control: { op: string; requestId?: string; servers?: Record<string, unknown>; force?: readonly string[] }) => ({ type: 'serve:mcp', payload: onRequest(control) }),
+			},
+		};
 	}
 
 	test('model refresh coalesces concurrent requests and permits retry after failure', async () => {
@@ -52,6 +87,78 @@ suite('CliTsAgent tool metadata', () => {
 		Reflect.set(agent, '_refreshModelCatalog', async () => { calls++; });
 		await agent.executeCommand('models.refresh');
 		assert.strictEqual(calls, 2);
+	});
+
+	test('pushes client-synced MCP servers to the session runtime and publishes them as customizations', async () => {
+		const pluginDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bb-mcp-plugin-'));
+		fs.writeFileSync(path.join(pluginDir, '.mcp.json'), JSON.stringify({
+			mcpServers: {
+				backboard: { type: 'http', url: 'https://backboard-docs.docsalot.dev/api/mcp' },
+				playwright: { command: 'npx', args: ['-y', '@playwright/mcp@latest'] },
+			},
+		}));
+
+		const fileService = makeFileService();
+		const pluginManager = {
+			syncCustomizations: async () => [{
+				customization: { type: CustomizationType.Plugin, id: 'plugin-1', uri: URI.file(pluginDir).toString(), name: 'synced', enabled: true },
+				pluginDir: URI.file(pluginDir),
+			}],
+		};
+		const agent = createAgent({}, {}, {}, {}, pluginManager, fileService);
+
+		const requests: Array<{ op: string; servers?: Record<string, unknown>; force?: readonly string[] }> = [];
+		const sessionUri = AgentSession.uri('backboard', 'mcp-session');
+		const session = createMcpSession(sessionUri, control => {
+			requests.push(control);
+			return {
+				servers: Object.keys(control.servers ?? {}).map(name => ({
+					name,
+					status: control.servers?.[name] && (control.servers[name] as { disabled?: boolean }).disabled ? 'disabled' : 'connected',
+					toolNames: [`mcp__${name}__tool`],
+				})),
+			};
+		});
+		const internals = agent as unknown as { _sessions: Map<string, unknown> };
+		internals._sessions.set('mcp-session', session);
+
+		const synced = await agent.setClientCustomizations(sessionUri, 'client-1', [
+			{ type: CustomizationType.Plugin, id: 'plugin-1', uri: URI.file(pluginDir).toString(), name: 'synced', enabled: true } as never,
+		]);
+
+		assert.strictEqual(synced.length, 1);
+		assert.strictEqual(requests.length, 1);
+		assert.strictEqual(requests[0].op, 'setMcpServers');
+		assert.deepStrictEqual(Object.keys(requests[0].servers ?? {}).sort(), ['backboard', 'playwright']);
+		assert.strictEqual((requests[0].servers!['backboard'] as { url?: string }).url, 'https://backboard-docs.docsalot.dev/api/mcp');
+		assert.strictEqual((requests[0].servers!['playwright'] as { command?: string }).command, 'npx');
+
+		const customizations = await agent.getSessionCustomizations(sessionUri);
+		assert.deepStrictEqual(customizations.map(c => c.name).sort(), ['backboard', 'playwright']);
+		for (const customization of customizations) {
+			assert.strictEqual(customization.type, CustomizationType.McpServer);
+			assert.strictEqual((customization as { state: { kind: McpServerStatus } }).state.kind, McpServerStatus.Ready);
+		}
+
+		// The composer's per-server toggle disconnects a server for this session.
+		const backboard = customizations.find(c => c.name === 'backboard')!;
+		agent.setCustomizationEnabled(backboard.id, false);
+		await (session as { mcpPush?: Promise<void> }).mcpPush;
+		assert.strictEqual(requests.length, 2);
+		assert.strictEqual((requests[1].servers!['backboard'] as { disabled?: boolean }).disabled, true);
+		assert.strictEqual((requests[1].servers!['playwright'] as { disabled?: boolean }).disabled, undefined);
+
+		const afterToggle = await agent.getSessionCustomizations(sessionUri);
+		const disabledBackboard = afterToggle.find(c => c.name === 'backboard')!;
+		assert.strictEqual(disabledBackboard.enabled, false);
+		assert.strictEqual((disabledBackboard as { state: { kind: McpServerStatus } }).state.kind, McpServerStatus.Stopped);
+
+		// Reconnecting forces a fresh handshake for that server only.
+		agent.setCustomizationEnabled(backboard.id, true);
+		await (session as { mcpPush?: Promise<void> }).mcpPush;
+		assert.strictEqual(requests.length, 3);
+		assert.deepStrictEqual(requests[2].force, ['backboard']);
+		assert.strictEqual((requests[2].servers!['backboard'] as { disabled?: boolean }).disabled, undefined);
 	});
 
 	test('distinguishes successful no-match and partial searches from execution failure', () => {
@@ -123,15 +230,12 @@ suite('CliTsAgent tool metadata', () => {
 				Buffer.from(JSON.stringify({ exp })).toString('base64url'),
 				'signature',
 			].join('.');
-			fs.mkdirSync(path.join(tempRoot, '.backboard_ide'), { recursive: true });
-			fs.writeFileSync(path.join(tempRoot, '.backboard_ide', 'subscriptions.json'), JSON.stringify({ chatgptSubscriptionAuthFile: authFile }));
+			fs.mkdirSync(path.join(tempRoot, '.backboard'), { recursive: true });
+			fs.writeFileSync(path.join(tempRoot, '.backboard', 'config.json'), JSON.stringify({ chatgptSubscriptionAuthFile: authFile }));
 			fs.writeFileSync(authFile, JSON.stringify({ tokens: { access_token: jwt(1), refresh_token: 'renewable' } }));
 
 			assert.strictEqual(hasUsableChatGptSubscriptionLogin(tempRoot, 2_000), true);
 			fs.writeFileSync(authFile, JSON.stringify({ tokens: { access_token: jwt(1) } }));
-			assert.strictEqual(hasUsableChatGptSubscriptionLogin(tempRoot, 2_000), false);
-			fs.writeFileSync(authFile, JSON.stringify({ tokens: { access_token: jwt(1), refresh_token: 'renewable' } }));
-			fs.rmSync(path.join(tempRoot, '.backboard_ide'), { recursive: true });
 			assert.strictEqual(hasUsableChatGptSubscriptionLogin(tempRoot, 2_000), false);
 			assert.strictEqual(isChatGptSubscriptionModel('openai-subscription/gpt-5.6-sol'), true);
 			assert.strictEqual(isChatGptSubscriptionModel('openai/gpt-5.6-sol'), false);
@@ -206,7 +310,8 @@ suite('CliTsAgent tool metadata', () => {
 				forkContext?: string;
 				providerHandoffContext?: string;
 				storedTurns: Array<{ prompt: string; response: string }>;
-				proc?: { isRunning: boolean; dispose(): void; notify(value: unknown): void };
+				sendQueue?: Promise<void>;
+				proc?: { isRunning: boolean; dispose(): void; notify(value: unknown): void; nextRequestId(): string; request(value: unknown): Promise<unknown> };
 			}>;
 			_writeStore(): void;
 		};
@@ -223,19 +328,61 @@ suite('CliTsAgent tool metadata', () => {
 			isRunning: true,
 			dispose: () => disposed++,
 			notify: () => notified++,
+			nextRequestId: () => 'idle',
+			request: async () => ({}),
 		};
 
 		await agent.changeModel(created.session, { id: 'openai/gpt-5.6' });
+		await session.sendQueue;
 
 		assert.strictEqual(session.model?.id, 'openai/gpt-5.6');
 		assert.strictEqual(session.threadId, undefined);
 		assert.strictEqual(session.proc, undefined);
 		assert.strictEqual(disposed, 1);
 		assert.strictEqual(notified, 0);
-		assert.strictEqual(storeWrites, 1);
+		assert.strictEqual(storeWrites, 2);
 		assert.strictEqual(session.forkContext, undefined);
 		assert.match(session.providerHandoffContext ?? '', /ORCHID/);
 		assert.match(session.providerHandoffContext ?? '', /changed model providers/);
+	});
+
+	test('waits for runtime workers and coalesces model selections before applying one', async () => {
+		const agent = createAgent();
+		const internals = agent as unknown as {
+			_sessions: Map<string, { threadId?: string; sendQueue?: Promise<void>; proc?: unknown }>;
+			_writeStore(): void;
+			_sendMessage(session: unknown): Promise<void>;
+		};
+		internals._writeStore = () => {};
+		let sent = false;
+		internals._sendMessage = async () => { sent = true; };
+		const created = await agent.createSession({ model: { id: 'openai-key/gpt-4.1' } });
+		const session = internals._sessions.get(AgentSession.id(created.session))!;
+		session.threadId = 'byok_thread';
+		let release!: () => void;
+		const idle = new Promise<void>(resolve => { release = resolve; });
+		let entered!: () => void;
+		const waiting = new Promise<void>(resolve => { entered = resolve; });
+		const controls: Array<{ op: string; model?: string; source?: string }> = [];
+		session.proc = { isRunning: true, nextRequestId: () => 'change', dispose: () => {},
+			request: async (control: { op: string; model?: string; source?: string }) => {
+				controls.push(control);
+				if (control.op === 'waitForIdle') { entered(); await idle; }
+				return { payload: { op: control.op } };
+			},
+		};
+		await agent.changeModel(created.session, { id: 'google-key/gemini-2.5-flash' });
+		await waiting;
+		await agent.changeModel(created.session, { id: 'xai-key/grok-4.6' });
+		const submission = agent.sendMessage(created.session, 'queued');
+		assert.deepStrictEqual({ controls: controls.map(control => control.op), sent }, { controls: ['waitForIdle'], sent: false });
+		release();
+		await submission;
+		assert.strictEqual(sent, true);
+		assert.deepStrictEqual(controls.map(({ op, model, source }) => ({ op, model, source })), [
+			{ op: 'waitForIdle', model: undefined, source: undefined },
+			{ op: 'setModel', model: 'xai/grok-4.6', source: 'byok' },
+		]);
 	});
 
 	test('fails fast with an actionable reconnect when Claude login expires', async () => {
@@ -269,33 +416,332 @@ suite('CliTsAgent tool metadata', () => {
 		assert.strictEqual(internals._claudeSubscriptionConnected, true);
 	});
 
-	for (const command of ['chatgptSubscription.login', 'claudeSubscription.login', 'claudeSubscription.enable', 'claudeSubscription.check']) {
-		test(`All platforms reject ${command} before starting subscription setup`, async () => {
-			for (const windows of [true, false]) {
-				await assert.rejects(createAgent().executeCommand(command, windows), /Subscriptions are currently unavailable/);
-			}
-		});
-	}
-
-	for (const provider of ['openai-subscription', 'anthropic-subscription']) {
-		test(`rejects a cached model selection for ${provider} before modifying the session`, async () => {
-			await assert.rejects(createAgent().changeModel(AgentSession.uri('backboard', 'stale-selection'), { id: `${provider}/default` }), /Subscriptions are currently unavailable/);
-		});
-	}
-
-	test('blocks Claude status regardless of saved connection state', async () => {
+	test('reports whether Claude setup needs OAuth', async () => {
 		const agent = createAgent();
 		for (const connected of [true, false]) {
 			Reflect.set(agent, '_refreshClaudeSubscriptionConnectionState', async () => { Reflect.set(agent, '_claudeSubscriptionConnected', connected); });
-			await assert.rejects(agent.executeCommand('claudeSubscription.check', false), /Subscriptions are currently unavailable/);
+			assert.deepStrictEqual(await agent.executeCommand('claudeSubscription.check'), { message: '', requiresSignIn: !connected });
 		}
 	});
 
 	test('refuses to start interactive Claude OAuth through the stdin-less agent command', async () => {
 		await assert.rejects(
-			createAgent().executeCommand('claudeSubscription.login', false),
-			/Subscriptions are currently unavailable/,
+			createAgent().executeCommand('claudeSubscription.login'),
+			/requires an interactive terminal/,
 		);
+	});
+
+	test('treats every key-billed vendor as one handoff family', () => {
+		assert.deepStrictEqual(
+			[
+				requiresProviderThreadHandoff('byok_abc', undefined, 'openai/gpt-5.5'),
+				requiresProviderThreadHandoff('byok_abc', 'openai-key/gpt-5.5', 'anthropic-key/claude-opus-5'),
+				requiresProviderThreadHandoff('thread_bb', 'openai/gpt-5.5', 'openai-key/gpt-5.5'),
+				requiresProviderThreadHandoff('thread_bb', undefined, 'anthropic-key/claude-opus-5'),
+				requiresProviderThreadHandoff('thread_bb', 'openai/gpt-5.5', 'openai/gpt-5.6'),
+			],
+			[true, false, true, true, false],
+		);
+	});
+
+	test('publishes key-billed models only after a key is validated and activated', async () => {
+		const agent = createAgent();
+		const validated: string[] = [];
+		const internals = agent as unknown as {
+			_validateProviderKey(provider: string, key: string): Promise<unknown>;
+			_pushCredentials(): Promise<{ acknowledged: number; terminated: number; unconfirmed: number; total: number }>;
+			_persistModelsCache(): void;
+		};
+		internals._validateProviderKey = async (provider, key) => {
+			validated.push(`${provider}:${key}`);
+			return { ok: true, models: [{ provider, name: 'gpt-5.5', model_type: 'llm' }] };
+		};
+		internals._pushCredentials = async () => ({ acknowledged: 0, terminated: 0, unconfirmed: 0, total: 0 });
+		internals._persistModelsCache = () => { };
+		const keyRow = () => agent.models.get().find(model => model.id === 'openai-key/gpt-5.5');
+
+		await assert.rejects(agent.executeCommand('providerKeys.validate', { provider: 'openai', key: '  ' }), /Enter an? OpenAI API key/);
+		await assert.rejects(agent.executeCommand('providerKeys.validate', { provider: 'unsupported', key: 'test' }), /not supported/);
+
+		const validation = await agent.executeCommand('providerKeys.validate', { provider: 'openai', key: 'sk-test-key' });
+		const activation = await agent.executeCommand('providerKeys.set', { provider: 'openai', key: 'sk-test-key' });
+		const afterActivation = keyRow();
+		await agent.executeCommand('providerKeys.remove', { provider: 'openai' });
+		const afterRemoval = keyRow();
+		const status = await agent.executeCommand('providerKeys.status');
+
+		assert.deepStrictEqual({
+			validation: validation.data,
+			vendorCalls: validated,
+			activation: activation.data,
+			afterActivation: { label: afterActivation?._meta?.upstreamProviderLabel, configured: afterActivation?._meta?.byokKeyConfigured },
+			afterRemoval: { listed: afterRemoval !== undefined, configured: afterRemoval?._meta?.byokKeyConfigured },
+			status: status.data,
+		}, {
+			validation: { ok: true, modelCount: 1 },
+			// Activation reuses the validated catalog instead of calling the vendor again.
+			vendorCalls: ['openai:sk-test-key'],
+			activation: { connected: true, revision: 1, acknowledged: 0, terminated: 0, running: 0 },
+			afterActivation: { label: 'OpenAI API Key', configured: true },
+			// The row stays listed so a pinned session keeps its selection, but it is unavailable.
+			afterRemoval: { listed: true, configured: false },
+			status: { providers: { openai: { held: false, discovered: true }, anthropic: { held: false, discovered: false }, google: { held: false, discovered: false }, openrouter: { held: false, discovered: false }, xai: { held: false, discovered: false } }, revision: 2 },
+		});
+	});
+
+	test('sends the billing route with every turn and refuses a key-billed model without a key', async () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-cli-ts-byok-'));
+		try {
+			const agent = createAgent({}, {}, {}, { getSessionConfigValues: () => ({ isolation: 'folder' }) });
+			const progress: AgentSignal[] = [];
+			store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+			const submits: Array<{ model?: string; source?: string }> = [];
+			const internals = agent as unknown as {
+				_storePath(): string;
+				_materialize(session: { materialized: boolean }): Promise<void>;
+				_resolveRgDir(): Promise<string | undefined>;
+				_refreshModelsOnce(): void;
+				_ensureProcess(session: unknown): unknown;
+				_validateProviderKey(provider: string, key: string): Promise<unknown>;
+				_pushCredentials(): Promise<{ acknowledged: number; terminated: number; unconfirmed: number; total: number }>;
+				_persistModelsCache(): void;
+			};
+			internals._storePath = () => path.join(tempRoot, 'sessions.json');
+			internals._materialize = async session => { session.materialized = true; };
+			internals._resolveRgDir = async () => undefined;
+			internals._refreshModelsOnce = () => { };
+			internals._validateProviderKey = async provider => ({ ok: true, models: [{ provider, name: 'gpt-5.5', model_type: 'llm' }] });
+			internals._pushCredentials = async () => ({ acknowledged: 0, terminated: 0, unconfirmed: 0, total: 0 });
+			internals._persistModelsCache = () => { };
+			internals._ensureProcess = () => ({
+				isRunning: true,
+				start: () => { },
+				nextRequestId: () => 'fixture-request',
+				request: async (request: { op: string; model?: string; source?: string }) => {
+					if (request.op === 'submit') {
+						submits.push({ model: request.model, source: request.source });
+					}
+					return { payload: { status: 'completed' } };
+				},
+				notify: () => { },
+				dispose: () => { },
+			});
+			const sessionUri = AgentSession.uri('backboard', 'byok-route');
+			await agent.createSession({ session: sessionUri, workingDirectory: URI.file(tempRoot), model: { id: 'openai-key/gpt-5.5' } });
+
+			await agent.sendMessage(sessionUri, 'first');
+			const errors = progress
+				.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatError)
+				.map(signal => signal.kind === 'action' ? (signal.action as { error?: { message: string } }).error?.message : undefined);
+
+			await agent.executeCommand('providerKeys.set', { provider: 'openai', key: 'sk-test-key' });
+			await agent.sendMessage(sessionUri, 'second');
+			await agent.changeModel(sessionUri, { id: 'anthropic/claude-opus-5' });
+			await agent.sendMessage(sessionUri, 'third');
+
+			assert.deepStrictEqual({ errors, submits }, {
+				errors: ['No OpenAI API key is connected. Add one under API Keys to use this model.'],
+				submits: [
+					{ model: 'openai/gpt-5.5', source: 'byok' },
+					{ model: 'anthropic/claude-opus-5', source: 'backboard' },
+				],
+			});
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('a replacement key with a narrower catalog keeps the old row listed but unavailable and blocks sends', async () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-cli-ts-narrow-key-'));
+		try {
+			const agent = createAgent({}, {}, {}, { getSessionConfigValues: () => ({ isolation: 'folder' }) });
+			const progress: AgentSignal[] = [];
+			store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+			let catalog = ['gpt-5.5', 'gpt-5-mini'];
+			const submits: string[] = [];
+			const internals = agent as unknown as {
+				_storePath(): string;
+				_materialize(session: { materialized: boolean }): Promise<void>;
+				_resolveRgDir(): Promise<string | undefined>;
+				_refreshModelsOnce(): void;
+				_ensureProcess(session: unknown): unknown;
+				_validateProviderKey(provider: string, key: string): Promise<unknown>;
+				_pushCredentials(): Promise<{ acknowledged: number; terminated: number; unconfirmed: number; total: number }>;
+				_persistModelsCache(): void;
+			};
+			internals._storePath = () => path.join(tempRoot, 'sessions.json');
+			internals._materialize = async session => { session.materialized = true; };
+			internals._resolveRgDir = async () => undefined;
+			internals._refreshModelsOnce = () => { };
+			internals._validateProviderKey = async provider => ({ ok: true, models: catalog.map(name => ({ provider, name, model_type: 'llm' })) });
+			internals._pushCredentials = async () => ({ acknowledged: 0, terminated: 0, unconfirmed: 0, total: 0 });
+			internals._persistModelsCache = () => { };
+			internals._ensureProcess = () => ({
+				isRunning: true,
+				start: () => { },
+				nextRequestId: () => 'fixture-request',
+				request: async (request: { op: string; model?: string }) => {
+					if (request.op === 'submit') {
+						submits.push(request.model ?? '');
+					}
+					return { payload: { status: 'completed' } };
+				},
+				notify: () => { },
+				dispose: () => { },
+			});
+
+			await agent.executeCommand('providerKeys.validate', { provider: 'openai', key: 'sk-first-key' });
+			await agent.executeCommand('providerKeys.set', { provider: 'openai', key: 'sk-first-key' });
+			catalog = ['gpt-5-mini'];
+			await agent.executeCommand('providerKeys.validate', { provider: 'openai', key: 'sk-second-key' });
+			await agent.executeCommand('providerKeys.set', { provider: 'openai', key: 'sk-second-key' });
+			const rows = agent.models.get()
+				.filter(model => ['openai-key/gpt-5.5', 'openai-key/gpt-5-mini'].includes(model.id))
+				.map(model => [model.id, model._meta?.byokKeyConfigured, model._meta?.byokModelAvailable])
+				.sort((left, right) => String(left[0]).localeCompare(String(right[0])));
+
+			const sessionUri = AgentSession.uri('backboard', 'narrow-key');
+			await agent.createSession({ session: sessionUri, workingDirectory: URI.file(tempRoot), model: { id: 'openai-key/gpt-5.5' } });
+			await agent.sendMessage(sessionUri, 'hello');
+			const errors = progress
+				.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatError)
+				.map(signal => signal.kind === 'action' ? (signal.action as { error?: { message: string } }).error?.message : undefined);
+
+			assert.deepStrictEqual({ rows, submits, errors }, {
+				// The row the new key cannot reach stays listed, so the pinned
+				// selection stays visible, but it is flagged and refused on send.
+				rows: [['openai-key/gpt-5-mini', true, true], ['openai-key/gpt-5.5', true, false]],
+				submits: [],
+				errors: ['gpt-5.5 is not available with the connected OpenAI API key. Pick another OpenAI API Key model or replace the key.'],
+			});
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('refuses key changes from a superseded generation and accepts equal or newer ones', async () => {
+		const agent = createAgent();
+		const internals = agent as unknown as {
+			_validateProviderKey(provider: string, key: string): Promise<unknown>;
+			_pushCredentials(): Promise<{ acknowledged: number; terminated: number; unconfirmed: number; total: number }>;
+			_persistModelsCache(): void;
+		};
+		internals._validateProviderKey = async provider => ({ ok: true, models: [{ provider, name: 'gpt-5.5', model_type: 'llm' }] });
+		internals._pushCredentials = async () => ({ acknowledged: 0, terminated: 0, unconfirmed: 0, total: 0 });
+		internals._persistModelsCache = () => { };
+		const held = async () => ((await agent.executeCommand('providerKeys.status')).data as { providers: Record<string, { held: boolean }> }).providers['openai'].held;
+
+		await agent.executeCommand('providerKeys.set', { provider: 'openai', key: 'sk-new-key', generation: 2 });
+		const staleSet = await agent.executeCommand('providerKeys.set', { provider: 'openai', key: 'sk-old-key', generation: 1 }).catch(error => error);
+		const staleRemove = await agent.executeCommand('providerKeys.remove', { provider: 'openai', generation: 1 }).catch(error => error);
+		const heldAfterStale = await held();
+		await agent.executeCommand('providerKeys.set', { provider: 'openai', key: 'sk-new-key', generation: 2 });
+		await agent.executeCommand('providerKeys.remove', { provider: 'openai', generation: 3 });
+
+		assert.deepStrictEqual({
+			staleSet: staleSet instanceof Error ? staleSet.message : 'accepted',
+			staleRemove: staleRemove instanceof Error ? staleRemove.message : 'accepted',
+			heldAfterStale,
+			heldAfterRemoval: await held(),
+		}, {
+			staleSet: 'This OpenAI key change was superseded by a newer one.',
+			staleRemove: 'This OpenAI key change was superseded by a newer one.',
+			heldAfterStale: true,
+			heldAfterRemoval: false,
+		});
+	});
+
+	test('removal terminates a runtime that never acknowledges the credential change and reports it', async () => {
+		const agent = createAgent();
+		const terminations: string[] = [];
+		let running = true;
+		let pushes = 0;
+		const proc = {
+			get isRunning() { return running; },
+			get credentialSnapshotWritten() { return running; },
+			nextRequestId: () => 'r',
+			request: (control: { op: string }) => {
+				// The first push (activation) is applied; the second (removal) is never answered.
+				if (control.op === 'setCredentials' && ++pushes === 2) {
+					return new Promise(() => { });
+				}
+				return Promise.resolve({ payload: { op: control.op } });
+			},
+			terminate: (reason: string) => {
+				terminations.push(reason);
+				running = false;
+			},
+			whenExited: async () => { },
+			dispose: () => { },
+		};
+		const internals = agent as unknown as {
+			_sessions: Map<string, { proc: unknown }>;
+			_credentialAckTimeoutMs: number;
+			_validateProviderKey(provider: string, key: string): Promise<unknown>;
+			_persistModelsCache(): void;
+		};
+		internals._credentialAckTimeoutMs = 20;
+		internals._validateProviderKey = async provider => ({ ok: true, models: [{ provider, name: 'gpt-5.5', model_type: 'llm' }] });
+		internals._persistModelsCache = () => { };
+		internals._sessions.set('wedged', { proc });
+
+		await agent.executeCommand('providerKeys.validate', { provider: 'openai', key: 'sk-test-key' });
+		const activation = await agent.executeCommand('providerKeys.set', { provider: 'openai', key: 'sk-test-key' });
+		const removal = await agent.executeCommand('providerKeys.remove', { provider: 'openai' });
+		const status = await agent.executeCommand('providerKeys.status');
+
+		assert.deepStrictEqual({
+			activation: activation.data,
+			removal: removal.data,
+			terminations,
+			held: (status.data as { providers: Record<string, { held: boolean }> }).providers['openai'].held,
+		}, {
+			activation: { connected: true, revision: 1, acknowledged: 1, terminated: 0, running: 1 },
+			// The wedged runtime was ended instead of being left with the revoked key.
+			removal: { revision: 2, acknowledged: 0, terminated: 1, running: 1 },
+			terminations: ['Runtime restarted after a credential change.'],
+			held: false,
+		});
+	});
+
+	test('a Backboard-route turn fails closed when the runtime cannot honour host-managed keys', async () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-cli-ts-old-runtime-'));
+		try {
+			const agent = createAgent({}, {}, {}, { getSessionConfigValues: () => ({ isolation: 'folder' }) });
+			const progress: AgentSignal[] = [];
+			store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+			const internals = agent as unknown as {
+				_storePath(): string;
+				_materialize(session: { materialized: boolean }): Promise<void>;
+				_resolveRgDir(): Promise<string | undefined>;
+				_refreshModelsOnce(): void;
+				_ensureProcess(session: unknown): unknown;
+			};
+			internals._storePath = () => path.join(tempRoot, 'sessions.json');
+			internals._materialize = async session => { session.materialized = true; };
+			internals._resolveRgDir = async () => undefined;
+			internals._refreshModelsOnce = () => { };
+			internals._ensureProcess = () => ({
+				isRunning: true,
+				start: () => { },
+				nextRequestId: () => 'fixture-request',
+				// The process gate rejects every request to a runtime without the capability.
+				request: async () => { throw new Error('The bundled Backboard runtime does not support API keys. Update Backboard.'); },
+				notify: () => { },
+				dispose: () => { },
+			});
+			const sessionUri = AgentSession.uri('backboard', 'old-runtime');
+			await agent.createSession({ session: sessionUri, workingDirectory: URI.file(tempRoot), model: { id: 'anthropic/claude-opus-5' } });
+
+			await agent.sendMessage(sessionUri, 'hello');
+
+			const errors = progress
+				.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatError)
+				.map(signal => signal.kind === 'action' ? (signal.action as { error?: { message: string } }).error?.message : undefined);
+			assert.deepStrictEqual(errors, ['The bundled Backboard runtime does not support API keys. Update Backboard.']);
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
 	});
 
 	test('usage event forwards the context measurement via ChatUsage _meta', () => {

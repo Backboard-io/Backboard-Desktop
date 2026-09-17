@@ -1132,7 +1132,8 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 /* Backboard image generations render as an intentional media card inside the
  * response instead of an unbounded inline bitmap. */
-.interactive-item-container .value .rendered-markdown img[src^='https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-images/'] {
+.interactive-item-container .value .rendered-markdown img[src^='https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-images/'],
+.interactive-item-container .value .rendered-markdown img[src^='https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-image/'] {
 	box-sizing: border-box;
 	display: block;
 	width: min(100%, 640px);
@@ -1143,6 +1144,18 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	border-radius: 12px;
 	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
 	object-fit: contain;
+}
+/* Generated videos get the same media-card treatment as generated images. */
+.interactive-item-container .value .rendered-markdown video.generated-video {
+	box-sizing: border-box;
+	display: block;
+	width: min(100%, 640px);
+	height: auto;
+	max-height: 520px;
+	margin: 10px 0 8px;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
 }
 
 .chat-tool-hover,
@@ -9499,7 +9512,8 @@ have to be updated for changes to the rules above, or to support more deeply nes
 		animation: none !important;
 	}
 
-	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live::after {
+	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live::after,
+	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-generating {
 		animation: none !important;
 		opacity: 1;
 	}
@@ -10051,6 +10065,12 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	border-radius: 6px;
 	background: var(--bb-core-tool-surface);
 	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-generating {
+	margin: 4px 0 8px;
+	border-color: var(--bb-cursor-diff-border);
+	background-color: var(--bb-cursor-diff-surface);
 }
 
 /* A singleton read shows the filename immediately. Multiple adjacent reads
@@ -11045,4 +11065,62 @@ html body .monaco-workbench .interactive-session .interactive-input-part .chat-i
 	.chat-editor-container, .interactive-input-editor, .monaco-editor,
 	.monaco-editor-background, .margin, .overflow-guard, .chat-input-toolbars) {
 	background: var(--bb-composer-surface) !important;
+}
+
+/* --- Prompt dot rail: one dot per user prompt on the left edge ------------ */
+
+.interactive-list > .chat-prompt-dot-rail {
+	position: absolute;
+	top: 12px;
+	bottom: 12px;
+	left: 0;
+	width: 14px;
+	z-index: 4;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	pointer-events: none;
+}
+
+.interactive-list > .chat-prompt-dot-rail.hidden {
+	display: none;
+}
+
+.interactive-list > .chat-prompt-dot-rail .chat-prompt-dot-viewport {
+	position: relative;
+	width: 100%;
+	/* The window is the rail's wheel target; the fade matches the rail's fade zone. */
+	pointer-events: auto;
+	-webkit-mask-image: linear-gradient(to bottom, transparent 0, black 30px, black calc(100% - 30px), transparent 100%);
+	mask-image: linear-gradient(to bottom, transparent 0, black 30px, black calc(100% - 30px), transparent 100%);
+}
+
+.interactive-list > .chat-prompt-dot-rail .chat-prompt-dot-track {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	transition: transform 0.18s ease-out;
+}
+
+.interactive-list > .chat-prompt-dot-rail .chat-prompt-dot {
+	position: absolute;
+	left: 50%;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	transform: translate(-50%, 0);
+	background: color-mix(in srgb, var(--vscode-foreground) 45%, transparent);
+	pointer-events: auto;
+	cursor: pointer;
+	transition: opacity 0.15s ease-out, filter 0.15s ease-out, background-color 0.15s ease-out, transform 0.15s ease-out;
+}
+
+.interactive-list > .chat-prompt-dot-rail .chat-prompt-dot:hover {
+	background: var(--vscode-foreground);
+}
+
+.interactive-list > .chat-prompt-dot-rail .chat-prompt-dot.active {
+	background: var(--vscode-focusBorder);
+	transform: translate(-50%, 0) scale(1.35);
 }

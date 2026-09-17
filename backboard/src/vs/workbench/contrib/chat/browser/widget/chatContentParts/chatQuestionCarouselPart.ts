@@ -38,7 +38,14 @@ import { ScrollbarVisibility } from '../../../../../../base/common/scrollable.js
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { ITerminalChatService } from '../../../../terminal/browser/terminal.js';
+import { FileAccess } from '../../../../../../base/common/network.js';
+import { URI } from '../../../../../../base/common/uri.js';
 import './media/chatQuestionCarousel.css';
+
+export function isGenerateVideoApprovalCarousel(carousel: IChatQuestionCarousel): boolean {
+	const titles = new Set(carousel.questions.map(question => question.title));
+	return titles.has('Edit Video') && titles.has('Duration') && titles.has('Quality');
+}
 
 const PREVIOUS_QUESTION_ACTION_ID = 'workbench.action.chat.previousQuestion';
 const NEXT_QUESTION_ACTION_ID = 'workbench.action.chat.nextQuestion';
@@ -170,6 +177,11 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		const interactiveStore = new DisposableStore();
 		this._interactiveUIStore.value = interactiveStore;
 
+		if (isGenerateVideoApprovalCarousel(carousel)) {
+			this.renderEditVideoApproval(interactiveStore);
+			return;
+		}
+
 		// Question container
 		this._questionContainer = dom.$('.chat-question-carousel-content');
 		this.domNode.append(this._questionContainer);
@@ -268,6 +280,107 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 	/**
 	 * Saves the current question's answer to the answers map.
 	 */
+	private renderEditVideoApproval(store: DisposableStore): void {
+		this.domNode.classList.add('chat-edit-video-approval');
+		const card = dom.$('.chat-edit-video-card');
+		this._questionContainer = card;
+		this.domNode.append(card);
+
+		const title = dom.$('.chat-edit-video-title');
+		title.textContent = localize('chat.editVideo.title', 'Edit Video');
+		card.appendChild(title);
+
+		const promptQuestion = this.carousel.questions.find(question => question.title === 'Edit Video');
+		const durationQuestion = this.carousel.questions.find(question => question.title === 'Duration');
+		const qualityQuestion = this.carousel.questions.find(question => question.title === 'Quality');
+		const audioQuestion = this.carousel.questions.find(question => question.title === 'Native Audio');
+		const rawPrompt = typeof promptQuestion?.message === 'string'
+			? promptQuestion.message
+			: promptQuestion?.message?.value ?? promptQuestion?.title ?? '';
+		const parsed = parseEditVideoPrompt(rawPrompt);
+
+		const preview = dom.$('.chat-edit-video-preview');
+		const firstImage = parsed.images[0];
+		if (firstImage) {
+			const thumb = dom.$('img.chat-edit-video-thumb') as HTMLImageElement;
+			thumb.alt = firstImage.alt || localize('chat.editVideo.reference', 'Reference');
+			try {
+				thumb.src = FileAccess.uriToBrowserUri(URI.parse(firstImage.src)).toString(true);
+			} catch {
+				thumb.src = firstImage.src;
+			}
+			preview.appendChild(thumb);
+		}
+		const promptText = dom.$('.chat-edit-video-prompt');
+		promptText.textContent = parsed.prompt || localize('chat.editVideo.promptFallback', 'Generate this clip');
+		preview.appendChild(promptText);
+		card.appendChild(preview);
+
+		const rows = dom.$('.chat-edit-video-rows');
+		const durationSelect = durationQuestion ? this.appendEditVideoSelect(rows, store, localize('chat.editVideo.duration', 'Duration'), durationQuestion) : undefined;
+		const qualitySelect = qualityQuestion ? this.appendEditVideoSelect(rows, store, localize('chat.editVideo.quality', 'Quality'), qualityQuestion) : undefined;
+		const audioSelect = audioQuestion ? this.appendEditVideoSelect(rows, store, localize('chat.editVideo.audio', 'Native Audio'), audioQuestion) : undefined;
+		this.appendEditVideoValue(rows, localize('chat.editVideo.model', 'Model'), parsed.model ?? localize('chat.editVideo.modelUnset', 'Selected video model'));
+		card.appendChild(rows);
+
+		const approve = store.add(new Button(card, { ...defaultButtonStyles }));
+		approve.element.classList.add('chat-edit-video-approve');
+		approve.label = localize('chat.editVideo.approve', 'Approve');
+		store.add(approve.onDidClick(() => {
+			if (promptQuestion) {
+				this._answers.set(promptQuestion.id, { selectedValue: promptQuestion.options?.[0]?.id ?? 'Approve' });
+			}
+			if (durationQuestion && durationSelect) {
+				this._answers.set(durationQuestion.id, { selectedValue: durationSelect.value });
+			}
+			if (qualityQuestion && qualitySelect) {
+				this._answers.set(qualityQuestion.id, { selectedValue: qualitySelect.value });
+			}
+			if (audioQuestion && audioSelect) {
+				this._answers.set(audioQuestion.id, { selectedValue: audioSelect.value });
+			}
+			this._options.onSubmit(this._answers);
+			this.hideAndShowSummary();
+		}));
+	}
+
+	private appendEditVideoSelect(rows: HTMLElement, store: DisposableStore, label: string, question: IChatQuestion): HTMLSelectElement {
+		const row = dom.$('.chat-edit-video-row');
+		const name = dom.$('.chat-edit-video-label');
+		name.textContent = label;
+		const select = dom.$('select.chat-edit-video-select') as HTMLSelectElement;
+		select.setAttribute('aria-label', label);
+		for (const option of question.options ?? []) {
+			const node = document.createElement('option');
+			node.value = option.id;
+			node.textContent = option.label;
+			select.appendChild(node);
+		}
+		const previous = this._answers.get(question.id);
+		const selected = typeof previous === 'object' && previous && 'selectedValue' in previous
+			? previous.selectedValue
+			: question.options?.[0]?.id;
+		if (selected) {
+			select.value = selected;
+		}
+		store.add(dom.addDisposableListener(select, dom.EventType.CHANGE, () => {
+			this._answers.set(question.id, { selectedValue: select.value });
+		}));
+		row.append(name, select);
+		rows.appendChild(row);
+		return select;
+	}
+
+	private appendEditVideoValue(rows: HTMLElement, label: string, value: string): void {
+		const row = dom.$('.chat-edit-video-row');
+		const name = dom.$('.chat-edit-video-label');
+		name.textContent = label;
+		const text = dom.$('.chat-edit-video-value');
+		text.textContent = value;
+		row.append(name, text);
+		rows.appendChild(row);
+	}
+
 	private saveCurrentAnswer(): void {
 		const currentQuestion = this.carousel.questions[this._currentIndex];
 		const answer = this.getCurrentAnswer();
@@ -1894,4 +2007,15 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 		super.dispose();
 	}
+}
+
+function parseEditVideoPrompt(raw: string): { prompt: string; model?: string; images: { alt: string; src: string }[] } {
+	const images: { alt: string; src: string }[] = [];
+	const withoutImages = raw.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_match, alt: string, src: string) => {
+		images.push({ alt, src });
+		return '';
+	});
+	const modelMatch = /(?:^|\n)Model:\s*(.+)$/m.exec(withoutImages);
+	const prompt = withoutImages.replace(/(?:^|\n)Model:\s*.+$/m, '').replace(/\n{2,}/g, '\n').trim();
+	return { prompt, model: modelMatch?.[1]?.trim(), images };
 }

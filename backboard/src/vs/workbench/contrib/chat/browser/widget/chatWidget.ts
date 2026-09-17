@@ -89,7 +89,7 @@ import { ChatTipContentPart } from './chatContentParts/chatTipContentPart.js';
 import { ChatContentMarkdownRenderer } from './chatContentMarkdownRenderer.js';
 import { IAgentSessionsService } from '../agentSessions/agentSessionsService.js';
 import { BackboardLogoIcon, isClaudeAgentSessionProvider, isCodexAgentSessionProvider } from '../agentSessions/agentSessions.js';
-import { IAgentSession } from '../agentSessions/agentSessionsModel.js';
+import { getAgentSessionListStatus, IAgentSession } from '../agentSessions/agentSessionsModel.js';
 import { IChatDebugService } from '../../common/chatDebugService.js';
 import { getChatSessionType } from '../../common/model/chatUri.js';
 import { ICustomizationHarnessService } from '../../common/customizationHarnessService.js';
@@ -1441,6 +1441,14 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				'aria-label': localize('chat.emptyHome.openRecentChat', "Open {0}, {1}", session.label, timeLabel),
 			})) as HTMLButtonElement;
 			row.title = session.label;
+			const statusDot = dom.append(row, $('span.backboard-panel-recent-chat-status'));
+			statusDot.setAttribute('aria-hidden', 'true');
+			const listStatus = getAgentSessionListStatus(session);
+			statusDot.classList.add(listStatus);
+			if (listStatus === 'running') {
+				statusDot.classList.add('codicon', 'codicon-loading');
+				statusDot.title = localize('chat.emptyHome.sessionInProgress', "Working...");
+			}
 			dom.append(row, $('span.backboard-panel-recent-chat-title', undefined, session.label));
 			dom.append(row, $('span.backboard-panel-recent-chat-time', undefined, timeLabel));
 			this.backboardEmptyHomeDisposables.add(dom.addDisposableListener(row, dom.EventType.CLICK, event => {

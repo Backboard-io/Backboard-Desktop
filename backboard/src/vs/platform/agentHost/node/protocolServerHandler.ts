@@ -1077,6 +1077,7 @@ export class ProtocolServerHandler extends Disposable {
 				config: params.config,
 				property: params.property,
 				query: params.query,
+				refresh: params.refresh,
 			});
 		},
 		completions: async (_client, params) => {

@@ -130,7 +130,25 @@ export interface SendMessageRequest {
 	image_generation?: string;
 	image_model_provider?: string;
 	image_model_name?: string;
+	/** `"auto"` enables Backboard's built-in video generation for the turn. */
+	video_generation?: string;
+	video_model_provider?: string;
+	video_model_name?: string;
+	/** Direct media generation without a conversation-model call. */
+	operation?: string;
+	video_config?: {
+		duration?: number;
+		resolution?: string;
+		generate_audio?: boolean;
+		aspect_ratio?: string;
+	};
 	stream?: boolean;
+	/**
+	 * The billing route the turn or worker captured when it started. In
+	 * host-managed mode routing reads it instead of inferring a backend at
+	 * dispatch time; clients strip it before anything goes on the wire.
+	 */
+	source?: ModelSource;
 }
 
 export interface OpenRouterRequestOptions {
@@ -144,6 +162,59 @@ export interface OpenRouterRequestOptions {
 	cost_tier?: string;
 }
 
+/** One entry from `GET /models/image/all`. */
+export interface ImageModelInfo {
+	name: string;
+	provider: string;
+	model_type?: string;
+	supports_vision?: boolean | null;
+}
+
+/** One entry from `GET /models/video/all`. */
+export interface VideoModelInfo {
+	id: string;
+	name: string;
+	provider: string;
+	model_type?: string;
+	supports_video_input?: boolean | null;
+	supports_audio_input?: boolean | null;
+}
+
+export interface ImageModelsListResponse {
+	models: ImageModelInfo[];
+	total: number;
+}
+
+export interface VideoModelsListResponse {
+	models: VideoModelInfo[];
+	total: number;
+}
+
+export interface GeneratedMediaInfo {
+	document_id?: string;
+	media_type?: string;
+	mime_type?: string;
+	url: string;
+}
+
+export interface GenerateVideoRequest {
+	prompt: string;
+	video_model_provider: string;
+	video_model_name: string;
+	video_config?: {
+		duration?: number;
+		resolution?: string;
+		generate_audio?: boolean;
+		aspect_ratio?: string;
+	};
+}
+
+export interface GenerateVideoResult {
+	url: string;
+	document_id?: string;
+	label?: string;
+}
+
 export interface SubmitToolOutputsRequest {
 	thread_id: string;
 	run_id?: string;
@@ -151,6 +222,8 @@ export interface SubmitToolOutputsRequest {
 	thinking?: ThinkingConfig | null;
 	tools?: OpenAITool[];
 	stream?: boolean;
+	/** The turn's captured billing route; see SendMessageRequest.source. */
+	source?: ModelSource;
 }
 
 export interface BackboardResponse {
@@ -164,6 +237,8 @@ export interface BackboardResponse {
 	input_tokens?: number | null;
 	output_tokens?: number | null;
 	total_tokens?: number | null;
+	generated_media?: GeneratedMediaInfo[];
+	messages?: Array<{ generated_media?: GeneratedMediaInfo[] }>;
 }
 
 export type BackboardMessageRole = "user" | "assistant" | "tool";
@@ -230,6 +305,7 @@ export type ProviderEvent =
 	| { kind: "media"; payload: Record<string, unknown> }
 	| {
 			kind: "completed";
+			providerMetadata?: string;
 			finalText?: string;
 			usage?: ProviderUsage;
 			contextUsage?: BackboardContextUsage;
@@ -286,6 +362,18 @@ export interface ProviderUsage {
 /** Which backend serves a model: a saved key, subscription, or Backboard routing. */
 export type ModelSource = "byok" | "subscription" | "backboard";
 
+/**
+ * A model selection together with the billing route it was made on. Turns and
+ * workers capture one when they start and stamp it on every request, so a
+ * later selection change can never move their billing.
+ */
+export interface ModelRoute {
+	provider: string;
+	model: string;
+	/** Undefined outside host-managed mode, where routing infers the backend. */
+	source?: ModelSource;
+}
+
 export interface ModelInfo extends ThinkingModelMetadata {
 	id: string;
 	provider: string;
@@ -312,6 +400,8 @@ export interface ModelCatalogItem {
 	supports_adaptive_thinking?: boolean;
 	last_updated?: string | number | null;
 	max_output_tokens?: number | null;
+	/** Whether the model accepts image input. */
+	supports_vision?: boolean | null;
 	supports_thinking?: boolean | null;
 	thinking_controls?: ThinkingModelMetadata["thinking_controls"];
 	source?: ModelSource;

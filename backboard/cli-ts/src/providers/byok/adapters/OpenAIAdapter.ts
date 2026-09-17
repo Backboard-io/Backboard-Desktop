@@ -8,11 +8,17 @@ import type {
 	ProviderAdapter,
 } from "../ByokTypes.ts";
 import { getJson, postSseJson } from "../httpStream.ts";
+import {
+	credentialKey,
+	type ProviderCredential,
+} from "../ProviderCredential.ts";
 import { thinkingEffort } from "../thinking.ts";
 import {
-	OPENAI_DISABLED_TOOL_REASONING_PATTERN,
-	OPENAI_NON_CHAT_MODEL_PATTERNS,
-} from "./OpenAIAdapter.constants.ts";
+	isSupportedOpenAiModel,
+	openAiReasoningControls,
+	requiresDisabledToolReasoning,
+	unsupportedOpenAiModelMessage,
+} from "./OpenAIModelRegistry.ts";
 
 const API_BASE = "https://api.openai.com/v1";
 
@@ -25,32 +31,37 @@ interface OpenAIModelsResponse {
 export const openaiAdapter: ProviderAdapter = {
 	id: "openai",
 	label: "OpenAI",
+	modelCapabilities: openAiReasoningControls,
 	consoleUrl: "https://platform.openai.com/api-keys",
 	keyHint: "sk-...",
 
 	looksLikeKey(key) {
-		return /^sk-[\w-]{20,}$/.test(key.trim());
+		return /^sk-[\w-]{20,}$/.test(credentialKey(key).trim());
 	},
 
-	async validateKey(key, signal) {
+	async validateKey(key, signal, transport) {
 		await getJson<OpenAIModelsResponse>(
 			`${API_BASE}/models`,
 			headers(key),
 			"openai",
 			signal,
+			key,
+			transport,
 		);
 	},
 
-	async listModels(key, signal) {
+	async listModels(key, signal, transport) {
 		const response = await getJson<OpenAIModelsResponse>(
 			`${API_BASE}/models`,
 			headers(key),
 			"openai",
 			signal,
+			key,
+			transport,
 		);
 		const models: ModelCatalogItem[] = [];
 		for (const model of response.data ?? []) {
-			if (!model.id || !isChatModel(model.id)) continue;
+			if (!model.id || !isSupportedOpenAiModel(model.id)) continue;
 			models.push({
 				name: model.id,
 				provider: "openai",
@@ -58,6 +69,7 @@ export const openaiAdapter: ProviderAdapter = {
 				// The models list reports epoch seconds; the catalog sorter wants ms.
 				last_updated:
 					typeof model.created === "number" ? model.created * 1000 : null,
+				...openAiReasoningControls(model.id),
 				context_limit: contextWindowFor({
 					provider: "openai",
 					model: model.id,
@@ -67,8 +79,8 @@ export const openaiAdapter: ProviderAdapter = {
 		return models;
 	},
 
-	supportsThinking() {
-		return true;
+	supportsThinking(model) {
+		return openAiReasoningControls(model).supports_thinking;
 	},
 
 	stream(request, key) {
@@ -76,21 +88,25 @@ export const openaiAdapter: ProviderAdapter = {
 	},
 };
 
-function headers(key: string): Record<string, string> {
-	return { Authorization: `Bearer ${key.trim()}` };
-}
-
-function isChatModel(id: string): boolean {
-	const normalized = id.toLowerCase();
-	return !OPENAI_NON_CHAT_MODEL_PATTERNS.some((pattern) =>
-		normalized.includes(pattern),
-	);
+function headers(key: ProviderCredential): Record<string, string> {
+	return { Authorization: `Bearer ${credentialKey(key).trim()}` };
 }
 
 async function* streamOpenAI(
 	request: ByokStreamRequest,
-	key: string,
+	key: ProviderCredential,
 ): AsyncIterable<ProviderEvent> {
+	// The catalog filter keeps unsupported ids out of the picker, but a stored
+	// conversation or a stale selection can still name one. Refuse here so the
+	// request never reaches an endpoint that would fail in a less legible way.
+	if (!isSupportedOpenAiModel(request.model)) {
+		yield {
+			kind: "failed",
+			error: unsupportedOpenAiModelMessage(request.model),
+			retryable: false,
+		};
+		return;
+	}
 	const body: Record<string, unknown> = {
 		model: request.model,
 		messages: toOpenAIMessages(request),
@@ -151,6 +167,8 @@ async function* streamOpenAI(
 	const sseRequest: Parameters<typeof postSseJson>[0] = {
 		url: `${API_BASE}/chat/completions`,
 		headers: headers(key),
+		credential: key,
+		transport: request.transport,
 		body,
 		provider: "openai",
 	};
@@ -256,12 +274,6 @@ async function* streamOpenAI(
 		return;
 	}
 	yield { kind: "completed", usage: finalUsage };
-}
-
-export function requiresDisabledToolReasoning(model: string): boolean {
-	return OPENAI_DISABLED_TOOL_REASONING_PATTERN.test(
-		model.trim().toLowerCase(),
-	);
 }
 
 function readUsage(usage: Record<string, unknown>): {

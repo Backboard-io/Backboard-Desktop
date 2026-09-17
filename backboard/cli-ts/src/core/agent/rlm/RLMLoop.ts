@@ -367,6 +367,7 @@ export class RLMLoop {
 				thread_id: input.threadId,
 				llm_provider: this.deps.model.provider,
 				model_name: this.deps.model.model,
+				...(this.deps.source === undefined ? {} : { source: this.deps.source }),
 			},
 			input.signal ? { signal: input.signal } : {},
 		);

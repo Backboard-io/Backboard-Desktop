@@ -28,9 +28,6 @@ export interface IOnboardingService {
 	 */
 	show(): void;
 
-	/** Open account setup without changing the completed onboarding experience. */
-	showSignIn(): Promise<boolean>;
-
 	/**
 	 * Reset onboarding state in the current session and show the modal.
 	 */

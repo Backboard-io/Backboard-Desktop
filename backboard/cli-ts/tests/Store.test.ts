@@ -9,6 +9,30 @@ import { initialState } from "../src/state/AppState.ts";
 import { reduce, transcriptFromMessages } from "../src/state/Store.ts";
 
 describe("Store reducer", () => {
+	it("preserves array identity across delta-only frames", () => {
+		let state = initialState("test");
+		state = reduce(state, {
+			type: "assistant:delta",
+			turnId: "t1",
+			messageId: "m1",
+			text: "hello",
+		});
+		const before = state.render;
+		// A delta that crosses no flush boundary (no newline, under the live
+		// window) must not rebuild the transcript arrays: downstream memo
+		// boundaries and Ink's <Static> skip work on referential equality.
+		state = reduce(state, {
+			type: "assistant:delta",
+			turnId: "t1",
+			messageId: "m1",
+			text: " world",
+		});
+
+		expect(state.render).not.toBe(before);
+		expect(state.render.staticItems).toBe(before.staticItems);
+		expect(state.render.liveItems).toBe(before.liveItems);
+	});
+
 	it("renders typed execution failure while keeping the rich result", () => {
 		let state = reduce(initialState("test"), {
 			type: "tool:start",

@@ -2309,11 +2309,12 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			}
 			this.latestCoreTodoWrapper = itemWrapper;
 		}
-		if ((this.useCursorPanelPresentation || this.useCursorTranscriptPresentation) && isCoreTool && (!this.useCursorTranscriptPresentation || isCoreTodo || coreToolKind === 'read')) {
+		if ((this.useCursorPanelPresentation || this.useCursorTranscriptPresentation) && isCoreTool && (!this.useCursorTranscriptPresentation || isCoreTodo || coreToolKind === 'read' || coreToolKind === 'generateVideo')) {
 			// Core tools already own a compact header, lifecycle status, and optional
 			// details disclosure. Mount that native card directly: wrapping it in a
 			// generic work row or activity group creates two competing summaries and
-			// two chevrons for one call.
+			// two chevrons for one call. Video generation keeps its own card so the
+			// transcript surfaces the running shell while the clip is produced.
 			if (itemWrapper.firstElementChild?.classList.contains('chat-thinking-icon')) {
 				itemWrapper.firstElementChild.remove();
 			}

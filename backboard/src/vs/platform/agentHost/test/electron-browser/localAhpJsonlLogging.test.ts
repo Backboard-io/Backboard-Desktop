@@ -34,6 +34,30 @@ suite('localAhpJsonlLogging', () => {
 		return content.split('\n').filter(Boolean).map(line => JSON.parse(line));
 	}
 
+	test('redacts provider keys carried by executeAgentCommand', async () => {
+		const { fileService, logger } = makeLogger();
+		const target = {
+			async executeAgentCommand(params: { command: string; args?: Record<string, unknown> }) {
+				return { message: 'ok', data: { argsSeen: Object.keys(params.args ?? {}) } };
+			},
+		} as unknown as IAgentService;
+		const wrapped = wrapAgentServiceWithAhpLogging(target, logger);
+
+		const result = await wrapped.executeAgentCommand!({ provider: 'backboard', command: 'providerKeys.set', args: { provider: 'openai', key: 'sk-secret-key-value' } });
+		const entries = await readEntries(fileService, logger);
+
+		assert.deepStrictEqual({
+			result: result.data,
+			request: entries[0].params[0],
+			leaked: JSON.stringify(entries).includes('sk-secret-key-value'),
+		}, {
+			// The target still receives the real arguments.
+			result: { argsSeen: ['provider', 'key'] },
+			request: { provider: 'backboard', command: 'providerKeys.set', args: { provider: 'openai', key: '<redacted>' } },
+			leaked: false,
+		});
+	});
+
 	test('logs request/response/notification frames around proxied calls', async () => {
 		const { fileService, logger } = makeLogger();
 

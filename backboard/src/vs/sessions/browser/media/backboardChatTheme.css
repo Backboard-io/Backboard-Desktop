@@ -312,7 +312,7 @@
 
 /* ---- Turn fold (thinking/work summary) ---- */
 
-/* T3's turn fold is one flat muted 12px line ("Worked for 12s ⌄" —
+/* T3's turn fold is one flat muted 12px line ("Worked ⌄" —
  * `text-xs text-muted-foreground tabular-nums hover:text-foreground`), with
  * no weight or opacity hierarchy inside it. The stock header carries a bold
  * bright verb and a dimmed detail segment; flatten all of it to the fold's

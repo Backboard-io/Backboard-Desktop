@@ -38,9 +38,6 @@ import {
 	type WorkspaceSnapshot,
 } from "./workspaceIndex.ts";
 
-/** Pre-images above this size are not captured (journaled as skips). */
-export const MAX_CAPTURE_BYTES = 50 * 1024 * 1024;
-
 const TURN_LABEL_MAX = 60;
 const REDO_TOOL = "redo-point";
 /** A begin walk is skipped when a storing refresh completed this recently. */
@@ -455,10 +452,8 @@ export class CheckpointStore implements CheckpointRecorder {
 					throw new Error(`Corrupt checkpoint contents: ${entry.path}`);
 			}
 			const stats = await lstatOrNull(entry.path);
-			if (stats && (!stats.isFile() || stats.size > MAX_CAPTURE_BYTES)) {
-				throw new Error(
-					`Cannot back up ${entry.path}: unsupported file or capture limit exceeded`,
-				);
+			if (stats && !stats.isFile()) {
+				throw new Error(`Cannot back up ${entry.path}: unsupported file`);
 			}
 		}
 	}
@@ -612,22 +607,6 @@ export class CheckpointStore implements CheckpointRecorder {
 				path,
 				existed: true,
 				unsupported: true,
-			};
-		} else if (stats.size > MAX_CAPTURE_BYTES) {
-			if (request.opts?.requireRevertible) {
-				throw new Error(
-					`Pre-image of ${path} is not capturable (${stats.size} bytes ` +
-						`exceeds the ${MAX_CAPTURE_BYTES}-byte cap), so the write could ` +
-						"not be rolled back; aborting before any modification",
-				);
-			}
-			return {
-				type: "skip",
-				turnId,
-				toolCallId,
-				path,
-				reason: "too_large",
-				size: stats.size,
 			};
 		} else {
 			const content = await readFile(path);
@@ -1495,15 +1474,6 @@ export class CheckpointStore implements CheckpointRecorder {
 					path: entry.path,
 					existed: true,
 					unsupported: true,
-				});
-			} else if (stats.size > MAX_CAPTURE_BYTES) {
-				this.append({
-					type: "skip",
-					turnId: redoId,
-					toolCallId: undoId,
-					path: entry.path,
-					reason: "too_large",
-					size: stats.size,
 				});
 			} else {
 				const content = await readFile(entry.path);

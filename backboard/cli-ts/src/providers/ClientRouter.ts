@@ -11,16 +11,21 @@ import type {
 	AssistantInfo,
 	BackboardResponse,
 	BackboardThread,
+	GenerateVideoRequest,
+	GenerateVideoResult,
+	ImageModelsListResponse,
 	ModelCatalogItem,
+	ModelSource,
 	ModelsListResponse,
 	ModelThinkingMetadataResponse,
 	ProviderEvent,
 	SendMessageRequest,
 	SubmitToolOutputsRequest,
+	VideoModelsListResponse,
 } from "./backboard/types.ts";
 import { byokAdapterFor } from "./byok/registry.ts";
 
-export type ClientSource = "byok" | "subscription" | "backboard";
+export type ClientSource = ModelSource;
 
 export const CHATGPT_SUBSCRIPTION_PROVIDER = "openai-subscription";
 export const CLAUDE_SUBSCRIPTION_PROVIDER = "anthropic-subscription";
@@ -49,6 +54,14 @@ export interface ClientRouterDeps {
 	hasBackboardAuth?: () => boolean;
 	/** True when an enabled saved key can serve this provider. */
 	hasKeyFor: (provider: string) => boolean;
+	/**
+	 * Host-managed mode: a key never wins implicitly. Every request states its
+	 * own billing route (`source`), captured when its turn or worker started,
+	 * and a request without one is refused. The TUI leaves this off.
+	 */
+	explicitSources?: boolean;
+	/** The billing route the host attached to the live model, when explicit. */
+	getModelSource?: () => ModelSource | undefined;
 }
 
 /**
@@ -59,6 +72,11 @@ export interface ClientRouterDeps {
  * models onto the user's own billing. Requests that name an existing thread
  * route by that thread's origin instead, so toggling a key mid-conversation
  * can never split one thread across two backends.
+ *
+ * In explicit mode (`explicitSources`) the precedence rule is off: every
+ * request carries the route its turn captured and nothing is inferred from the
+ * live selection or from which keys happen to be held, so neither a key change
+ * nor a model change can move a running turn's billing.
  */
 export class ClientRouter implements AgentClient {
 	constructor(private readonly deps: ClientRouterDeps) {}
@@ -70,6 +88,11 @@ export class ClientRouter implements AgentClient {
 			this.subscriptionForProvider(model.provider)
 		) {
 			return "subscription";
+		}
+		if (this.deps.explicitSources) {
+			// Only the live selection has a host-stated route; it answers for
+			// capability and catalog questions. Requests never come through here.
+			return this.deps.getModelSource?.() === "byok" ? "byok" : "backboard";
 		}
 		if (
 			this.deps.byok &&
@@ -105,7 +128,7 @@ export class ClientRouter implements AgentClient {
 		req: SubmitToolOutputsRequest,
 		options?: RequestOptions,
 	): AsyncIterable<ProviderEvent> {
-		return this.forThread(req.thread_id).runToolOutputs(req, options);
+		return this.forContinuation(req).runToolOutputs(req, options);
 	}
 
 	preserveFailedMessage(
@@ -123,7 +146,7 @@ export class ClientRouter implements AgentClient {
 		options?: RequestOptions,
 	): Promise<string | null> {
 		return (
-			this.forThread(req.thread_id).preserveFailedToolOutputs?.(req, options) ??
+			this.forContinuation(req).preserveFailedToolOutputs?.(req, options) ??
 			Promise.resolve(null)
 		);
 	}
@@ -150,18 +173,19 @@ export class ClientRouter implements AgentClient {
 		model: string,
 		options?: RequestOptions,
 	): Promise<ModelThinkingMetadataResponse> {
-		return this.clientFor({ provider, model }).getModelThinkingMetadata(
-			provider,
-			model,
-			options,
-		);
+		return (
+			options?.source
+				? this.forRoute(options.source, undefined, { provider, model })
+				: this.clientFor({ provider, model })
+		).getModelThinkingMetadata(provider, model, options);
 	}
 
 	/**
 	 * The merged catalog. Signed in, the user sees everything; with keys only,
 	 * they see exactly what their keys can reach. Where both offer the same
 	 * `provider/model`, the key-backed entry replaces the routed one - matching
-	 * where the request would actually go.
+	 * where the request would actually go. In explicit mode both entries are
+	 * kept, because the host presents them as two distinct billing routes.
 	 */
 	async listModels(options?: RequestOptions): Promise<ModelsListResponse> {
 		const backboardClient = this.backboard();
@@ -197,9 +221,11 @@ export class ClientRouter implements AgentClient {
 			const source = clients[index]?.source;
 			if (result?.status !== "fulfilled" || !source) continue;
 			for (const model of result.value.models) {
-				if (isSubscriptionProvider(model.provider) && !this.subscriptionForProvider(model.provider)) continue;
-				if (seen.has(modelKey(model))) continue;
-				seen.add(modelKey(model));
+				const key = this.deps.explicitSources
+					? `${source}:${modelKey(model)}`
+					: modelKey(model);
+				if (seen.has(key)) continue;
+				seen.add(key);
 				models.push({ ...model, source });
 			}
 		}
@@ -211,6 +237,39 @@ export class ClientRouter implements AgentClient {
 		filter?: { name?: string },
 	): Promise<AssistantInfo[]> {
 		return this.active().listAssistants(options, filter);
+	}
+
+	/**
+	 * Image/video generation catalogs live only on the Backboard backend,
+	 * so these forward there rather than merging across clients.
+	 */
+	async listImageModels(
+		options?: RequestOptions,
+	): Promise<ImageModelsListResponse> {
+		const backboard = this.backboard();
+		if (!backboard?.listImageModels) return { models: [], total: 0 };
+		return backboard.listImageModels(options);
+	}
+
+	async listVideoModels(
+		options?: RequestOptions,
+	): Promise<VideoModelsListResponse> {
+		const backboard = this.backboard();
+		if (!backboard?.listVideoModels) return { models: [], total: 0 };
+		return backboard.listVideoModels(options);
+	}
+
+	async generateVideo(
+		request: GenerateVideoRequest,
+		options?: RequestOptions,
+	): Promise<GenerateVideoResult> {
+		const backboard = this.backboard();
+		if (!backboard?.generateVideo) {
+			throw new Error(
+				"Video generation requires a signed-in Backboard account.",
+			);
+		}
+		return backboard.generateVideo(request, options);
 	}
 
 	createAssistant(
@@ -267,12 +326,88 @@ export class ClientRouter implements AgentClient {
 	 * picker happened to be on.
 	 */
 	private forRequest(req: SendMessageRequest): AgentClient {
+		const live = this.deps.getModel();
+		const model = {
+			provider: req.llm_provider ?? live.provider,
+			model: req.model_name ?? live.model,
+		};
+		if (this.deps.explicitSources) {
+			return this.forRoute(req.source, req.thread_id, model);
+		}
 		if (req.thread_id) return this.forThread(req.thread_id);
-		const model = this.deps.getModel();
-		return this.clientFor({
-			provider: req.llm_provider ?? model.provider,
-			model: req.model_name ?? model.model,
-		});
+		return this.clientFor(model);
+	}
+
+	/** A continuation belongs to its thread; explicit mode still checks the route. */
+	private forContinuation(req: SubmitToolOutputsRequest): AgentClient {
+		if (this.deps.explicitSources) {
+			return this.forRoute(req.source, req.thread_id);
+		}
+		return this.forThread(req.thread_id);
+	}
+
+	/**
+	 * Explicit mode: the request's own route decides, and nothing is inferred
+	 * from the live selection, the thread, or which keys are held. A request
+	 * without a route is a runtime bug and is refused; a key-billed request
+	 * whose key is gone fails rather than falling back to Backboard; a thread
+	 * created on another backend is refused, because the IDE hands off to a
+	 * fresh thread on a route change and failing loudly beats billing the wrong
+	 * account. `model` is the request's own model when it names one; a
+	 * continuation names none and is served by its thread's backend.
+	 */
+	private forRoute(
+		source: ModelSource | undefined,
+		threadId: string | undefined,
+		model?: ModelRef,
+	): AgentClient {
+		if (source === undefined) {
+			throw new Error(
+				"Refusing to send a request without a billing route in host-managed mode.",
+			);
+		}
+		if (threadId) this.assertThreadMatchesSource(threadId, source);
+		const described = model ? formatModel(model) : "this conversation";
+		if (source === "subscription") {
+			const route =
+				(model && this.subscriptionForProvider(model.provider)) ||
+				(threadId ? this.subscriptionForThread(threadId) : undefined);
+			if (!route) {
+				throw new Error(
+					`No connected subscription can serve ${described}. Connect the subscription and start a new conversation.`,
+				);
+			}
+			return route.client;
+		}
+		if (source === "byok") {
+			if (model && !this.deps.hasKeyFor(model.provider)) {
+				throw new Error(
+					`No API key is configured for ${model.provider} in this session.`,
+				);
+			}
+			if (!this.deps.byok) {
+				throw new Error(`No API key backend can serve ${described}.`);
+			}
+			return this.deps.byok;
+		}
+		const backboard = this.backboard();
+		if (!backboard) {
+			throw new Error(
+				`No backend can serve ${described}. Sign in with Backboard to continue.`,
+			);
+		}
+		return backboard;
+	}
+
+	private assertThreadMatchesSource(
+		threadId: string,
+		source: ModelSource,
+	): void {
+		const threadSource = this.sourceForThread(threadId);
+		if (threadSource === source) return;
+		throw new Error(
+			`This conversation is bound to ${describeSource(threadSource)}, but this request bills to ${describeSource(source)}. Start a new conversation to switch.`,
+		);
 	}
 
 	private active(): AgentClient {
@@ -281,6 +416,15 @@ export class ClientRouter implements AgentClient {
 
 	private clientFor(model: ModelRef): AgentClient {
 		const source = this.sourceFor(model);
+		if (
+			source === "byok" &&
+			this.deps.explicitSources &&
+			!this.deps.hasKeyFor(model.provider)
+		) {
+			throw new Error(
+				`No API key is configured for ${model.provider} in this session.`,
+			);
+		}
 		const client =
 			source === "byok"
 				? this.deps.byok
@@ -289,7 +433,7 @@ export class ClientRouter implements AgentClient {
 					: this.backboard();
 		if (!client) {
 			throw new Error(
-				`No backend can serve ${formatModel(model)}. Choose a Backboard or API key model.`,
+				`No backend can serve ${formatModel(model)}. Sign in with Backboard, connect the required subscription, or add a key with /keys.`,
 			);
 		}
 		return client;
@@ -302,7 +446,7 @@ export class ClientRouter implements AgentClient {
 		const knownSubscription = knownSubscriptionForThread(threadId);
 		if (knownSubscription) {
 			throw new Error(
-				`${knownSubscription.label} subscriptions are currently unavailable. Choose a Backboard or API key model.`,
+				`This thread requires a connected ${knownSubscription.label} subscription.`,
 			);
 		}
 		if (threadId.startsWith("byok_") && this.deps.byok) return this.deps.byok;
@@ -383,6 +527,17 @@ function knownSubscriptionForThread(threadId: string) {
 
 function normalizeProvider(provider: string): string {
 	return provider.trim().toLowerCase();
+}
+
+function describeSource(source: ClientSource): string {
+	switch (source) {
+		case "byok":
+			return "your API key";
+		case "subscription":
+			return "a subscription";
+		default:
+			return "Backboard";
+	}
 }
 
 function uniqueClients(clients: Array<AgentClient | undefined>): AgentClient[] {

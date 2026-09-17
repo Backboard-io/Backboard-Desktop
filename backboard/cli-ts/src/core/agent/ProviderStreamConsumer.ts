@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import {
@@ -28,10 +28,14 @@ export interface PendingAction {
 }
 
 export interface ProviderStreamConsumerOptions {
-	/** Buffer image-enabled responses so malformed provider HTML never reaches the UI. */
+	/** Buffer media-enabled responses so malformed provider HTML never reaches the UI. */
 	imageGeneration?: boolean;
+	/** Enables video generation; shares the buffering and persistence path. */
+	videoGeneration?: boolean;
 	/** Project directory where generated image bytes should be persisted. */
 	generatedMediaDir?: string;
+	/** Project directory where generated video bytes should be persisted. */
+	generatedVideoDir?: string;
 	/** Test seam for downloading generated media. */
 	fetch?: (url: string) => Promise<Response>;
 	/** Abort and retry a provider attempt that emits no events for this long. */
@@ -43,6 +47,12 @@ export interface ProviderStreamConsumerOptions {
 interface GeneratedMedia {
 	url: string;
 	label: string;
+	/**
+	 * Kind reported by the provider (`media_type`/`mime_type`). The URL shape is
+	 * only a fallback: stored clips live under `/generated-video/`, which the
+	 * path heuristics alone cannot be trusted to recognise.
+	 */
+	kind?: "image" | "video";
 	savedPath?: string;
 	contentHash?: string;
 }
@@ -68,6 +78,13 @@ export class ProviderStreamConsumer {
 		private readonly session: Session,
 		private readonly options: ProviderStreamConsumerOptions = {},
 	) {}
+
+	/** Image and video generation share the buffering and media-persistence path. */
+	private get generativeMediaEnabled(): boolean {
+		return Boolean(
+			this.options.imageGeneration || this.options.videoGeneration,
+		);
+	}
 
 	async consumeWithRetry(
 		createStream: (signal: AbortSignal) => AsyncIterable<ProviderEvent>,
@@ -228,7 +245,7 @@ export class ProviderStreamConsumer {
 						break;
 					case "assistant_delta":
 						if (event.text) {
-							if (this.options.imageGeneration) bufferedText += event.text;
+							if (this.generativeMediaEnabled) bufferedText += event.text;
 							else assistant.appendDelta(event.text);
 						}
 						break;
@@ -236,11 +253,13 @@ export class ProviderStreamConsumer {
 						if (event.text) assistant.appendReasoning(event.text);
 						break;
 					case "tool_started":
+						assistant.flushAnswer();
 						assistant.flushReasoning();
 						markToolAnnouncement();
 						earlyTools?.announce(event.id, event.name);
 						break;
 					case "tool_ready":
+						assistant.flushAnswer();
 						assistant.flushReasoning();
 						markToolAnnouncement();
 						earlyTools?.offer({
@@ -260,6 +279,7 @@ export class ProviderStreamConsumer {
 						const media = mediaFromPayload(event.payload);
 						if (media) {
 							await this.addGeneratedMedia(media, generatedMedia);
+							this.emitMediaToolCall(media);
 						} else {
 							this.bus.emit({
 								type: "system:warning",
@@ -285,7 +305,7 @@ export class ProviderStreamConsumer {
 						}));
 						assistant.finalize(
 							calls,
-							this.options.imageGeneration
+							this.generativeMediaEnabled
 								? normalizeImageResponse(bufferedText, generatedMedia)
 								: undefined,
 						);
@@ -295,16 +315,17 @@ export class ProviderStreamConsumer {
 						throw new ProviderStreamFailure(event.error, event.retryable);
 					case "completed": {
 						const finalText = event.finalText ?? bufferedText;
-						if (this.options.imageGeneration) {
+						if (this.generativeMediaEnabled) {
 							// Some providers omit the media event and return the generated
 							// Backboard URL only in final_content. Persist that response too.
 							for (const media of mediaFromResponseText(finalText)) {
 								await this.addGeneratedMedia(media, generatedMedia);
+								this.emitMediaToolCall(media);
 							}
 						}
 						assistant.finalize(
 							[],
-							this.options.imageGeneration
+							this.generativeMediaEnabled
 								? normalizeImageResponse(finalText, generatedMedia)
 								: event.finalText,
 						);
@@ -386,12 +407,44 @@ export class ProviderStreamConsumer {
 		}
 	}
 
+	private readonly emittedMediaToolCalls = new Set<string>();
+
+	private emitMediaToolCall(media: GeneratedMedia): void {
+		if (this.emittedMediaToolCalls.has(media.url)) return;
+		this.emittedMediaToolCalls.add(media.url);
+		const isVideo = isVideoMedia(media);
+		const toolCallId = `gen_${isVideo ? "video" : "image"}_${media.contentHash ?? randomUUID()}`;
+		const toolName = isVideo ? "generate_video" : "generate_image";
+		const inputSummary =
+			media.label || (isVideo ? "Generating video…" : "Generating image…");
+		this.bus.emit({
+			type: "tool:start",
+			toolCallId,
+			name: toolName,
+			inputSummary,
+		});
+		const saved = media.savedPath
+			? `\n\nSaved to \`${projectRelativeGeneratedPath(media.savedPath)}\`.`
+			: "";
+		const detail = `![${media.label}](${media.url})${saved}`;
+		this.bus.emit({
+			type: "tool:result",
+			toolCallId,
+			name: toolName,
+			title: isVideo ? "Video generated" : "Image generated",
+			detail,
+		});
+	}
+
 	private async addGeneratedMedia(
 		media: GeneratedMedia,
 		generatedMedia: GeneratedMedia[],
 	): Promise<void> {
 		if (generatedMedia.some((item) => item.url === media.url)) return;
-		const persisted = await this.persistGeneratedMedia(media.url);
+		const persisted = await this.persistGeneratedMedia(
+			media.url,
+			this.mediaDirectoryFor(media),
+		);
 		media.savedPath = persisted?.path;
 		media.contentHash = persisted?.contentHash;
 		if (
@@ -402,10 +455,17 @@ export class ProviderStreamConsumer {
 		}
 	}
 
+	/** Generated videos land in their own project folder so images stay separate. */
+	private mediaDirectoryFor(media: GeneratedMedia): string | undefined {
+		return isVideoMedia(media)
+			? (this.options.generatedVideoDir ?? this.options.generatedMediaDir)
+			: this.options.generatedMediaDir;
+	}
+
 	private async persistGeneratedMedia(
 		url: string,
+		directory: string | undefined,
 	): Promise<PersistedGeneratedMedia | undefined> {
-		const directory = this.options.generatedMediaDir;
 		if (!directory) return undefined;
 		try {
 			const response = await (this.options.fetch ?? fetch)(url);
@@ -427,7 +487,7 @@ export class ProviderStreamConsumer {
 		} catch (error) {
 			this.bus.emit({
 				type: "system:warning",
-				message: `Generated image could not be saved locally: ${errorMessage(error)}`,
+				message: `Generated media could not be saved locally: ${errorMessage(error)}`,
 			});
 			return undefined;
 		}
@@ -494,11 +554,12 @@ function mediaFromPayload(
 		mediaUrlField(payload.image) ??
 		mediaUrlField(payload.chunk);
 	if (!url) return null;
+	const kind = mediaKindFromPayload(payload);
 	const label =
 		typeof payload.prompt === "string" && payload.prompt.trim()
 			? payload.prompt.trim()
-			: "Generated image";
-	return { url, label: label.replace(/[[\]]/g, "") };
+			: defaultMediaLabel(kind, url);
+	return { url, label: label.replace(/[[\]]/g, ""), ...(kind ? { kind } : {}) };
 }
 
 function mediaFromResponseText(text: string): GeneratedMedia[] {
@@ -510,7 +571,9 @@ function mediaFromResponseText(text: string): GeneratedMedia[] {
 		) {
 			media.push({
 				url,
-				label: label.replace(/[[\]]/g, "").trim() || "Generated image",
+				label:
+					label.replace(/[[\]]/g, "").trim() ||
+					defaultMediaLabel(undefined, url),
 			});
 		}
 	};
@@ -519,6 +582,12 @@ function mediaFromResponseText(text: string): GeneratedMedia[] {
 		/!\[([^\]]*)\]\(\s*(https:\/\/[^)\s]+)\s*\)/gi,
 	)) {
 		add(match[2] ?? "", match[1] ?? "Generated image");
+	}
+	// Generated videos can arrive as a plain link instead of image markdown.
+	for (const match of text.matchAll(
+		/\[([^\]]*)\]\(\s*(https:\/\/[^)\s]+)\s*\)/gi,
+	)) {
+		add(match[2] ?? "", match[1] ?? "Generated video");
 	}
 	for (const match of text.matchAll(/\\?<img\b[^>]*>/gi)) {
 		const tag = match[0];
@@ -535,11 +604,73 @@ function isBackboardGeneratedMediaUrl(value: string): boolean {
 		return (
 			url.protocol === "https:" &&
 			url.hostname === "backboard-prod.s3.ca-central-1.amazonaws.com" &&
-			url.pathname.startsWith("/generated-images/")
+			/^\/generated-(?:images?|videos?)\//.test(url.pathname)
 		);
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Generated clips use the `generated-video`/`generated-videos` bucket prefix;
+ * the extension decides anything else (uploads, provider mirrors).
+ */
+function isVideoMediaUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		return (
+			/^\/generated-videos?\//.test(url.pathname) ||
+			/[.](?:mp4|webm|mov|m4v)$/i.test(url.pathname)
+		);
+	} catch {
+		return false;
+	}
+}
+
+/** Explicit provider metadata wins over the URL shape when classifying media. */
+function isVideoMedia(media: GeneratedMedia): boolean {
+	return media.kind ? media.kind === "video" : isVideoMediaUrl(media.url);
+}
+
+/**
+ * Reads `media_type`/`mime_type` (documented `generated_media` fields) from a
+ * media event so a clip is classified correctly even when its URL carries no
+ * video extension.
+ */
+function mediaKindFromPayload(
+	payload: Record<string, unknown>,
+): "image" | "video" | undefined {
+	for (const value of [
+		payload,
+		payload.media,
+		payload.data,
+		payload.image,
+		payload.chunk,
+	]) {
+		if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+		const record = value as Record<string, unknown>;
+		const declared =
+			typeof record.media_type === "string"
+				? record.media_type.trim().toLowerCase()
+				: "";
+		if (declared === "video" || declared === "image") return declared;
+		const mime =
+			typeof record.mime_type === "string"
+				? record.mime_type.trim().toLowerCase()
+				: "";
+		if (mime.startsWith("video/")) return "video";
+		if (mime.startsWith("image/")) return "image";
+	}
+	return undefined;
+}
+
+function defaultMediaLabel(
+	kind: "image" | "video" | undefined,
+	url: string,
+): string {
+	return (kind ?? (isVideoMediaUrl(url) ? "video" : "image")) === "video"
+		? "Generated video"
+		: "Generated image";
 }
 
 function normalizeImageResponse(text: string, media: GeneratedMedia[]): string {
@@ -597,7 +728,9 @@ function generatedMediaFilename(
 	} catch {
 		// Data URLs and malformed provider URLs fall through to content type.
 	}
-	const extension = /^[.](?:png|jpe?g|webp|gif|avif)$/.test(sourceExtension)
+	const extension = /^[.](?:png|jpe?g|webp|gif|avif|mp4|webm|mov|m4v)$/.test(
+		sourceExtension,
+	)
 		? sourceExtension === ".jpeg"
 			? ".jpg"
 			: sourceExtension
@@ -611,13 +744,18 @@ function extensionForContentType(contentType: string | null): string {
 	if (type === "image/webp") return ".webp";
 	if (type === "image/gif") return ".gif";
 	if (type === "image/avif") return ".avif";
+	if (type === "video/mp4") return ".mp4";
+	if (type === "video/webm") return ".webm";
+	if (type === "video/quicktime") return ".mov";
 	return ".jpg";
 }
 
 function projectRelativeGeneratedPath(path: string): string {
-	const marker = `${join("generated-images", "")}`;
-	const index = path.lastIndexOf(marker);
-	return index >= 0 ? path.slice(index) : path;
+	for (const folder of ["generated-videos", "generated-images"]) {
+		const index = path.lastIndexOf(`${join(folder, "")}`);
+		if (index >= 0) return path.slice(index);
+	}
+	return path;
 }
 
 function mediaUrlField(value: unknown): string | null {

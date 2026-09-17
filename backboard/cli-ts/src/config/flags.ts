@@ -21,6 +21,9 @@ export interface CliFlags {
 	claudeSubscriptionEnable: boolean;
 	claudeSubscriptionLogout: boolean;
 	claudeSubscriptionStatus: boolean;
+	/** `keys validate --provider <id>`: check a key read from stdin, print JSON. */
+	keysValidate: boolean;
+	provider?: string;
 	help: boolean;
 	version: boolean;
 }
@@ -41,12 +44,18 @@ export function parseFlags(argv: string[]): CliFlags {
 		claudeSubscriptionEnable: false,
 		claudeSubscriptionLogout: false,
 		claudeSubscriptionStatus: false,
+		keysValidate: false,
 		help: false,
 		version: false,
 	};
 
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
+		if (arg === "keys" && argv[i + 1] === "validate") {
+			flags.keysValidate = true;
+			i++;
+			continue;
+		}
 		if (arg === "subscription" && argv[i + 1] === "login") {
 			flags.subscriptionLogin = true;
 			i++;
@@ -135,6 +144,9 @@ export function parseFlags(argv: string[]): CliFlags {
 			}
 			case "profile":
 				flags.profile = readValue();
+				break;
+			case "provider":
+				flags.provider = readValue();
 				break;
 			case "cwd":
 				flags.cwd = readValue();

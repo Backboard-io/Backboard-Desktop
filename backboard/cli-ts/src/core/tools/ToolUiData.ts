@@ -16,6 +16,7 @@ export const BACKBOARD_TOOL_KINDS = [
 	"browser",
 	"findSkill",
 	"findMcp",
+	"generateVideo",
 ] as const;
 
 export type BackboardToolKind = (typeof BACKBOARD_TOOL_KINDS)[number];
@@ -99,6 +100,8 @@ function backboardToolKind(toolName: string): BackboardToolKind | undefined {
 			return "findSkill";
 		case "findmcp":
 			return "findMcp";
+		case "generatevideo":
+			return "generateVideo";
 		default:
 			return undefined;
 	}
@@ -169,6 +172,18 @@ function safeToolInput(
 			return compact({
 				task: text(value.task, MAX_QUERY_CHARS),
 				server: text(value.server, 256),
+			});
+		case "generateVideo":
+			return compact({
+				prompt: text(value.prompt, MAX_PREVIEW_CHARS),
+				duration: finiteNumber(value.duration),
+				resolution: text(value.resolution, 32),
+				generate_audio: boolean(value.generate_audio),
+				aspect_ratio: text(value.aspect_ratio, 32),
+				model_provider: text(value.model_provider, 64),
+				model_name: text(value.model_name, 256),
+				model_label: text(value.model_label, 128),
+				images: stringArray(value.images, 8, MAX_PATH_CHARS),
 			});
 	}
 }
@@ -264,6 +279,13 @@ function safeToolResult(
 						value.toolNames.length > MAX_TOOL_NAMES) ||
 					(Array.isArray(value.candidates) && value.candidates.length > 6) ||
 					undefined,
+			});
+		case "generateVideo":
+			return compact({
+				url: text(value.url, MAX_URL_CHARS),
+				document_id: text(value.document_id, 256),
+				label: text(value.label, 500),
+				savedPath: text(value.savedPath, MAX_PATH_CHARS),
 			});
 	}
 }

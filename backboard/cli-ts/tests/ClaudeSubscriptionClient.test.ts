@@ -256,7 +256,9 @@ describe("ClaudeSubscriptionClient", () => {
 					cachedTokens: 3,
 					cacheWriteTokens: 2,
 					costUsd: 0,
-					contextTokens: 12,
+					// Occupancy includes the cached prompt portions and this
+					// turn's output, matching the level Backboard reports.
+					contextTokens: 21,
 					contextLimit: 200_000,
 					provider: "anthropic-subscription",
 					model: "sonnet",
@@ -316,6 +318,7 @@ describe("ClaudeSubscriptionClient", () => {
 			providers: [...new Set(result.models.map((model) => model.provider))],
 			effortLevels: result.models.map((model) => model.supported_effort_levels),
 			contexts: result.models.map((model) => model.context_limit),
+			visions: result.models.map((model) => model.supports_vision),
 		}).toEqual({
 			total: 3,
 			names: ["default", "claude-fable-5-1[1m]", "haiku"],
@@ -331,6 +334,7 @@ describe("ClaudeSubscriptionClient", () => {
 				[],
 			],
 			contexts: [1_000_000, 1_000_000, 200_000],
+			visions: [true, true, true],
 		});
 	});
 

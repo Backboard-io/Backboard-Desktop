@@ -134,6 +134,28 @@ export interface IAgentSession extends IAgentSessionData {
 	setRead(read: boolean): void;
 }
 
+export type AgentSessionListStatus = 'running' | 'completed' | 'needs-input' | 'failed' | 'opened';
+
+/**
+ * Compact list indicator for a session: spinner while working, green when
+ * completed and not yet opened, orange when input is needed, grey once opened.
+ */
+export function getAgentSessionListStatus(session: IAgentSession): AgentSessionListStatus {
+	if (session.status === AgentSessionStatus.InProgress) {
+		return 'running';
+	}
+	if (session.status === AgentSessionStatus.NeedsInput) {
+		return 'needs-input';
+	}
+	if (session.status === AgentSessionStatus.Failed) {
+		return 'failed';
+	}
+	if (session.status === AgentSessionStatus.Completed && !session.isRead()) {
+		return 'completed';
+	}
+	return 'opened';
+}
+
 interface IInternalAgentSessionData extends IAgentSessionData {
 
 	/**

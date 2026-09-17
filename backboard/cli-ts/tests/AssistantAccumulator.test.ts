@@ -10,6 +10,7 @@ function makeAccumulator(deps?: {
 	suppressFinalMessage?: () => boolean;
 	suppressAllMessages?: () => boolean;
 	reasoningFlushIntervalMs?: number;
+	answerFlushIntervalMs?: number;
 }) {
 	const bus = new EventBus();
 	const session = new Session("sess_test");
@@ -73,6 +74,151 @@ describe("AssistantAccumulator", () => {
 			"assistant:message",
 		]);
 		expect(session.getMessages()).toHaveLength(1);
+	});
+
+	it("publishes the first visible text immediately, then coalesces the burst", () => {
+		const { accumulator, events } = makeAccumulator({
+			answerFlushIntervalMs: 1_000,
+		});
+		accumulator.appendDelta("Hello");
+
+		// The first chunk is never held back: time to first token must not be
+		// padded by the pacing window.
+		expect(events).toEqual([
+			{
+				type: "assistant:delta",
+				turnId: "turn_1",
+				messageId: "turn_1:assistant:0",
+				text: "Hello",
+			},
+		]);
+
+		accumulator.appendDelta(" from");
+		accumulator.appendDelta(" the");
+		accumulator.appendDelta(" model");
+
+		// The rest of the burst waits for the window or a boundary, so a token
+		// flood cannot drive a repaint per token.
+		expect(events).toHaveLength(1);
+
+		accumulator.finalize();
+		expect(events).toEqual([
+			{
+				type: "assistant:delta",
+				turnId: "turn_1",
+				messageId: "turn_1:assistant:0",
+				text: "Hello",
+			},
+			{
+				type: "assistant:delta",
+				turnId: "turn_1",
+				messageId: "turn_1:assistant:0",
+				text: " from the model",
+			},
+			{
+				type: "assistant:message",
+				turnId: "turn_1",
+				messageId: "turn_1:assistant:0",
+				text: "Hello from the model",
+			},
+		]);
+	});
+
+	it("paces a large backlog out over several windows instead of dumping it", async () => {
+		const { accumulator, events } = makeAccumulator({
+			answerFlushIntervalMs: 5,
+		});
+		accumulator.appendDelta("Hi");
+		accumulator.appendDelta("x".repeat(300));
+		accumulator.appendDelta("x".repeat(300));
+
+		await Bun.sleep(8);
+
+		const revealed = (caught: typeof events) =>
+			caught
+				.filter((event) => event.type === "assistant:delta")
+				.reduce((total, event) => total + event.text.length, 0);
+		const revealedEarly = revealed(events);
+		// Some of the backlog has been revealed, but nowhere near all of it:
+		// the burst is spread across frames rather than dumped in one update.
+		expect(revealedEarly).toBeGreaterThan(2);
+		expect(revealedEarly).toBeLessThan(602);
+
+		accumulator.finalize();
+		expect(revealed(events)).toBe(602);
+	});
+
+	it("paces a single oversized chunk into a bite plus a drained remainder", async () => {
+		const { accumulator, events } = makeAccumulator({
+			answerFlushIntervalMs: 5,
+		});
+		accumulator.appendDelta("x".repeat(1200));
+
+		// The first frame reveals a bite, not the whole chunk.
+		const first = events[0];
+		expect(first?.type).toBe("assistant:delta");
+		expect(
+			first?.type === "assistant:delta" ? first.text.length : 0,
+		).toBeLessThan(1200);
+
+		await Bun.sleep(350);
+
+		// The remainder drains within the drain window instead of waiting for
+		// finalize, and nothing is lost.
+		const total = events.reduce(
+			(total, event) =>
+				event.type === "assistant:delta" ? total + event.text.length : total,
+			0,
+		);
+		expect(total).toBe(1200);
+		expect(events.length).toBeGreaterThan(3);
+	});
+
+	it("keeps answer text ahead of reasoning that arrives after it", () => {
+		const { accumulator, events } = makeAccumulator({
+			answerFlushIntervalMs: 1_000,
+		});
+		accumulator.appendDelta("the answer");
+		accumulator.appendReasoning("still thinking");
+
+		expect(events).toEqual([
+			{
+				type: "assistant:delta",
+				turnId: "turn_1",
+				messageId: "turn_1:assistant:0",
+				text: "the answer",
+			},
+			{
+				type: "assistant:reasoning",
+				turnId: "turn_1",
+				text: "still thinking",
+			},
+		]);
+	});
+
+	it("drops coalesced answer text when the segment is discarded", () => {
+		const { accumulator, events } = makeAccumulator({
+			answerFlushIntervalMs: 1_000,
+		});
+		accumulator.appendDelta("superseded");
+		// The first chunk was published immediately; this one is still buffered
+		// and must be dropped rather than published when the segment is discarded.
+		accumulator.appendDelta(" text");
+		accumulator.discardPartial();
+
+		expect(events).toEqual([
+			{
+				type: "assistant:delta",
+				turnId: "turn_1",
+				messageId: "turn_1:assistant:0",
+				text: "superseded",
+			},
+			{
+				type: "assistant:message:discard",
+				turnId: "turn_1",
+				messageId: "turn_1:assistant:0",
+			},
+		]);
 	});
 
 	it("discards a buffered true final answer but shows buffered commentary before tool rounds", () => {

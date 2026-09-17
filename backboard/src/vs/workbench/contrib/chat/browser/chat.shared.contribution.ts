@@ -143,6 +143,7 @@ import { ChatEditorInput, ChatEditorInputSerializer } from './widgetHosts/editor
 import { ChatLayoutService } from './widget/chatLayoutService.js';
 import { ChatLanguageModelsDataContribution, LanguageModelsConfigurationService } from './languageModelsConfigurationService.js';
 import './chatManagement/chatManagement.contribution.js';
+import './byokKeys/byokKeys.contribution.js';
 import './aiCustomization/aiCustomizationWorkspaceService.js';
 import './aiCustomization/customizationHarnessService.js';
 import './aiCustomization/aiCustomizationManagement.contribution.js';
@@ -403,7 +404,7 @@ configurationRegistry.registerConfiguration({
 				nls.localize('chat.experimental.incrementalRendering.animationStyle.reveal', "Content reveals top-to-bottom with a soft gradient edge."),
 			],
 			description: nls.localize('chat.experimental.incrementalRendering.animationStyle', "Controls the animation style for incremental rendering."),
-			default: 'rise',
+			default: 'blur',
 			tags: ['experimental'],
 		},
 		[ChatConfiguration.IncrementalRenderingBuffering]: {

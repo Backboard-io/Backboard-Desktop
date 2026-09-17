@@ -12,7 +12,6 @@ import * as https from 'https';
 import * as os from 'os';
 import * as path from 'path';
 import * as readline from 'readline';
-import { PanelAuthState } from './panel/authState';
 import { codiconsStylesheetUri, fontBaseUri, iconBaseUri, panelHtml, webviewLocalResourceRoots } from './panel/panelHtml';
 import { initializeBackboardUpdates, readCurrentAppVersion } from './updates';
 import type { BackboardAttachment, BackboardConfigJson, BackboardDeviceCodeResponse, BackboardOAuthSaveResult, BackboardOAuthTokens, BridgeEvent, BridgeModel, FileAttachment, FileChangePayload, ImageAttachment, ModelCacheEntry, PanelOptions, PanelPersistedState, PanelStateStore, PanelThreadFile, PendingRequest, ResponseSink, ToolCacheEntry, ToolResultRequest, VoiceAttachment } from './types';
@@ -118,9 +117,6 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(configWatcher.onDidCreate(refreshBackboardState));
 	context.subscriptions.push(configWatcher.onDidChange(refreshBackboardState));
 	context.subscriptions.push(configWatcher.onDidDelete(refreshBackboardState));
-	context.subscriptions.push(vscode.window.onDidChangeWindowState(state => {
-		if (state.focused) { refreshBackboardState(); }
-	}));
 	const panelStateWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(backboardPanelStatePath()), path.basename(backboardPanelStatePath())));
 	const panelThreadsWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(backboardThreadsDir(), '*.json'));
 	let panelHistoryRefreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -332,11 +328,6 @@ async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
 		await openBackboardOAuthAuthorizeUrl(device.verification_uri_complete);
 		const tokens = await pollBackboardDeviceToken(device);
 		const saveResult = await saveBackboardOAuthTokens(tokens);
-		// Notify the workbench after the write, rather than relying on a watcher
-		// for a credential directory that may have just been recreated.
-		await vscode.commands.executeCommand('backboard.refreshAuthState').then(undefined, () => {
-			backboardToolOutput?.appendLine('[oauth] Workbench sign-in refresh unavailable.');
-		});
 		await cacheBackboardUserName(stringValueFromRecord(tokens.access_token));
 		bridge.restart();
 		bridge.warmUp();
@@ -1640,9 +1631,6 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 
 	resolveWebviewView(webviewView: vscode.WebviewView): void {
 		this.view = webviewView;
-		this.context.subscriptions.push(webviewView.onDidChangeVisibility(() => {
-			if (webviewView.visible) { this.refreshState(); }
-		}));
 		// The panel just became visible: start the serve process and resolve
 		// the assistant now, while the user is still typing their first
 		// message, instead of paying CLI startup on the first send.
@@ -1665,8 +1653,8 @@ class BackboardPanelProvider implements vscode.WebviewViewProvider {
 							void postPanelState(this.bridge, webviewView.webview, true);
 						}
 					});
-				} else if (message?.type === 'setupProviderKey') {
-					const command = 'backboard.setupProviderKey';
+				} else if (message?.type === 'setupProviderKey' || (process.platform !== 'win32' && message?.type === 'setupSubscription')) {
+					const command = message.type === 'setupProviderKey' ? 'backboard.setupProviderKey' : 'backboard.setupSubscription';
 					void vscode.commands.executeCommand(command).then(
 						() => postPanelState(this.bridge, webviewView.webview, true),
 						() => vscode.window.showErrorMessage('Setup failed. Please try again.')
@@ -3699,19 +3687,11 @@ async function savePanelOptions(options: PanelOptions): Promise<void> {
 		.map(([key, value]) => config.update(key, value, vscode.ConfigurationTarget.Global)));
 }
 
-const panelAuthStates = new WeakMap<vscode.Webview, PanelAuthState>();
-
 async function postPanelState(bridge: BackboardBridge, webview: vscode.Webview, forceModelRefresh = false): Promise<void> {
-	let authState = panelAuthStates.get(webview);
-	if (!authState) {
-		authState = new PanelAuthState();
-		panelAuthStates.set(webview, authState);
-	}
-	const authenticated = await authState.refresh(hasBackboardCredentials, () => bridge.hasAlternativeCredentials());
-	if (authenticated === undefined) { return; }
 	const settings = readSettings();
 	const publicPanelSettings = publicSettings(settings);
-	await webview.postMessage({ type: 'settings', settings: { ...publicPanelSettings, authenticated }, workspace: workspacePath() });
+	const alternativeConfigured = await bridge.hasAlternativeCredentials().catch(() => false);
+	await webview.postMessage({ type: 'settings', settings: { ...publicPanelSettings, authenticated: publicPanelSettings.authenticated || alternativeConfigured }, workspace: workspacePath() });
 	const cachedModels = forceModelRefresh ? undefined : await bridge.cachedModels();
 	const cachedTools = forceModelRefresh ? undefined : await bridge.cachedTools(settings.mode);
 	if (cachedModels) {

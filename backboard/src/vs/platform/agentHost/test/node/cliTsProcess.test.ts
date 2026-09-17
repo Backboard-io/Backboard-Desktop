@@ -8,11 +8,211 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { cliTsInvocationFingerprint, detectCliTsExecutableArchitecture } from '../../node/cliTs/cliTsProcess.js';
+import { NullLogService } from '../../../log/common/log.js';
+import { CliTsServeProcess, cliTsInvocationFingerprint, detectCliTsExecutableArchitecture } from '../../node/cliTs/cliTsProcess.js';
+
+interface IStubRuntimeOptions {
+	readonly omitReady?: boolean;
+	readonly wrongRevision?: boolean;
+	readonly wrongOperation?: boolean;
+	readonly wrongUpdateRevision?: boolean;
+	/** Capabilities the stub announces in `serve:ready`. */
+	readonly capabilities?: readonly string[];
+	/** Delay before the stub acknowledges `setCredentials`. */
+	readonly credentialAckDelayMs?: number;
+	/** Ops the stub records but never answers. */
+	readonly hangOps?: readonly string[];
+}
+
+const STUB_ENV = ['BACKBOARD_CLI_TS_PATH', 'CLI_TS_STUB_LOG', 'CLI_TS_STUB_CAPABILITIES', 'CLI_TS_STUB_ACK_DELAY_MS', 'CLI_TS_STUB_HANG_OPS'] as const;
+
+/**
+ * Runs `fn` against a stand-in runtime: it announces itself, records every op
+ * it receives (tagged with whether the credential snapshot was acknowledged
+ * by then), acknowledges correlated requests, and exits on dispose.
+ */
+async function withStubRuntime(options: IStubRuntimeOptions, fn: (ops: () => string[]) => Promise<void>): Promise<void> {
+	const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-ts-stub-'));
+	const logPath = path.join(directory, 'ops.log');
+	const stubScript = path.join(directory, 'stub.js');
+	const stubLauncher = path.join(directory, 'backboard-cli-ts');
+	fs.writeFileSync(stubScript, [
+		`const fs = require('fs');`,
+		`const readline = require('readline');`,
+		`const capabilities = JSON.parse(process.env.CLI_TS_STUB_CAPABILITIES);`,
+		`const ackDelay = Number(process.env.CLI_TS_STUB_ACK_DELAY_MS);`,
+		`const hangOps = JSON.parse(process.env.CLI_TS_STUB_HANG_OPS);`,
+		`let credentialsAcked = false;`,
+		`const write = record => process.stdout.write(JSON.stringify({ timestamp: '', session_id: 's', source: 'serve', ...record }) + '\\n');`,
+		`if (!${!!options.omitReady}) write({ type: 'serve:ready', payload: { capabilities } });`,
+		`readline.createInterface({ input: process.stdin }).on('line', line => {`,
+		`	const control = JSON.parse(line);`,
+		`	fs.appendFileSync(process.env.CLI_TS_STUB_LOG, control.op + ':' + credentialsAcked + '\\n');`,
+		`	if (control.op === 'dispose') { process.exit(0); }`,
+		`	if (!control.requestId || hangOps.includes(control.op)) { return; }`,
+		`	const ack = () => write({ type: 'serve:ack', requestId: control.requestId, payload: { op: ${options.wrongOperation ? "'wrong'" : 'control.op'}, revision: ${options.wrongRevision ? -1 : options.wrongUpdateRevision ? '(control.revision === 2 ? -1 : control.revision)' : 'control.revision'} } });`,
+		`	if (control.op === 'setCredentials') { setTimeout(() => { credentialsAcked = true; ack(); }, ackDelay); return; }`,
+		`	ack();`,
+		`});`,
+	].join('\n'));
+	fs.writeFileSync(stubLauncher, `#!/bin/sh\nexec "${process.execPath}" "${stubScript}" "$@"\n`, { mode: 0o755 });
+	const previous = new Map(STUB_ENV.map(name => [name, process.env[name]] as const));
+	process.env['BACKBOARD_CLI_TS_PATH'] = stubLauncher;
+	process.env['CLI_TS_STUB_LOG'] = logPath;
+	process.env['CLI_TS_STUB_CAPABILITIES'] = JSON.stringify(options.capabilities ?? ['host-managed-byok-v2']);
+	process.env['CLI_TS_STUB_ACK_DELAY_MS'] = String(options.credentialAckDelayMs ?? 0);
+	process.env['CLI_TS_STUB_HANG_OPS'] = JSON.stringify(options.hangOps ?? []);
+	try {
+		await fn(() => fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean) : []);
+	} finally {
+		for (const [name, value] of previous) {
+			if (value === undefined) {
+				delete process.env[name];
+			} else {
+				process.env[name] = value;
+			}
+		}
+		fs.rmSync(directory, { recursive: true, force: true });
+	}
+}
+
+async function until(condition: () => boolean, timeoutMs = 5000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (!condition()) {
+		if (Date.now() > deadline) {
+			throw new Error('condition not met in time');
+		}
+		await new Promise(resolve => setTimeout(resolve, 10));
+	}
+}
 
 suite('cli-ts process', () => {
 
-	ensureNoDisposablesAreLeakedInTestSuite();
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('hands over the credential snapshot after ready and holds requests until it is acknowledged', async function () {
+		if (process.platform === 'win32') {
+			this.skip();
+		}
+		await withStubRuntime({ credentialAckDelayMs: 150 }, async ops => {
+			const proc = store.add(new CliTsServeProcess(new NullLogService(), {
+				onEvent: () => { },
+				credentialSnapshot: () => ({ op: 'setCredentials', revision: 1, providerKeys: [{ provider: 'openai', key: 'sk-test' }] }),
+			}));
+			const ack = await proc.request({ op: 'listModels', requestId: 'r1' });
+			const ready = await proc.whenReady();
+			assert.deepStrictEqual({
+				ackOp: (ack.payload as { op: string }).op,
+				capabilities: ready.capabilities,
+				snapshotWritten: proc.credentialSnapshotWritten,
+				// The request line reached the runtime only after it acknowledged the snapshot.
+				ops: ops(),
+			}, {
+				ackOp: 'listModels',
+				capabilities: ['host-managed-byok-v2'],
+				snapshotWritten: true,
+				ops: ['setCredentials:false', 'listModels:true'],
+			});
+		});
+	});
+
+	test('sends an empty snapshot too, so a runtime never keeps keys the host no longer holds', async function () {
+		if (process.platform === 'win32') {
+			this.skip();
+		}
+		await withStubRuntime({}, async ops => {
+			const proc = store.add(new CliTsServeProcess(new NullLogService(), {
+				onEvent: () => { },
+				credentialSnapshot: () => ({ op: 'setCredentials', revision: 0, providerKeys: [] }),
+			}));
+			await proc.request({ op: 'listModels', requestId: 'r1' });
+			assert.deepStrictEqual(ops(), ['setCredentials:false', 'listModels:true']);
+		});
+	});
+
+	test('refuses every request to a runtime without the capability and never sends it keys', async function () {
+		if (process.platform === 'win32') {
+			this.skip();
+		}
+		await withStubRuntime({ capabilities: [] }, async ops => {
+			const proc = store.add(new CliTsServeProcess(new NullLogService(), {
+				onEvent: () => { },
+				credentialSnapshot: () => ({ op: 'setCredentials', revision: 1, providerKeys: [{ provider: 'openai', key: 'sk-test' }] }),
+			}));
+			await assert.rejects(proc.request({ op: 'listModels', requestId: 'r1' }), /does not support the current API key protocol/);
+			await proc.whenExited();
+			assert.deepStrictEqual({ running: proc.isRunning, ops: ops() }, { running: false, ops: ['dispose:false'] });
+		});
+	});
+
+	test('terminate ends the child and fails its pending requests with the given reason', async function () {
+		if (process.platform === 'win32') {
+			this.skip();
+		}
+		await withStubRuntime({ hangOps: ['listModels'] }, async ops => {
+			const proc = store.add(new CliTsServeProcess(new NullLogService(), {
+				onEvent: () => { },
+				credentialSnapshot: () => ({ op: 'setCredentials', revision: 1, providerKeys: [] }),
+			}));
+			const pending = proc.request({ op: 'listModels', requestId: 'r1' });
+			await until(() => ops().includes('listModels:true'));
+			proc.terminate('Runtime restarted after a credential change.');
+			await assert.rejects(pending, /Runtime restarted after a credential change\./);
+			await proc.whenExited();
+			assert.strictEqual(proc.isRunning, false);
+		});
+	});
+
+	for (const [label, options, pattern] of [
+		['missing ready', { omitReady: true }, /did not become ready/],
+		['missing credential ack', { hangOps: ['setCredentials'] }, /did not acknowledge/],
+		['wrong credential revision', { wrongRevision: true }, /invalid credential acknowledgement/],
+		['wrong credential operation', { wrongOperation: true }, /invalid credential acknowledgement/],
+		['v1 runtime', { capabilities: ['host-managed-byok-v1'] }, /current API key protocol/],
+	] as const) {
+		test(`fails closed on ${label}`, async function () {
+			if (process.platform === 'win32') { this.skip(); }
+			await withStubRuntime(options, async () => {
+				const proc = store.add(new CliTsServeProcess(new NullLogService(), {
+					onEvent: () => {}, readyTimeoutMs: label === 'missing ready' ? 50 : 3_000, credentialAckTimeoutMs: 50,
+					credentialSnapshot: () => ({ op: 'setCredentials', revision: 1, providerKeys: [] }),
+				}));
+				await assert.rejects(proc.request({ op: 'listModels', requestId: 'timed' }), pattern);
+				await proc.whenExited();
+				assert.strictEqual(proc.isRunning, false);
+			});
+		});
+	}
+
+	test('rejects a mismatched later credential ack and recovers with a fresh process', async function () {
+		if (process.platform === 'win32') { this.skip(); }
+		await withStubRuntime({ wrongUpdateRevision: true }, async ops => {
+			const proc = store.add(new CliTsServeProcess(new NullLogService(), {
+				onEvent: () => {}, credentialSnapshot: () => ({ op: 'setCredentials', revision: 1, providerKeys: [] }),
+			}));
+			await proc.request({ op: 'listModels', requestId: 'initial' });
+			await assert.rejects(proc.request({ op: 'setCredentials', revision: 2, providerKeys: [], requestId: 'update' }), /invalid credential acknowledgement/);
+			await proc.whenExited();
+			await proc.request({ op: 'listModels', requestId: 'recovered' });
+			assert.strictEqual(ops().filter(op => op === 'listModels:true').length, 2);
+		});
+	});
+
+	test('cancel bypasses an unacknowledged startup gate', async function () {
+		if (process.platform === 'win32') { this.skip(); }
+		await withStubRuntime({ hangOps: ['setCredentials'] }, async ops => {
+			const proc = store.add(new CliTsServeProcess(new NullLogService(), {
+				onEvent: () => {}, credentialSnapshot: () => ({ op: 'setCredentials', revision: 1, providerKeys: [] }),
+			}));
+			const request = proc.request({ op: 'listModels', requestId: 'cancelled' });
+			const rejected = assert.rejects(request, /startup cancelled/);
+			await until(() => ops().includes('setCredentials:false'));
+			proc.notify({ op: 'cancel' });
+			await rejected;
+			await proc.whenExited();
+			assert.deepStrictEqual(ops(), ['setCredentials:false', 'dispose:false']);
+		});
+	});
 
 	test('detects supported macOS executable architectures', () => {
 		const x64 = Buffer.alloc(8);

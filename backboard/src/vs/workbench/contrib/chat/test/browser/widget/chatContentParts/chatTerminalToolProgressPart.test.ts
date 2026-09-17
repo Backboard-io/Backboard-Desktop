@@ -61,9 +61,9 @@ suite('ChatTerminalToolProgressPart Auto-Expand Logic', () => {
 		hasRealOutputValue = false;
 	});
 
-	test('Cursor transcript keeps a stable terminal viewport for scrollback', () => {
+	test('Cursor transcript fits short terminal output and bounds long scrollback', () => {
 		assert.strictEqual(getTerminalOutputViewportHeight(480, 200, true), '200px');
-		assert.strictEqual(getTerminalOutputViewportHeight(120, 200, true), '200px');
+		assert.strictEqual(getTerminalOutputViewportHeight(120, 200, true), '120px');
 		assert.strictEqual(getTerminalOutputViewportHeight(480, 200, false), '');
 	});
 
