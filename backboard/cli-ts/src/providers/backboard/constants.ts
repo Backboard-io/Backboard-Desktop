@@ -27,6 +27,7 @@ export const BACKBOARD_STREAM_EVENTS = {
 	mediaGenerated: "media_generated",
 	toolCallStart: "tool_call_start",
 	toolCallReady: "tool_call_ready",
+	toolCalls: "tool_calls",
 	toolSubmitRequired: "tool_submit_required",
 	runEnded: "run_ended",
 	messageComplete: "message_complete",

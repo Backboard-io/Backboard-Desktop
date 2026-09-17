@@ -279,6 +279,31 @@ function mapStreamPayload(
 			if (id && name) events.push({ kind: "tool_started", id, name });
 			return { events, accumulatedContent, accumulatedReasoning };
 		}
+		case BACKBOARD_STREAM_EVENTS.toolCalls: {
+			// Advisory batch of completed calls. Hosted tools (generate_video,
+			// generate_image) are announced here and run server-side, so these
+			// map to announce-only start events — early execution waits for an
+			// explicit tool_submit_required.
+			const announced = Array.isArray(payload.tool_calls)
+				? payload.tool_calls
+				: [];
+			for (const raw of announced) {
+				if (!isRawToolCall(raw)) continue;
+				let input: unknown;
+				try {
+					input = parseArguments(raw.function.arguments);
+				} catch {
+					input = undefined;
+				}
+				events.push({
+					kind: "tool_started",
+					id: raw.id,
+					name: raw.function.name,
+					...(input !== undefined ? { input } : {}),
+				});
+			}
+			return { events, accumulatedContent, accumulatedReasoning };
+		}
 		case BACKBOARD_STREAM_EVENTS.toolCallReady: {
 			// Advisory early-execution event; malformed frames are dropped.
 			const rawCall = (payload as Record<string, unknown>).tool_call;

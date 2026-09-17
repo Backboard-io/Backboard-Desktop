@@ -107,9 +107,11 @@ describe("buildRunMessageRequest", () => {
 			videoGeneration: true,
 			videoModel: { provider: "openrouter", name: "google/veo-3.1" },
 		});
-		// Conversation turns expose generate_video as a local function tool.
-		expect(selected.video_generation).toBeUndefined();
-		expect(selected.video_model_name).toBeUndefined();
+		// Conversation turns activate Backboard's hosted generate_video tool via
+		// the video_generation fields, mirroring the image_generation path.
+		expect(selected.video_generation).toBe("auto");
+		expect(selected.video_model_provider).toBe("openrouter");
+		expect(selected.video_model_name).toBe("google/veo-3.1");
 	});
 
 	it("pins a selected OpenRouter upstream and otherwise leaves routing automatic", () => {

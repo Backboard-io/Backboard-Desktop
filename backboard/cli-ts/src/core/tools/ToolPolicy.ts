@@ -52,7 +52,11 @@ export class ToolPolicy {
 		const excluded = new Set(this.excludedToolNames);
 		if (!this.snapshot.computerUseEnabled) excluded.add("computer");
 		if (!this.snapshot.browserUseEnabled) excluded.add("browser");
-		if (!this.snapshot.videoGenerationEnabled) excluded.add("generate_video");
+		// `generate_video` is Backboard's hosted tool, activated by the
+		// `video_generation: "auto"` request fields. Declaring it as a client
+		// function makes the server run the hosted one — it must never be
+		// emitted as a schema even when video generation is enabled.
+		excluded.add("generate_video");
 		if (!this.snapshot.skillDiscoveryEnabled) {
 			for (const name of SKILL_DISCOVERY_TOOLS) excluded.add(name);
 		}
@@ -104,8 +108,13 @@ export class ToolPolicy {
 		extraExcluded: readonly string[] = [],
 		profile?: PromptProfileId,
 	): OpenAITool[] {
+		const schemaExcluded = new Set(
+			this.schemaExcludedNames().map(canonicalToolName),
+		);
 		return registry.toJSONSchemasFor(
-			this.visibleTools(registry, extraExcluded),
+			this.visibleTools(registry, extraExcluded).filter(
+				(tool) => !schemaExcluded.has(canonicalToolName(tool.agentName)),
+			),
 			profile,
 		);
 	}

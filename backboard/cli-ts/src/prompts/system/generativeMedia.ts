@@ -1,10 +1,11 @@
 /**
  * Tells the agent which built-in media tools this turn enables.
  *
- * The composer's Image/Video pickers are authoritative. Video generation is
- * the `generate_video` function tool; without this note an agent that cannot
- * see the tool tends to call the media HTTP API from a shell, which silently
- * generates with a model the user never chose.
+ * The composer's Image/Video pickers are authoritative. Image and video
+ * generation are Backboard's hosted tools, activated by the
+ * `image_generation` / `video_generation` request fields; without this note
+ * an agent that cannot see them tends to call the media HTTP API from a
+ * shell, which silently generates with a model the user never chose.
  */
 export interface GenerativeMediaSelection {
 	imageModel?: { provider: string; name: string };

@@ -291,7 +291,7 @@ export type ProviderEvent =
 	| { kind: "thread"; threadId: string }
 	| { kind: "assistant_delta"; text: string }
 	| { kind: "reasoning_delta"; text: string }
-	| { kind: "tool_started"; id: string; name: string }
+	| { kind: "tool_started"; id: string; name: string; input?: unknown }
 	| { kind: "tool_ready"; call: ProviderToolCall }
 	| {
 			kind: "requires_action";

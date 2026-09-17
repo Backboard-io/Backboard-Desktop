@@ -39,14 +39,17 @@ describe("ToolPolicy skill-discovery gate", () => {
 		expect(excluded).toContain("find_mcp");
 	});
 
-	it("hides generate_video until a composer video model is selected", () => {
+	it("keeps generate_video runtime-gated but never emits its schema", () => {
 		const off = new ToolPolicy(snapshot({ videoGenerationEnabled: false }));
 		expect(off.isRuntimeAllowed("generate_video")).toBe(false);
 		expect(off.schemaExcludedNames()).toContain("generate_video");
 
+		// Video generation rides Backboard's hosted tool via the
+		// `video_generation: "auto"` request fields; the schema stays off the
+		// wire even when enabled so the server does not see a duplicate.
 		const on = new ToolPolicy(snapshot({ videoGenerationEnabled: true }));
 		expect(on.isRuntimeAllowed("GenerateVideo")).toBe(true);
-		expect(on.schemaExcludedNames()).not.toContain("generate_video");
+		expect(on.schemaExcludedNames()).toContain("generate_video");
 	});
 
 	it("allows find_skill/find_mcp when discovery is enabled", () => {

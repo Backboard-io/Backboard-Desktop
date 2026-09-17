@@ -846,6 +846,78 @@ describe("ProviderStreamConsumer", () => {
 		}
 	});
 
+	it("completes the announced hosted video call row instead of announcing it to the scheduler", async () => {
+		const projectRoot = await mkdtemp(join(tmpdir(), "backboard-videos-"));
+		const videoDirectory = join(projectRoot, "generated-videos");
+		const videoUrl =
+			"https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-video/e147512d-f009-458f-9e87-35b144a12a55.mp4";
+		const videoBytes = Uint8Array.from([0x00, 0x00, 0x00, 0x18]);
+		const assistant = {
+			appendDelta: () => {},
+			appendReasoning: () => {},
+			flushAnswer: () => {},
+			flushReasoning: () => {},
+			finalize: () => {},
+			discardPartial: () => {},
+		} as unknown as AssistantAccumulator;
+
+		const bus = new EventBus();
+		const startedIds: string[] = [];
+		const resultIds: string[] = [];
+		bus.on("tool:start", (event) => startedIds.push(event.toolCallId));
+		bus.on("tool:result", (event) => resultIds.push(event.toolCallId));
+		const announced: string[] = [];
+		const earlyTools = {
+			announce: (id: string) => announced.push(id),
+			offer: () => {},
+			reset: () => {},
+		};
+
+		try {
+			const consumer = new ProviderStreamConsumer(
+				bus,
+				new Session("sess_test"),
+				{
+					videoGeneration: true,
+					generatedVideoDir: videoDirectory,
+					fetch: async () =>
+						new Response(videoBytes, {
+							headers: { "content-type": "video/mp4" },
+						}),
+				},
+			);
+			await consumer.consumeWithRetry(
+				() =>
+					streamOf([
+						{
+							kind: "tool_started",
+							id: "call_hosted_1",
+							name: "generate_video",
+							input: { prompt: "a dog" },
+						},
+						{
+							kind: "media",
+							payload: { url: videoUrl, prompt: "a dog" },
+						},
+						{ kind: "completed", finalText: "Here's your clip." },
+					]),
+				assistant,
+				new AbortController().signal,
+				earlyTools,
+			);
+
+			// The hosted call renders its own pending row; the scheduler must not
+			// also announce it or the row would end retracted as skipped.
+			expect(announced).toHaveLength(0);
+			expect(startedIds).toContain("call_hosted_1");
+			// The generated media completes that same card rather than opening a
+			// second gen_video_* row.
+			expect(resultIds).toContain("call_hosted_1");
+		} finally {
+			await rm(projectRoot, { recursive: true, force: true });
+		}
+	});
+
 	it("classifies a clip from media_type when the stored URL has no extension", async () => {
 		const projectRoot = await mkdtemp(join(tmpdir(), "backboard-videos-"));
 		const videoDirectory = join(projectRoot, "generated-videos");

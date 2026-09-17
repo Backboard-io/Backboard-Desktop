@@ -256,7 +256,24 @@ export class ProviderStreamConsumer {
 						assistant.flushAnswer();
 						assistant.flushReasoning();
 						markToolAnnouncement();
-						earlyTools?.announce(event.id, event.name);
+						if (isHostedMediaToolName(event.name)) {
+							// Hosted media calls run inside the run server-side; no
+							// requires_action arrives to close a scheduler-announced
+							// row, which would end it retracted as "skipped". Emit a
+							// plain start instead so the generated-media result below
+							// completes this same card.
+							this.pendingHostedMediaCalls[
+								event.name === "generate_video" ? "video" : "image"
+							].push(event.id);
+							this.bus.emit({
+								type: "tool:start",
+								toolCallId: event.id,
+								name: event.name,
+								inputSummary: hostedMediaInputSummary(event.name, event.input),
+							});
+						} else {
+							earlyTools?.announce(event.id, event.name);
+						}
 						break;
 					case "tool_ready":
 						assistant.flushAnswer();
@@ -409,11 +426,20 @@ export class ProviderStreamConsumer {
 
 	private readonly emittedMediaToolCalls = new Set<string>();
 
+	/** Server-announced hosted media call ids, completed by emitMediaToolCall. */
+	private readonly pendingHostedMediaCalls = {
+		image: [] as string[],
+		video: [] as string[],
+	};
+
 	private emitMediaToolCall(media: GeneratedMedia): void {
 		if (this.emittedMediaToolCalls.has(media.url)) return;
 		this.emittedMediaToolCalls.add(media.url);
 		const isVideo = isVideoMedia(media);
-		const toolCallId = `gen_${isVideo ? "video" : "image"}_${media.contentHash ?? randomUUID()}`;
+		const pending = this.pendingHostedMediaCalls[isVideo ? "video" : "image"];
+		const toolCallId =
+			pending.shift() ??
+			`gen_${isVideo ? "video" : "image"}_${media.contentHash ?? randomUUID()}`;
 		const toolName = isVideo ? "generate_video" : "generate_image";
 		const inputSummary =
 			media.label || (isVideo ? "Generating video…" : "Generating image…");
@@ -630,6 +656,27 @@ function isVideoMediaUrl(value: string): boolean {
 /** Explicit provider metadata wins over the URL shape when classifying media. */
 function isVideoMedia(media: GeneratedMedia): boolean {
 	return media.kind ? media.kind === "video" : isVideoMediaUrl(media.url);
+}
+
+/**
+ * Backboard's hosted media tools: the server announces them in `tool_calls`
+ * frames and executes them inside the run, so no requires_action follows.
+ */
+function isHostedMediaToolName(name: string): boolean {
+	return name === "generate_video" || name === "generate_image";
+}
+
+/** Pending-row label for a hosted media call, using the prompt when present. */
+function hostedMediaInputSummary(name: string, input: unknown): string {
+	const fallback =
+		name === "generate_video" ? "Generating video…" : "Generating image…";
+	if (!input || typeof input !== "object" || Array.isArray(input)) {
+		return fallback;
+	}
+	const prompt = (input as Record<string, unknown>).prompt;
+	if (typeof prompt !== "string" || !prompt.trim()) return fallback;
+	const trimmed = prompt.trim();
+	return trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
 }
 
 /**

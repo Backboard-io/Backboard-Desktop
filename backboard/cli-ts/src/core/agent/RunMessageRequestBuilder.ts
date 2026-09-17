@@ -87,10 +87,18 @@ export function buildRunMessageRequest(
 						context.imageModel?.name ?? DEFAULT_IMAGE_MODEL_NAME,
 				}
 			: {}),
-		// Video generation is the local `generate_video` function tool. Do not
-		// also send `video_generation: "auto"` on the conversation turn — that
-		// would inject a second hosted tool with the same name and the model
-		// would curl the HTTP API instead of calling ours.
+		// Video generation is Backboard's built-in hosted tool: like
+		// `image_generation: "auto"`, these fields activate the server-side
+		// `generate_video` tool inside the run instead of a client function.
+		// Declaring our own function with the same name makes the server run
+		// the hosted one without this configuration, which fails the turn.
+		...(context.videoGeneration && context.videoModel
+			? {
+					video_generation: "auto",
+					video_model_provider: context.videoModel.provider,
+					video_model_name: context.videoModel.name,
+				}
+			: {}),
 		tools: context.tools,
 	};
 }

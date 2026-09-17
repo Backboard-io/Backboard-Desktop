@@ -489,4 +489,51 @@ describe("mapStreamPayloadToEvents", () => {
 
 		expect(events).toEqual([{ kind: "assistant_delta", text: "hello" }]);
 	});
+
+	it("announces hosted tool calls as start-only advisories", () => {
+		// Hosted tools such as generate_video are emitted in `tool_calls` frames
+		// and executed inside the run — they must never become offers that the
+		// scheduler could early-execute locally.
+		const events = mapStreamPayloadToEvents({
+			type: "tool_calls",
+			run_id: "run_1",
+			tool_calls: [
+				{
+					id: "call_1",
+					type: "function",
+					function: {
+						name: "generate_video",
+						arguments: '{"prompt":"a dog"}',
+					},
+				},
+			],
+		});
+
+		expect(events).toEqual([
+			{
+				kind: "tool_started",
+				id: "call_1",
+				name: "generate_video",
+				input: { prompt: "a dog" },
+			},
+		]);
+	});
+
+	it("drops malformed entries from hosted tool-call advisories", () => {
+		const events = mapStreamPayloadToEvents({
+			type: "tool_calls",
+			tool_calls: [
+				{ id: "call_bad", type: "function" },
+				{
+					id: "call_1",
+					type: "function",
+					function: { name: "Read", arguments: "not json" },
+				},
+			],
+		});
+
+		expect(events).toEqual([
+			{ kind: "tool_started", id: "call_1", name: "Read" },
+		]);
+	});
 });
