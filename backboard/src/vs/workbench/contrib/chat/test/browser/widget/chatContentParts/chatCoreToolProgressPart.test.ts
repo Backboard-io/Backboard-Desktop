@@ -539,7 +539,7 @@ suite('ChatCoreToolProgressPart', () => {
 		assert.strictEqual(viewModel.summary, '1 / 1 tasks done');
 	});
 
-	test('paints a breathing video shell while generate_video is running', () => {
+	test('animates a film-frame shell while generate_video is running', () => {
 		const running = createPart({
 			kind: 'coreTool',
 			toolKind: 'generateVideo',
@@ -555,13 +555,35 @@ suite('ChatCoreToolProgressPart', () => {
 		assert.deepStrictEqual({
 			running: running.domNode.classList.contains('chat-core-tool-card-running'),
 			shell: !!running.domNode.querySelector('.chat-core-tool-card-generating'),
+			rails: running.domNode.querySelectorAll('.chat-core-tool-card-generating-rail').length,
+			frames: running.domNode.querySelectorAll('.chat-core-tool-card-generating-frame').length,
+			sweep: !!running.domNode.querySelector('.chat-core-tool-card-generating-sweep'),
+			bar: !!running.domNode.querySelector('.chat-core-tool-card-generating-bar'),
+			decorative: running.domNode.querySelector('.chat-core-tool-card-generating')?.getAttribute('aria-hidden'),
+			// The header is the live status line while the clip renders, and the
+			// prompt appears once, as the shell caption.
+			title: running.domNode.querySelector('.chat-core-tool-card-title')?.textContent,
+			liveTitle: !!running.domNode.querySelector('.chat-core-tool-card-title-live'),
+			headerSummaries: running.domNode.querySelectorAll('.chat-core-tool-card-summary').length,
+			caption: running.domNode.querySelector('.chat-core-tool-card-generating-caption')?.textContent,
 			complete: complete.domNode.classList.contains('chat-core-tool-card-complete'),
 			completeShell: !!complete.domNode.querySelector('.chat-core-tool-card-generating'),
+			completeTitle: complete.domNode.querySelector('.chat-core-tool-card-title')?.textContent,
 		}, {
 			running: true,
 			shell: true,
+			rails: 2,
+			frames: 3,
+			sweep: true,
+			bar: true,
+			decorative: 'true',
+			title: 'Generating video',
+			liveTitle: true,
+			headerSummaries: 0,
+			caption: 'A cat and a dog singing',
 			complete: true,
 			completeShell: false,
+			completeTitle: 'Generate Video',
 		});
 	});
 

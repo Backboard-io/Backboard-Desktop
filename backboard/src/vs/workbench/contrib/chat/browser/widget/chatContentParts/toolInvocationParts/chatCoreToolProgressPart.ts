@@ -466,12 +466,21 @@ function renderCoreToolCard(view: ICoreToolCardViewModel, invocation: IInvocatio
 	heading.classList.add('chat-core-tool-card-heading');
 	const titleLine = document.createElement('div');
 	titleLine.classList.add('chat-core-tool-card-title-line');
+	const isVideoRunning = view.toolKind === 'generateVideo' && outcome === 'running';
 	const title = document.createElement('span');
 	title.classList.add('chat-core-tool-card-title');
 	title.id = titleId;
-	title.textContent = view.title;
+	// While a clip renders, the header is the live status line: an animated
+	// label reads as progress, where the static tool name plus a duplicated
+	// prompt echo read as a stalled row.
+	if (isVideoRunning) {
+		title.classList.add('chat-core-tool-card-title-live');
+		title.textContent = localize('chat.coreTool.generateVideo.running', "Generating video");
+	} else {
+		title.textContent = view.title;
+	}
 	titleLine.appendChild(title);
-	if (view.summary) {
+	if (view.summary && !isVideoRunning) {
 		const summary = document.createElement('span');
 		summary.classList.add('chat-core-tool-card-summary');
 		summary.textContent = view.toolKind === 'read' ? view.summary.split(/[\\/]/).pop() || view.summary : view.summary;
@@ -530,11 +539,8 @@ function renderCoreToolCard(view: ICoreToolCardViewModel, invocation: IInvocatio
 	lifecycleStatus.textContent = localize('chat.coreTool.lifecycleStatus', "{0}: {1}", view.title, outcomeLabel(outcome));
 	card.appendChild(lifecycleStatus);
 
-	if (view.toolKind === 'generateVideo' && outcome === 'running') {
-		const generating = document.createElement('div');
-		generating.classList.add('chat-core-tool-card-generating');
-		generating.setAttribute('aria-hidden', 'true');
-		card.appendChild(generating);
+	if (isVideoRunning) {
+		card.appendChild(createGeneratingVideoShell(view.summary));
 	}
 
 	if (outcome === 'error' && errorMessage) {
@@ -634,6 +640,59 @@ function renderCoreToolCard(view: ICoreToolCardViewModel, invocation: IInvocatio
 		domNode: card,
 		...(hasDetails ? { disclosureButton: header as HTMLButtonElement, details } : {}),
 	};
+}
+
+/**
+ * Placeholder viewport for a clip that is still rendering: a film frame whose
+ * sprockets travel, whose tiles cross-fade, and over which a light sweep
+ * passes. Everything is decorative, so the whole subtree stays out of the
+ * accessibility tree; the card's live region already announces the status.
+ */
+function createGeneratingVideoShell(prompt: string | undefined): HTMLElement {
+	const generating = document.createElement('div');
+	generating.classList.add('chat-core-tool-card-generating');
+	generating.setAttribute('aria-hidden', 'true');
+
+	const stage = document.createElement('div');
+	stage.classList.add('chat-core-tool-card-generating-stage');
+
+	for (const edge of ['top', 'bottom']) {
+		const rail = document.createElement('span');
+		rail.classList.add('chat-core-tool-card-generating-rail', `chat-core-tool-card-generating-rail-${edge}`);
+		stage.appendChild(rail);
+	}
+
+	const frames = document.createElement('div');
+	frames.classList.add('chat-core-tool-card-generating-frames');
+	for (let index = 0; index < 3; index++) {
+		const frame = document.createElement('span');
+		frame.classList.add('chat-core-tool-card-generating-frame');
+		frame.style.animationDelay = `${index * 240}ms`;
+		frames.appendChild(frame);
+	}
+	stage.appendChild(frames);
+
+	const sweep = document.createElement('span');
+	sweep.classList.add('chat-core-tool-card-generating-sweep');
+	stage.appendChild(sweep);
+
+	generating.appendChild(stage);
+
+	if (prompt) {
+		const caption = document.createElement('div');
+		caption.classList.add('chat-core-tool-card-generating-caption');
+		caption.textContent = prompt;
+		generating.appendChild(caption);
+	}
+
+	const track = document.createElement('div');
+	track.classList.add('chat-core-tool-card-generating-track');
+	const bar = document.createElement('span');
+	bar.classList.add('chat-core-tool-card-generating-bar');
+	track.appendChild(bar);
+	generating.appendChild(track);
+
+	return generating;
 }
 
 function coreToolMetricPresentation(view: ICoreToolCardViewModel): { count?: ICoreToolCardMetric; subtitle?: string } {

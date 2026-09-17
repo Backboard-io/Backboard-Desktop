@@ -208,9 +208,6 @@ class ClipboardImageContextValuePick implements IChatContextValueItem {
 		if (!widget.attachmentCapabilities.supportsImageAttachments) {
 			return false;
 		}
-		if (!widget.input.selectedLanguageModel.get()?.metadata.capabilities?.vision) {
-			return false;
-		}
 		const imageData = await this._clipboardService.readImage();
 		return isImage(imageData);
 	}
@@ -307,7 +304,7 @@ class ScreenshotContextValuePick implements IChatContextValueItem {
 	) { }
 
 	async isEnabled(widget: IChatWidget) {
-		return !!widget.attachmentCapabilities.supportsImageAttachments && !!widget.input.selectedLanguageModel.get()?.metadata.capabilities?.vision;
+		return !!widget.attachmentCapabilities.supportsImageAttachments;
 	}
 
 	async asAttachment(): Promise<IChatRequestVariableEntry | undefined> {

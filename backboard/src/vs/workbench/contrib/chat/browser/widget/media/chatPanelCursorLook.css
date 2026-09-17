@@ -1594,40 +1594,60 @@
 }
 
 /* Leading status indicator on recent chats: spinner while working, colored
- * dot otherwise (green completed, orange needs input, red failed, grey opened). */
+ * dot otherwise (green completed, orange needs input, red failed, grey opened).
+ * Both states share the same fixed, centered box so the dot rows and the
+ * spinner rows line up on a single vertical and horizontal axis. */
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status {
+	display: inline-flex;
 	flex: 0 0 auto;
+	align-items: center;
+	justify-content: center;
+	width: 14px;
+	height: 20px;
+	margin-right: 8px;
+	font-size: 13px;
+	line-height: 20px;
+	text-align: center;
+}
+
+/* The dot is drawn as a pseudo element so the running state can keep the same
+ * box while the codicon glyph occupies it instead. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status:not(.running)::before {
+	content: '';
+	display: block;
 	width: 8px;
 	height: 8px;
-	margin-right: 10px;
 	border-radius: 50%;
 	background-color: var(--vscode-descriptionForeground);
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.completed {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.completed::before {
 	background-color: var(--vscode-charts-green);
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.needs-input {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.needs-input::before {
 	background-color: var(--vscode-charts-orange);
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.failed {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.failed::before {
 	background-color: var(--vscode-charts-red);
 }
 
-.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.opened {
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.opened::before {
 	background-color: var(--vscode-descriptionForeground);
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.running {
-	width: auto;
-	height: auto;
-	border-radius: 0;
-	background-color: transparent;
 	color: var(--vscode-textLink-foreground);
-	font-size: 13px;
-	line-height: 20px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.running::before {
+	display: block;
+	width: 14px;
+	height: 14px;
+	line-height: 14px;
+	font-size: 14px;
+	text-align: center;
 }
 
 .monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-view-all {

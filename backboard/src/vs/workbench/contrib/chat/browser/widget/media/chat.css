@@ -9513,7 +9513,13 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	}
 
 	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live::after,
-	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-generating {
+	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-generateVideo.chat-core-tool-card-running :is(
+		.chat-core-tool-card-title-live,
+		.chat-core-tool-card-generating-rail,
+		.chat-core-tool-card-generating-frame,
+		.chat-core-tool-card-generating-sweep,
+		.chat-core-tool-card-generating-bar
+	) {
 		animation: none !important;
 		opacity: 1;
 	}
@@ -10777,8 +10783,16 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	color: var(--vscode-descriptionForeground);
 	text-align: left;
 }
-.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-backboard-turn-fold > :is(.chat-backboard-turn-fold-icon, .chat-backboard-turn-fold-chevron) {
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-backboard-turn-fold > .chat-backboard-turn-fold-icon {
 	display: none !important;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-backboard-turn-fold > .chat-backboard-turn-fold-chevron {
+	opacity: 1;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-backboard-turn-fold > .chat-backboard-turn-fold-label {
+	margin-inline-start: 16px;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript :is(.chat-core-tool-stack-header, .chat-core-tool-card-header, .chat-thinking-group-header, .chat-thinking-cursor-reasoning-label):focus {

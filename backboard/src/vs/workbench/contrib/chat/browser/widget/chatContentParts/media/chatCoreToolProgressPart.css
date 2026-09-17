@@ -464,28 +464,158 @@ a.chat-core-tool-card-item-title:hover {
 	margin-inline: 0;
 }
 
+/* --- Generating video: a live film frame ---------------------------------
+ * A clip can take minutes, so the running card shows a real animation rather
+ * than a static skeleton: sprocket rails travel, three frame tiles cross-fade,
+ * and a light sweep passes over the stage. All of it is decorative and paints
+ * only transform/opacity so the transcript stays cheap to animate. */
+.chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-title-live {
+	background: linear-gradient(
+		90deg,
+		var(--vscode-descriptionForeground) 0%,
+		var(--vscode-foreground) 45%,
+		var(--vscode-descriptionForeground) 90%) 0 0 / 300% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+	animation: backboard-cursor-video-title-shimmer 2.4s linear infinite;
+}
+
 .chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-generating {
+	--bb-video-shell-line: color-mix(in srgb, var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground)) 20%, transparent);
 	display: block;
 	box-sizing: border-box;
 	width: 100%;
-	height: 148px;
 	margin: 4px 0 6px;
+	padding: 0 9px 9px;
+}
+
+.chat-core-tool-card-generating-stage {
+	position: relative;
+	box-sizing: border-box;
+	width: 100%;
+	height: 148px;
 	overflow: hidden;
 	border: 1px solid var(--bb-core-tool-border);
 	border-radius: 8px;
 	background:
-		radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--vscode-foreground) 22%, transparent) 0 13px, transparent 14px),
-		linear-gradient(var(--bb-core-tool-border), var(--bb-core-tool-border)) 0 28px / 100% 1px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground)) 26%, transparent), color-mix(in srgb, var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground)) 13%, transparent)) 12px 10px / 92px 8px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--vscode-progressBar-background) 55%, transparent), color-mix(in srgb, var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground)) 18%, transparent)) 16px calc(100% - 18px) / 42% 4px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground)) 16%, transparent), transparent) 16px calc(100% - 18px) / calc(100% - 32px) 4px no-repeat,
+		radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--vscode-progressBar-background) 12%, transparent), transparent 62%),
 		var(--bb-core-tool-surface);
-	animation: backboard-cursor-video-shell-breathe 1.8s ease-in-out infinite;
 }
 
-@keyframes backboard-cursor-video-shell-breathe {
-	0%, 100% { opacity: 0.72; }
-	50% { opacity: 1; }
+/* Travelling sprocket holes: one repeating gradient shifted by exactly one
+ * period, so the loop is seamless at any card width. */
+.chat-core-tool-card-generating-rail {
+	position: absolute;
+	left: 0;
+	width: 200%;
+	height: 9px;
+	background: repeating-linear-gradient(
+		90deg,
+		var(--bb-video-shell-line) 0 8px,
+		transparent 8px 18px);
+	animation: backboard-cursor-video-rail-travel 1.6s linear infinite;
+}
+
+.chat-core-tool-card-generating-rail-top {
+	top: 6px;
+}
+
+.chat-core-tool-card-generating-rail-bottom {
+	bottom: 6px;
+	animation-direction: reverse;
+}
+
+.chat-core-tool-card-generating-frames {
+	position: absolute;
+	inset: 22px 12px;
+	display: flex;
+	align-items: stretch;
+	gap: 8px;
+}
+
+.chat-core-tool-card-generating-frame {
+	flex: 1 1 0;
+	border: 1px solid var(--bb-video-shell-line);
+	border-radius: 5px;
+	background: linear-gradient(
+		160deg,
+		color-mix(in srgb, var(--vscode-progressBar-background) 26%, transparent),
+		color-mix(in srgb, var(--vscode-foreground) 7%, transparent));
+	animation: backboard-cursor-video-frame-cycle 1.44s ease-in-out infinite;
+}
+
+.chat-core-tool-card-generating-sweep {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: -40%;
+	width: 40%;
+	background: linear-gradient(
+		90deg,
+		transparent,
+		color-mix(in srgb, var(--vscode-foreground) 9%, transparent),
+		transparent);
+	animation: backboard-cursor-video-sweep 2.6s ease-in-out infinite;
+}
+
+.chat-core-tool-card-generating-caption {
+	max-width: 100%;
+	margin-top: 7px;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+	line-height: 16px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-core-tool-card-generating-track {
+	box-sizing: border-box;
+	width: 100%;
+	height: 3px;
+	margin-top: 7px;
+	overflow: hidden;
+	border-radius: 3px;
+	background: var(--bb-video-shell-line);
+}
+
+.chat-core-tool-card-generating-bar {
+	display: block;
+	width: 38%;
+	height: 100%;
+	border-radius: 3px;
+	background: linear-gradient(
+		90deg,
+		transparent,
+		var(--vscode-progressBar-background),
+		transparent);
+	animation: backboard-cursor-video-bar-travel 1.9s ease-in-out infinite;
+}
+
+@keyframes backboard-cursor-video-title-shimmer {
+	0% { background-position: 100% 0; }
+	100% { background-position: -100% 0; }
+}
+
+@keyframes backboard-cursor-video-rail-travel {
+	0% { transform: translateX(0); }
+	100% { transform: translateX(-18px); }
+}
+
+@keyframes backboard-cursor-video-frame-cycle {
+	0%, 100% { opacity: 0.28; transform: scaleY(0.9); }
+	50% { opacity: 1; transform: scaleY(1); }
+}
+
+@keyframes backboard-cursor-video-sweep {
+	0% { left: -40%; }
+	60%, 100% { left: 100%; }
+}
+
+@keyframes backboard-cursor-video-bar-travel {
+	0% { transform: translateX(-100%); }
+	100% { transform: translateX(264%); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -497,7 +627,24 @@ a.chat-core-tool-card-item-title:hover {
 		transition: none;
 	}
 
-	.chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-generating {
+	.chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-title-live,
+	.chat-core-tool-card-generating-rail,
+	.chat-core-tool-card-generating-frame,
+	.chat-core-tool-card-generating-sweep,
+	.chat-core-tool-card-generating-bar {
 		animation: none;
+	}
+
+	.chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-title-live {
+		-webkit-text-fill-color: currentColor;
+		background: none;
+	}
+
+	.chat-core-tool-card-generating-frame {
+		opacity: 0.6;
+	}
+
+	.chat-core-tool-card-generating-sweep {
+		display: none;
 	}
 }

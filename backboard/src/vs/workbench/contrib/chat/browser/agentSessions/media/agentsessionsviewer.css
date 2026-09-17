@@ -261,8 +261,8 @@
 			height: 8px;
 			margin-right: 8px;
 			border-radius: 50%;
-			font-size: 12px;
-			line-height: 16px;
+			font-size: 8px;
+			line-height: 8px;
 			background-color: var(--vscode-descriptionForeground);
 
 			&.completed {
@@ -281,12 +281,16 @@
 				background-color: var(--vscode-descriptionForeground);
 			}
 
+			/* Keep the same 8px box as the dot so the title never shifts, and match
+			 * the dot's visual size (the codicon glyph is centered on the box). */
 			&.running {
-				width: auto;
-				height: auto;
+				width: 8px;
+				height: 8px;
 				border-radius: 0;
 				background-color: transparent;
 				color: var(--vscode-textLink-foreground);
+				font-size: 10px;
+				line-height: 1;
 			}
 		}
 

@@ -274,7 +274,20 @@
 	align-items: center;
 	justify-content: center;
 	flex: 0 0 auto;
+	width: 8px;
+	height: 8px;
 	margin-right: 10px;
+	font-size: 8px;
+	line-height: 8px;
+}
+
+/* The spinner keeps the dot's 8px box so both states start the title at the
+ * same x, and its glyph is sized to read as the same size as the dot. */
+.agent-sessions-history-modal-body .agent-session-status-dot.running {
+	width: 8px;
+	height: 8px;
+	font-size: 10px;
+	line-height: 1;
 }
 
 .agent-sessions-history-modal-body .agent-session-main-col {

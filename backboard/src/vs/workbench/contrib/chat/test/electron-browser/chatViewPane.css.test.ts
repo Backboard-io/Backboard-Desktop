@@ -326,10 +326,13 @@ suite('ChatViewPane CSS', () => {
 		assert.doesNotMatch(chatCss, /chat-thinking-cursor-edit-pending::after/, 'pending edits must not each paint a diff skeleton');
 		assert.match(chatCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*chat-thinking-work-edit-live[^}]+animation:\s*none\s*!important/);
 		const coreToolCss = readFileSync(join(process.cwd(), 'src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatCoreToolProgressPart.css'), 'utf8');
-		const videoShell = ruleBody(coreToolCss, '.chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-generating');
-		assert.match(videoShell, /height:\s*148px/);
-		assert.match(videoShell, /animation:\s*backboard-cursor-video-shell-breathe 1\.8s ease-in-out infinite/);
-		assert.match(coreToolCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*chat-core-tool-card-generating[^}]+animation:\s*none/);
+		const videoStage = ruleBody(coreToolCss, '.chat-core-tool-card-generating-stage {');
+		assert.match(videoStage, /height:\s*148px/);
+		assert.match(ruleBody(coreToolCss, '.chat-core-tool-card-generating-rail {'), /animation:\s*backboard-cursor-video-rail-travel/);
+		assert.match(ruleBody(coreToolCss, '.chat-core-tool-card-generating-frame {'), /animation:\s*backboard-cursor-video-frame-cycle/);
+		assert.match(ruleBody(coreToolCss, '.chat-core-tool-card-generating-sweep {'), /animation:\s*backboard-cursor-video-sweep/);
+		assert.match(ruleBody(coreToolCss, '.chat-core-tool-card-generating-bar {'), /animation:\s*backboard-cursor-video-bar-travel/);
+		assert.match(coreToolCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*chat-core-tool-card-generating-sweep[^}]+animation:\s*none/);
 	});
 
 	test('scopes right-panel rhythm to the chat host', () => {
