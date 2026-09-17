@@ -14,7 +14,7 @@ import { ICompressedTreeNode } from '../../../../../base/browser/ui/tree/compres
 import { ICompressibleKeyboardNavigationLabelProvider, ICompressibleTreeRenderer } from '../../../../../base/browser/ui/tree/objectTree.js';
 import { ITreeNode, ITreeElementRenderDetails, IAsyncDataSource, ITreeSorter, ITreeDragAndDrop, ITreeDragOverReaction } from '../../../../../base/browser/ui/tree/tree.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../../base/common/lifecycle.js';
-import { AgentSessionSection, AgentSessionStatus, getAgentChangesSummary, hasValidDiff, IAgentSession, IAgentSessionSection, IAgentSessionShowLess, IAgentSessionShowMore, IAgentSessionsModel, isAgentSession, isAgentSessionSection, isAgentSessionShowLess, isAgentSessionShowMore, isAgentSessionsModel, isSessionInProgressStatus } from './agentSessionsModel.js';
+import { AgentSessionSection, AgentSessionStatus, getAgentChangesSummary, getAgentSessionListStatus, hasValidDiff, IAgentSession, IAgentSessionSection, IAgentSessionShowLess, IAgentSessionShowMore, IAgentSessionsModel, isAgentSession, isAgentSessionSection, isAgentSessionShowLess, isAgentSessionShowMore, isAgentSessionsModel, isSessionInProgressStatus } from './agentSessionsModel.js';
 import { IconLabel } from '../../../../../base/browser/ui/iconLabel/iconLabel.js';
 import { ThemeIcon, themeColorFromId } from '../../../../../base/common/themables.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
@@ -66,6 +66,7 @@ interface IAgentSessionItemTemplate {
 
 	// Column 2 Row 1
 	readonly title: IconLabel;
+	readonly statusDot: HTMLElement;
 	readonly pinnedIndicator: HTMLElement;
 	readonly statusContainer: HTMLElement;
 	readonly statusTime: HTMLElement;
@@ -155,6 +156,7 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 				]),
 				h('div.agent-session-main-col', [
 					h('div.agent-session-title-row', [
+						h('span.agent-session-status-dot@statusDot'),
 						h('div.agent-session-title@title'),
 						h('div.agent-session-pinned-indicator@pinnedIndicator'),
 						h('div.agent-session-title-toolbar@titleToolbar'),
@@ -193,6 +195,7 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 			element: elements.item,
 			icon: elements.icon,
 			title: disposables.add(new IconLabel(elements.title, { supportHighlights: true, supportIcons: true })),
+			statusDot: elements.statusDot,
 			pinnedIndicator: elements.pinnedIndicator,
 			titleToolbar,
 			detailsIcon: elements.detailsIcon,
@@ -224,6 +227,15 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 
 		// Archived
 		template.element.classList.toggle('archived', session.element.isArchived());
+
+		// Leading status indicator: throbber while working, colored dot otherwise
+		template.statusDot.className = 'agent-session-status-dot';
+		template.statusDot.setAttribute('aria-hidden', 'true');
+		const listStatus = getAgentSessionListStatus(session.element);
+		template.statusDot.classList.add(listStatus);
+		if (listStatus === 'running') {
+			template.statusDot.classList.add('codicon', 'codicon-loading');
+		}
 
 		// Section label for group hover detection
 		if (this.options.isGroupedByRepository?.()) {
@@ -435,7 +447,7 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 
 	private getIcon(session: IAgentSession, statusOnly?: boolean): ThemeIcon {
 		if (session.status === AgentSessionStatus.InProgress) {
-			return { ...Codicon.sessionInProgress, color: themeColorFromId('textLink.foreground') };
+			return { ...Codicon.loading, color: themeColorFromId('textLink.foreground') };
 		}
 
 		if (session.status === AgentSessionStatus.NeedsInput) {

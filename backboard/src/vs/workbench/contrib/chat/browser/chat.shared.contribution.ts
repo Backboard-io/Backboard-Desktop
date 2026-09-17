@@ -403,7 +403,7 @@ configurationRegistry.registerConfiguration({
 				nls.localize('chat.experimental.incrementalRendering.animationStyle.reveal', "Content reveals top-to-bottom with a soft gradient edge."),
 			],
 			description: nls.localize('chat.experimental.incrementalRendering.animationStyle', "Controls the animation style for incremental rendering."),
-			default: 'rise',
+			default: 'blur',
 			tags: ['experimental'],
 		},
 		[ChatConfiguration.IncrementalRenderingBuffering]: {

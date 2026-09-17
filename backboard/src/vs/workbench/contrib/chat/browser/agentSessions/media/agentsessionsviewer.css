@@ -250,6 +250,46 @@
 			align-items: center;
 		}
 
+		/* Leading status indicator: throbber while actively working, colored dot
+		 * otherwise. Hidden where the status icon column is visible (it shows the
+		 * indicator instead); shown in compact surfaces like the history modal
+		 * that hide the icon column. */
+		.agent-session-status-dot {
+			display: none;
+			flex: 0 0 auto;
+			width: 8px;
+			height: 8px;
+			margin-right: 8px;
+			border-radius: 50%;
+			font-size: 12px;
+			line-height: 16px;
+			background-color: var(--vscode-descriptionForeground);
+
+			&.completed {
+				background-color: var(--vscode-charts-green);
+			}
+
+			&.needs-input {
+				background-color: var(--vscode-charts-orange);
+			}
+
+			&.failed {
+				background-color: var(--vscode-charts-red);
+			}
+
+			&.opened {
+				background-color: var(--vscode-descriptionForeground);
+			}
+
+			&.running {
+				width: auto;
+				height: auto;
+				border-radius: 0;
+				background-color: transparent;
+				color: var(--vscode-textLink-foreground);
+			}
+		}
+
 		.agent-session-title-row {
 			line-height: 16px;
 			padding-bottom: 1px;
@@ -566,6 +606,12 @@
 		gap: 8px;
 		line-height: 18px;
 		padding-bottom: 0;
+	}
+
+	.agent-session-status-dot {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.agent-session-title {

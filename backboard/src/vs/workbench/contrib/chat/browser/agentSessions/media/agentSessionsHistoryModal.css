@@ -267,6 +267,16 @@
 	display: none !important;
 }
 
+/* Leading status indicator: spinner for active sessions, colored dot otherwise
+ * (the status icon column is hidden here). */
+.agent-sessions-history-modal-body .agent-session-status-dot {
+	display: inline-flex !important;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	margin-right: 10px;
+}
+
 .agent-sessions-history-modal-body .agent-session-main-col {
 	display: flex;
 	align-items: center;
