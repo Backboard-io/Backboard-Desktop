@@ -841,7 +841,7 @@ describe("SubAgentRunner", () => {
 			});
 			const runner = new SubAgentRunner({
 				client: router,
-				getModel: () => ({ provider: route.provider, model: route.model }),
+				getRoute: () => ({ provider: route.provider, model: route.model }),
 				memory: "off",
 				memoryProfile: "code",
 				getThinking: async () => undefined,

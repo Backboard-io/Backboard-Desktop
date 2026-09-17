@@ -201,6 +201,7 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 		if (id === BYOK_KEYS_SETUP_ID) {
 			await this._commandService.executeCommand(OPEN_API_KEYS_COMMAND_ID);
 			return;
+		}
 		if (isWindows) {
 			throw new Error(localize('agentSetup.byosDisabled', "BYOS subscriptions are not supported on Windows. Sign in with Backboard or use a provider API key."));
 		}

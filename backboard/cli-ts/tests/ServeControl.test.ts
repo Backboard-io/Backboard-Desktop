@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { parseControlLine } from "../src/entrypoints/serveControl.ts";
+import type { ServeControl } from "../src/entrypoints/ServeTypes.ts";
 
 describe("parseControlLine", () => {
 	it("ignores blank lines", () => {
@@ -28,8 +29,8 @@ describe("parseControlLine", () => {
 	});
 
 	it("parses the MCP server push and rejects malformed payloads", () => {
-		const control = {
-			op: "setMcpServers" as const,
+		const control: ServeControl = {
+			op: "setMcpServers",
 			requestId: "mcp-1",
 			servers: {
 				"backboard": { type: "streamable-http", url: "https://backboard-docs.docsalot.dev/api/mcp" },

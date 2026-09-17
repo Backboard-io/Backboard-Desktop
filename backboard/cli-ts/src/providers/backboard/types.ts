@@ -386,7 +386,6 @@ export interface ModelInfo extends ThinkingModelMetadata {
 }
 
 export interface ModelCatalogItem {
-	supports_vision?: boolean;
 	name: string;
 	provider: string;
 	model_type: string;

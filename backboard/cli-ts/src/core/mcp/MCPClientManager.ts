@@ -118,7 +118,7 @@ export class McpClientManager {
 	 * unregister; unchanged servers keep their live connections.
 	 */
 	async setServers(
-		entries: Record<string, McpServerFileEntry>,
+		entries: Record<string, McpServerFileEntry & { disabled?: boolean }>,
 		signal: AbortSignal,
 		options: { configSource?: McpConfigSource; forceNames?: readonly string[] } = {},
 	): Promise<McpToolRefreshResult> {
