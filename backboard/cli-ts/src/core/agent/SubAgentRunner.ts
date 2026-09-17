@@ -15,7 +15,6 @@ import {
 import type { ToolContext } from "../tools/ToolContext.ts";
 import { ToolRegistry } from "../tools/ToolRegistry.ts";
 import { AgentLoopFactory } from "./AgentLoopFactory.ts";
-import { MAX_SUBAGENT_TOOL_ROUNDS } from "./SubAgentConstants.ts";
 import type {
 	SubAgentResult,
 	SubAgentRunnerDeps,
@@ -133,7 +132,6 @@ export class SubAgentRunner {
 				thinking,
 				thinkingResolver,
 				requestKind: "subagent",
-				maxToolRounds: MAX_SUBAGENT_TOOL_ROUNDS,
 			});
 
 			// One worker-lifetime scratch directory lets repeated Execute calls reuse
