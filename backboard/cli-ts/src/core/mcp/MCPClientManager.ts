@@ -1,6 +1,7 @@
 import { errorMessage } from "../../utils/errors.ts";
 import {
 	type McpConfig,
+	type McpConfigSource,
 	type McpServerConfig,
 	type McpServerFileEntry,
 	mcpProjectConfigPath,
@@ -105,6 +106,90 @@ export class McpClientManager {
 		}
 
 		return { tools, warnings };
+	}
+
+	/**
+	 * Reconciles the live server set with `entries` (name → config). Servers
+	 * missing from `entries` are closed and forgotten; new or changed servers
+	 * are (re)connected. Used by the IDE, which owns MCP configuration for the
+	 * session and pushes the full set whenever it changes.
+	 *
+	 * Returns the tools to register and the tool names the caller must
+	 * unregister; unchanged servers keep their live connections.
+	 */
+	async setServers(
+		entries: Record<string, McpServerFileEntry>,
+		signal: AbortSignal,
+		options: { configSource?: McpConfigSource; forceNames?: readonly string[] } = {},
+	): Promise<McpToolRefreshResult> {
+		const warnings: string[] = [];
+		const removedToolNames: string[] = [];
+		const tools: McpToolDefinition[] = [];
+
+		for (const name of [...this.serverConfigs.keys()]) {
+			if (Object.hasOwn(entries, name)) continue;
+			removedToolNames.push(...(await this.closeServerConnection(name)));
+			this.serverConfigs.delete(name);
+			this.serverStatuses.delete(name);
+		}
+
+		for (const [name, entry] of Object.entries(entries)) {
+			const existing = this.serverConfigs.get(name);
+			const normalized = normalizeMcpServer(name, entry, {
+				timeoutMs: this.config.timeoutMs,
+				warnings,
+				configSources: [
+					options.configSource ?? {
+						scope: "project",
+						path: mcpProjectConfigPath(this.cwd),
+					},
+				],
+			});
+			if (!normalized) continue;
+
+			// Unchanged servers keep their live connection. Comparing the
+			// normalized shape (not the raw entry) avoids reconnects when the
+			// IDE re-sends the same set on every sync. `forceNames` reconnects
+			// a single server on demand (the IDE's "connect" action).
+			if (existing && serverConfigEquals(existing, normalized) && !options.forceNames?.includes(name)) {
+				continue;
+			}
+			if (existing) {
+				removedToolNames.push(...(await this.closeServerConnection(name)));
+			}
+			this.serverConfigs.set(name, normalized);
+			if (normalized.disabled) {
+				this.serverStatuses.set(name, {
+					name,
+					type: normalized.type,
+					configSources: [...normalized.configSources],
+					status: "disabled",
+					message: "Server is disabled.",
+					toolNames: [],
+					capabilities: {},
+					promptNames: [],
+					resourceUris: [],
+					updatedResourceUris: [],
+					subscribedResourceUris: [],
+				});
+				continue;
+			}
+
+			const result = await this.connector.connect(normalized, signal, {
+				interactiveAuth: false,
+			});
+			warnings.push(...result.warnings);
+			this.applyConnectResult(result);
+			tools.push(
+				...this.withRegisteredNames(
+					result.tools,
+					this.registeredToolNames,
+					warnings,
+				),
+			);
+		}
+
+		return { tools, removedToolNames, warnings };
 	}
 
 	async addServer(
@@ -459,6 +544,33 @@ export class McpClientManager {
 		}
 		return registered;
 	}
+}
+
+/**
+ * Compares two normalized server configs for everything that affects the live
+ * connection. `setServers` uses this to keep unchanged servers connected when
+ * the IDE re-sends its full set.
+ */
+function serverConfigEquals(a: McpServerConfig, b: McpServerConfig): boolean {
+	if (a.type !== b.type || a.disabled !== b.disabled) return false;
+	if (a.command !== b.command || a.url !== b.url) return false;
+	if (a.cwd !== b.cwd) return false;
+	return recordEquals(a.env, b.env)
+		&& recordEquals(a.headers, b.headers)
+		&& arrayEquals(a.args, b.args);
+}
+
+function recordEquals(
+	a: Record<string, string>,
+	b: Record<string, string>,
+): boolean {
+	const aKeys = Object.keys(a);
+	if (aKeys.length !== Object.keys(b).length) return false;
+	return aKeys.every((key) => a[key] === b[key]);
+}
+
+function arrayEquals(a: readonly string[], b: readonly string[]): boolean {
+	return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 async function closeTransport(

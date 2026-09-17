@@ -204,6 +204,12 @@ export interface CliTsServeProcessOptions {
 	readonly onEvent: (event: CliTsAgentEvent) => void;
 	/** Called once when the process exits (for any reason). */
 	readonly onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
+	/**
+	 * Called once when the process reports `serve:ready`, i.e. it is about to
+	 * read control lines. Used to push state the process cannot read from disk
+	 * (the IDE-owned MCP server set) into a freshly started run.
+	 */
+	readonly onReady?: () => void;
 }
 
 /**
@@ -406,6 +412,11 @@ export class CliTsServeProcess extends Disposable {
 	private handleServeRecord(record: CliTsRecord): void {
 		if (record.type === 'serve:ready') {
 			this.logService.info(`[cli-ts] serve ready: ${JSON.stringify(record.payload)}`);
+			try {
+				this.options.onReady?.();
+			} catch (error) {
+				this.logService.warn(`[cli-ts] onReady callback failed: ${error instanceof Error ? error.message : String(error)}`);
+			}
 			return;
 		}
 		const requestId = record.requestId;

@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { BACKBOARD_ACCESS_DEFAULT, BACKBOARD_MODE_MULTITASK, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, backboardModelInfos, backboardModelInfosForPlatform, backboardMultitaskSystemContext, createBackboardTurnSettings, resolveBackboardSessionConfig } from '../../node/cliTs/backboardRuntimeShared.js';
+import { BACKBOARD_ACCESS_DEFAULT, BACKBOARD_MODE_MULTITASK, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, backboardModelInfos, backboardMultitaskSystemContext, createBackboardTurnSettings, resolveBackboardSessionConfig } from '../../node/cliTs/backboardRuntimeShared.js';
 
 suite('Backboard runtime configuration', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -21,22 +21,82 @@ suite('Backboard runtime configuration', () => {
 		assert.strictEqual(resolved.values.showReasoning, undefined);
 	});
 
-	for (const windows of [true, false]) {
-		test(`filters bundled, cached and live subscription routes for Windows=${windows}`, () => {
-			const models = backboardModelInfosForPlatform(windows, [
-				{ provider: 'openai-subscription', name: 'account-model' },
-				{ provider: 'anthropic-subscription', name: 'default' },
-				{ provider: 'openai', name: 'gpt-5.5' },
-				{ provider: 'anthropic', name: 'claude-sonnet-5' },
-			], BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS);
-			assert.strictEqual(models.some(model => model.id.startsWith('openai-subscription/')), false);
-			assert.strictEqual(models.some(model => model.id.startsWith('anthropic-subscription/')), false);
-			assert.ok(models.some(model => model.id === 'openai/gpt-5.5'));
-			assert.ok(models.some(model => model.id === 'anthropic/claude-sonnet-5'));
-			const bundled = backboardModelInfosForPlatform(windows, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS);
-			assert.strictEqual(bundled.some(model => model.id.includes('-subscription/')), false);
-		});
-	}
+	test('bundles ChatGPT subscription models as distinct Backboard harness routes', () => {
+		const models = backboardModelInfos(BUNDLED_CHATGPT_SUBSCRIPTION_MODELS);
+		const subscriptionModels = models.filter(model => model.id.startsWith('openai-subscription/'));
+
+		assert.deepStrictEqual(subscriptionModels.map(model => model.id), [
+			'openai-subscription/gpt-5.4',
+			'openai-subscription/gpt-5.4-mini',
+			'openai-subscription/gpt-5.5',
+			'openai-subscription/gpt-5.6-luna',
+			'openai-subscription/gpt-5.6-sol',
+			'openai-subscription/gpt-5.6-terra',
+		]);
+		for (const model of subscriptionModels) {
+			assert.strictEqual(model.provider, 'backboard');
+			assert.strictEqual(model.supportsVision, true);
+			assert.strictEqual(model._meta?.upstreamProvider, 'openai-subscription');
+			assert.strictEqual(model._meta?.upstreamProviderLabel, 'OpenAI (ChatGPT Subscription)');
+		}
+	});
+
+	test('bundles the current Claude Code subscription fallback routes', () => {
+		const models = backboardModelInfos(BUNDLED_CLAUDE_SUBSCRIPTION_MODELS);
+		const subscriptionModels = models.filter(model => model.id.startsWith('anthropic-subscription/'));
+
+		assert.deepStrictEqual(subscriptionModels.map(model => model.id), [
+			'anthropic-subscription/claude-fable-5-1[1m]',
+			'anthropic-subscription/default',
+			'anthropic-subscription/haiku',
+			'anthropic-subscription/opus[1m]',
+			'anthropic-subscription/sonnet',
+		]);
+		for (const model of subscriptionModels) {
+			assert.strictEqual(model.provider, 'backboard');
+			assert.strictEqual(model.supportsVision, true);
+			assert.strictEqual(model._meta?.upstreamProvider, 'anthropic-subscription');
+			assert.strictEqual(model._meta?.upstreamProviderLabel, 'Claude Subscription');
+		}
+		assert.deepStrictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/opus[1m]')?.configSchema?.properties.intensity.enum, ['low', 'medium', 'high', 'xhigh', 'max']);
+		assert.strictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/opus[1m]')?.configSchema?.properties.intensity.default, 'high');
+		assert.strictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/haiku')?.configSchema, undefined);
+		assert.strictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/opus[1m]')?.maxContextWindow, 1_000_000);
+	});
+
+	test('uses Claude Code live model names and does not add unavailable bundled aliases', () => {
+		const models = backboardModelInfos([
+			{
+				provider: 'anthropic-subscription',
+				name: 'default',
+				display_name: 'Claude Default (Opus 5)',
+				description: 'Opus 5 with 1M context',
+				resolved_model: 'claude-opus-5[1m]',
+				context_limit: 1_000_000,
+				model_type: 'llm',
+				supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'],
+			},
+			{
+				provider: 'anthropic-subscription',
+				name: 'haiku',
+				display_name: 'Claude Haiku 4.5',
+				model_type: 'llm',
+				supported_effort_levels: [],
+			},
+		], BUNDLED_CLAUDE_SUBSCRIPTION_MODELS)
+			.filter(model => model.id.startsWith('anthropic-subscription/'));
+
+		assert.deepStrictEqual(models.map(model => model.id), [
+			'anthropic-subscription/default',
+			'anthropic-subscription/haiku',
+		]);
+		assert.strictEqual(models[0]?.name, 'Claude Default (Opus 5)');
+		assert.strictEqual(models[0]?._meta?.modelDescription, 'Opus 5 with 1M context');
+		assert.strictEqual(models[1]?.configSchema, undefined);
+		// Claude subscription routes are vision-capable even though the live
+		// catalog (and older persisted caches) omit the capability flag.
+		assert.deepStrictEqual(models.map(model => model.supportsVision), [true, true]);
+	});
 
 	test('builds OpenRouter serving-provider choices from live catalog metadata', () => {
 		const [model] = backboardModelInfos([{
@@ -119,13 +179,24 @@ suite('Backboard runtime configuration', () => {
 		}
 	});
 
-	test('advertises image generation as a one-click toggle', () => {
+	test('advertises image and video generation as model pickers', () => {
 		const resolved = resolveBackboardSessionConfig(undefined);
-		const images = resolved.schema.properties?.imageGeneration;
+		const images = resolved.schema.properties?.imageModel;
+		const video = resolved.schema.properties?.videoModel;
 
-		assert.strictEqual(images?.type, 'boolean');
-		assert.strictEqual(images?.default, false);
-		assert.strictEqual(resolved.values.imageGeneration, false);
+		assert.strictEqual(images?.type, 'string');
+		assert.strictEqual(images?.default, 'off');
+		assert.strictEqual(images?.enumDynamic, true);
+		assert.ok(images?.enum?.includes('off'));
+		assert.ok(images?.enum?.includes('google/gemini-3.1-flash-image'));
+		assert.strictEqual(resolved.values.imageModel, 'off');
+
+		assert.strictEqual(video?.type, 'string');
+		assert.strictEqual(video?.default, 'off');
+		assert.strictEqual(video?.enumDynamic, true);
+		// Video has no universal default model; live completions fill the list.
+		assert.deepStrictEqual(video?.enum, ['off']);
+		assert.strictEqual(resolved.values.videoModel, 'off');
 	});
 
 	test('keeps web search automatic and out of composer configuration', () => {
@@ -141,22 +212,37 @@ suite('Backboard runtime configuration', () => {
 		assert.strictEqual(settings.webSearch, true);
 	});
 
-	test('keeps the image toggle independent from the conversation model', () => {
+	test('keeps the image and video pickers independent from the conversation model', () => {
 		const settings = createBackboardTurnSettings(
-			{ imageGeneration: true },
+			{ imageModel: 'google/gemini-3.1-flash-image' },
 			undefined,
 			{ id: 'openrouter/moonshotai/kimi-k3' },
 		);
 		assert.strictEqual(settings.provider, 'openrouter');
 		assert.strictEqual(settings.model, 'moonshotai/kimi-k3');
 		assert.strictEqual(settings.imageGeneration, true);
+		assert.deepStrictEqual(settings.imageModel, { provider: 'google', name: 'gemini-3.1-flash-image' });
+		assert.strictEqual(settings.videoGeneration, false);
 
+		const video = createBackboardTurnSettings(
+			{ videoModel: 'openrouter/google/veo-3.1' },
+			undefined,
+			{ id: 'openai/gpt-5.5' },
+		);
+		assert.strictEqual(video.videoGeneration, true);
+		assert.deepStrictEqual(video.videoModel, { provider: 'openrouter', name: 'google/veo-3.1' });
+		assert.strictEqual(video.imageGeneration, false);
+
+		// A stored boolean from before the picker still enables images, but cannot
+		// enable video because video has no default model.
 		const migrated = createBackboardTurnSettings(
-			{ imageGeneration: 'openrouter/google/gemini-3.1-flash-image' },
+			{ imageGeneration: true, videoGeneration: true },
 			undefined,
 			{ id: 'openai/gpt-5.5' },
 		);
 		assert.strictEqual(migrated.imageGeneration, true);
+		assert.deepStrictEqual(migrated.imageModel, { provider: 'google', name: 'gemini-3.1-flash-image' });
+		assert.strictEqual(migrated.videoGeneration, false);
 	});
 
 	test('defaults to the fast direct folder path while keeping explicit worktree isolation available', () => {

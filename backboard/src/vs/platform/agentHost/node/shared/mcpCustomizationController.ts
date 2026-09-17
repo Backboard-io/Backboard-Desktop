@@ -63,6 +63,14 @@ export interface IMcpCustomizationControllerOptions {
 	 * to {@link DEFAULT_MCP_APP_CAPABILITIES}.
 	 */
 	readonly capabilities?: AhpMcpUiHostCapabilities;
+	/**
+	 * Per-server enablement override. Providers whose servers can be turned
+	 * off for a session (e.g. the Backboard runtime, where the composer can
+	 * connect/disconnect a server) return `false` here so re-published
+	 * customizations keep the user's choice instead of resetting to enabled.
+	 * Defaults to enabled for every server.
+	 */
+	readonly isServerEnabled?: (serverName: string) => boolean;
 }
 
 interface ILiveEntry {
@@ -279,7 +287,7 @@ export class McpCustomizationController extends Disposable {
 			id,
 			uri: this._mintTopLevelId(serverName),
 			name: serverName,
-			enabled: true,
+			enabled: this._options.isServerEnabled?.(serverName) ?? true,
 			state,
 			channel,
 			mcpApp,

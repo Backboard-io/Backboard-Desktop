@@ -599,6 +599,8 @@ export interface IAgentResolveSessionConfigParams {
 export interface IAgentSessionConfigCompletionsParams extends IAgentResolveSessionConfigParams {
 	readonly property: string;
 	readonly query?: string;
+	/** Bypass any server-side cache and re-fetch the underlying catalog. */
+	readonly refresh?: boolean;
 }
 
 /** Serializable model information from the agent host. */

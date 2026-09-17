@@ -23,6 +23,8 @@ import {
 	McpClientManager,
 	McpController,
 	McpToolRegistrar,
+	type McpServerConfig,
+	type McpServerFileEntry,
 } from "../core/mcp/index.ts";
 import {
 	buildPermissionContext,
@@ -426,6 +428,15 @@ export async function runServe(argv: string[]): Promise<void> {
 						if (control.imageGeneration !== undefined) {
 							config.setImageGenerationEnabled(control.imageGeneration);
 						}
+						if (control.imageModel !== undefined) {
+							config.setImageModel(parseGenerativeModelRef(control.imageModel));
+						}
+						if (control.videoGeneration !== undefined) {
+							config.setVideoGenerationEnabled(control.videoGeneration);
+						}
+						if (control.videoModel !== undefined) {
+							config.setVideoModel(parseGenerativeModelRef(control.videoModel));
+						}
 						config.setOpenRouterProvider(control.openRouterProvider);
 						// Sent on every turn; an absent list clears prior client
 						// tools so a disconnected surface never leaves stale tools.
@@ -483,12 +494,64 @@ export async function runServe(argv: string[]): Promise<void> {
 					model: config.modelString,
 				});
 				return;
+			case "setMcpServers": {
+				// The IDE owns MCP configuration for the session and pushes the
+				// full set on every change. Servers it no longer lists are
+				// disconnected; untouched servers keep their live connection.
+				// Servers configured directly in `.backboard/mcp.json` stay
+				// available: the push layers on top of the files on disk.
+				const configured = await loadMcpConfig({
+					cwd: config.cwd,
+					paths: config.mcpConfigPaths,
+				});
+				const servers: Record<string, McpServerFileEntry> = {};
+				for (const server of configured.servers) {
+					if (server.disabled) continue;
+					servers[server.name] = mcpConfigToFileEntry(server);
+				}
+				for (const [name, entry] of Object.entries(control.servers)) {
+					servers[name] = entry;
+				}
+				const result = await mcpManager.setServers(
+					servers,
+					new AbortController().signal,
+					{
+						forceNames: control.force,
+						configSource: {
+							scope: "user",
+							path: config.mcpConfigPaths.user,
+						},
+					},
+				);
+				mcpToolRegistrar.applyRefresh(result);
+				writeRecord("serve:mcp", control.requestId, {
+					servers: mcpManager.listServerStatuses(),
+					warnings: result.warnings,
+				});
+				return;
+			}
 			case "listModels":
 				config.refreshAuth();
 				writeRecord(
 					"serve:models",
 					control.requestId,
 					await client.listModels(),
+				);
+				return;
+			case "listImageModels":
+				config.refreshAuth();
+				writeRecord(
+					"serve:imageModels",
+					control.requestId,
+					(await client.listImageModels?.()) ?? { models: [], total: 0 },
+				);
+				return;
+			case "listVideoModels":
+				config.refreshAuth();
+				writeRecord(
+					"serve:videoModels",
+					control.requestId,
+					(await client.listVideoModels?.()) ?? { models: [], total: 0 },
 				);
 				return;
 			case "listTools":
@@ -609,6 +672,48 @@ export async function runServe(argv: string[]): Promise<void> {
 	if (!disposing) controller.cancel({ clearQueue: true });
 	await Promise.allSettled([...pendingOps]);
 	await flush();
+}
+
+/**
+ * Parses a `provider/name` selection into the pair Backboard expects.
+ * Provider names never contain a slash, so splitting on the first one keeps
+ * OpenRouter video ids (e.g. `openrouter/google/veo-3.1`) intact.
+ */
+/**
+ * Converts a normalized MCP config back into the on-disk entry shape, used
+ * when re-reading `.backboard/mcp.json` servers into a `setMcpServers` push.
+ */
+function mcpConfigToFileEntry(server: McpServerConfig): McpServerFileEntry {
+	if (server.type === "stdio") {
+		return {
+			type: "stdio",
+			...(server.command ? { command: server.command } : {}),
+			args: [...server.args],
+			...(Object.keys(server.env).length > 0 ? { env: { ...server.env } } : {}),
+			...(server.cwd ? { cwd: server.cwd } : {}),
+		};
+	}
+	return {
+		type: "streamable-http",
+		...(server.url ? { url: server.url } : {}),
+		...(Object.keys(server.headers).length > 0
+			? { headers: { ...server.headers } }
+			: {}),
+	};
+}
+
+function parseGenerativeModelRef(
+	value: string,
+): { provider: string; name: string } | undefined {
+	const trimmed = value.trim();
+	const separator = trimmed.indexOf("/");
+	if (separator <= 0 || separator === trimmed.length - 1) {
+		return undefined;
+	}
+	return {
+		provider: trimmed.slice(0, separator),
+		name: trimmed.slice(separator + 1),
+	};
 }
 
 function parseMaxWorkers(value: string | undefined): number {

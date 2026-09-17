@@ -27,6 +27,21 @@ describe("parseControlLine", () => {
 		expect(parseControlLine(JSON.stringify({ op: "commitRewind" as const, requestId: "request", transactionId: "tx-1", buffers: [{ path: "/file", content: "", encoding: 42 }] }))).toMatchObject({ ok: false });
 	});
 
+	it("parses the MCP server push and rejects malformed payloads", () => {
+		const control = {
+			op: "setMcpServers" as const,
+			requestId: "mcp-1",
+			servers: {
+				"backboard": { type: "streamable-http", url: "https://backboard-docs.docsalot.dev/api/mcp" },
+				playwright: { command: "npx", args: ["-y", "@playwright/mcp@latest"] },
+			},
+			force: ["playwright"],
+		};
+		expect(parseControlLine(JSON.stringify(control))).toEqual({ ok: true, control });
+		expect(parseControlLine(JSON.stringify({ op: "setMcpServers", requestId: "mcp-2", servers: ["nope"] }))).toMatchObject({ ok: false });
+		expect(parseControlLine(JSON.stringify({ op: "setMcpServers", requestId: "mcp-3" }))).toMatchObject({ ok: false });
+	});
+
 	it("parses the public R-CLI submit settings", () => {
 		const control = {
 			op: "submit" as const,
@@ -178,5 +193,20 @@ describe("parseControlLine", () => {
 			ok: true,
 			control: { op: "listTools", requestId: "r2" },
 		});
+	});
+
+	it("accepts the generative-model catalog ops", () => {
+		// These back the composer's image/video model pickers; if they are not in
+		// the allowlist the catalog request is dropped and the picker times out.
+		for (const op of ["listImageModels", "listVideoModels"] as const) {
+			expect(parseControlLine(JSON.stringify({ op, requestId: "r1" }))).toEqual({
+				ok: true,
+				control: { op, requestId: "r1" },
+			});
+			expect(parseControlLine(JSON.stringify({ op }))).toEqual({
+				ok: false,
+				error: `invalid ${op} op: missing requestId`,
+			});
+		}
 	});
 });

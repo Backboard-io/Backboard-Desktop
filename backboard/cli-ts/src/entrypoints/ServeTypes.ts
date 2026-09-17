@@ -1,4 +1,5 @@
 import type { PermissionMode } from "../core/permissions/PermissionMode.ts";
+import type { McpServerFileEntry } from "../core/mcp/config.ts";
 import type {
 	ClientToolDefinition,
 	ClientToolResultPayload,
@@ -42,6 +43,12 @@ export type ServeControl =
 			notify?: boolean;
 			/** Enables Backboard's built-in image generation for the turn. */
 			imageGeneration?: boolean;
+			/** Selected image model as `provider/name`; absent uses the built-in default. */
+			imageModel?: string;
+			/** Enables Backboard's built-in video generation for the turn. */
+			videoGeneration?: boolean;
+			/** Selected video model as `provider/name`; required for video generation. */
+			videoModel?: string;
 			/** Pins an OpenRouter upstream; absent uses automatic routing. */
 			openRouterProvider?: string;
 			/**
@@ -63,7 +70,21 @@ export type ServeControl =
 			error?: string;
 	  }
 	| { op: "setModel"; requestId?: string; model: string }
+	| {
+			/**
+			 * Replaces the session's MCP server set with the IDE-configured
+			 * servers (name → `.backboard/mcp.json` entry). Servers missing from
+			 * the payload are disconnected; unchanged servers keep running.
+			 * `force` reconnects the named servers even when unchanged.
+			 */
+			op: "setMcpServers";
+			requestId?: string;
+			servers: Record<string, McpServerFileEntry & { disabled?: boolean }>;
+			force?: string[];
+		}
 	| { op: "listModels"; requestId: string }
+	| { op: "listImageModels"; requestId: string }
+	| { op: "listVideoModels"; requestId: string }
 	| { op: "listTools"; requestId: string }
 	| { op: "listSkills"; requestId: string }
 	| { op: "archiveWorkers"; requestId: string }
@@ -90,6 +111,9 @@ export type ServeRecordType =
 	| "serve:ready"
 	| "serve:turn"
 	| "serve:models"
+	| "serve:mcp"
+	| "serve:imageModels"
+	| "serve:videoModels"
 	| "serve:tools"
 	| "serve:skills"
 	| "serve:warm"

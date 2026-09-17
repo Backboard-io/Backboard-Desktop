@@ -177,6 +177,8 @@ export interface SessionConfigCompletionsParams extends BaseParams {
 	property: string;
 	/** Search filter text (empty or omitted returns default/recent values) */
 	query?: string;
+	/** Bypass any server-side cache and re-fetch the underlying catalog. */
+	refresh?: boolean;
 }
 
 /**

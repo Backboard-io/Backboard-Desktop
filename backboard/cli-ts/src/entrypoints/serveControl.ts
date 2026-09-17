@@ -8,7 +8,10 @@ const KNOWN_OPS = new Set<ServeControl["op"]>([
 	"respondInput",
 	"clientToolResult",
 	"setModel",
+	"setMcpServers",
 	"listModels",
+	"listImageModels",
+	"listVideoModels",
 	"listTools",
 	"listSkills",
 	"archiveWorkers",
@@ -134,7 +137,23 @@ export function parseControlLine(line: string): ParsedControlLine | null {
 		case "setModel":
 			if (typeof record.model !== "string") return missing("model");
 			break;
+		case "setMcpServers":
+			if (
+				typeof record.servers !== "object" ||
+				record.servers === null ||
+				Array.isArray(record.servers)
+			)
+				return missing("servers");
+			if (
+				record.force !== undefined &&
+				(!Array.isArray(record.force) ||
+					record.force.some((name) => typeof name !== "string"))
+			)
+				return missing("force");
+			break;
 		case "listModels":
+		case "listImageModels":
+		case "listVideoModels":
 		case "listTools":
 		case "listSkills":
 		case "archiveWorkers":

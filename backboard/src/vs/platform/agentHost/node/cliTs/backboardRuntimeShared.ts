@@ -3,8 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { isWindows } from '../../../../base/common/platform.js';
-import { isBackboardProviderAvailable } from '../../common/backboardSubscriptions.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -58,6 +56,18 @@ const BACKBOARD_COMPUTER_USE_CONFIG_KEY = 'computerUse';
 const BACKBOARD_BROWSER_USE_CONFIG_KEY = 'browserUse';
 const BACKBOARD_NOTIFICATIONS_CONFIG_KEY = 'notifications';
 const BACKBOARD_IMAGE_GENERATION_CONFIG_KEY = 'imageGeneration';
+/** Selected image model as `provider/name`; `off` disables image generation. */
+export const BACKBOARD_IMAGE_MODEL_CONFIG_KEY = 'imageModel';
+const BACKBOARD_VIDEO_GENERATION_CONFIG_KEY = 'videoGeneration';
+/** Selected video model as `provider/name`; `off` disables video generation. */
+export const BACKBOARD_VIDEO_MODEL_CONFIG_KEY = 'videoModel';
+/** Composer value that turns image or video generation off. */
+export const BACKBOARD_GENERATIVE_MEDIA_OFF = 'off';
+/**
+ * Built-in image model used when image generation is on without an explicit
+ * pick. Mirrors the CLI harness default in RunMessageRequestBuilder.
+ */
+const DEFAULT_IMAGE_MODEL_SELECTION = 'google/gemini-3.1-flash-image';
 export const BACKBOARD_OPENROUTER_PROVIDER_CONFIG_KEY = 'openRouterProvider';
 export const BACKBOARD_MODE_PLAN = 'plan';
 export const BACKBOARD_MODE_MULTITASK = 'multitask';
@@ -187,6 +197,12 @@ export interface BackboardTurnSettings {
 	readonly notifications: boolean;
 	/** Whether Backboard's built-in image generation is enabled this turn. */
 	readonly imageGeneration: boolean;
+	/** Selected image model; undefined uses the harness default. */
+	readonly imageModel?: { provider: string; name: string };
+	/** Whether Backboard's built-in video generation is enabled this turn. */
+	readonly videoGeneration: boolean;
+	/** Selected video model; video generation needs an explicit model. */
+	readonly videoModel?: { provider: string; name: string };
 	/** A user-pinned OpenRouter serving provider; undefined keeps automatic routing. */
 	readonly openRouterProvider?: string;
 	readonly config: Record<string, unknown>;
@@ -421,13 +437,22 @@ function openRouterProviderConfigSchema(providers: readonly BridgeOpenRouterProv
 }
 
 function inferBackboardModelSupportsVision(model: BridgeModel): boolean {
-	const id = `${normalizeProviderKey(model.provider)}/${model.name}`.toLowerCase();
+	const provider = normalizeProviderKey(model.provider);
+	// Locally-authenticated subscription routes serve Claude/GPT families that
+	// accept image input, but their live catalog entries do not always declare
+	// the capability (and their names are aliases like `default`/`haiku` that no
+	// family pattern matches). Treat the route as vision-capable so pasted
+	// images are not flagged as unsupported.
+	if (provider === 'anthropic-subscription' || provider === 'openai-subscription') {
+		return true;
+	}
+	const id = [provider, model.name, model.displayName, model.display_name, model.resolved_model]
+		.filter((part): part is string => typeof part === 'string' && part.length > 0)
+		.join(' ')
+		.toLowerCase();
 	return id.includes('gpt-4o')
 		|| id.includes('gpt-5')
-		|| id.includes('claude-3')
-		|| id.includes('claude-sonnet-4')
-		|| id.includes('claude-opus-4')
-		|| id.includes('claude-haiku-4')
+		|| id.includes('claude')
 		|| id.includes('gemini')
 		|| id.includes('grok-4')
 		|| id.includes('mistral-medium-3')
@@ -533,11 +558,7 @@ function mergeBridgeModels(...modelSets: readonly (readonly BridgeModel[])[]): B
 }
 
 export function backboardModelInfos(...modelSets: readonly (readonly BridgeModel[])[]): IAgentModelInfo[] {
-	return backboardModelInfosForPlatform(isWindows, ...modelSets);
-}
-
-export function backboardModelInfosForPlatform(windows: boolean, ...modelSets: readonly (readonly BridgeModel[])[]): IAgentModelInfo[] {
-	const mergedModels = mergeBridgeModels(...modelSets).filter(model => isBackboardProviderAvailable(model.provider, windows));
+	const mergedModels = mergeBridgeModels(...modelSets);
 	return mergedModels
 		.filter(isVisibleBridgeModel)
 		.concat(supplementalBridgeModels(mergedModels))
@@ -701,11 +722,35 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 						default: false,
 						sessionMutable: true,
 					},
-					[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]: {
-						type: 'boolean',
-						title: localize('backboard.config.imageGeneration.title', "Image Generation"),
-						description: localize('backboard.config.imageGeneration.description', "Generate images with Gemini 3.1 Flash Image."),
-						default: false,
+					[BACKBOARD_IMAGE_MODEL_CONFIG_KEY]: {
+						type: 'string',
+						title: localize('backboard.config.imageModel.title', "Image"),
+						description: localize('backboard.config.imageModel.description', "Generate images with the selected Backboard image model."),
+						default: BACKBOARD_GENERATIVE_MEDIA_OFF,
+						enum: [BACKBOARD_GENERATIVE_MEDIA_OFF, DEFAULT_IMAGE_MODEL_SELECTION],
+						enumLabels: [
+							localize('backboard.config.generativeMedia.off', "Off"),
+							'Gemini 3.1 Flash Image',
+						],
+						enumDescriptions: [
+							localize('backboard.config.imageModel.off.description', "Do not generate images."),
+							localize('backboard.config.imageModel.default.description', "Google's Gemini 3.1 Flash Image."),
+						],
+						// The live catalog is too large to enumerate; the enum above is the seed.
+						enumDynamic: true,
+						sessionMutable: true,
+					},
+					[BACKBOARD_VIDEO_MODEL_CONFIG_KEY]: {
+						type: 'string',
+						title: localize('backboard.config.videoModel.title', "Video"),
+						description: localize('backboard.config.videoModel.description', "Generate videos with the selected Backboard video model."),
+						default: BACKBOARD_GENERATIVE_MEDIA_OFF,
+						// Video generation has no universal default model, so live
+						// completions supply every selectable model.
+						enum: [BACKBOARD_GENERATIVE_MEDIA_OFF],
+						enumLabels: [localize('backboard.config.generativeMedia.off', "Off")],
+						enumDescriptions: [localize('backboard.config.videoModel.off.description', "Do not generate videos.")],
+						enumDynamic: true,
 						sessionMutable: true,
 					},
 				},
@@ -728,7 +773,8 @@ function normalizeBackboardConfig(rawConfig: Record<string, unknown> | undefined
 		[BACKBOARD_COMPUTER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_COMPUTER_USE_CONFIG_KEY], false),
 		[BACKBOARD_BROWSER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_BROWSER_USE_CONFIG_KEY], false),
 		[BACKBOARD_NOTIFICATIONS_CONFIG_KEY]: booleanOf(merged[BACKBOARD_NOTIFICATIONS_CONFIG_KEY], false),
-		[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]: normalizeImageGenerationEnabled(merged[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]),
+		[BACKBOARD_IMAGE_MODEL_CONFIG_KEY]: normalizeImageModelSelection(merged[BACKBOARD_IMAGE_MODEL_CONFIG_KEY], merged[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]),
+		[BACKBOARD_VIDEO_MODEL_CONFIG_KEY]: normalizeVideoModelSelection(merged[BACKBOARD_VIDEO_MODEL_CONFIG_KEY], merged[BACKBOARD_VIDEO_GENERATION_CONFIG_KEY]),
 	};
 }
 
@@ -740,7 +786,8 @@ export function createBackboardTurnSettings(
 	const values = normalizeBackboardConfig(storedConfig, sessionConfig);
 	const parsedModel = parseModelSelection(model) ?? parseModelSelection({ id: DEFAULT_MODEL_ID })!;
 	const rawMode = stringConfigValue(values, SessionConfigKey.Mode, BACKBOARD_ACCESS_DEFAULT);
-	const imageGeneration = booleanConfigValue(values, BACKBOARD_IMAGE_GENERATION_CONFIG_KEY, false);
+	const imageModel = parseGenerativeModelSelection(stringConfigValue(values, BACKBOARD_IMAGE_MODEL_CONFIG_KEY, BACKBOARD_GENERATIVE_MEDIA_OFF));
+	const videoModel = parseGenerativeModelSelection(stringConfigValue(values, BACKBOARD_VIDEO_MODEL_CONFIG_KEY, BACKBOARD_GENERATIVE_MEDIA_OFF));
 	const configuredOpenRouterProvider = stringValueFromRecord(model?.config?.[BACKBOARD_OPENROUTER_PROVIDER_CONFIG_KEY]);
 	const configuredModelIntensity = stringValueFromRecord(model?.config?.[BACKBOARD_INTENSITY_CONFIG_KEY]);
 	const intensity = configuredModelIntensity
@@ -765,7 +812,12 @@ export function createBackboardTurnSettings(
 		computerUse: booleanConfigValue(values, BACKBOARD_COMPUTER_USE_CONFIG_KEY, false),
 		browserUse: booleanConfigValue(values, BACKBOARD_BROWSER_USE_CONFIG_KEY, false),
 		notifications: booleanConfigValue(values, BACKBOARD_NOTIFICATIONS_CONFIG_KEY, false),
-		imageGeneration,
+		// The wire booleans are derived from the selected models so the composer
+		// has a single source of truth (the model picker).
+		imageGeneration: imageModel !== undefined,
+		videoGeneration: videoModel !== undefined,
+		...(imageModel ? { imageModel } : {}),
+		...(videoModel ? { videoModel } : {}),
 		...(parsedModel.provider === 'openrouter' && configuredOpenRouterProvider && configuredOpenRouterProvider !== 'auto'
 			? { openRouterProvider: configuredOpenRouterProvider }
 			: {}),
@@ -773,14 +825,38 @@ export function createBackboardTurnSettings(
 	};
 }
 
-function normalizeImageGenerationEnabled(value: unknown): boolean {
-	// Migrate values saved by the short-lived image-model picker back to the
-	// simple toggle. Any selected model means Images was enabled; the runtime
-	// now ignores that id and always uses Gemini 3.1 Flash Image.
-	if (typeof value === 'string' && !['', 'off', 'false', 'disabled'].includes(value.trim().toLowerCase())) {
-		return true;
+function normalizeImageModelSelection(value: unknown, legacyEnabled: unknown): string {
+	const selected = stringValueFromRecord(value);
+	if (selected && selected.toLowerCase() !== BACKBOARD_GENERATIVE_MEDIA_OFF) {
+		return selected;
 	}
-	return booleanOf(value, false);
+	// Sessions saved while Images was a boolean toggle keep the capability on
+	// with the built-in default model instead of silently turning it off.
+	return booleanOf(legacyEnabled, false) ? DEFAULT_IMAGE_MODEL_SELECTION : BACKBOARD_GENERATIVE_MEDIA_OFF;
+}
+
+function normalizeVideoModelSelection(value: unknown, legacyEnabled: unknown): string {
+	const selected = stringValueFromRecord(value);
+	if (selected && selected.toLowerCase() !== BACKBOARD_GENERATIVE_MEDIA_OFF) {
+		return selected;
+	}
+	// Video generation has no universal default model, so a retired boolean
+	// toggle cannot be migrated into an enabled model selection.
+	void legacyEnabled;
+	return BACKBOARD_GENERATIVE_MEDIA_OFF;
+}
+
+/** Splits a `provider/name` selection; provider names never contain a slash. */
+function parseGenerativeModelSelection(value: string | undefined): { provider: string; name: string } | undefined {
+	const trimmed = value?.trim();
+	if (!trimmed || trimmed.toLowerCase() === BACKBOARD_GENERATIVE_MEDIA_OFF) {
+		return undefined;
+	}
+	const separator = trimmed.indexOf('/');
+	if (separator <= 0 || separator === trimmed.length - 1) {
+		return undefined;
+	}
+	return { provider: trimmed.slice(0, separator), name: trimmed.slice(separator + 1) };
 }
 
 function normalizeBackboardIntensity(value: unknown): string {

@@ -783,6 +783,7 @@ export class RemoteAgentHostProtocolClient extends Disposable implements IAgentC
 			config: params.config,
 			property: params.property,
 			query: params.query,
+			refresh: params.refresh,
 		});
 	}
 

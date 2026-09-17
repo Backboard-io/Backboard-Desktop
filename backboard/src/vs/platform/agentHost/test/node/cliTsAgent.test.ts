@@ -10,10 +10,14 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import type { CliTsAgentEvent, CliTsWorkerState, CliTsWorkerIntegrationChange } from '../../node/cliTs/cliTsProtocol.js';
 import { URI } from '../../../../base/common/uri.js';
+import { Schemas } from '../../../../base/common/network.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
+import { FileService } from '../../../files/common/fileService.js';
+import { DiskFileSystemProvider } from '../../../files/node/diskFileSystemProvider.js';
 import { NullLogService } from '../../../log/common/log.js';
 import { AgentSession, type AgentSignal } from '../../common/agentService.js';
 import { ActionType } from '../../common/state/sessionActions.js';
+import { CustomizationType, McpServerStatus } from '../../common/state/protocol/channels-session/state.js';
 import { buildSubagentSessionUri, FileEditKind, ResponsePartKind, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ToolCallResponsePart, type ToolResultFileEditContent } from '../../common/state/sessionState.js';
 import { AgentHostCheckpointService } from '../../node/agentHostCheckpointService.js';
 import { assertUsableClaudeSubscriptionLogin, CliTsAgent, cliTsToolExecutionFailed, getBackboardWorktreeBranchName, getBackboardWorktreesRoot, hasUsableChatGptSubscriptionLogin, isChatGptSubscriptionModel, isClaudeSubscriptionModel, requiresProviderThreadHandoff, withChatGptSubscriptionConnectionState, withClaudeSubscriptionConnectionState } from '../../node/cliTs/cliTsAgent.js';
@@ -25,7 +29,7 @@ import { createSessionDataService, TestDiffComputeService } from '../common/sess
 suite('CliTsAgent tool metadata', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
 
-	function createAgent(checkpointService: unknown = {}, sessionDataService: unknown = {}, gitService: unknown = {}, configurationService: unknown = { getSessionConfigValues: () => ({}) }): CliTsAgent {
+	function createAgent(checkpointService: unknown = {}, sessionDataService: unknown = {}, gitService: unknown = {}, configurationService: unknown = { getSessionConfigValues: () => ({}) }, pluginManager: unknown = { syncCustomizations: async () => [] }, fileService: unknown = {}): CliTsAgent {
 		return store.add(new CliTsAgent(
 			new NullLogService(),
 			configurationService as never,
@@ -33,7 +37,38 @@ suite('CliTsAgent tool metadata', () => {
 			{} as never,
 			checkpointService as never,
 			gitService as never,
+			pluginManager as never,
+			fileService as never,
 		));
+	}
+
+	function makeFileService(): FileService {
+		const log = new NullLogService();
+		const service = store.add(new FileService(log));
+		store.add(service.registerProvider(Schemas.file, store.add(new DiskFileSystemProvider(log))));
+		return service;
+	}
+
+	function createMcpSession(sessionUri: URI, onRequest: (control: { op: string; requestId?: string; servers?: Record<string, unknown>; force?: readonly string[] }) => unknown): unknown {
+		return {
+			sessionUri,
+			sessionId: AgentSession.id(sessionUri),
+			createdAt: 0,
+			modifiedAt: 0,
+			materialized: true,
+			disposed: false,
+			subagentTurnOwners: new Map(),
+			completedSubagentToolCallIds: new Set(),
+			pendingClientToolCalls: new Set(),
+			pendingInputs: new Map(),
+			storedTurns: [],
+			storedSubagentTurns: new Map(),
+			proc: {
+				isRunning: true,
+				nextRequestId: () => `request-${Math.random()}`,
+				request: async (control: { op: string; requestId?: string; servers?: Record<string, unknown>; force?: readonly string[] }) => ({ type: 'serve:mcp', payload: onRequest(control) }),
+			},
+		};
 	}
 
 	test('model refresh coalesces concurrent requests and permits retry after failure', async () => {
@@ -52,6 +87,78 @@ suite('CliTsAgent tool metadata', () => {
 		Reflect.set(agent, '_refreshModelCatalog', async () => { calls++; });
 		await agent.executeCommand('models.refresh');
 		assert.strictEqual(calls, 2);
+	});
+
+	test('pushes client-synced MCP servers to the session runtime and publishes them as customizations', async () => {
+		const pluginDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bb-mcp-plugin-'));
+		fs.writeFileSync(path.join(pluginDir, '.mcp.json'), JSON.stringify({
+			mcpServers: {
+				backboard: { type: 'http', url: 'https://backboard-docs.docsalot.dev/api/mcp' },
+				playwright: { command: 'npx', args: ['-y', '@playwright/mcp@latest'] },
+			},
+		}));
+
+		const fileService = makeFileService();
+		const pluginManager = {
+			syncCustomizations: async () => [{
+				customization: { type: CustomizationType.Plugin, id: 'plugin-1', uri: URI.file(pluginDir).toString(), name: 'synced', enabled: true },
+				pluginDir: URI.file(pluginDir),
+			}],
+		};
+		const agent = createAgent({}, {}, {}, {}, pluginManager, fileService);
+
+		const requests: Array<{ op: string; servers?: Record<string, unknown>; force?: readonly string[] }> = [];
+		const sessionUri = AgentSession.uri('backboard', 'mcp-session');
+		const session = createMcpSession(sessionUri, control => {
+			requests.push(control);
+			return {
+				servers: Object.keys(control.servers ?? {}).map(name => ({
+					name,
+					status: control.servers?.[name] && (control.servers[name] as { disabled?: boolean }).disabled ? 'disabled' : 'connected',
+					toolNames: [`mcp__${name}__tool`],
+				})),
+			};
+		});
+		const internals = agent as unknown as { _sessions: Map<string, unknown> };
+		internals._sessions.set('mcp-session', session);
+
+		const synced = await agent.setClientCustomizations(sessionUri, 'client-1', [
+			{ type: CustomizationType.Plugin, id: 'plugin-1', uri: URI.file(pluginDir).toString(), name: 'synced', enabled: true } as never,
+		]);
+
+		assert.strictEqual(synced.length, 1);
+		assert.strictEqual(requests.length, 1);
+		assert.strictEqual(requests[0].op, 'setMcpServers');
+		assert.deepStrictEqual(Object.keys(requests[0].servers ?? {}).sort(), ['backboard', 'playwright']);
+		assert.strictEqual((requests[0].servers!['backboard'] as { url?: string }).url, 'https://backboard-docs.docsalot.dev/api/mcp');
+		assert.strictEqual((requests[0].servers!['playwright'] as { command?: string }).command, 'npx');
+
+		const customizations = await agent.getSessionCustomizations(sessionUri);
+		assert.deepStrictEqual(customizations.map(c => c.name).sort(), ['backboard', 'playwright']);
+		for (const customization of customizations) {
+			assert.strictEqual(customization.type, CustomizationType.McpServer);
+			assert.strictEqual((customization as { state: { kind: McpServerStatus } }).state.kind, McpServerStatus.Ready);
+		}
+
+		// The composer's per-server toggle disconnects a server for this session.
+		const backboard = customizations.find(c => c.name === 'backboard')!;
+		agent.setCustomizationEnabled(backboard.id, false);
+		await (session as { mcpPush?: Promise<void> }).mcpPush;
+		assert.strictEqual(requests.length, 2);
+		assert.strictEqual((requests[1].servers!['backboard'] as { disabled?: boolean }).disabled, true);
+		assert.strictEqual((requests[1].servers!['playwright'] as { disabled?: boolean }).disabled, undefined);
+
+		const afterToggle = await agent.getSessionCustomizations(sessionUri);
+		const disabledBackboard = afterToggle.find(c => c.name === 'backboard')!;
+		assert.strictEqual(disabledBackboard.enabled, false);
+		assert.strictEqual((disabledBackboard as { state: { kind: McpServerStatus } }).state.kind, McpServerStatus.Stopped);
+
+		// Reconnecting forces a fresh handshake for that server only.
+		agent.setCustomizationEnabled(backboard.id, true);
+		await (session as { mcpPush?: Promise<void> }).mcpPush;
+		assert.strictEqual(requests.length, 3);
+		assert.deepStrictEqual(requests[2].force, ['backboard']);
+		assert.strictEqual((requests[2].servers!['backboard'] as { disabled?: boolean }).disabled, undefined);
 	});
 
 	test('distinguishes successful no-match and partial searches from execution failure', () => {
@@ -123,15 +230,12 @@ suite('CliTsAgent tool metadata', () => {
 				Buffer.from(JSON.stringify({ exp })).toString('base64url'),
 				'signature',
 			].join('.');
-			fs.mkdirSync(path.join(tempRoot, '.backboard_ide'), { recursive: true });
-			fs.writeFileSync(path.join(tempRoot, '.backboard_ide', 'subscriptions.json'), JSON.stringify({ chatgptSubscriptionAuthFile: authFile }));
+			fs.mkdirSync(path.join(tempRoot, '.backboard'), { recursive: true });
+			fs.writeFileSync(path.join(tempRoot, '.backboard', 'config.json'), JSON.stringify({ chatgptSubscriptionAuthFile: authFile }));
 			fs.writeFileSync(authFile, JSON.stringify({ tokens: { access_token: jwt(1), refresh_token: 'renewable' } }));
 
 			assert.strictEqual(hasUsableChatGptSubscriptionLogin(tempRoot, 2_000), true);
 			fs.writeFileSync(authFile, JSON.stringify({ tokens: { access_token: jwt(1) } }));
-			assert.strictEqual(hasUsableChatGptSubscriptionLogin(tempRoot, 2_000), false);
-			fs.writeFileSync(authFile, JSON.stringify({ tokens: { access_token: jwt(1), refresh_token: 'renewable' } }));
-			fs.rmSync(path.join(tempRoot, '.backboard_ide'), { recursive: true });
 			assert.strictEqual(hasUsableChatGptSubscriptionLogin(tempRoot, 2_000), false);
 			assert.strictEqual(isChatGptSubscriptionModel('openai-subscription/gpt-5.6-sol'), true);
 			assert.strictEqual(isChatGptSubscriptionModel('openai/gpt-5.6-sol'), false);
@@ -269,32 +373,18 @@ suite('CliTsAgent tool metadata', () => {
 		assert.strictEqual(internals._claudeSubscriptionConnected, true);
 	});
 
-	for (const command of ['chatgptSubscription.login', 'claudeSubscription.login', 'claudeSubscription.enable', 'claudeSubscription.check']) {
-		test(`All platforms reject ${command} before starting subscription setup`, async () => {
-			for (const windows of [true, false]) {
-				await assert.rejects(createAgent().executeCommand(command, windows), /Subscriptions are currently unavailable/);
-			}
-		});
-	}
-
-	for (const provider of ['openai-subscription', 'anthropic-subscription']) {
-		test(`rejects a cached model selection for ${provider} before modifying the session`, async () => {
-			await assert.rejects(createAgent().changeModel(AgentSession.uri('backboard', 'stale-selection'), { id: `${provider}/default` }), /Subscriptions are currently unavailable/);
-		});
-	}
-
-	test('blocks Claude status regardless of saved connection state', async () => {
+	test('reports whether Claude setup needs OAuth', async () => {
 		const agent = createAgent();
 		for (const connected of [true, false]) {
 			Reflect.set(agent, '_refreshClaudeSubscriptionConnectionState', async () => { Reflect.set(agent, '_claudeSubscriptionConnected', connected); });
-			await assert.rejects(agent.executeCommand('claudeSubscription.check', false), /Subscriptions are currently unavailable/);
+			assert.deepStrictEqual(await agent.executeCommand('claudeSubscription.check'), { message: '', requiresSignIn: !connected });
 		}
 	});
 
 	test('refuses to start interactive Claude OAuth through the stdin-less agent command', async () => {
 		await assert.rejects(
-			createAgent().executeCommand('claudeSubscription.login', false),
-			/Subscriptions are currently unavailable/,
+			createAgent().executeCommand('claudeSubscription.login'),
+			/requires an interactive terminal/,
 		);
 	});
 

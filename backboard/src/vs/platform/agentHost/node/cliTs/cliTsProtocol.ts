@@ -63,6 +63,33 @@ export interface CliTsClientToolResultPayload {
 	readonly error?: string;
 }
 
+/** One MCP server entry pushed to cli-ts (`.backboard/mcp.json` shape). */
+export interface CliTsMcpServerEntry {
+	readonly type?: 'stdio' | 'http' | 'streamable-http' | 'sse';
+	readonly disabled?: boolean;
+	readonly command?: string;
+	readonly args?: readonly string[];
+	readonly env?: Readonly<Record<string, string>>;
+	readonly cwd?: string;
+	readonly url?: string;
+	readonly headers?: Readonly<Record<string, string>>;
+}
+
+/** One MCP server runtime state reported by a `serve:mcp` record. */
+export interface CliTsMcpServerStatus {
+	readonly name: string;
+	readonly type?: string;
+	readonly status?: 'connected' | 'needs_authentication' | 'error' | 'disabled';
+	readonly message?: string;
+	readonly toolNames?: readonly string[];
+}
+
+/** Payload of a `serve:mcp` response. */
+export interface CliTsMcpListPayload {
+	readonly servers?: readonly CliTsMcpServerStatus[];
+	readonly warnings?: readonly string[];
+}
+
 /** One control operation, written to the serve process's stdin as one JSON line. */
 export type CliTsServeControl =
 	| {
@@ -95,6 +122,12 @@ export type CliTsServeControl =
 		readonly notify?: boolean;
 		/** Enables Backboard's built-in image tool for this turn. */
 		readonly imageGeneration?: boolean;
+		/** Selected image model as `provider/name`; `off` clears the selection. */
+		readonly imageModel?: string;
+		/** Enables Backboard's built-in video tool for this turn. */
+		readonly videoGeneration?: boolean;
+		/** Selected video model as `provider/name`; `off` clears the selection. */
+		readonly videoModel?: string;
 		/** Pins an OpenRouter upstream; absent uses automatic routing. */
 		readonly openRouterProvider?: string;
 		/** IDE-executed tools advertised to the model; absent clears them. */
@@ -106,7 +139,21 @@ export type CliTsServeControl =
 	| { readonly op: 'respondInput'; readonly id: string; readonly answers: readonly string[] }
 	| { readonly op: 'clientToolResult'; readonly id: string; readonly result?: CliTsClientToolResultPayload; readonly error?: string }
 	| { readonly op: 'setModel'; readonly requestId?: string; readonly model: string }
+	| {
+		/**
+		 * Replaces the session's IDE-owned MCP server set. Servers missing from
+		 * the payload are disconnected; unchanged servers keep running. Servers
+		 * configured directly in `.backboard/mcp.json` are layered underneath.
+		 */
+		readonly op: 'setMcpServers';
+		readonly requestId?: string;
+		readonly servers: Readonly<Record<string, CliTsMcpServerEntry>>;
+		/** Server names to reconnect even when their configuration is unchanged. */
+		readonly force?: readonly string[];
+	}
 	| { readonly op: 'listModels'; readonly requestId: string }
+	| { readonly op: 'listImageModels'; readonly requestId: string }
+	| { readonly op: 'listVideoModels'; readonly requestId: string }
 	| { readonly op: 'listTools'; readonly requestId: string }
 	| { readonly op: 'listSkills'; readonly requestId: string }
 	| { readonly op: 'archiveWorkers'; readonly requestId: string }

@@ -4,8 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { AgentRewindRequest, IAgentRewindBuffer, IAgentRewindResult } from '../../common/agentRewind.js';
-import { isBackboardProviderAvailable } from '../../common/backboardSubscriptions.js';
-import { isWindows } from '../../../../base/common/platform.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -24,7 +22,12 @@ import { ActionType, type ChatAction, type SessionAction } from '../../common/st
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
 import { buildSubagentSessionUri, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, FileEditKind, MessageAttachmentKind, MessageKind, parseSubagentSessionUri, ResponsePartKind, SessionStatus, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type ToolResultFileEditContent, type Turn } from '../../common/state/sessionState.js';
-import type { ISyncedCustomization } from '../../common/agentPluginManager.js';
+import { IAgentPluginManager, type ISyncedCustomization } from '../../common/agentPluginManager.js';
+import { McpServerStatus, type Customization, type McpServerState } from '../../common/state/protocol/channels-session/state.js';
+import { McpCustomizationController } from '../shared/mcpCustomizationController.js';
+import { parsePlugin } from '../../../agentPlugins/common/pluginParsers.js';
+import { IFileService } from '../../../files/common/files.js';
+import { McpServerType, type IMcpServerConfiguration } from '../../../mcp/common/mcpPlatformTypes.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
 import { IAgentHostCheckpointService } from '../../common/agentHostCheckpointService.js';
 import { type IFileEditRecord, ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
@@ -32,13 +35,118 @@ import { buildSessionDbUri, FileEditTracker } from '../shared/fileEditTracker.js
 import { isClaudeLoggedIn } from '../shared/agentLoginProbes.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { IAgentHostGitService, META_DIFF_BASE_BRANCH } from '../agentHostGitService.js';
-import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_MODE_PLAN, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, backboardModelInfos, backboardMultitaskSystemContext, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
+import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_GENERATIVE_MEDIA_OFF, BACKBOARD_IMAGE_MODEL_CONFIG_KEY, BACKBOARD_MODE_PLAN, BACKBOARD_VIDEO_MODEL_CONFIG_KEY, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, backboardModelInfos, backboardMultitaskSystemContext, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
 
 /** cli-ts tool name excluded from the turn when Web Search is toggled off. */
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
 import { CliTsServeProcess, runCliTsCommand } from './cliTsProcess.js';
-import type { CliTsRecord, CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsPermissionMode, CliTsTurnStatus, CliTsWorkerIntegrationChange, CliTsWorkerIntegrationSnapshot, CliTsWorkerState } from './cliTsProtocol.js';
+import type { CliTsRecord, CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsMcpListPayload, CliTsMcpServerEntry, CliTsMcpServerStatus, CliTsPermissionMode, CliTsTurnStatus, CliTsWorkerIntegrationChange, CliTsWorkerIntegrationSnapshot, CliTsWorkerState } from './cliTsProtocol.js';
+
+/** Formats a selected generative model for the serve control, or `off`. */
+function generativeModelSelection(model: { provider: string; name: string } | undefined): string {
+	return model ? `${model.provider}/${model.name}` : BACKBOARD_GENERATIVE_MEDIA_OFF;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Maps one catalog row to a `provider/name` picker item. Image catalogs expose
+ * `name`; video catalogs expose the OpenRouter model `id` alongside `name`.
+ */
+function generativeModelCompletionItem(
+	model: Record<string, unknown>,
+	property: string,
+): { value: string; label: string } | undefined {
+	const provider = typeof model.provider === 'string' ? model.provider.trim() : '';
+	const identifier = property === BACKBOARD_VIDEO_MODEL_CONFIG_KEY
+		? (typeof model.id === 'string' ? model.id : typeof model.name === 'string' ? model.name : '')
+		: (typeof model.name === 'string' ? model.name : '');
+	const name = identifier.trim();
+	if (!provider || !name) {
+		return undefined;
+	}
+	const display = typeof model.name === 'string' && model.name.trim() ? model.name.trim() : name;
+	return { value: `${provider}/${name}`, label: display };
+}
+
+/**
+ * Maps a cli-ts MCP runtime status onto the protocol's server lifecycle
+ * state. The runtime reports `needs_authentication` for remote servers that
+ * require a token; without RFC 9728 metadata from the IDE-managed config the
+ * state is surfaced as an error the user can act on from the server list.
+ */
+function mcpServerStateFromRuntime(status: CliTsMcpServerStatus): McpServerState {
+	switch (status.status) {
+		case 'connected':
+			return { kind: McpServerStatus.Ready };
+		case 'disabled':
+			return { kind: McpServerStatus.Stopped };
+		case 'needs_authentication':
+			return {
+				kind: McpServerStatus.Error,
+				error: { errorType: 'mcp-server-auth-required', message: status.message ?? 'MCP server requires authentication.' },
+			};
+		case 'error':
+			return {
+				kind: McpServerStatus.Error,
+				error: { errorType: 'mcp-server-failed', message: status.message ?? 'MCP server failed to start.' },
+			};
+		default:
+			return { kind: McpServerStatus.Starting };
+	}
+}
+
+/**
+ * Converts a workbench MCP server configuration into the `.backboard/mcp.json`
+ * entry shape the runtime reads. Variable references are rewritten from the
+ * VS Code forms (`${input:NAME}`, `${env:NAME}`) to the CLI's `${NAME}` so an
+ * environment variable of the same name still resolves at connect time.
+ */
+function mcpEntryFromConfiguration(configuration: IMcpServerConfiguration): CliTsMcpServerEntry | undefined {
+	if (configuration.type === McpServerType.LOCAL) {
+		if (!configuration.command) {
+			return undefined;
+		}
+		const env = configuration.env ? mcpEnvToCliEnv(configuration.env) : undefined;
+		return {
+			type: 'stdio',
+			command: rewriteMcpVariables(configuration.command),
+			...(configuration.args ? { args: configuration.args.map(rewriteMcpVariables) } : {}),
+			...(env && Object.keys(env).length > 0 ? { env } : {}),
+			...(configuration.cwd ? { cwd: configuration.cwd } : {}),
+		};
+	}
+	if (!configuration.url) {
+		return undefined;
+	}
+	const headers = configuration.headers ? mcpEnvToCliEnv(configuration.headers) : undefined;
+	return {
+		type: 'streamable-http',
+		url: rewriteMcpVariables(configuration.url),
+		...(headers && Object.keys(headers).length > 0 ? { headers } : {}),
+	};
+}
+
+function mcpEnvToCliEnv(source: Record<string, string | number | null>): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const [key, value] of Object.entries(source)) {
+		if (value === null) {
+			continue;
+		}
+		env[key] = rewriteMcpVariables(String(value));
+	}
+	return env;
+}
+
+/** Rewrites VS Code MCP variable syntax to the CLI's environment syntax. */
+function rewriteMcpVariables(value: string): string {
+	return value
+		.replace(/\$\{input:([A-Za-z_][A-Za-z0-9_]*)(:-([^}]*))?\}/g, (_match, name: string, _defaultExpr: string | undefined, fallback: string) => fallback !== undefined ? `\${${name}:-${fallback}}` : `\${${name}}`)
+		.replace(/\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => `\${${name}}`);
+}
 
 const CLI_TS_STORE_VERSION = 1;
 const CHATGPT_SUBSCRIPTION_PROVIDER = 'openai-subscription';
@@ -69,7 +177,7 @@ export function hasUsableChatGptSubscriptionLogin(homeDir = os.homedir(), now = 
 		const envAuthFile = process.env['BACKBOARD_CHATGPT_SUBSCRIPTION_AUTH_FILE']?.trim();
 		let configuredAuthFile = '';
 		try {
-			const config = JSON.parse(fs.readFileSync(path.join(homeDir, '.backboard_ide', 'subscriptions.json'), 'utf8')) as { chatgptSubscriptionAuthFile?: unknown };
+			const config = JSON.parse(fs.readFileSync(path.join(homeDir, '.backboard', 'config.json'), 'utf8')) as { chatgptSubscriptionAuthFile?: unknown };
 			configuredAuthFile = typeof config.chatgptSubscriptionAuthFile === 'string' ? config.chatgptSubscriptionAuthFile.trim() : '';
 		} catch {
 			// An explicit env override remains usable on a fresh install with no config.
@@ -188,7 +296,7 @@ function withSubscriptionConnectionStates(
  */
 type CliTsWorkerWorkspace = NonNullable<CliTsAgentEvent['workspace']>;
 
-type CliTsBackboardToolKind = 'read' | 'grep' | 'glob' | 'fetchUrl' | 'webSearch' | 'todo' | 'computer' | 'browser' | 'findSkill' | 'findMcp';
+type CliTsBackboardToolKind = 'read' | 'grep' | 'glob' | 'fetchUrl' | 'webSearch' | 'todo' | 'computer' | 'browser' | 'findSkill' | 'findMcp' | 'generateVideo';
 
 interface CliTsToolUiState {
 	readonly kind: CliTsBackboardToolKind;
@@ -408,6 +516,20 @@ interface CliTsSession {
 	cancelBeforeSubmit?: boolean;
 	/** Client tools pushed by the active IDE client via {@link CliTsAgent.setClientTools}. */
 	clientTools?: { readonly clientId: string; readonly tools: readonly ToolDefinition[] };
+	/**
+	 * IDE-owned MCP servers for this session, keyed by server name, in the
+	 * `.backboard/mcp.json` shape the runtime understands. Pushed to the serve
+	 * process on every change and re-pushed whenever a process starts.
+	 */
+	mcpServers?: Record<string, CliTsMcpServerEntry>;
+	/** Server names the user disconnected for this session (composer toggle). */
+	mcpDisabled?: Set<string>;
+	/** Last runtime state reported by the serve process, keyed by server name. */
+	mcpRuntimeStates?: Map<string, McpServerState>;
+	/** Serializes MCP pushes so overlapping syncs cannot interleave. */
+	mcpPush?: Promise<void>;
+	/** Publishes MCP server customizations for this session. */
+	mcpController?: McpCustomizationController;
 	/** Whether the current turn runs with Full Access (client tool calls auto-confirm). */
 	turnAutoApproves?: boolean;
 	/** Client tool calls forwarded to the IDE and awaiting a result. */
@@ -465,7 +587,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 	readonly onDidMaterializeSession = this._onDidMaterializeSession.event;
 
 	/**
-	 * Hydrates the previous live Backboard API result from disk,
+	 * Starts with the locally-authenticated ChatGPT and Claude subscription routes,
+	 * immediately hydrates the previous live Backboard API result from disk,
 	 * and refreshes from the backend once a serve process is up. API catalog
 	 * providers such as OpenRouter are never supplemented from a compiled list.
 	 */
@@ -473,7 +596,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		'cliTsModels',
 		withSubscriptionConnectionStates(
 			backboardModelInfos(BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
-			false,
+			hasUsableChatGptSubscriptionLogin(),
 			false,
 		),
 	);
@@ -488,6 +611,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 	private _modelsRefreshed = false;
 	private _modelRefreshPromise: Promise<void> | undefined;
 	private readonly _modelRefreshProcess = this._register(new MutableDisposable<CliTsServeProcess>());
+	/** Short-lived catalog process for the composer's image/video model pickers. */
+	private readonly _generativeCatalogProcess = this._register(new MutableDisposable<CliTsServeProcess>());
+	/** Cached image/video catalogs so the composer pickers open instantly. Keyed by config property. */
+	private readonly _generativeCatalogCache = new Map<string, { items: { value: string; label: string }[]; fetchedAt: number }>();
+	private readonly _generativeCatalogPending = new Map<string, Promise<{ value: string; label: string }[]>>();
 	private _rgDir: Promise<string | undefined> | undefined;
 	private _chatGptSubscriptionLoginPromise: Promise<void> | undefined;
 	private _claudeSubscriptionEnablePromise: Promise<void> | undefined;
@@ -501,6 +629,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
 		@IAgentHostCheckpointService private readonly _checkpointService: IAgentHostCheckpointService,
 		@IAgentHostGitService private readonly _gitService: IAgentHostGitService,
+		@IAgentPluginManager private readonly _pluginManager: IAgentPluginManager,
+		@IFileService private readonly _fileService: IFileService,
 	) {
 		super();
 		this._hydrateModelsFromCache();
@@ -532,7 +662,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			if (models.length) {
 				this._models.set(withSubscriptionConnectionStates(
 					backboardModelInfos(models, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
-					false,
+					hasUsableChatGptSubscriptionLogin(),
 					this._claudeSubscriptionConnected,
 				), undefined);
 			}
@@ -589,15 +719,12 @@ export class CliTsAgent extends Disposable implements IAgent {
 		};
 	}
 
-	async executeCommand(command: string, _windows = isWindows): Promise<IAgentCommandResult> {
-		if (command.startsWith('chatgptSubscription.') || command.startsWith('claudeSubscription.')) {
-			throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
-		}
+	async executeCommand(command: string): Promise<IAgentCommandResult> {
 		switch (command) {
 			case 'models.refresh':
 				this._modelRefreshPromise ??= this._refreshModelCatalog().finally(() => { this._modelRefreshPromise = undefined; });
 				await this._modelRefreshPromise;
-				return { message: localize('cliTsAgent.modelsOnly.refreshed', "Models refreshed.") };
+				return { message: localize('cliTsAgent.models.refreshed', "Models and subscriptions refreshed.") };
 			case CHATGPT_SUBSCRIPTION_LOGIN_COMMAND:
 				await this._ensureChatGptSubscriptionLogin(true);
 				return {
@@ -622,9 +749,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	private async _ensureChatGptSubscriptionLogin(force: boolean): Promise<void> {
-		if (!isBackboardProviderAvailable(CHATGPT_SUBSCRIPTION_PROVIDER)) {
-			throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
-		}
 		if (!force && hasUsableChatGptSubscriptionLogin()) {
 			return;
 		}
@@ -653,9 +777,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	private async _requireClaudeSubscriptionLogin(): Promise<void> {
-		if (!isBackboardProviderAvailable(CLAUDE_SUBSCRIPTION_PROVIDER)) {
-			throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
-		}
 		try {
 			await assertUsableClaudeSubscriptionLogin();
 			this._setClaudeSubscriptionConnectionState(true);
@@ -665,7 +786,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		}
 	}
 
-	private async _refreshClaudeSubscriptionConnectionState(probe: () => Promise<boolean> = async () => false): Promise<void> {
+	private async _refreshClaudeSubscriptionConnectionState(probe: () => Promise<boolean> = isClaudeLoggedIn): Promise<void> {
 		const revision = ++this._claudeSubscriptionStatusRevision;
 		const connected = await probe();
 		if (revision === this._claudeSubscriptionStatusRevision) {
@@ -820,11 +941,78 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	async sessionConfigCompletions(params: IAgentSessionConfigCompletionsParams): Promise<SessionConfigCompletionsResult> {
+		if (params.property === BACKBOARD_IMAGE_MODEL_CONFIG_KEY || params.property === BACKBOARD_VIDEO_MODEL_CONFIG_KEY) {
+			return this._generativeModelCompletions(params.property, params.query, params.refresh);
+		}
 		if (params.property !== SessionConfigKey.Branch || !params.workingDirectory) {
 			return { items: [] };
 		}
 		const branches = await this._gitService.getBranches(params.workingDirectory, { query: params.query, limit: 200 });
 		return { items: branches.map(branch => ({ value: branch, label: branch })) };
+	}
+
+	/**
+	 * Live image/video catalog for the composer pickers. Dynamic completions
+	 * replace the static enum, so the Off entry is supplied here.
+	 */
+	private async _generativeModelCompletions(property: string, query: string | undefined, refresh?: boolean): Promise<SessionConfigCompletionsResult> {
+		const offItem = { value: BACKBOARD_GENERATIVE_MEDIA_OFF, label: localize('cliTsAgent.generativeMedia.off', "Off") };
+		const items = await this._generativeCatalogItems(property, refresh);
+		const filter = query?.trim().toLowerCase();
+		const filtered = filter
+			? items.filter(item => item.value.toLowerCase().includes(filter) || item.label.toLowerCase().includes(filter))
+			: items;
+		return { items: [offItem, ...filtered.slice(0, 200)] };
+	}
+
+	/**
+	 * Full (unfiltered) catalog items for one property, cached in memory so
+	 * reopening a picker is instant. Entries are reused for 10 minutes and
+	 * refetched eagerly when the picker's refresh button is used. Failed
+	 * fetches are not cached, so a later open retries.
+	 */
+	private _generativeCatalogItems(property: string, refresh?: boolean): Promise<{ value: string; label: string }[]> {
+		const cached = refresh ? undefined : this._generativeCatalogCache.get(property);
+		if (cached && Date.now() - cached.fetchedAt < 10 * 60 * 1000) {
+			return Promise.resolve(cached.items);
+		}
+		const pending = this._generativeCatalogPending.get(property);
+		if (pending) {
+			return pending;
+		}
+		const fetch = this._fetchGenerativeCatalog(property)
+			.then(items => {
+				this._generativeCatalogCache.set(property, { items, fetchedAt: Date.now() });
+				return items;
+			})
+			.finally(() => {
+				this._generativeCatalogPending.delete(property);
+			});
+		this._generativeCatalogPending.set(property, fetch);
+		return fetch;
+	}
+
+	private async _fetchGenerativeCatalog(property: string): Promise<{ value: string; label: string }[]> {
+		// A short-lived catalog process reads current credentials and avoids
+		// touching the provider routers owned by running conversations.
+		const proc = new CliTsServeProcess(this._logService, { onEvent: () => { } });
+		this._generativeCatalogProcess.value = proc;
+		try {
+			const op = property === BACKBOARD_IMAGE_MODEL_CONFIG_KEY ? 'listImageModels' : 'listVideoModels';
+			const record = await raceTimeout(proc.request({ op, requestId: proc.nextRequestId() }), 30_000);
+			const payload = record?.payload as { models?: unknown[] } | undefined;
+			const items = (Array.isArray(payload?.models) ? payload.models : [])
+				.filter(isPlainRecord)
+				.map(model => generativeModelCompletionItem(model, property))
+				.filter((item): item is { value: string; label: string } => item !== undefined);
+			return items;
+		} catch (error) {
+			this._logService.warn(`[cli-ts] Failed to load the ${property} catalog: ${error instanceof Error ? error.message : String(error)}`);
+			// Serve the stale cache rather than an empty picker when a refresh fails.
+			return this._generativeCatalogCache.get(property)?.items ?? [];
+		} finally {
+			this._generativeCatalogProcess.clear();
+		}
 	}
 
 	sendMessage(sessionUri: URI, prompt: string, attachments?: readonly MessageAttachment[], turnId?: string): Promise<void> {
@@ -1076,8 +1264,14 @@ export class CliTsAgent extends Disposable implements IAgent {
 		// on the first frame.
 		this._fireStatus(session, turn, localize('cliTsAgent.status.preparing', "Preparing…"));
 		try {
-			if (!isBackboardProviderAvailable(settings.provider)) {
-				throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
+			if (settings.provider === CHATGPT_SUBSCRIPTION_PROVIDER) {
+				if (!hasUsableChatGptSubscriptionLogin()) {
+					this._fireStatus(session, turn, localize('cliTsAgent.status.waitingForChatGptLogin', "Waiting for ChatGPT sign-in…"));
+				}
+				await this._ensureChatGptSubscriptionLogin(false);
+			} else if (settings.provider === CLAUDE_SUBSCRIPTION_PROVIDER) {
+				this._fireStatus(session, turn, localize('cliTsAgent.status.checkingClaudeLogin', "Checking Claude sign-in…"));
+				await this._requireClaudeSubscriptionLogin();
 			}
 			// Resolve folder/worktree isolation from the latest live config before
 			// starting a process or capturing the session baseline. The checkpoint
@@ -1125,6 +1319,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 				browserUse: settings.browserUse,
 				notify: settings.notifications,
 				imageGeneration: settings.imageGeneration,
+				// Always sent so returning a picker to Off clears a previously
+				// selected generation model on the persistent serve process.
+				imageModel: generativeModelSelection(settings.imageModel),
+				videoGeneration: settings.videoGeneration,
+				videoModel: generativeModelSelection(settings.videoModel),
 				openRouterProvider: settings.openRouterProvider,
 				excludedTools,
 				// Advertise IDE-executed tools (integrated browser, tasks, …).
@@ -1515,9 +1714,6 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	async changeModel(sessionUri: URI, model: ModelSelection): Promise<void> {
-		if (!isBackboardProviderAvailable(providerFromModelId(model.id) ?? '')) {
-			throw new Error(localize('cliTsAgent.subscriptions.unavailable', "Subscriptions are currently unavailable. Use Backboard or an API key."));
-		}
 		const session = this._session(sessionUri);
 		const previousModelId = session.model?.id;
 		session.model = model;
@@ -1638,8 +1834,36 @@ export class CliTsAgent extends Disposable implements IAgent {
 		return true;
 	}
 
-	async setClientCustomizations(_session: URI, _clientId: string, _customizations: ClientPluginCustomization[]): Promise<ISyncedCustomization[]> {
-		return [];
+	/**
+	 * Receives the IDE's customization refs and pushes the MCP servers they
+	 * carry into this session's serve process.
+	 *
+	 * Backboard sessions are configured from the IDE (marketplace installs,
+	 * the seeded Backboard docs server, and the user's `.backboard/mcp.json`),
+	 * so the runtime never reads MCP configuration on its own. The servers are
+	 * stored on the session and re-applied whenever a new serve process starts.
+	 */
+	async setClientCustomizations(session: URI, clientId: string, customizations: ClientPluginCustomization[]): Promise<ISyncedCustomization[]> {
+		const entry = this._sessions.get(AgentSession.id(session));
+		if (!entry || entry.disposed) {
+			return [];
+		}
+		const synced = await this._pluginManager.syncCustomizations(clientId, customizations);
+		entry.mcpServers = await this._extractSyncedMcpServers(synced);
+		// Publish before connecting so the composer lists every server (still
+		// starting) rather than only the ones that came up.
+		this._getOrCreateMcpController(entry).applyAll(this._mcpServerStates(entry));
+		await this._pushMcpServers(entry);
+		return synced;
+	}
+
+	async getSessionCustomizations(session: URI): Promise<readonly Customization[]> {
+		const entry = this._sessions.get(AgentSession.id(session));
+		if (!entry) {
+			return [];
+		}
+		this._getOrCreateMcpController(entry).applyAll(this._mcpServerStates(entry));
+		return this._getOrCreateMcpController(entry).topLevelCustomizations();
 	}
 
 	setClientTools(session: URI, clientId: string | undefined, tools: ToolDefinition[]): void {
@@ -1669,7 +1893,32 @@ export class CliTsAgent extends Disposable implements IAgent {
 		session.proc.notify({ op: 'clientToolResult', id: toolCallId, result: clientToolResultToWire(result) });
 	}
 
-	setCustomizationEnabled(_id: string, _enabled: boolean): void {
+	/**
+	 * Connects or disconnects an MCP server for this session. The composer's
+	 * server list dispatches this per session customization; disabling marks
+	 * the server as `disabled` in the pushed set (the runtime closes the
+	 * connection but keeps the configuration), enabling forces a reconnect.
+	 */
+	setCustomizationEnabled(id: string, enabled: boolean): void {
+		for (const session of this._sessions.values()) {
+			const controller = session.mcpController;
+			const customization = controller?.topLevelCustomizations().find(candidate => candidate.id === id);
+			if (!customization || !session.mcpServers || !Object.hasOwn(session.mcpServers, customization.name)) {
+				continue;
+			}
+			const disabled = session.mcpDisabled ??= new Set<string>();
+			if (enabled) {
+				disabled.delete(customization.name);
+			} else {
+				disabled.add(customization.name);
+			}
+			this._getOrCreateMcpController(session).applyOne({
+				name: customization.name,
+				state: enabled ? { kind: McpServerStatus.Starting } : { kind: McpServerStatus.Stopped },
+			});
+			void this._pushMcpServers(session, enabled ? [customization.name] : []);
+			return;
+		}
 	}
 
 	async shutdown(): Promise<void> {
@@ -1716,6 +1965,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 		session.fileEdits?.dbRef.dispose();
 		session.fileEdits = undefined;
 		session.pendingInputs?.clear();
+		session.mcpController?.dispose();
+		session.mcpController = undefined;
+		session.mcpRuntimeStates = undefined;
 	}
 
 	// ---- session plumbing ---------------------------------------------------
@@ -2065,9 +2317,122 @@ export class CliTsAgent extends Disposable implements IAgent {
 			onExit: () => {
 				session.pendingInputs.clear();
 			},
+			// A new process starts from disk only; re-push the IDE-owned MCP
+			// server set as soon as it can read control lines.
+			onReady: () => {
+				void this._pushMcpServers(session);
+			},
 		});
 		session.proc = proc;
 		return proc;
+	}
+
+	// ---- MCP servers pushed by the IDE -------------------------------------
+
+	private _getOrCreateMcpController(session: CliTsSession): McpCustomizationController {
+		if (!session.mcpController) {
+			session.mcpController = new McpCustomizationController({
+				providerId: this.id,
+				sessionId: session.sessionId,
+				resolveChildId: () => undefined,
+				emit: action => this._fire(session.sessionUri, action),
+				isServerEnabled: name => session.mcpDisabled?.has(name) !== true,
+			});
+		}
+		return session.mcpController;
+	}
+
+	/** Current published state for every IDE-owned server on the session. */
+	private _mcpServerStates(session: CliTsSession): { name: string; state: McpServerState }[] {
+		return Object.keys(session.mcpServers ?? {}).map(name => ({
+			name,
+			state: session.mcpDisabled?.has(name)
+				? { kind: McpServerStatus.Stopped } as McpServerState
+				: session.mcpRuntimeStates?.get(name) ?? { kind: McpServerStatus.Starting },
+		}));
+	}
+
+	/**
+	 * Pushes the session's IDE-owned MCP servers to the serve process. No-op
+	 * while no process is running: the set is re-pushed on `serve:ready`.
+	 * Pushes are serialized per session so overlapping syncs cannot apply a
+	 * stale set after a newer one.
+	 */
+	private async _pushMcpServers(session: CliTsSession, forceNames: readonly string[] = []): Promise<void> {
+		const previous = session.mcpPush ?? Promise.resolve();
+		const next = previous.catch(() => undefined).then(async () => {
+			const proc = session.proc;
+			if (!proc?.isRunning || session.disposed) {
+				return;
+			}
+			const servers: Record<string, CliTsMcpServerEntry> = {};
+			for (const [name, entry] of Object.entries(session.mcpServers ?? {})) {
+				servers[name] = session.mcpDisabled?.has(name) ? { ...entry, disabled: true } : entry;
+			}
+			try {
+				const record = await proc.request({
+					op: 'setMcpServers',
+					requestId: proc.nextRequestId(),
+					servers,
+					...(forceNames.length > 0 ? { force: [...forceNames] } : {}),
+				});
+				const payload = record.payload as CliTsMcpListPayload | undefined;
+				this._applyMcpStatuses(session, payload?.servers ?? []);
+			} catch (error) {
+				this._logService.warn(`[cli-ts] Failed to push MCP servers to session ${session.sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+				// Surface the failure in the composer instead of leaving the
+				// servers stuck in "starting".
+				this._applyMcpStatuses(session, Object.keys(session.mcpServers ?? {}).map(name => ({
+					name,
+					status: 'error' as const,
+					message: error instanceof Error ? error.message : String(error),
+				})));
+			}
+		});
+		session.mcpPush = next;
+		await next;
+	}
+
+	/** Publishes the runtime's server states as session customizations. */
+	private _applyMcpStatuses(session: CliTsSession, statuses: readonly CliTsMcpServerStatus[]): void {
+		if (statuses.length === 0) {
+			return;
+		}
+		const controller = this._getOrCreateMcpController(session);
+		const states = session.mcpRuntimeStates ??= new Map<string, McpServerState>();
+		for (const status of statuses) {
+			states.set(status.name, mcpServerStateFromRuntime(status));
+		}
+		for (const [name, state] of states) {
+			if (session.mcpServers && Object.hasOwn(session.mcpServers, name)) {
+				controller.applyOne({ name, state });
+			}
+		}
+	}
+
+	/**
+	 * Reads the MCP servers out of the plugin directories the client synced,
+	 * i.e. the servers the IDE offers this session.
+	 */
+	private async _extractSyncedMcpServers(synced: readonly ISyncedCustomization[]): Promise<Record<string, CliTsMcpServerEntry>> {
+		const servers: Record<string, CliTsMcpServerEntry> = {};
+		for (const item of synced) {
+			if (!item.pluginDir) {
+				continue;
+			}
+			try {
+				const parsed = await parsePlugin(item.pluginDir, this._fileService, undefined, os.homedir());
+				for (const server of parsed.mcpServers) {
+					const entry = mcpEntryFromConfiguration(server.configuration);
+					if (entry) {
+						servers[server.name] = entry;
+					}
+				}
+			} catch (error) {
+				this._logService.warn(`[cli-ts] Failed to read MCP servers from synced customization '${item.pluginDir.toString()}': ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
+		return servers;
 	}
 
 	private async _requestWorkerLifecycle(session: CliTsSession, op: 'archiveWorkers' | 'unarchiveWorkers' | 'deleteWorkers'): Promise<void> {
@@ -2111,7 +2476,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 	private async _refreshModelCatalog(): Promise<void> {
 		await this._refreshClaudeSubscriptionConnectionState();
-		this._models.set(withChatGptSubscriptionConnectionState(this._models.get(), false), undefined);
+		this._models.set(withChatGptSubscriptionConnectionState(this._models.get(), hasUsableChatGptSubscriptionLogin()), undefined);
 		// A short-lived catalog process reads current credentials and avoids touching
 		// the provider routers or processes owned by running conversations.
 		const proc = new CliTsServeProcess(this._logService, { onEvent: () => { } });
@@ -2149,10 +2514,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const models = (Array.isArray(payload?.models) ? payload.models : []).filter(isBridgeModel);
 		if (models.length) {
 			// The Backboard API is authoritative for catalog providers. Only the
-			// Release filtering applies to both live and bundled catalog entries.
+			// Locally-authenticated subscription routes are supplemented.
 			const infos = withSubscriptionConnectionStates(
 				backboardModelInfos(models, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS),
-				false,
+				hasUsableChatGptSubscriptionLogin(),
 				this._claudeSubscriptionConnected,
 			);
 			this._models.set(infos.length ? infos : [fallbackModel()], undefined);
@@ -3097,6 +3462,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 				}
 				const questions: ChatInputQuestion[] = specs.map((spec, index) => {
 					const id = `answer-${index}`;
+					const videoApproval = spec.header === 'Edit Video'
+						|| spec.header === 'Duration'
+						|| spec.header === 'Quality'
+						|| spec.header === 'Native Audio';
 					return spec.options.length
 						? {
 							id,
@@ -3105,7 +3474,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 							message: spec.question,
 							required: true,
 							options: spec.options.map(option => ({ id: option, label: option })),
-							allowFreeformInput: true,
+							allowFreeformInput: !videoApproval,
 						}
 						: {
 							id,
@@ -4289,6 +4658,7 @@ const CLI_TS_BACKBOARD_TOOL_KINDS = new Set<CliTsBackboardToolKind>([
 	'browser',
 	'findSkill',
 	'findMcp',
+	'generateVideo',
 ]);
 
 function cliTsToolUiState(value: unknown): CliTsToolUiState | undefined {

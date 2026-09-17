@@ -92,6 +92,9 @@ export class ListMcpServerCommand extends Action2 {
 					ContextKeyExpr.or(
 						ContextKeyExpr.and(ContextKeyExpr.equals(`config.${mcpAutoStartConfig}`, McpAutoStartValue.Never), McpContextKeys.hasUnknownTools),
 						McpContextKeys.hasServersWithErrors,
+						// Agent-host sessions own their MCP servers; keep the chip
+						// available so they can be connected without leaving the composer.
+						McpContextKeys.hasAgentHostServers,
 					),
 					ChatContextKeys.chatModeKind.isEqualTo(ChatModeKind.Agent),
 					ChatContextKeys.lockedToCodingAgent.negate(),
