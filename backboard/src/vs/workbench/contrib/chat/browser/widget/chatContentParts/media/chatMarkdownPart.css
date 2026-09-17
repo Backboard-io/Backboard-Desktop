@@ -60,6 +60,32 @@
 	word-break: break-word;
 }
 
+/*
+ * Soft glow marking the streaming frontier of a long plaintext response.
+ * Zero width and inline, so it adds no layout and cannot change wrapping —
+ * only the box-shadow paints the glow.
+ */
+.chat-streaming-caret {
+	display: inline-block;
+	width: 0;
+	height: 1em;
+	vertical-align: text-bottom;
+	box-shadow: 0 0 6px 1.5px color-mix(in srgb, var(--vscode-focusBorder, #4daafc) 55%, transparent);
+	animation: chatStreamingCaretPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes chatStreamingCaretPulse {
+	0%, 100% { opacity: 0.35; }
+	50% { opacity: 0.85; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.chat-streaming-caret {
+		animation: none;
+		opacity: 0.6;
+	}
+}
+
 .chat-codeblock-deferred {
 	contain: content;
 	min-height: 72px;

@@ -724,6 +724,7 @@ suite('ChatMarkdownContentPart', () => {
 
 		assert.ok(part.domNode.querySelector('.chat-markdown-streaming-plaintext'));
 		assert.strictEqual(part.domNode.textContent, markdown, 'existing long text should be visible on the mounting frame');
+		assert.ok(part.domNode.querySelector('.chat-markdown-streaming-plaintext .chat-streaming-caret'), 'the streaming frontier should carry a glow marker');
 
 		(context.element as { isComplete: boolean }).isComplete = true;
 		part.updateStreamRate(100, true);

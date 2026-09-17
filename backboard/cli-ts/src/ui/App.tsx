@@ -61,6 +61,7 @@ import {
 	type StartupUpdateInfo,
 } from "../core/update/startupNotice.ts";
 import { checkForCliUpdate } from "../core/update/updateCheck.ts";
+import type { RenderTranscriptItem } from "../state/AppState.ts";
 import type { AgentClient } from "../providers/AgentClient.ts";
 import { fetchModels } from "../providers/backboard/models.ts";
 import {
@@ -1692,6 +1693,32 @@ export function App({
 		agent.state.render.generation,
 	);
 	const liveItems = compactLiveTranscriptItems(agent.state.render.liveItems);
+	// The un-flushed tail of each streaming assistant message (text that has
+	// not yet crossed a newline flush boundary in the store) is the part that
+	// should visibly "type". Render it as a live streaming chunk so every
+	// paced delta repaints just this item; the id matches assistantLiveId so
+	// finalize/discard cleanup in the store removes it automatically.
+	const liveAssistantChunks = useMemo(
+		() =>
+			agent.state.render.assistantStreams
+				.filter((stream) => stream.pendingText.length > 0)
+				.map(
+					(stream): RenderTranscriptItem => ({
+						kind: "assistant_chunk",
+						id: `${stream.messageId}:live`,
+						turnId: stream.turnId,
+						text: stream.pendingText,
+						showHeader: stream.showNextHeader,
+					}),
+				),
+		[agent.state.render.assistantStreams],
+	);
+	// Identity-stable input for the memoized MessageList: rebuilt only when one
+	// of the two slices actually changes, not on every App render.
+	const messageListItems = useMemo(
+		() => [...transcriptLayout.responsiveItems, ...liveAssistantChunks, ...liveItems],
+		[transcriptLayout.responsiveItems, liveAssistantChunks, liveItems],
+	);
 
 	if (resize.isResizing) {
 		return <Box />;
@@ -1711,9 +1738,7 @@ export function App({
 						}
 						banner={showBanner ? banner : null}
 					/>
-					<MessageList
-						items={[...transcriptLayout.responsiveItems, ...liveItems]}
-					/>
+					<MessageList items={messageListItems} />
 					<TodoPanel todos={agent.state.todos} display={todoPanelDisplay} />
 
 					{running && !agent.state.pendingAsk ? (

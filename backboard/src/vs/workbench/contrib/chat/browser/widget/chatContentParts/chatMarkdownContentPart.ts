@@ -431,6 +431,9 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 				const plaintext = $('div.chat-markdown-streaming-plaintext');
 				streamingPlaintextNode = this.domNode.ownerDocument.createTextNode('');
 				plaintext.appendChild(streamingPlaintextNode);
+				// Soft glow marking the streaming frontier. It is zero-width and
+				// follows the text node, so it never affects wrapping or line height.
+				plaintext.appendChild($('span.chat-streaming-caret'));
 				this.domNode.appendChild(plaintext);
 				this._usingStreamingPlaintext = true;
 			}

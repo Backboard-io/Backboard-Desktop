@@ -558,14 +558,26 @@ function appendAssistantDelta(
 		stream,
 		flushedStream,
 	);
+	const liveId = assistantLiveId(flushedStream.messageId);
+	const hasLivePlaceholder = state.render.liveItems.some(
+		(item) => item.id === liveId,
+	);
+	// Delta-only frames (nothing crossed a flush boundary) must keep the same
+	// array references: rebuilding them here re-renders the whole transcript
+	// region and defeats the memo boundaries downstream for zero visual change.
+	const staticItems =
+		chunks.length > 0
+			? [...state.render.staticItems, ...chunks]
+			: state.render.staticItems;
+	const liveItems = hasLivePlaceholder
+		? state.render.liveItems.filter((item) => item.id !== liveId)
+		: state.render.liveItems;
 	return {
 		...state,
 		render: {
 			...state.render,
-			staticItems: [...state.render.staticItems, ...chunks],
-			liveItems: state.render.liveItems.filter(
-				(item) => item.id !== assistantLiveId(flushedStream.messageId),
-			),
+			staticItems,
+			liveItems,
 			assistantStreams: streams,
 		},
 	};
