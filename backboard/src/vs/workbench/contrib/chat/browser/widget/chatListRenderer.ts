@@ -196,9 +196,12 @@ function isBackboardCursorTranscript(container: HTMLElement): boolean {
 }
 
 export function formatBackboardWorkTimer(elapsedMs: number, complete: boolean): string {
+	if (complete) {
+		return localize('chat.worked', "Worked");
+	}
 	const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
 	const duration = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-	return complete ? localize('chat.workedFor', "Worked for {0}", duration) : localize('chat.workingFor', "Working for {0}", duration);
+	return localize('chat.workingFor', "Working for {0}", duration);
 }
 
 export function isBackboardWorkerWait(content: IChatRendererContent): boolean {
