@@ -10,7 +10,7 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import { raceTimeout } from '../../../../base/common/async.js';
 import { Emitter } from '../../../../base/common/event.js';
-import { Disposable, MutableDisposable, type IReference } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, MutableDisposable, type IReference } from '../../../../base/common/lifecycle.js';
 import { type IObservable, observableValue } from '../../../../base/common/observable.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
@@ -43,6 +43,7 @@ const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
 import { type CliTsCredentialSnapshot, CliTsServeProcess, runCliTsCommand } from './cliTsProcess.js';
 import type { CliTsRecord, CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsMcpListPayload, CliTsMcpServerEntry, CliTsMcpServerStatus, CliTsPermissionMode, CliTsTurnStatus, CliTsWorkerIntegrationChange, CliTsWorkerIntegrationSnapshot, CliTsWorkerState } from './cliTsProtocol.js';
+import { GenerativeModelCatalog, type GenerativeModelItem, type GenerativeModelProperty } from './generativeModelCatalog.js';
 
 /** Formats a selected generative model for the serve control, or `off`. */
 function generativeModelSelection(model: { provider: string; name: string } | undefined): string {
@@ -676,11 +677,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 	private _modelsRefreshed = false;
 	private _modelRefreshPromise: Promise<void> | undefined;
 	private readonly _modelRefreshProcess = this._register(new MutableDisposable<CliTsServeProcess>());
-	/** Short-lived catalog process for the composer's image/video model pickers. */
-	private readonly _generativeCatalogProcess = this._register(new MutableDisposable<CliTsServeProcess>());
-	/** Cached image/video catalogs so the composer pickers open instantly. Keyed by config property. */
-	private readonly _generativeCatalogCache = new Map<string, { items: { value: string; label: string }[]; fetchedAt: number }>();
-	private readonly _generativeCatalogPending = new Map<string, Promise<{ value: string; label: string }[]>>();
+	/** Each concurrent catalog fetch owns its process until that request completes. */
+	private readonly _generativeCatalogProcesses = this._register(new DisposableStore());
+	private readonly _generativeCatalog: GenerativeModelCatalog;
 	private _rgDir: Promise<string | undefined> | undefined;
 	private _chatGptSubscriptionLoginPromise: Promise<void> | undefined;
 	private _claudeSubscriptionEnablePromise: Promise<void> | undefined;
@@ -717,6 +716,12 @@ export class CliTsAgent extends Disposable implements IAgent {
 	) {
 		super();
 		this._hydrateModelsFromCache();
+		this._generativeCatalog = this._register(new GenerativeModelCatalog(
+			path.join(path.dirname(this._modelsCachePath()), 'generative-models-cache.json'),
+			() => this._currentApiUrl(),
+			property => this._fetchGenerativeCatalog(property),
+			this._logService,
+		));
 		void this._refreshClaudeSubscriptionConnectionState();
 	}
 
@@ -1311,7 +1316,22 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 	async resolveSessionConfig(params: IAgentResolveSessionConfigParams): Promise<ResolveSessionConfigResult> {
 		const repository = params.workingDirectory ? await this._getGitInfo(params.workingDirectory) : undefined;
-		return resolveBackboardSessionConfig(params.config, repository);
+		const result = resolveBackboardSessionConfig(params.config, repository);
+		for (const property of [BACKBOARD_IMAGE_MODEL_CONFIG_KEY, BACKBOARD_VIDEO_MODEL_CONFIG_KEY] as const) {
+			const cached = this._generativeCatalog.peek(property);
+			if (cached) {
+				const schema = result.schema.properties[property];
+				result.schema.properties[property] = {
+					...schema,
+					enum: [BACKBOARD_GENERATIVE_MEDIA_OFF, ...cached.map(item => item.value)],
+					enumLabels: [localize('cliTsAgent.generativeMedia.off', "Off"), ...cached.map(item => item.label)],
+					enumDescriptions: undefined,
+				};
+			}
+			// Warm both catalogs without making composer configuration wait for the network.
+			void this._generativeCatalog.get(property).catch(() => { /* A picker open can retry and display the error. */ });
+		}
+		return result;
 	}
 
 	private async _getGitInfo(workingDirectory: URI): Promise<{ currentBranch: string; defaultBranch: string } | undefined> {
@@ -1338,63 +1358,45 @@ export class CliTsAgent extends Disposable implements IAgent {
 	 * Live image/video catalog for the composer pickers. Dynamic completions
 	 * replace the static enum, so the Off entry is supplied here.
 	 */
-	private async _generativeModelCompletions(property: string, query: string | undefined, refresh?: boolean): Promise<SessionConfigCompletionsResult> {
+	private async _generativeModelCompletions(property: GenerativeModelProperty, query: string | undefined, refresh?: boolean): Promise<SessionConfigCompletionsResult> {
 		const offItem = { value: BACKBOARD_GENERATIVE_MEDIA_OFF, label: localize('cliTsAgent.generativeMedia.off', "Off") };
-		const items = await this._generativeCatalogItems(property, refresh);
+		const items = await this._generativeCatalog.get(property, refresh);
 		const filter = query?.trim().toLowerCase();
 		const filtered = filter
 			? items.filter(item => item.value.toLowerCase().includes(filter) || item.label.toLowerCase().includes(filter))
 			: items;
-		return { items: [offItem, ...filtered.slice(0, 200)] };
+		// The composer filters locally, so its unfiltered snapshot must match the cached schema.
+		return { items: [offItem, ...(filter ? filtered.slice(0, 200) : filtered)] };
 	}
 
-	/**
-	 * Full (unfiltered) catalog items for one property, cached in memory so
-	 * reopening a picker is instant. Entries are reused for 10 minutes and
-	 * refetched eagerly when the picker's refresh button is used. Failed
-	 * fetches are not cached, so a later open retries.
-	 */
-	private _generativeCatalogItems(property: string, refresh?: boolean): Promise<{ value: string; label: string }[]> {
-		const cached = refresh ? undefined : this._generativeCatalogCache.get(property);
-		if (cached && Date.now() - cached.fetchedAt < 10 * 60 * 1000) {
-			return Promise.resolve(cached.items);
-		}
-		const pending = this._generativeCatalogPending.get(property);
-		if (pending) {
-			return pending;
-		}
-		const fetch = this._fetchGenerativeCatalog(property)
-			.then(items => {
-				this._generativeCatalogCache.set(property, { items, fetchedAt: Date.now() });
-				return items;
-			})
-			.finally(() => {
-				this._generativeCatalogPending.delete(property);
-			});
-		this._generativeCatalogPending.set(property, fetch);
-		return fetch;
-	}
-
-	private async _fetchGenerativeCatalog(property: string): Promise<{ value: string; label: string }[]> {
+	private async _fetchGenerativeCatalog(property: GenerativeModelProperty): Promise<readonly GenerativeModelItem[]> {
 		// A short-lived catalog process reads current credentials and avoids
 		// touching the provider routers owned by running conversations.
-		const proc = new CliTsServeProcess(this._logService, { onEvent: () => { } });
-		this._generativeCatalogProcess.value = proc;
+		const proc = this._generativeCatalogProcesses.add(new CliTsServeProcess(this._logService, { onEvent: () => { } }));
 		try {
 			const op = property === BACKBOARD_IMAGE_MODEL_CONFIG_KEY ? 'listImageModels' : 'listVideoModels';
 			const record = await raceTimeout(proc.request({ op, requestId: proc.nextRequestId() }), 30_000);
-			const payload = record?.payload as { models?: unknown[] } | undefined;
-			const items = (Array.isArray(payload?.models) ? payload.models : [])
+			if (!record) {
+				throw new Error('Model catalog request timed out.');
+			}
+			const payload = record.payload;
+			const expectedType = property === BACKBOARD_IMAGE_MODEL_CONFIG_KEY ? 'serve:imageModels' : 'serve:videoModels';
+			if (record.type !== expectedType || !isPlainRecord(payload) || !Array.isArray(payload.models)) {
+				throw new Error('Invalid model catalog response.');
+			}
+			const items = payload.models
 				.filter(isPlainRecord)
 				.map(model => generativeModelCompletionItem(model, property))
 				.filter((item): item is { value: string; label: string } => item !== undefined);
+			if (payload.models.length > 0 && items.length === 0) {
+				throw new Error('Invalid model catalog entries.');
+			}
 			return items;
 		} catch (error) {
 			this._logService.warn(`[cli-ts] Failed to load the ${property} catalog: ${error instanceof Error ? error.message : String(error)}`);
-			// Serve the stale cache rather than an empty picker when a refresh fails.
-			return this._generativeCatalogCache.get(property)?.items ?? [];
+			throw error;
 		} finally {
-			this._generativeCatalogProcess.clear();
+			this._generativeCatalogProcesses.delete(proc);
 		}
 	}
 

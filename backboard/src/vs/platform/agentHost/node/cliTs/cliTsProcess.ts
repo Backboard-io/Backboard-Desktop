@@ -148,13 +148,25 @@ function isCliTsExecutableCompatible(path: string): boolean {
  * Resolves how to start cli-ts, shared by persistent serve processes and
  * one-shot account commands such as ChatGPT subscription login.
  */
-export function resolveCliTsInvocation(logService: ILogService): CliTsInvocation {
+export function resolveCliTsInvocation(logService: ILogService, appRoot = dirname(FileAccess.asFileUri('').fsPath)): CliTsInvocation {
 	const envPath = process.env['BACKBOARD_CLI_TS_PATH']?.trim() || process.env['VSCODE_BACKBOARD_CLI_TS_PATH']?.trim();
 	if (envPath) {
 		return { command: envPath, args: [] };
 	}
 	const executable = process.platform === 'win32' ? 'backboard-cli-ts.exe' : 'backboard-cli-ts';
-	const appRoot = dirname(FileAccess.asFileUri('').fsPath);
+	const devEntrypoint = join(appRoot, 'cli-ts', 'src', 'entrypoints', 'cli.tsx');
+	const resolveDevInvocation = (): CliTsInvocation => {
+		const bunPath = resolveBunCommand();
+		if (bunPath) {
+			return { command: bunPath, args: ['run', devEntrypoint] };
+		}
+		throw new Error(`cli-ts dev entrypoint exists at ${devEntrypoint}, but Bun is not available. Install Bun, set BACKBOARD_BUN_PATH to a Bun executable, or set BACKBOARD_CLI_TS_PATH to a freshly built runtime.`);
+	};
+	// A checkout may contain yesterday's release binary. Dev windows must run
+	// today's source so the workbench and runtime speak the same control protocol.
+	if (process.env['VSCODE_DEV'] && fs.existsSync(devEntrypoint)) {
+		return resolveDevInvocation();
+	}
 	const candidates = [
 		join(appRoot, 'extensions', 'backboard', 'bin', executable),
 		join(process.cwd(), 'extensions', 'backboard', 'bin', executable),
@@ -167,14 +179,8 @@ export function resolveCliTsInvocation(logService: ILogService): CliTsInvocation
 			logService.warn(`[cli-ts] skipping packaged binary for the wrong CPU architecture: ${candidate} (host=${process.platform}-${process.arch})`);
 		}
 	}
-	const devEntrypoint = join(appRoot, 'cli-ts', 'src', 'entrypoints', 'cli.tsx');
 	if (fs.existsSync(devEntrypoint)) {
-		const bunPath = resolveBunCommand();
-		if (bunPath) {
-			return { command: bunPath, args: ['run', devEntrypoint] };
-		}
-
-		throw new Error(`cli-ts dev entrypoint exists at ${devEntrypoint}, but Bun is not available. Install Bun, set BACKBOARD_BUN_PATH to a Bun executable, or build the packaged cli-ts binary with: npm --prefix extensions/backboard run package-cli-ts`);
+		return resolveDevInvocation();
 	}
 	throw new Error(`cli-ts binary not found. Build it with: npm --prefix extensions/backboard run package-cli-ts (looked at ${candidates.join(', ')})`);
 }

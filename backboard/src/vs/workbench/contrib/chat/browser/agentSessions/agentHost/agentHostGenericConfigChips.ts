@@ -41,12 +41,13 @@ export interface IAgentHostGenericConfigOption {
 	/** Value applied when its inline composer token is removed. */
 	readonly deactivationValue?: string;
 	show(anchor?: HTMLElement): void;
-	/** Static enum metadata for slider-style editors; `undefined` for non-enum properties. */
+	/** Enum seed or last successful media catalog, with the current session selection. */
 	getEnumInfo(): { values: string[]; labels: string[]; descriptions: (string | undefined)[]; current: string | undefined } | undefined;
 	/**
 	 * Live values for `enumDynamic` properties (the image/video model
 	 * catalogs), or `undefined` when the property has a static enum. Resolves
-	 * to the seed enum if the catalog request fails.
+	 * to the seed enum if a non-media request fails. Image/video catalog failures
+	 * reject so the composer can keep cached rows and offer a retry.
 	 */
 	getDynamicEnumInfo?(refresh?: boolean): Promise<{ values: string[]; labels: string[]; descriptions: (string | undefined)[]; current: string | undefined }> | undefined;
 	/** Current value as the host sees it, for confirming a just-applied selection. */

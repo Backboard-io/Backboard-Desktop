@@ -9,7 +9,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { NullLogService } from '../../../log/common/log.js';
-import { CliTsServeProcess, cliTsInvocationFingerprint, detectCliTsExecutableArchitecture } from '../../node/cliTs/cliTsProcess.js';
+import { CliTsServeProcess, cliTsInvocationFingerprint, detectCliTsExecutableArchitecture, resolveCliTsInvocation } from '../../node/cliTs/cliTsProcess.js';
 
 interface IStubRuntimeOptions {
 	readonly omitReady?: boolean;
@@ -89,6 +89,41 @@ async function until(condition: () => boolean, timeoutMs = 5000): Promise<void> 
 suite('cli-ts process', () => {
 
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('dev windows prefer source over a packaged runtime, while releases and explicit overrides retain their runtime', () => {
+		const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-ts-resolution-'));
+		const entrypoint = path.join(directory, 'cli-ts', 'src', 'entrypoints', 'cli.tsx');
+		const binary = path.join(directory, 'extensions', 'backboard', 'bin', process.platform === 'win32' ? 'backboard-cli-ts.exe' : 'backboard-cli-ts');
+		const names = ['VSCODE_DEV', 'BACKBOARD_CLI_TS_PATH', 'VSCODE_BACKBOARD_CLI_TS_PATH', 'BACKBOARD_BUN_PATH'] as const;
+		const previous = new Map(names.map(name => [name, process.env[name]] as const));
+		try {
+			fs.mkdirSync(path.dirname(entrypoint), { recursive: true });
+			fs.writeFileSync(entrypoint, '');
+			fs.mkdirSync(path.dirname(binary), { recursive: true });
+			// A native executable of the host architecture; clone it when the filesystem supports that.
+			fs.copyFileSync(process.execPath, binary, fs.constants.COPYFILE_FICLONE);
+			delete process.env['BACKBOARD_CLI_TS_PATH'];
+			delete process.env['VSCODE_BACKBOARD_CLI_TS_PATH'];
+			process.env['BACKBOARD_BUN_PATH'] = process.execPath;
+			process.env['VSCODE_DEV'] = '1';
+			const development = resolveCliTsInvocation(new NullLogService(), directory);
+			delete process.env['VSCODE_DEV'];
+			const release = resolveCliTsInvocation(new NullLogService(), directory);
+			process.env['VSCODE_DEV'] = '1';
+			process.env['BACKBOARD_CLI_TS_PATH'] = binary;
+			const override = resolveCliTsInvocation(new NullLogService(), directory);
+			assert.deepStrictEqual({ development, release, override }, {
+				development: { command: process.execPath, args: ['run', entrypoint] },
+				release: { command: binary, args: [] },
+				override: { command: binary, args: [] },
+			});
+		} finally {
+			for (const [name, value] of previous) {
+				if (value === undefined) { delete process.env[name]; } else { process.env[name] = value; }
+			}
+			fs.rmSync(directory, { recursive: true, force: true });
+		}
+	});
 
 	test('hands over the credential snapshot after ready and holds requests until it is acknowledged', async function () {
 		if (process.platform === 'win32') {

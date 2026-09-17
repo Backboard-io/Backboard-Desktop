@@ -316,6 +316,8 @@ export class AgentHostChatInputPicker extends Disposable {
 	private _container: HTMLElement | undefined;
 	private _trigger: HTMLElement | undefined;
 	private _isDisposed = false;
+	private _modelCatalogSnapshot: { readonly backendSession: string; readonly items: readonly IConfigPickerItem[] } | undefined;
+	private _modelCatalogRequest = 0;
 
 	private _initialResolved: { readonly sessionResource: URI; readonly result: ResolveSessionConfigResult } | undefined;
 	private readonly _initialResolveCts = this._register(new MutableDisposable<CancellationTokenSource>());
@@ -769,12 +771,21 @@ export class AgentHostChatInputPicker extends Disposable {
 	}
 
 	/**
-	 * Static enum metadata for the bound property, for custom (non-list)
-	 * editors like the reasoning slider. `undefined` for non-enum properties
-	 * or before the schema has resolved.
+	 * Latest media catalog or static enum seed for custom editors. Selection
+	 * is always read from the session, never from a cached catalog response.
+	 * `undefined` for non-enum properties or before the schema has resolved.
 	 */
 	getEnumInfo(): { values: string[]; labels: string[]; descriptions: (string | undefined)[]; current: string | undefined } | undefined {
 		const ctx = this._readContext();
+		if (ctx && this._modelCatalogSnapshot?.backendSession === ctx.backendSession.toString()) {
+			const items = this._modelCatalogSnapshot.items;
+			return {
+				values: items.map(item => item.value),
+				labels: items.map(item => item.label),
+				descriptions: items.map(item => item.description),
+				current: typeof ctx.value === 'string' ? ctx.value : undefined,
+			};
+		}
 		if (!ctx || !Array.isArray(ctx.schema.enum) || ctx.schema.enum.length === 0) {
 			return undefined;
 		}
@@ -797,12 +808,21 @@ export class AgentHostChatInputPicker extends Disposable {
 		if (!ctx || !ctx.schema.enumDynamic) {
 			return undefined;
 		}
-		return this._getItems(ctx.schema, undefined, refresh).then(items => ({
-			values: items.map(item => item.value),
-			labels: items.map(item => item.label),
-			descriptions: items.map(item => item.description),
-			current: typeof ctx.value === 'string' ? ctx.value : undefined,
-		}));
+		const isMediaCatalog = ctx.backendSession.scheme === 'backboard' && (this._property === 'imageModel' || this._property === 'videoModel');
+		const request = ++this._modelCatalogRequest;
+		return this._getItems(ctx.schema, undefined, refresh, isMediaCatalog).then(items => {
+			const currentContext = this._readContext();
+			if (isMediaCatalog && request === this._modelCatalogRequest && !this._isDisposed
+				&& currentContext?.backendSession.toString() === ctx.backendSession.toString()) {
+				this._modelCatalogSnapshot = { backendSession: ctx.backendSession.toString(), items };
+			}
+			return {
+				values: items.map(item => item.value),
+				labels: items.map(item => item.label),
+				descriptions: items.map(item => item.description),
+				current: typeof currentContext?.value === 'string' ? currentContext.value : undefined,
+			};
+		});
 	}
 
 	/** Applies a value directly, bypassing the list popup (used by custom editors like the reasoning slider). */
@@ -837,7 +857,7 @@ export class AgentHostChatInputPicker extends Disposable {
 		return ctx.value !== normalizeConfigValueForSchema(ctx.schema, ctx.schema.default);
 	}
 
-	private async _getItems(schema: SessionConfigPropertySchema, query?: string, refresh?: boolean): Promise<readonly IConfigPickerItem[]> {
+	private async _getItems(schema: SessionConfigPropertySchema, query?: string, refresh?: boolean, propagateError = false): Promise<readonly IConfigPickerItem[]> {
 		if (schema.type === 'boolean') {
 			return [
 				{ value: 'true', label: localize('agentHostChatInputPicker.boolean.true', "On") },
@@ -858,7 +878,10 @@ export class AgentHostChatInputPicker extends Disposable {
 					config: this._readCurrentValues(),
 				});
 				return result.items.map(item => this._fromCompletion(item));
-			} catch {
+			} catch (error) {
+				if (propagateError) {
+					throw error;
+				}
 				// Fall through to the static enum below.
 			}
 		}

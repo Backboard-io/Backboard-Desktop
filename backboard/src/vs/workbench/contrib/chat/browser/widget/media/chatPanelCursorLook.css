@@ -2342,7 +2342,7 @@
 	gap: 2px;
 	flex-shrink: 0;
 }
-.monaco-workbench .backboard-composer-flow-header button.backboard-composer-model-close {
+.monaco-workbench .backboard-composer-flow-header button.backboard-composer-model-refresh {
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -2356,11 +2356,11 @@
 	cursor: pointer;
 	flex-shrink: 0;
 }
-.monaco-workbench .backboard-composer-flow-header button.backboard-composer-model-close:hover {
+.monaco-workbench .backboard-composer-flow-header button.backboard-composer-model-refresh:hover:not(:disabled) {
 	background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
 	color: var(--vscode-foreground);
 }
-.monaco-workbench .backboard-composer-flow-header button.backboard-composer-model-close.disabled {
+.monaco-workbench .backboard-composer-flow-header button.backboard-composer-model-refresh:disabled {
 	opacity: 0.6;
 	pointer-events: none;
 }
