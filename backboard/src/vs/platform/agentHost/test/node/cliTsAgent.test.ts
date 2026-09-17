@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createHash } from 'crypto';
+import { DeferredPromise } from '../../../../base/common/async.js';
 import type { CliTsAgentEvent, CliTsWorkerState, CliTsWorkerIntegrationChange } from '../../node/cliTs/cliTsProtocol.js';
 import { URI } from '../../../../base/common/uri.js';
 import { Schemas } from '../../../../base/common/network.js';
@@ -87,6 +88,44 @@ suite('CliTsAgent tool metadata', () => {
 		Reflect.set(agent, '_refreshModelCatalog', async () => { calls++; });
 		await agent.executeCommand('models.refresh');
 		assert.strictEqual(calls, 2);
+	});
+
+	test('media config renders cached catalogs while both background refreshes are pending', async () => {
+		const agent = createAgent();
+		const pending = new DeferredPromise<readonly { value: string; label: string }[]>();
+		const warmed: string[] = [];
+		Reflect.set(agent, '_generativeCatalog', {
+			peek: (property: string) => [{ value: `provider/${property}`, label: property }],
+			get: (property: string) => { warmed.push(property); return pending.p; },
+		});
+		const config = await agent.resolveSessionConfig({ config: { videoModel: 'provider/videoModel' } });
+		assert.deepStrictEqual({
+			images: config.schema.properties.imageModel.enum,
+			videos: config.schema.properties.videoModel.enum,
+			labels: config.schema.properties.videoModel.enumLabels,
+			selected: config.values.videoModel,
+			warmed,
+		}, {
+			images: ['off', 'provider/imageModel'], videos: ['off', 'provider/videoModel'],
+			labels: ['Off', 'videoModel'], selected: 'provider/videoModel', warmed: ['imageModel', 'videoModel'],
+		});
+		await pending.complete([]);
+	});
+
+	test('media completions preserve the full local-filter catalog and propagate refresh errors', async () => {
+		const agent = createAgent();
+		const items = Array.from({ length: 205 }, (_, i) => ({ value: `provider/${i}`, label: `Model ${i}` }));
+		const calls: Array<{ property: string; refresh: boolean | undefined }> = [];
+		Reflect.set(agent, '_generativeCatalog', {
+			get: async (property: string, refresh?: boolean) => {
+				calls.push({ property, refresh });
+				if (refresh) { throw new Error('offline'); }
+				return items;
+			},
+		});
+		assert.deepStrictEqual((await agent.sessionConfigCompletions({ property: 'videoModel' })).items, [{ value: 'off', label: 'Off' }, ...items]);
+		await assert.rejects(agent.sessionConfigCompletions({ property: 'videoModel', refresh: true }), /offline/);
+		assert.deepStrictEqual(calls, [{ property: 'videoModel', refresh: undefined }, { property: 'videoModel', refresh: true }]);
 	});
 
 	test('pushes client-synced MCP servers to the session runtime and publishes them as customizations', async () => {

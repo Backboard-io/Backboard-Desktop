@@ -61,9 +61,10 @@ Logs live in `.build/dev/` (`watch.log`, `app.log`), which is gitignored.
   This opens a system dialog and needs your admin password; it cannot be scripted. It also
   supplies the working `git` and `python3` that node-gyp needs.
 
-- **Bun**, at `~/.bun/bin/bun`. A dev checkout has no packaged `backboard-cli-ts` binary, so
-  the agent host falls back to `bun run cli-ts/src/entrypoints/cli.tsx`
-  ([cliTsProcess.ts](src/vs/platform/agentHost/node/cliTs/cliTsProcess.ts#L261-L268)).
+- **Bun**, at `~/.bun/bin/bun`. Dev windows run `bun run cli-ts/src/entrypoints/cli.tsx`
+  even if an older packaged binary is present, keeping runtime and workbench code in sync
+  ([cliTsProcess.ts](src/vs/platform/agentHost/node/cliTs/cliTsProcess.ts)).
+  An explicit `BACKBOARD_CLI_TS_PATH` override still takes precedence.
   Without it the app launches fine but every agent request fails with
   `BackboardSendFailed`.
 
