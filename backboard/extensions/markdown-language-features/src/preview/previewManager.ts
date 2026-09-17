@@ -321,7 +321,7 @@ export class MarkdownPreviewManager extends Disposable implements vscode.Webview
 	#refreshPreviewWhenDocumentChanges(preview: StaticMarkdownPreview, document: vscode.TextDocument): void {
 		const listener = vscode.workspace.onDidChangeTextDocument(event => {
 			if (event.document.uri.toString() === document.uri.toString()) {
-				preview.refresh();
+				preview.refresh(false);
 			}
 		});
 		preview.onDispose(() => listener.dispose());

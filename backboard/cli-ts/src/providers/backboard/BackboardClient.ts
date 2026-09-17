@@ -41,6 +41,17 @@ export type {
 	RunMessageOptions,
 } from "../AgentClient.ts";
 
+/**
+ * The billing route is a local routing hint for the ClientRouter; the API has
+ * no such field and must never see it.
+ */
+function wireRequest<T extends Pick<SendMessageRequest, "source">>(
+	req: T,
+): Omit<T, "source"> {
+	const { source: _source, ...wire } = req;
+	return wire;
+}
+
 /** JSON-encodes the object-valued request fields the form path expects as strings. */
 function messageFormData(
 	req: SendMessageRequest & { stream: boolean },
@@ -186,7 +197,11 @@ export class BackboardClient implements AgentClient {
 		req: SendMessageRequest,
 		options: RequestOptions = {},
 	): Promise<BackboardResponse> {
-		return this.post<BackboardResponse>("/threads/messages", req, options);
+		return this.post<BackboardResponse>(
+			"/threads/messages",
+			wireRequest(req),
+			options,
+		);
 	}
 
 	async generateVideo(
@@ -216,9 +231,10 @@ export class BackboardClient implements AgentClient {
 		req: SendMessageRequest,
 		options: RunMessageOptions = {},
 	): AsyncIterable<ProviderEvent> {
+		const wire = wireRequest(req);
 		const body = options.attachmentFilePaths?.length
-			? messageFormData({ ...req, stream: true }, options.attachmentFilePaths)
-			: { ...req, stream: true };
+			? messageFormData({ ...wire, stream: true }, options.attachmentFilePaths)
+			: { ...wire, stream: true };
 		yield* this.postStream(
 			"/threads/messages",
 			body,
@@ -231,8 +247,9 @@ export class BackboardClient implements AgentClient {
 		req: SubmitToolOutputsRequest,
 		options: RequestOptions = {},
 	): AsyncIterable<ProviderEvent> {
-		if (req.run_id) {
-			const { run_id: runId, thread_id: threadId, ...body } = req;
+		const wire = wireRequest(req);
+		if (wire.run_id) {
+			const { run_id: runId, thread_id: threadId, ...body } = wire;
 			yield* this.postStream(
 				`/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/submit-tool-outputs?stream=true`,
 				{ ...body, stream: true },
@@ -243,7 +260,7 @@ export class BackboardClient implements AgentClient {
 		}
 		yield* this.postStream(
 			"/threads/tool-outputs",
-			{ ...req, stream: true },
+			{ ...wire, stream: true },
 			options,
 			req.tools?.map((tool) => tool.function.name),
 		);

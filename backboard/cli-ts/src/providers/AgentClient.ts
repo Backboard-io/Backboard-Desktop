@@ -6,6 +6,7 @@ import type {
 	GenerateVideoRequest,
 	GenerateVideoResult,
 	ImageModelsListResponse,
+	ModelSource,
 	ModelsListResponse,
 	ModelThinkingMetadataResponse,
 	ProviderEvent,
@@ -15,6 +16,8 @@ import type {
 } from "./backboard/types.ts";
 
 export interface RequestOptions {
+	/** Explicit billing route for metadata requests made by a captured turn. */
+	source?: ModelSource;
 	signal?: AbortSignal;
 }
 

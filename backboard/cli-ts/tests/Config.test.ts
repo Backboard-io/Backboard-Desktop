@@ -358,6 +358,50 @@ describe("Config", () => {
 		});
 	});
 
+	it("ignores the CLI key file when the host manages provider keys", async () => {
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
+		await setProviderKey("anthropic", "sk-ant-test", homeDir);
+		const original = process.env.BACKBOARD_HOST_MANAGED_KEYS;
+		try {
+			process.env.BACKBOARD_HOST_MANAGED_KEYS = "1";
+			const config = new Config({ env, argv: [], homeDir });
+			expect(config.hostManagedProviderKeys).toBe(true);
+			expect(config.auth.providerKeys).toEqual([]);
+
+			// Host keys replace the file entirely and survive a credential refresh.
+			config.setHostProviderKeys([{ provider: "openai", key: "sk-host" }]);
+			expect(config.auth.providerKeys).toEqual([
+				{ provider: "openai", key: "sk-host" },
+			]);
+			config.refreshAuth();
+			expect(config.auth.providerKeys).toEqual([
+				{ provider: "openai", key: "sk-host" },
+			]);
+			config.setHostProviderKeys([]);
+			expect(config.hasProviderKeys).toBe(false);
+		} finally {
+			setEnv("BACKBOARD_HOST_MANAGED_KEYS", original);
+			await rm(homeDir, { recursive: true, force: true });
+		}
+	});
+
+	it("tracks the explicit billing source of the live model", () => {
+		const config = new Config({ env, argv: [] });
+		expect(config.modelSource).toBeUndefined();
+		config.setModel({ provider: "openai", model: "gpt-5.5" }, "byok");
+		expect(config.modelSource).toBe("byok");
+		// A selection without a route clears it; recovery never inherits a key.
+		config.setModel({ provider: "openai", model: "gpt-5.5" });
+		expect(config.modelSource).toBeUndefined();
+	});
+
+	it("parses the key validation command", () => {
+		const flags = parseFlags(["keys", "validate", "--provider", "openai"]);
+		expect(flags.keysValidate).toBe(true);
+		expect(flags.provider).toBe("openai");
+		expect(parseFlags([]).keysValidate).toBe(false);
+	});
+
 	it("selects the subscription catalog default for a subscription-only install", async () => {
 		const homeDir = await mkdtemp(path.join(os.tmpdir(), "cli-config-"));
 		await saveBackboardConfig(

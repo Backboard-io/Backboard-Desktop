@@ -1,10 +1,11 @@
-import type { WorkerWorkspaceRecord } from "../workspaces/WorkerWorkspaceTypes.ts";
+import type { ModelRoute } from "../../providers/backboard/types.ts";
 import type { AgentTraceStore } from "../agent/AgentTraceStore.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { AskUserQuestionSpec, TodoItem } from "../bus/events.ts";
 import type { CheckpointRecorder } from "../checkpoints/CheckpointStore.ts";
 import type { LspService } from "../lsp/index.ts";
 import type { PermissionContext } from "../permissions/types.ts";
+import type { WorkerWorkspaceRecord } from "../workspaces/WorkerWorkspaceTypes.ts";
 import type {
 	MutationCheckpointBatch,
 	MutationDiagnosticsBatch,
@@ -44,8 +45,12 @@ export interface MutationLockTurn {
  * `askUser` bridge round-trips an interactive question through the UI.
  */
 export interface ToolContext {
+	/** Immutable route inherited from the originating user turn. */
+	modelRoute?: Readonly<ModelRoute>;
 	/** Internal worker-engine sink; never a provider-supplied tool argument. */
-	workerLifecycle?: { onWorkspaceProgress(record: WorkerWorkspaceRecord): void };
+	workerLifecycle?: {
+		onWorkspaceProgress(record: WorkerWorkspaceRecord): void;
+	};
 	sessionId: string;
 	turnId?: string;
 	toolCallId?: string;

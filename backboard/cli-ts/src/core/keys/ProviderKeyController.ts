@@ -91,7 +91,8 @@ export class ProviderKeyController {
 	}
 }
 
-function validationMessage(label: string, err: unknown): string {
+/** The user-facing reason a key failed validation; shared with `keys validate`. */
+export function validationMessage(label: string, err: unknown): string {
 	if (err instanceof ByokError && err.isAuthFailure) {
 		return `${label} rejected that key. Check it was copied in full and is still active.`;
 	}

@@ -113,6 +113,23 @@ describe("Compactor", () => {
 		expect(request?.content).toContain("Fix the failing auth test");
 	});
 
+	it("bills the summary to the route the session is on", async () => {
+		const client = new FakeSummarizer(HANDOFF);
+		const routed = config();
+		routed.setModel({ provider: "openai", model: "gpt-5.5" }, "byok");
+		await new Compactor({
+			client: client as unknown as AgentClient,
+			session: populatedSession(),
+			config: routed,
+		}).compact();
+
+		expect(client.requests[0]?.source).toBe("byok");
+		// Outside host-managed mode the request carries no route at all.
+		const unrouted = new FakeSummarizer(HANDOFF);
+		await compactor(populatedSession(), unrouted).compact();
+		expect("source" in (unrouted.requests[0] ?? {})).toBe(false);
+	});
+
 	it("resets the thread so the next turn starts fresh", async () => {
 		const session = populatedSession();
 		await compactor(session, new FakeSummarizer(HANDOFF)).compact();

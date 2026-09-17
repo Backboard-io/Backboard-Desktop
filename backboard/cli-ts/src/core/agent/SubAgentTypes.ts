@@ -1,11 +1,11 @@
 import type {
 	MemoryMode,
 	MemoryProfile,
-	ModelRef,
 	ThinkingConfig,
 } from "../../config/defaults.ts";
 import type { RuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
+import type { ModelRoute } from "../../providers/backboard/types.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { TurnStatus, UsageInfo } from "../bus/events.ts";
 import type { CheckpointRecorder } from "../checkpoints/CheckpointStore.ts";
@@ -23,12 +23,15 @@ export type SubAgentToolFactory = (opts: {
 
 export interface SubAgentRunnerDeps {
 	client: AgentClient;
-	getModel: () => ModelRef;
+	/** The parent's selection and billing route, captured once per spawn. */
+	getRoute: () => ModelRoute;
 	getOpenRouterProvider?: () => string | undefined;
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
 	getThinking: () => Promise<ThinkingConfig | null | undefined>;
-	getThinkingResolver?: () => Promise<RuntimeThinkingResolver>;
+	getThinkingResolver?: (
+		route?: ModelRoute,
+	) => Promise<RuntimeThinkingResolver>;
 	systemPrompt: string;
 	toolFactory: SubAgentToolFactory;
 	isToolEnabled?: (name: string) => boolean;
@@ -38,6 +41,7 @@ export interface SubAgentRunnerDeps {
 }
 
 export interface SubAgentRunParams {
+	route?: Readonly<ModelRoute>;
 	name?: string;
 	prompt: string;
 	depth: number;

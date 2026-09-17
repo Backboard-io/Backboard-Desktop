@@ -36,6 +36,7 @@ const KEY_ONLY_DEFAULT_MODELS: Readonly<Record<ByokProviderId, ModelRef>> = {
 	anthropic: { provider: "anthropic", model: "claude-opus-5" },
 	openai: DEFAULTS.model,
 	google: { provider: "google", model: "gemini-2.5-flash" },
+	xai: { provider: "xai", model: "grok-4.6" },
 	openrouter: {
 		provider: "openrouter",
 		model: "anthropic/claude-sonnet-4.6",

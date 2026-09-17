@@ -42,6 +42,7 @@ import { IAuthenticationService } from '../../../../workbench/services/authentic
 import { IChatDashboardService } from '../../../browser/chatDashboardService.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
+import { OPEN_API_KEYS_COMMAND_ID } from '../../../../workbench/contrib/chat/browser/byokKeys/byokKeys.js';
 
 // --- Account Menu Items --- //
 const AccountMenu = Menus.AccountMenu;
@@ -139,6 +140,18 @@ MenuRegistry.appendMenuItem(AccountMenu, {
 	when: IsPhoneLayoutContext.negate(),
 	group: '2_settings',
 	order: 1,
+});
+
+// Provider API keys (bring your own OpenAI / Anthropic key)
+MenuRegistry.appendMenuItem(AccountMenu, {
+	command: {
+		id: OPEN_API_KEYS_COMMAND_ID,
+		title: localize('apiKeys', "API Keys"),
+		icon: Codicon.key,
+	},
+	when: IsPhoneLayoutContext.negate(),
+	group: '2_settings',
+	order: 2,
 });
 
 // Update actions

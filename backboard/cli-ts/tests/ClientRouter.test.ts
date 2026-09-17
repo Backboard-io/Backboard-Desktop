@@ -88,6 +88,8 @@ function router(options: {
 	model?: { provider: string; model: string };
 	keyed?: string[];
 	signedIn?: boolean;
+	explicitSources?: boolean;
+	modelSource?: "backboard" | "byok" | "subscription";
 }): ClientRouter {
 	return new ClientRouter({
 		...(options.backboardClient
@@ -120,6 +122,12 @@ function router(options: {
 			? {}
 			: { hasBackboardAuth: () => options.signedIn === true }),
 		hasKeyFor: (provider) => (options.keyed ?? []).includes(provider),
+		...(options.explicitSources
+			? {
+					explicitSources: true,
+					getModelSource: () => options.modelSource,
+				}
+			: {}),
 	});
 }
 
@@ -208,6 +216,292 @@ describe("ClientRouter precedence", () => {
 			keyed: [],
 		});
 		expect(withoutKey.capabilities.assistants).toBe(true);
+	});
+});
+
+describe("ClientRouter explicit sources (host-managed mode)", () => {
+	const live = { provider: "openai", model: "gpt-5.5" };
+	const anthropicModel = {
+		name: "claude-opus-5",
+		provider: "anthropic",
+		model_type: "llm",
+	};
+	const openaiModel = {
+		name: "gpt-5.5",
+		provider: "openai",
+		model_type: "llm",
+	};
+
+	it("routes the live model to the key only when the host says so", () => {
+		const keyRoute = router({
+			backboardClient: backboard(),
+			byokClient: byok(),
+			keyed: ["openai"],
+			model: live,
+			explicitSources: true,
+			modelSource: "byok",
+		});
+		expect(keyRoute.sourceFor(live)).toBe("byok");
+
+		// Same model, same key on hand, but no explicit route: Backboard bills.
+		const backboardRoute = router({
+			backboardClient: backboard(),
+			byokClient: byok(),
+			keyed: ["openai"],
+			model: live,
+			explicitSources: true,
+			modelSource: "backboard",
+		});
+		expect(backboardRoute.sourceFor(live)).toBe("backboard");
+	});
+
+	it("routes every request by its own captured route, never by the live selection", async () => {
+		const bb = backboard();
+		const key = byok();
+		// The picker moved on to another model after these requests captured
+		// their route; a worker or RLM leg still naming the old model stays on
+		// the key, and a Backboard-routed request stays on Backboard even while
+		// the live selection is key-billed.
+		const routed = router({
+			backboardClient: bb,
+			byokClient: key,
+			keyed: ["openai"],
+			model: { provider: "openai", model: "gpt-5.6" },
+			explicitSources: true,
+			modelSource: "byok",
+		});
+		await drain(
+			routed.runMessage({
+				content: "worker",
+				llm_provider: "openai",
+				model_name: "gpt-5.5",
+				source: "byok",
+			}),
+		);
+		await routed.sendMessage({
+			content: "rlm leg",
+			llm_provider: "openai",
+			model_name: "gpt-5-mini",
+			source: "byok",
+		});
+		await drain(
+			routed.runMessage({
+				content: "backboard turn",
+				llm_provider: "openai",
+				model_name: "gpt-5.6",
+				source: "backboard",
+			}),
+		);
+		expect({
+			key: [key.messages.length, key.sent.length],
+			backboard: [bb.messages.length, bb.sent.length],
+		}).toEqual({ key: [1, 1], backboard: [1, 0] });
+	});
+
+	it("refuses a request that carries no billing route", () => {
+		const bb = backboard();
+		const key = byok();
+		const routed = router({
+			backboardClient: bb,
+			byokClient: key,
+			keyed: ["openai"],
+			model: live,
+			explicitSources: true,
+			modelSource: "byok",
+		});
+		expect(() =>
+			routed.runMessage({ content: "hi", llm_provider: "openai" }),
+		).toThrow("without a billing route");
+		expect(() =>
+			routed.runToolOutputs({ thread_id: "byok_abc", tool_outputs: [] }),
+		).toThrow("without a billing route");
+		expect(bb.messages.length + key.messages.length).toBe(0);
+	});
+
+	it("checks a continuation's route against its thread", async () => {
+		const bb = backboard();
+		const key = byok();
+		const routed = router({
+			backboardClient: bb,
+			byokClient: key,
+			keyed: ["openai"],
+			model: live,
+			explicitSources: true,
+			modelSource: "byok",
+		});
+		expect(() =>
+			routed.runToolOutputs({
+				thread_id: "byok_abc",
+				tool_outputs: [],
+				source: "backboard",
+			}),
+		).toThrow("bound to your API key");
+		await drain(
+			routed.runToolOutputs({
+				thread_id: "byok_abc",
+				tool_outputs: [],
+				source: "byok",
+			}),
+		);
+		expect([key.toolOutputs.length, bb.toolOutputs.length]).toEqual([1, 0]);
+	});
+
+	it("leaves subscription providers on their subscription route", () => {
+		const routed = router({
+			backboardClient: backboard(),
+			subscriptionClient: byok(),
+			model: { provider: "openai-subscription", model: "auto" },
+			explicitSources: true,
+			modelSource: "subscription",
+		});
+		expect(
+			routed.sourceFor({ provider: "openai-subscription", model: "auto" }),
+		).toBe("subscription");
+	});
+
+	it("fails a key-billed selection whose key is missing instead of falling back", async () => {
+		const bb = backboard();
+		const key = byok();
+		const routed = router({
+			backboardClient: bb,
+			byokClient: key,
+			keyed: [],
+			model: live,
+			explicitSources: true,
+			modelSource: "byok",
+		});
+		// Routing happens while the stream is built, so the failure is synchronous.
+		expect(() =>
+			routed.runMessage({
+				content: "hi",
+				llm_provider: "openai",
+				model_name: "gpt-5.5",
+				source: "byok",
+			}),
+		).toThrow("No API key is configured for openai in this session.");
+		// Naming the key-billed thread changes nothing: the key is still gone.
+		expect(() =>
+			routed.runMessage({
+				content: "hi",
+				thread_id: "byok_abc",
+				llm_provider: "openai",
+				model_name: "gpt-5.5",
+				source: "byok",
+			}),
+		).toThrow("No API key is configured for openai in this session.");
+		expect(bb.messages).toHaveLength(0);
+		expect(key.messages).toHaveLength(0);
+	});
+
+	it("keeps Backboard and key-backed entries for the same model", async () => {
+		const result = await router({
+			backboardClient: backboard([anthropicModel, openaiModel]),
+			byokClient: byok([openaiModel]),
+			keyed: ["openai"],
+			model: live,
+			explicitSources: true,
+			modelSource: "byok",
+		}).listModels();
+
+		expect(result.models).toEqual([
+			{ ...openaiModel, source: "byok" },
+			{ ...anthropicModel, source: "backboard" },
+			{ ...openaiModel, source: "backboard" },
+		]);
+	});
+
+	it("refuses to continue a conversation on a different billing route", async () => {
+		const bb = backboard();
+		const key = byok();
+		const routed = router({
+			backboardClient: bb,
+			byokClient: key,
+			keyed: ["openai"],
+			model: live,
+			explicitSources: true,
+			modelSource: "backboard",
+		});
+		expect(() =>
+			routed.runMessage({
+				content: "hi",
+				thread_id: "byok_abc",
+				source: "backboard",
+			}),
+		).toThrow("bound to your API key");
+		await drain(
+			routed.runMessage({
+				content: "hi",
+				thread_id: "thread_bb",
+				source: "backboard",
+			}),
+		);
+		expect(bb.messages).toHaveLength(1);
+		expect(key.messages).toHaveLength(0);
+	});
+
+	it("continues a key-billed conversation on its key", async () => {
+		const bb = backboard();
+		const key = byok();
+		await drain(
+			router({
+				backboardClient: bb,
+				byokClient: key,
+				keyed: ["openai"],
+				model: live,
+				explicitSources: true,
+				modelSource: "byok",
+			}).runMessage({
+				content: "hi",
+				thread_id: "byok_abc",
+				llm_provider: "openai",
+				source: "byok",
+			}),
+		);
+		expect(key.messages).toHaveLength(1);
+		expect(bb.messages).toHaveLength(0);
+	});
+
+	it("routes subscription requests by their route and keeps them off other threads", async () => {
+		const bb = backboard();
+		const subscription = byok();
+		const routed = router({
+			backboardClient: bb,
+			subscriptions: {
+				"openai-subscription": { client: subscription, threadPrefix: "sub_" },
+			},
+			model: { provider: "openai-subscription", model: "auto" },
+			explicitSources: true,
+			modelSource: "subscription",
+		});
+		await drain(
+			routed.runMessage({
+				content: "hi",
+				llm_provider: "openai-subscription",
+				model_name: "auto",
+				source: "subscription",
+			}),
+		);
+		await drain(
+			routed.runToolOutputs({
+				thread_id: "sub_1",
+				tool_outputs: [],
+				source: "subscription",
+			}),
+		);
+		expect(() =>
+			routed.runToolOutputs({
+				thread_id: "sub_1",
+				tool_outputs: [],
+				source: "backboard",
+			}),
+		).toThrow("bound to a subscription");
+		expect({
+			subscription: [
+				subscription.messages.length,
+				subscription.toolOutputs.length,
+			],
+			backboard: [bb.messages.length, bb.toolOutputs.length],
+		}).toEqual({ subscription: [1, 1], backboard: [0, 0] });
 	});
 });
 

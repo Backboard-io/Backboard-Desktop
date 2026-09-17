@@ -3,7 +3,10 @@ import type {
 	ThinkingConfig,
 } from "../../config/defaults.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
-import type { SubmitToolOutputsRequest } from "../../providers/backboard/types.ts";
+import type {
+	ModelSource,
+	SubmitToolOutputsRequest,
+} from "../../providers/backboard/types.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { ToolCallRef } from "../bus/events.ts";
 import { type ToolResultRecord, toolMessage } from "../session/Message.ts";
@@ -32,6 +35,8 @@ export interface ToolRoundProcessorDeps {
 	bus: EventBus;
 	consumer: ProviderStreamConsumer;
 	tools: SubmitToolOutputsRequest["tools"];
+	/** The turn's captured billing route, stamped on every continuation. */
+	source?: ModelSource;
 	resolveThinking: (
 		evidence: DynamicThinkingEvidence,
 	) => ThinkingConfig | null | undefined;
@@ -161,6 +166,7 @@ export class ToolRoundProcessor {
 						...(pending.runId ? { run_id: pending.runId } : {}),
 						tool_outputs: outputs.map(toBackboardToolOutput),
 						tools: this.deps.tools,
+						...this.routeFields(),
 					};
 					await preserveProviderContext(
 						this.deps.bus,
@@ -189,6 +195,7 @@ export class ToolRoundProcessor {
 				const buildRequest = (): SubmitToolOutputsRequest => ({
 					thread_id: this.deps.session.threadId ?? "",
 					...(runId ? { run_id: runId } : {}),
+					...this.routeFields(),
 					tool_outputs: outputs.map(toBackboardToolOutput),
 					tools: this.deps.tools?.filter(
 						(tool) =>
@@ -238,6 +245,11 @@ export class ToolRoundProcessor {
 			// retract its announced rows. No-op after a normal finalize.
 			round.reset();
 		}
+	}
+
+	/** The captured route, present only when the turn started with one. */
+	private routeFields(): Pick<SubmitToolOutputsRequest, "source"> {
+		return this.deps.source === undefined ? {} : { source: this.deps.source };
 	}
 
 	private resolveContinuationThinking(

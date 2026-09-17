@@ -12,10 +12,10 @@ import { AgentController } from "../core/agent/AgentController.ts";
 import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
 import { AgentTaskStore } from "../core/agent/AgentTaskStore.ts";
 import { EventBus } from "../core/bus/EventBus.ts";
-import { createWorkerSnapshotMutation } from "../core/checkpoints/WorkerSnapshotMutation.ts";
-import { EditorRewind } from "../core/checkpoints/EditorRewind.ts";
 import { CheckpointManager } from "../core/checkpoints/CheckpointManager.ts";
 import { CheckpointStore } from "../core/checkpoints/CheckpointStore.ts";
+import { EditorRewind } from "../core/checkpoints/EditorRewind.ts";
+import { createWorkerSnapshotMutation } from "../core/checkpoints/WorkerSnapshotMutation.ts";
 import { HookController, loadHookConfig } from "../core/hooks/index.ts";
 import { LspService, resolveLspFlags } from "../core/lsp/index.ts";
 import {
@@ -43,15 +43,17 @@ import { GitWorktreeManager } from "../core/workspaces/GitWorktreeManager.ts";
 import { WorkerWorkspaceManager } from "../core/workspaces/WorkerWorkspaceManager.ts";
 import { WorkerWorkspaceStore } from "../core/workspaces/WorkerWorkspaceStore.ts";
 import { buildStartupEnvironmentPrompt } from "../prompts/system/startupEnvironment.ts";
+import type { ModelSource } from "../providers/backboard/types.ts";
 import { createAgentClient } from "../providers/createAgentClient.ts";
 import { createDefaultTools } from "../tools/index.ts";
 import { errorMessage } from "../utils/errors.ts";
 import { shortId } from "../utils/id.ts";
-import type {
-	ServeControl,
-	ServeFileAttachment,
-	ServeRecord,
-	ServeRecordType,
+import {
+	SERVE_CAPABILITIES,
+	type ServeControl,
+	type ServeFileAttachment,
+	type ServeRecord,
+	type ServeRecordType,
 } from "./ServeTypes.ts";
 import { parseControlLine } from "./serveControl.ts";
 import { buildServeConversationContext } from "./serveConversationContext.ts";
@@ -342,6 +344,30 @@ export async function runServe(argv: string[]): Promise<void> {
 	let rewinding = false;
 	const pendingOps = new Set<Promise<void>>();
 	let disposing = false;
+	let credentialRevision = -1;
+	let credentialSnapshot = "";
+	// A host that manages keys must state the route with every selection, and
+	// may not move the live model to another billing source while a turn is
+	// running: a selection takes effect only after the whole task is idle.
+	const assertRouteAllowed = (
+		model: string | undefined,
+		source: ModelSource | undefined,
+	): void => {
+		if (model === undefined) return;
+		if (config.hostManagedProviderKeys && source === undefined) {
+			throw new Error(
+				"A billing source is required for model selections in host-managed mode",
+			);
+		}
+		if (
+			(controller.isRunning || agentTaskManager.hasActiveTasks) &&
+			(model !== config.modelString || source !== config.modelSource)
+		) {
+			throw new Error(
+				"The model or billing source cannot change while a turn or its workers are running; wait for them to finish",
+			);
+		}
+	};
 	const handleControl = async (control: ServeControl): Promise<void> => {
 		switch (control.op) {
 			case "prepareRewind":
@@ -384,6 +410,10 @@ export async function runServe(argv: string[]): Promise<void> {
 			case "submit": {
 				if (rewinding) throw new Error("Wait for file restoration to finish");
 				editorRewind.assertReady();
+				assertRouteAllowed(control.model, control.source);
+				if (control.threadId && session.threadId === null) {
+					session.threadId = control.threadId;
+				}
 				if (control.skills?.length) {
 					await selectSkillsByName(control.skills);
 				}
@@ -402,7 +432,7 @@ export async function runServe(argv: string[]): Promise<void> {
 					onStart: async () => {
 						config.refreshAuth();
 						if (control.model !== undefined) {
-							config.setModel(parseModel(control.model));
+							config.setModel(parseModel(control.model), control.source);
 						}
 						if (control.thinking !== undefined) {
 							config.setThinking(parseThinking(control.thinking));
@@ -465,6 +495,11 @@ export async function runServe(argv: string[]): Promise<void> {
 				}
 				return;
 			}
+			case "waitForIdle":
+				await controller.waitForIdle();
+				await workerWorkspaceManager.waitForIdle();
+				writeRecord("serve:ack", control.requestId, { op: "waitForIdle" });
+				return;
 			case "warmup":
 				// Process startup itself is the main warm-up. A model request also
 				// establishes DNS/TLS without creating remote assistant state.
@@ -488,10 +523,12 @@ export async function runServe(argv: string[]): Promise<void> {
 				);
 				return;
 			case "setModel":
-				config.setModel(parseModel(control.model));
+				assertRouteAllowed(control.model, control.source);
+				config.setModel(parseModel(control.model), control.source);
 				writeRecord("serve:ack", control.requestId, {
 					op: "setModel",
 					model: config.modelString,
+					...(config.modelSource ? { source: config.modelSource } : {}),
 				});
 				return;
 			case "setMcpServers": {
@@ -527,6 +564,34 @@ export async function runServe(argv: string[]): Promise<void> {
 				writeRecord("serve:mcp", control.requestId, {
 					servers: mcpManager.listServerStatuses(),
 					warnings: result.warnings,
+				});
+				return;
+			}
+			case "setCredentials": {
+				const snapshot = JSON.stringify(
+					[...control.providerKeys].sort((a, b) =>
+						a.provider.localeCompare(b.provider),
+					),
+				);
+				if (
+					control.revision < credentialRevision ||
+					(control.revision === credentialRevision &&
+						snapshot !== credentialSnapshot)
+				) {
+					throw new Error("Stale or conflicting credential revision");
+				}
+				credentialRevision = control.revision;
+				credentialSnapshot = snapshot;
+				// Synchronous on purpose: stdin lines are dispatched in order but
+				// handlers run concurrently, so only the synchronous prefix of a
+				// handler is guaranteed to precede the next line's work.
+				config.setHostProviderKeys(
+					control.providerKeys.map(({ provider, key }) => ({ provider, key })),
+				);
+				writeRecord("serve:ack", control.requestId, {
+					op: "setCredentials",
+					revision: control.revision,
+					providers: control.providerKeys.map((entry) => entry.provider),
 				});
 				return;
 			}
@@ -639,6 +704,7 @@ export async function runServe(argv: string[]): Promise<void> {
 		cwd: config.cwd,
 		model: config.modelString,
 		upstream: "Backboard-io/Backboard-R-CLI",
+		capabilities: [...SERVE_CAPABILITIES],
 		runtime,
 	});
 

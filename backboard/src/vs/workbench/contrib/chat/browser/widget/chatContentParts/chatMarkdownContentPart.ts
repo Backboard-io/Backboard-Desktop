@@ -282,6 +282,7 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 	readonly onDidChangeDiff: Event<IEditSessionDiffStats> = this._onDidChangeDiff.event;
 
 	private readonly allRefs: IDisposableReference<CodeBlockPart | DeferredCodeBlockPart | ChatOutputCodeBlockPart | CollapsedCodeBlock | MarkdownDiffBlockPart>[] = [];
+	private codeBlockRefs = new Map<string, IDisposableReference<CodeBlockPart>>();
 
 	private readonly _codeblocks: IMarkdownPartCodeBlockInfo[] = [];
 	public get codeblocks(): IChatCodeBlockInfo[] {
@@ -424,6 +425,7 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 			const startedAt = perfEnabled ? performance.now() : 0;
 			if (!this._usingStreamingPlaintext) {
 				renderStore.clear();
+				this.codeBlockRefs.clear();
 				dom.clearNode(this.domNode);
 				this.allRefs.length = 0;
 				this._codeblocks.length = 0;
@@ -457,6 +459,14 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 			const startedAt = perfEnabled ? performance.now() : 0;
 
 			const previousRenderStore = renderStore.clearAndLeak();
+			// Keep the live editors leased while rebuilding the surrounding markdown.
+			// Releasing them to the pool clears their models and causes streaming
+			// blocks to collapse and repaint before the appended text is displayed.
+			const reusableCodeBlockRefs = this.codeBlockRefs;
+			this.codeBlockRefs = new Map();
+			for (const ref of reusableCodeBlockRefs.values()) {
+				previousRenderStore?.deleteAndLeak(ref);
+			}
 			const reusableOutputCodeBlockRefs = new Map<string, IDisposableReference<ChatOutputCodeBlockPart>>();
 			for (const ref of this.allRefs) {
 				if (ref.object instanceof ChatOutputCodeBlockPart) {
@@ -590,7 +600,7 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 							return ref.object.element;
 						}
 
-						const ref = this.renderCodeBlock(codeBlockInfo, currentWidth);
+						const ref = this.renderCodeBlock(codeBlockInfo, currentWidth, reusableCodeBlockRefs);
 						this._codeblocks.push({
 							...baseCodeBlockInfo,
 							codemapperUri: codeBlockInfo.codemapperUri,
@@ -705,6 +715,7 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 			}
 
 			store.add(wrapTablesWithScrollable(this.domNode, layoutParticipants));
+			dispose(reusableCodeBlockRefs.values());
 			dispose(reusableOutputCodeBlockRefs.values());
 			if (perfEnabled) {
 				recordMarkdownRenderPerf('markdown', performance.now() - startedAt, this.markdown.content.value.length);
@@ -757,6 +768,7 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 
 		dispose(this.allRefs);
 		this.allRefs.length = 0;
+		this.codeBlockRefs.clear();
 	}
 
 	private renderCodeBlockPill(sessionResource: URI, requestId: string, inUndoStop: string | undefined, codemapperUri: URI): IDisposableReference<CollapsedCodeBlock> {
@@ -826,7 +838,7 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 		this._onDidChangeDiff.fire({ added: totalAdded, removed: totalRemoved });
 	}
 
-	private renderCodeBlock(data: ICodeBlockData, currentWidth: number): IDisposableReference<CodeBlockPart | DeferredCodeBlockPart> {
+	private renderCodeBlock(data: ICodeBlockData, currentWidth: number, reusableCodeBlockRefs: Map<string, IDisposableReference<CodeBlockPart>>): IDisposableReference<CodeBlockPart | DeferredCodeBlockPart> {
 		if (isResponseVM(data.element) && data.element.isComplete && this.markdown.content.value.length >= LONG_STREAMING_MARKDOWN_PLAINTEXT_THRESHOLD) {
 			const codeBlock = new DeferredCodeBlockPart(data, currentWidth, this.editorPool, () => this._onDidChangeHeight.fire(), this.logService);
 			const ref: IDisposableReference<DeferredCodeBlockPart> = {
@@ -838,7 +850,9 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 			return ref;
 		}
 		const key = CodeBlockPart.poolKey(data.element.id, data.codeBlockIndex);
-		const ref = this.editorPool.get(key);
+		const ref = reusableCodeBlockRefs.get(key) ?? this.editorPool.get(key);
+		reusableCodeBlockRefs.delete(key);
+		this.codeBlockRefs.set(key, ref);
 		this.allRefs.push(ref);
 		ref.object.render(data, currentWidth);
 

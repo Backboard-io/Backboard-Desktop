@@ -15,6 +15,7 @@ import type {
 	AgentClient,
 	RunMessageOptions,
 } from "../../providers/AgentClient.ts";
+import type { ModelSource } from "../../providers/backboard/types.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { TurnStatus } from "../bus/events.ts";
@@ -62,6 +63,12 @@ export interface AgentLoopDeps {
 	refreshSystemPrompt?: () => string;
 	assistantId?: string;
 	model: { provider: string; model: string };
+	/**
+	 * The billing route this loop was started on. It never changes for the
+	 * life of the loop, even when a capacity fallback swaps the model, and it
+	 * is stamped on every message, continuation, and injected notification.
+	 */
+	source?: ModelSource;
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
 	workspaceId?: string;
@@ -159,6 +166,7 @@ export class AgentLoop {
 			bus,
 			consumer,
 			tools: this.deps.tools,
+			source: this.deps.source,
 			resolveThinking: (evidence) =>
 				forceThinkingOff
 					? null
@@ -196,6 +204,7 @@ export class AgentLoop {
 				refreshSystemPrompt: this.deps.refreshSystemPrompt,
 				assistantId: this.deps.assistantId,
 				model: activeModel,
+				source: this.deps.source,
 				memory: this.deps.memory,
 				memoryProfile: this.deps.memoryProfile,
 				workspaceId: this.deps.workspaceId,

@@ -1,4 +1,3 @@
-import { providerKeyResolver } from "../config/auth.ts";
 import type { Config } from "../config/Config.ts";
 import { supportsSubscriptions } from "../config/releaseFeatures.ts";
 import type { ServerEventLog } from "../core/session/ServerEventLog.ts";
@@ -39,7 +38,7 @@ export function createAgentClient(
 	// restart for anyone who started keys-only.
 	const backboard = new BackboardClient(config.env, serverLog);
 	const byok = new ByokClient(
-		(provider) => providerKeyResolver(config.auth)(provider),
+		(provider) => config.providerCredential(provider),
 		serverLog,
 		new ByokConversationStore(conversationBaseDir),
 	);
@@ -94,5 +93,9 @@ export function createAgentClient(
 		hasBackboardAuth: () => config.hasBackboardAuth,
 		hasKeyFor: (provider) =>
 			config.auth.providerKeys.some((entry) => entry.provider === provider),
+		// An IDE-managed runtime states the route with every selection; the
+		// key-over-SSO precedence rule stays a TUI behaviour.
+		explicitSources: config.hostManagedProviderKeys,
+		getModelSource: () => config.modelSource,
 	});
 }

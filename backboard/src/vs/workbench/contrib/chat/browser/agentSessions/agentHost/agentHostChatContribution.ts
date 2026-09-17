@@ -28,6 +28,7 @@ import { Target } from '../../../common/promptSyntax/promptTypes.js';
 import { AgentCustomizationItemProvider } from './agentCustomizationItemProvider.js';
 import { authenticateProtectedResources, AgentHostAuthTokenCache, resolveAuthenticationInteractively } from './agentHostAuth.js';
 import { AgentHostLanguageModelProvider, agentHostProviderSupportsAutoModel } from './agentHostLanguageModelProvider.js';
+
 import { AgentHostSessionHandler } from './agentHostSessionHandler.js';
 import { IAgentHostActiveClientService } from './agentHostActiveClientService.js';
 import { AgentHostSessionListController } from './agentHostSessionListController.js';
@@ -183,6 +184,7 @@ export class AgentHostContribution extends Disposable implements IWorkbenchContr
 		// implementation we're not going to bridge.
 		this._authenticateWithServer(allowed)
 			.catch(() => { /* best-effort */ });
+
 
 		// Register new agents and push model updates to existing ones
 		for (const agent of allowed) {

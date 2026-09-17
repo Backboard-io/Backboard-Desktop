@@ -1,9 +1,13 @@
 import type { ByokProviderId } from "../../core/keys/ProviderKeyTypes.ts";
+import { scrubSecret } from "./scrubSecret.ts";
 
 /**
  * A vendor API failure. Carries the HTTP status so `ProviderStreamConsumer`'s
  * retry classifier sees the same 502/503/504 signal it gets from Backboard,
  * and so auth failures can be reported with a "check /keys" hint.
+ *
+ * The message is scrubbed of anything key-shaped on construction: it is the
+ * one string every caller forwards to logs, events, and the IDE.
  */
 export class ByokError extends Error {
 	constructor(
@@ -12,7 +16,7 @@ export class ByokError extends Error {
 		readonly status: number,
 		readonly body: unknown,
 	) {
-		super(message);
+		super(scrubSecret(message));
 		this.name = "ByokError";
 	}
 
@@ -26,6 +30,7 @@ export function unexpectedStreamEndMessage(provider: ByokProviderId): string {
 		anthropic: "Anthropic",
 		openai: "OpenAI",
 		google: "Google",
+		xai: "xAI",
 		openrouter: "OpenRouter",
 	};
 	const label = labels[provider];

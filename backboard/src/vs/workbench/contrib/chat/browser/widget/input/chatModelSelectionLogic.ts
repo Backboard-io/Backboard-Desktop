@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { isKeyBilledModelId } from '../../../../../../platform/agentHost/common/byokProviders.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../common/constants.js';
 import { COPILOT_VENDOR_ID, ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier } from '../../../common/languageModels.js';
 
@@ -100,10 +101,26 @@ export function isModelValidForSession(
 }
 
 /**
+ * The key-billed provider a model bills to (`openai-key`), or undefined for
+ * every other route. A selection never carries across this boundary: a
+ * vanished key-billed row must not turn into the same model on Backboard's
+ * billing, and a Backboard row must not turn into one billed to the user's
+ * key.
+ */
+function keyBilledRouteOf(model: ILanguageModelChatMetadataAndIdentifier): string | undefined {
+	const id = model.metadata.id;
+	if (!isKeyBilledModelId(id)) {
+		return undefined;
+	}
+	return id.slice(0, id.indexOf('/')).trim().toLowerCase();
+}
+
+/**
  * Find a model in `pool` that matches `previous` by id, then family, then
  * name (case-insensitive). Used to carry a selection across model pools
  * (e.g. `copilot/claude-sonnet-4.6` → `agent-host-copilotcli:claude-sonnet-4.6`).
- * Returns `undefined` when no candidate matches.
+ * Candidates on another billing route are never considered. Returns
+ * `undefined` when no candidate matches.
  */
 export function findBestMatchingModel(
 	previous: ILanguageModelChatMetadataAndIdentifier | undefined,
@@ -112,12 +129,14 @@ export function findBestMatchingModel(
 	if (!previous || pool.length === 0) {
 		return undefined;
 	}
+	const route = keyBilledRouteOf(previous);
+	const candidates = pool.filter(m => keyBilledRouteOf(m) === route);
 	const id = previous.metadata.id?.trim().toLowerCase();
 	const family = previous.metadata.family?.trim().toLowerCase();
 	const name = previous.metadata.name?.trim().toLowerCase();
-	return (id ? pool.find(m => m.metadata.id?.trim().toLowerCase() === id) : undefined)
-		?? (family ? pool.find(m => m.metadata.family?.trim().toLowerCase() === family) : undefined)
-		?? (name ? pool.find(m => m.metadata.name?.trim().toLowerCase() === name) : undefined);
+	return (id ? candidates.find(m => m.metadata.id?.trim().toLowerCase() === id) : undefined)
+		?? (family ? candidates.find(m => m.metadata.family?.trim().toLowerCase() === family) : undefined)
+		?? (name ? candidates.find(m => m.metadata.name?.trim().toLowerCase() === name) : undefined);
 }
 
 /**

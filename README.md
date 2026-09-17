@@ -28,6 +28,24 @@ Switch between three modes from the title bar:
 
 Agent integrations require the credentials or accounts for the services you choose. Access to hosted services is separate from this repository's source-code license.
 
+### Security and credentials
+
+- **Backboard API key:** stored in `~/.backboard_ide/config.json`. The agent never reads it
+  from disk — the host injects it as `BACKBOARD_API_KEY` / `BACKBOARD_API_URL` into the
+  spawned `cli-ts` environment, and `cli-ts` checks `process.env` before touching any file.
+- **BYOK (bring your own key) for OpenAI, Anthropic, Google, xAI, and OpenRouter:** keys are
+  added on the API Keys page (account menu, or "Backboard: API Keys" in the command
+  palette). The Electron main process is the single owner: it validates a key through the
+  runtime, then saves it as an encrypted `secret://` entry in application storage — the
+  same keychain-backed store `ISecretStorageService` uses — and activates it in the agent
+  host. The host hands the key set to each `cli-ts` serve process over stdin, never through
+  argv, the environment, or a file.
+- **Key-billed models** appear in the model picker as their own sections next to the
+  Backboard-routed and subscription models. The selected model is the billing route:
+  adding or removing a key never silently changes what an existing session bills to.
+- Every Backboard credential can be overridden via environment variables for CI or local
+  development. Provider keys deliberately cannot.
+
 ## Getting started
 
 ### Run from source on macOS

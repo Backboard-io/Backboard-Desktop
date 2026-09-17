@@ -21,6 +21,40 @@ suite('Backboard runtime configuration', () => {
 		assert.strictEqual(resolved.values.showReasoning, undefined);
 	});
 
+	test('derives the billing route from the selected model id', () => {
+		const keyBilled = createBackboardTurnSettings(undefined, undefined, { id: 'openai-key/gpt-5.5' });
+		const backboard = createBackboardTurnSettings(undefined, undefined, { id: 'openai/gpt-5.5' });
+		const subscription = createBackboardTurnSettings(undefined, undefined, { id: 'anthropic-subscription/opus[1m]' });
+
+		assert.deepStrictEqual(
+			[
+				{ provider: keyBilled.provider, model: keyBilled.model, source: keyBilled.source },
+				{ provider: backboard.provider, model: backboard.model, source: backboard.source },
+				{ provider: subscription.provider, model: subscription.model, source: subscription.source, intensity: subscription.intensity },
+			],
+			[
+				{ provider: 'openai', model: 'gpt-5.5', source: 'byok' },
+				{ provider: 'openai', model: 'gpt-5.5', source: 'backboard' },
+				{ provider: 'anthropic-subscription', model: 'opus[1m]', source: 'subscription', intensity: 'high' },
+			],
+		);
+	});
+
+	test('lists key-billed models beside the Backboard rows under their own provider label', () => {
+		const models = backboardModelInfos([
+			{ provider: 'openai-key', name: 'gpt-5.5', model_type: 'llm' },
+			{ provider: 'openai', name: 'gpt-5.5', model_type: 'llm' },
+			{ provider: 'anthropic-key', name: 'claude-opus-5', model_type: 'llm' },
+		]);
+
+		assert.deepStrictEqual(models.map(model => [model.id, model._meta?.upstreamProvider, model._meta?.upstreamProviderLabel]), [
+			['anthropic-key/claude-opus-5', 'anthropic-key', 'Anthropic API Key'],
+			['openai/gpt-5.5', 'openai', 'OpenAI'],
+			['openai-key/gpt-5.5', 'openai-key', 'OpenAI API Key'],
+			['openrouter/openai/gpt-5-chat', 'openrouter', 'OpenRouter'],
+		]);
+	});
+
 	test('bundles ChatGPT subscription models as distinct Backboard harness routes', () => {
 		const models = backboardModelInfos(BUNDLED_CHATGPT_SUBSCRIPTION_MODELS);
 		const subscriptionModels = models.filter(model => model.id.startsWith('openai-subscription/'));

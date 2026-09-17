@@ -180,14 +180,10 @@ export function getCollapsedTerminalOutputPreview(output: string | undefined, co
 
 
 export function getTerminalOutputViewportHeight(contentHeight: number, maxHeight: number, useCursorTranscriptPresentation: boolean): string {
-	// Cursor transcript cards deliberately reserve the full expanded viewport.
-	// Without this, a short command result collapses the terminal to just a few
-	// rows and makes the output area jump as a streaming command grows.
-	if (useCursorTranscriptPresentation) {
-		return `${maxHeight}px`;
-	}
+	// Fit short output to its content, keeping transcript scrollback bounded
+	// once the output reaches the maximum viewport height.
 	const clampedHeight = Math.min(contentHeight, maxHeight);
-	return clampedHeight < maxHeight ? `${clampedHeight}px` : '';
+	return useCursorTranscriptPresentation || clampedHeight < maxHeight ? `${clampedHeight}px` : '';
 }
 
 export function calculateTerminalOutputContentHeight(

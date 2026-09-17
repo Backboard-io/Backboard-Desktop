@@ -1,8 +1,18 @@
+import type {
+	ByokProviderId,
+	ResolvedProviderKey,
+} from "../core/keys/ProviderKeyTypes.ts";
 import { canonicalToolName } from "../core/tools/names.ts";
 import { ToolPolicy } from "../core/tools/ToolPolicy.ts";
+import type { ModelSource } from "../providers/backboard/types.ts";
+import {
+	CredentialChangedError,
+	type ProviderCredential,
+} from "../providers/byok/ProviderCredential.ts";
 import {
 	type AuthState,
 	hasAnyCredentials,
+	hostManagedProviderKeys,
 	NO_CREDENTIALS_MESSAGE,
 	resolveAuth,
 } from "./auth.ts";
@@ -69,6 +79,11 @@ export class Config {
 	private workspaceId: string | null = null;
 
 	private currentModel: ModelRef;
+	/** Explicit billing route for the live model; only set by a host-managed runtime. */
+	private currentModelSource: ModelSource | undefined;
+	/** Keys pushed by the IDE host; they replace file keys on every auth refresh. */
+	private readonly credentialGenerations = new Map<ByokProviderId, number>();
+	private hostProviderKeys: ResolvedProviderKey[] | null = null;
 	private successfulModelRefs: ModelRef[];
 	private currentModelProfile: ModelProfile;
 	private readonly currentFormat: OutputFormat;
@@ -183,9 +198,77 @@ export class Config {
 		return formatModel(this.currentModel);
 	}
 
-	setModel(ref: ModelRef): void {
+	/**
+	 * Selects the live model. `source` is the explicit billing route a host-managed
+	 * runtime attaches to every selection; omitting it clears the route, so a
+	 * recovery fallback never inherits a key-billed source it did not ask for.
+	 */
+	setModel(ref: ModelRef, source?: ModelSource): void {
 		this.currentModel = ref;
+		this.currentModelSource = source;
 		this.currentModelProfile = resolveModelProfile(ref);
+	}
+
+	/** The explicit billing route for the live model, if the host attached one. */
+	get modelSource(): ModelSource | undefined {
+		return this.currentModelSource;
+	}
+
+	/** True when provider keys come only from the IDE host (BACKBOARD_HOST_MANAGED_KEYS). */
+	get hostManagedProviderKeys(): boolean {
+		return hostManagedProviderKeys();
+	}
+
+	/**
+	 * Replaces the provider keys with the host's snapshot. The snapshot is the
+	 * whole set, so an absent provider is a removal. Read at request time by the
+	 * BYOK client and the router, so no client is rebuilt.
+	 */
+	setHostProviderKeys(keys: readonly ResolvedProviderKey[]): void {
+		this.updateCredentialGenerations(keys);
+		this.hostProviderKeys = keys.map((entry) => ({ ...entry }));
+		this.auth = { ...this.auth, providerKeys: this.hostProviderKeys };
+	}
+
+	/** Captures a lease, invalidated synchronously by every key mutation. */
+	providerCredential(provider: ByokProviderId): ProviderCredential | null {
+		const key = this.auth.providerKeys.find(
+			(entry) => entry.provider === provider,
+		)?.key;
+		if (!key) return null;
+		const generation = this.credentialGenerations.get(provider) ?? 0;
+		return {
+			key,
+			generation,
+			assertCurrent: () => {
+				if (
+					(this.credentialGenerations.get(provider) ?? 0) !== generation ||
+					this.auth.providerKeys.find((entry) => entry.provider === provider)
+						?.key !== key
+				) {
+					throw new CredentialChangedError(provider);
+				}
+			},
+		};
+	}
+
+	private updateCredentialGenerations(
+		keys: readonly ResolvedProviderKey[],
+	): void {
+		const providers = new Set(
+			[...this.auth.providerKeys, ...keys].map((entry) => entry.provider),
+		);
+		for (const provider of providers) {
+			if (
+				this.auth.providerKeys.find((entry) => entry.provider === provider)
+					?.key !== keys.find((entry) => entry.provider === provider)?.key
+			) {
+				this.credentialGenerations.set(
+					provider,
+					(this.credentialGenerations.get(provider) ?? 0) + 1,
+				);
+			}
+		}
 	}
 
 	/** Working models, newest first, for automatic recovery from provider capacity. */
@@ -447,9 +530,17 @@ export class Config {
 	 * running session picks them up without a restart.
 	 */
 	refreshAuth(): AuthState {
+		const previous = this.auth;
 		this.auth = resolveAuth(
 			this.homeDir === undefined ? {} : { homeDir: this.homeDir },
 		);
+		if (this.hostProviderKeys) {
+			this.auth = { ...this.auth, providerKeys: this.hostProviderKeys };
+		}
+		const refreshed = this.auth;
+		this.auth = previous;
+		this.updateCredentialGenerations(refreshed.providerKeys);
+		this.auth = refreshed;
 		const next = this.auth.backboard ?? anonymousEnv();
 		this.env.apiKey = next.apiKey;
 		this.env.apiUrl = next.apiUrl;

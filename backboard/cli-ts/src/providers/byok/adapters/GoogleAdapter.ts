@@ -14,6 +14,14 @@ import type {
 import { toGoogleSchema } from "../googleSchema.ts";
 import { getJson, postSseJson } from "../httpStream.ts";
 import {
+	credentialKey,
+	type ProviderCredential,
+} from "../ProviderCredential.ts";
+import {
+	decodeProviderMetadata,
+	encodeProviderMetadata,
+} from "../ProviderMetadata.ts";
+import {
 	thinkingBudgetTokens,
 	thinkingLevel,
 	usesNativeAdaptiveThinking,
@@ -27,9 +35,12 @@ import {
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 interface GoogleModelsResponse {
+	nextPageToken?: string;
 	models?: Array<{
 		name?: string;
 		displayName?: string;
+		inputTokenLimit?: number;
+		outputTokenLimit?: number;
 		supportedGenerationMethods?: string[];
 	}>;
 }
@@ -41,44 +52,62 @@ export const googleAdapter: ProviderAdapter = {
 	keyHint: "AIza...",
 
 	looksLikeKey(key) {
-		return /^AIza[\w-]{30,}$/.test(key.trim());
+		return /^AIza[\w-]{30,}$/.test(credentialKey(key).trim());
 	},
 
-	async validateKey(key, signal) {
+	async validateKey(key, signal, transport) {
 		await getJson<GoogleModelsResponse>(
 			`${API_BASE}/models?pageSize=1`,
 			headers(key),
 			"google",
 			signal,
+			key,
+			transport,
 		);
 	},
 
-	async listModels(key, signal) {
-		const response = await getJson<GoogleModelsResponse>(
-			`${API_BASE}/models?pageSize=1000`,
-			headers(key),
-			"google",
-			signal,
-		);
+	async listModels(key, signal, transport) {
 		const models: ModelCatalogItem[] = [];
-		for (const model of response.models ?? []) {
-			// Names come back namespaced as "models/gemini-...".
-			const name = model.name?.replace(/^models\//, "");
-			if (!name) continue;
-			if (!model.supportedGenerationMethods?.includes("generateContent")) {
-				continue;
+		let pageToken: string | undefined;
+		const seen = new Set<string>();
+		do {
+			const response = await getJson<GoogleModelsResponse>(
+				`${API_BASE}/models?pageSize=1000${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`,
+				headers(key),
+				"google",
+				signal,
+				key,
+				transport,
+			);
+			for (const model of response.models ?? []) {
+				// Names come back namespaced as "models/gemini-...".
+				const name = model.name?.replace(/^models\//, "");
+				if (!name) continue;
+				if (!model.supportedGenerationMethods?.includes("generateContent")) {
+					continue;
+				}
+				if (!isGoogleChatModel(name)) continue;
+				models.push({
+					name,
+					provider: "google",
+					model_type: "llm",
+					...googleCapabilities(name),
+					context_limit:
+						model.inputTokenLimit ??
+						contextWindowFor({ provider: "google", model: name }),
+					max_output_tokens: model.outputTokenLimit ?? null,
+					supports_vision: true,
+				});
 			}
-			if (!isGoogleChatModel(name)) continue;
-			models.push({
-				name,
-				provider: "google",
-				model_type: "llm",
-				supports_thinking: supportsGoogleThinking(name),
-				context_limit: contextWindowFor({ provider: "google", model: name }),
-			});
-		}
+			pageToken = response.nextPageToken;
+			if (pageToken && seen.has(pageToken))
+				throw new Error("Google returned a repeated model catalog page");
+			if (pageToken) seen.add(pageToken);
+		} while (pageToken);
 		return models;
 	},
+
+	modelCapabilities: googleCapabilities,
 
 	supportsThinking(model) {
 		return supportsGoogleThinking(model);
@@ -89,13 +118,32 @@ export const googleAdapter: ProviderAdapter = {
 	},
 };
 
-function headers(key: string): Record<string, string> {
-	return { "x-goog-api-key": key.trim() };
+function headers(key: ProviderCredential): Record<string, string> {
+	return { "x-goog-api-key": credentialKey(key).trim() };
 }
 
 export function isGoogleChatModel(model: string): boolean {
 	const normalized = model.trim().toLowerCase();
-	if (/embedding|aqa/.test(normalized)) return false;
+	// Explicit nonstandard families documented to share generateContent and custom tools.
+	if (
+		/^gemma-4-(?:31b|26b-a4b)-it$/.test(normalized) ||
+		/^gemini-robotics-er-(?:1\.[56]|2)-preview$/.test(normalized)
+	)
+		return true;
+	if (
+		!normalized.startsWith("gemini-") ||
+		/embedding|aqa|tts|audio|live|robotics/.test(normalized)
+	)
+		return false;
+	// generateContent alone does not promise custom function calling (for example,
+	// the older thinking experiments used a different tool contract).
+	if (
+		!/^gemini-(?:1\.5-(?:pro|flash)|2\.0-flash|2\.5-(?:pro|flash)|3(?:\.\d+)?-(?:pro|flash)|(?:pro|flash|flash-lite)-latest)(?:$|-)/.test(
+			normalized,
+		) ||
+		normalized.includes("thinking-exp")
+	)
+		return false;
 	if (GOOGLE_IMAGE_MODEL_PATTERN.test(normalized)) return false;
 	return !GOOGLE_NON_CHAT_MODEL_PREFIXES.some((prefix) =>
 		normalized.startsWith(prefix),
@@ -109,9 +157,29 @@ export function supportsGoogleThinking(model: string): boolean {
 	);
 }
 
+/** Keep picker controls within the native API's model-specific range. */
+function googleCapabilities(model: string): Partial<ModelCatalogItem> {
+	const supported = supportsGoogleThinking(model);
+	const native = usesNativeAdaptiveThinking("google", model);
+	const controllable = supported && (native || /^gemini-2\.5-/.test(model));
+	return {
+		supports_thinking: supported,
+		supported_effort_levels: !controllable
+			? []
+			: /^gemini-3-pro(?:$|-)/.test(model)
+				? ["low", "high"]
+				: ["low", "medium", "high"],
+		thinking_controls: {
+			supported: controllable,
+			allowed_fields: controllable ? [native ? "effort" : "budget_tokens"] : [],
+			defaults_only: !controllable,
+		},
+	};
+}
+
 async function* streamGoogle(
 	request: ByokStreamRequest,
-	key: string,
+	key: ProviderCredential,
 ): AsyncIterable<ProviderEvent> {
 	const generationConfig: Record<string, unknown> = {};
 	if (request.maxOutputTokens) {
@@ -122,7 +190,7 @@ async function* streamGoogle(
 
 	const body: Record<string, unknown> = {
 		systemInstruction: { parts: [{ text: request.systemPrompt }] },
-		contents: renderGoogleContents(request.messages),
+		contents: renderGoogleContents(request.messages, request.model),
 	};
 	if (Object.keys(generationConfig).length > 0) {
 		body.generationConfig = generationConfig;
@@ -142,6 +210,7 @@ async function* streamGoogle(
 	};
 
 	const calls: ProviderToolCall[] = [];
+	const responseParts: Record<string, unknown>[] = [];
 	let usage = {
 		inputTokens: 0,
 		outputTokens: 0,
@@ -155,6 +224,8 @@ async function* streamGoogle(
 	const sseRequest: Parameters<typeof postSseJson>[0] = {
 		url: `${API_BASE}/models/${encodeURIComponent(request.model)}:streamGenerateContent?alt=sse`,
 		headers: headers(key),
+		credential: key,
+		transport: request.transport,
 		body,
 		provider: "google",
 	};
@@ -195,6 +266,8 @@ async function* streamGoogle(
 				thoughtSignature?: string;
 				functionCall?: { name?: string; args?: unknown; id?: string };
 			};
+			// Keep every original part, including signature-only and thought parts, in order.
+			responseParts.push(structuredClone(entry));
 			if (entry.text) {
 				emitted = true;
 				yield entry.thought
@@ -237,11 +310,6 @@ async function* streamGoogle(
 	}
 
 	const finalUsage = { ...usage, provider: "google", model: request.model };
-	if (calls.length > 0) {
-		yield { kind: "usage", usage: finalUsage };
-		yield { kind: "requires_action", runId: null, calls };
-		return;
-	}
 	// Anything but a normal stop ended the turn early. Without this the turn
 	// completes empty and the user is left with a blank reply and no reason.
 	const abnormal = abnormalFinishMessage(finishReason);
@@ -253,7 +321,29 @@ async function* streamGoogle(
 		};
 		return;
 	}
-	yield { kind: "completed", usage: finalUsage };
+	if (calls.length > 0) {
+		yield { kind: "usage", usage: finalUsage };
+		yield {
+			kind: "requires_action",
+			runId: null,
+			calls,
+			providerMetadata: encodeProviderMetadata(
+				"google",
+				request.model,
+				responseParts,
+			),
+		};
+		return;
+	}
+	yield {
+		kind: "completed",
+		usage: finalUsage,
+		providerMetadata: encodeProviderMetadata(
+			"google",
+			request.model,
+			responseParts,
+		),
+	};
 }
 
 function blockedPromptMessage(reason: string): string {
@@ -318,16 +408,31 @@ function toFunctionDeclarations(request: ByokStreamRequest): unknown[] {
 export function googleThinkingConfig(
 	request: ByokStreamRequest,
 ): Record<string, unknown> | null {
-	if (!request.thinking) return null;
+	if (
+		!request.thinking ||
+		!googleCapabilities(request.model).thinking_controls?.supported
+	)
+		return null;
 
 	if (usesNativeAdaptiveThinking("google", request.model)) {
 		const level = thinkingLevel(request.thinking);
 		if (!level) return null;
-		return { thinkingLevel: level === "max" ? "high" : level };
+		const mapped =
+			level === "max" ||
+			level === "xhigh" ||
+			(level === "medium" && /^gemini-3-pro(?:$|-)/.test(request.model))
+				? "high"
+				: level;
+		return { thinkingLevel: mapped };
 	}
 
 	const budget = thinkingBudgetTokens(request.thinking, "google");
-	return budget !== null && budget > 0 ? { thinkingBudget: budget } : null;
+	if (budget === null || budget <= 0) return null;
+	const pro = /^gemini-2\.5-pro(?:$|-)/.test(request.model);
+	const minimum = pro ? 128 : request.model.includes("flash-lite") ? 512 : 1;
+	return {
+		thinkingBudget: Math.min(pro ? 32768 : 24576, Math.max(minimum, budget)),
+	};
 }
 
 /**
@@ -336,6 +441,7 @@ export function googleThinkingConfig(
  */
 export function renderGoogleContents(
 	messages: readonly ByokMessage[],
+	model?: string,
 ): unknown[] {
 	const out: unknown[] = [];
 	// Names, not ids, key a functionResponse - resolve each result's name from
@@ -348,6 +454,14 @@ export function renderGoogleContents(
 			continue;
 		}
 		if (message.role === "assistant") {
+			const original = model
+				? decodeProviderMetadata(message.providerMetadata, "google", model)
+				: undefined;
+			if (Array.isArray(original) && original.length > 0) {
+				for (const call of message.toolCalls) callNames.set(call.id, call.name);
+				out.push({ role: "model", parts: original });
+				continue;
+			}
 			const parts: unknown[] = [];
 			if (message.content) parts.push({ text: message.content });
 			for (const call of message.toolCalls) {
@@ -358,7 +472,9 @@ export function renderGoogleContents(
 						args: call.input ?? {},
 						...(isProviderCallId(call.id) ? { id: call.id } : {}),
 					},
-					...(call.signature ? { thoughtSignature: call.signature } : {}),
+					...(!model && call.signature
+						? { thoughtSignature: call.signature }
+						: {}),
 				});
 			}
 			if (parts.length > 0) out.push({ role: "model", parts });

@@ -1,9 +1,28 @@
+import type { ByokProviderId } from "../core/keys/ProviderKeyTypes.ts";
 import type { PermissionMode } from "../core/permissions/PermissionMode.ts";
 import type { McpServerFileEntry } from "../core/mcp/config.ts";
 import type {
 	ClientToolDefinition,
 	ClientToolResultPayload,
 } from "../core/tools/ClientToolBridge.ts";
+import type { ModelSource } from "../providers/backboard/types.ts";
+
+/**
+ * Advertised in the `serve:ready` payload. A host that manages provider keys
+ * must see this before it sends credentials or key-billed turns, so an older
+ * packaged runtime fails closed instead of silently routing to Backboard.
+ */
+export const HOST_MANAGED_BYOK_CAPABILITY = "host-managed-byok-v2";
+
+export const SERVE_CAPABILITIES: readonly string[] = [
+	HOST_MANAGED_BYOK_CAPABILITY,
+];
+
+/** One provider key in a host credential snapshot. */
+export interface ServeProviderKey {
+	provider: ByokProviderId;
+	key: string;
+}
 
 /** A binary attachment sent by the IDE and staged for the public R-CLI. */
 export interface ServeFileAttachment {
@@ -32,6 +51,12 @@ export type ServeControl =
 			/** Hidden host guidance appended to this turn's system prompt. */
 			systemContext?: string;
 			model?: string;
+			/**
+			 * Explicit billing route for `model`. Required by a host-managed
+			 * runtime whenever `model` is sent; subscription ids keep routing by
+			 * their provider id regardless of this value.
+			 */
+			source?: ModelSource;
 			thinking?: string;
 			excludedTools?: string[];
 			permission?: PermissionMode;
@@ -59,6 +84,7 @@ export type ServeControl =
 			clientTools?: ClientToolDefinition[];
 	  }
 	| { op: "steer"; requestId?: string; prompt: string; systemContext?: string }
+	| { op: "waitForIdle"; requestId: string }
 	| { op: "warmup"; requestId?: string }
 	| { op: "cancel"; requestId?: string }
 	| { op: "respondInput"; id: string; answers: string[] }
@@ -69,7 +95,6 @@ export type ServeControl =
 			result?: ClientToolResultPayload;
 			error?: string;
 	  }
-	| { op: "setModel"; requestId?: string; model: string }
 	| {
 			/**
 			 * Replaces the session's MCP server set with the IDE-configured
@@ -82,6 +107,18 @@ export type ServeControl =
 			servers: Record<string, McpServerFileEntry & { disabled?: boolean }>;
 			force?: string[];
 		}
+	| { op: "setModel"; requestId?: string; model: string; source?: ModelSource }
+	| {
+			/**
+			 * The host's complete provider-key snapshot: an absent provider is a
+			 * removal. Applied synchronously, so it takes effect for every later
+			 * line even though handlers otherwise run concurrently.
+			 */
+			op: "setCredentials";
+			requestId?: string;
+			revision: number;
+			providerKeys: ServeProviderKey[];
+	  }
 	| { op: "listModels"; requestId: string }
 	| { op: "listImageModels"; requestId: string }
 	| { op: "listVideoModels"; requestId: string }

@@ -4,7 +4,10 @@ import {
 	type MemoryProfile,
 	type ThinkingConfig,
 } from "../../config/defaults.ts";
-import type { SendMessageRequest } from "../../providers/backboard/types.ts";
+import type {
+	ModelSource,
+	SendMessageRequest,
+} from "../../providers/backboard/types.ts";
 import type { Session } from "../session/Session.ts";
 import type { OpenAITool } from "../tools/schema.ts";
 
@@ -14,6 +17,11 @@ export interface RunMessageRequestContext {
 	systemPrompt: string;
 	assistantId?: string;
 	model: { provider: string; model: string };
+	/**
+	 * The billing route captured when the turn or worker started. Every request
+	 * built for it carries the same value, so routing never has to guess.
+	 */
+	source?: ModelSource;
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
 	workspaceId?: string;
@@ -56,6 +64,7 @@ export function buildRunMessageRequest(
 		assistant_id: context.assistantId,
 		llm_provider: context.model.provider,
 		model_name: context.model.model,
+		...(context.source === undefined ? {} : { source: context.source }),
 		system_prompt: context.systemPrompt,
 		memory: formatBackboardMemoryMode(context.memory),
 		memory_profile: context.memoryProfile,

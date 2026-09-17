@@ -84,6 +84,8 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 	#line: number | undefined;
 	readonly #scrollToFragment: string | undefined;
 	#firstUpdate = true;
+	#forceUpdate = false;
+	#forceRender = false;
 	#scrollToFirstDiffChange: boolean;
 	#currentVersion?: PreviewDocumentVersion;
 	#isScrolling = false;
@@ -243,13 +245,18 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 	 * The first call immediately refreshes the preview,
 	 * calls happening shortly thereafter are debounced.
 	*/
-	public refresh(forceUpdate: boolean = false) {
+	public refresh(forceUpdate: boolean = false, forceRender: boolean = forceUpdate) {
+		// Diff decorations can change without this document's version changing.
+		// Recompute them without replacing the webview page. Preserve stronger
+		// refresh requests when several changes share a pending timer.
+		this.#forceUpdate ||= forceUpdate || this.#firstUpdate;
+		this.#forceRender ||= forceRender;
 		// Schedule update if none is pending
 		if (!this.#throttleTimer) {
 			if (this.#firstUpdate) {
-				this.#updatePreview(true);
+				this.#updatePreview();
 			} else {
-				this.#throttleTimer = setTimeout(() => this.#updatePreview(forceUpdate), this.#delay);
+				this.#throttleTimer = setTimeout(() => this.#updatePreview(), this.#delay);
 			}
 		}
 
@@ -289,9 +296,13 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 		return this.#isScrolling;
 	}
 
-	async #updatePreview(forceUpdate?: boolean): Promise<void> {
+	async #updatePreview(): Promise<void> {
 		clearTimeout(this.#throttleTimer);
 		this.#throttleTimer = undefined;
+		const forceUpdate = this.#forceUpdate;
+		const forceRender = this.#forceRender || forceUpdate;
+		this.#forceUpdate = false;
+		this.#forceRender = false;
 
 		if (this.#disposed) {
 			return;
@@ -312,7 +323,7 @@ class MarkdownPreview extends Disposable implements WebviewResourceProvider {
 		}
 
 		const pendingVersion = new PreviewDocumentVersion(document);
-		if (!forceUpdate && this.#currentVersion?.equals(pendingVersion)) {
+		if (!forceRender && this.#currentVersion?.equals(pendingVersion)) {
 			if (this.#line) {
 				this.scrollTo(this.#line);
 			}
@@ -649,8 +660,8 @@ export class StaticMarkdownPreview extends Disposable implements IManagedMarkdow
 		return false;
 	}
 
-	public refresh() {
-		this.#preview.refresh(true);
+	public refresh(forceUpdate = true) {
+		this.#preview.refresh(forceUpdate, true);
 	}
 
 	public scrollTo(line: number): void {

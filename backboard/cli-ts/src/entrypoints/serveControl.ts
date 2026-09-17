@@ -1,14 +1,17 @@
+import { isByokProviderId } from "../core/keys/ProviderKeyTypes.ts";
 import type { ServeControl } from "./ServeTypes.ts";
 
 const KNOWN_OPS = new Set<ServeControl["op"]>([
 	"submit",
 	"steer",
 	"warmup",
+	"waitForIdle",
 	"cancel",
 	"respondInput",
 	"clientToolResult",
 	"setModel",
 	"setMcpServers",
+	"setCredentials",
 	"listModels",
 	"listImageModels",
 	"listVideoModels",
@@ -59,6 +62,13 @@ export function parseControlLine(line: string): ParsedControlLine | null {
 		error: `invalid ${op} op: missing ${field}`,
 		requestId,
 	});
+	// Errors name the field only. A credential line that fails validation must
+	// never have its values echoed back onto stdout.
+	const validSource = (value: unknown): boolean =>
+		value === undefined ||
+		value === "backboard" ||
+		value === "byok" ||
+		value === "subscription";
 	switch (op as ServeControl["op"]) {
 		case "prepareRewind":
 		case "commitRewind":
@@ -112,6 +122,7 @@ export function parseControlLine(line: string): ParsedControlLine | null {
 			) {
 				return missing("systemContext");
 			}
+			if (!validSource(record.source)) return missing("source");
 			break;
 		case "steer":
 			if (typeof record.prompt !== "string") return missing("prompt");
@@ -136,6 +147,30 @@ export function parseControlLine(line: string): ParsedControlLine | null {
 			break;
 		case "setModel":
 			if (typeof record.model !== "string") return missing("model");
+			if (!validSource(record.source)) return missing("source");
+			break;
+		case "setCredentials":
+			if (
+				typeof record.revision !== "number" ||
+				!Number.isInteger(record.revision) ||
+				record.revision < 0
+			) {
+				return missing("revision");
+			}
+			if (
+				!Array.isArray(record.providerKeys) ||
+				record.providerKeys.some(
+					(entry) =>
+						typeof entry !== "object" ||
+						entry === null ||
+						typeof entry.provider !== "string" ||
+						!isByokProviderId(entry.provider) ||
+						typeof entry.key !== "string" ||
+						entry.key.trim().length === 0,
+				)
+			) {
+				return missing("providerKeys");
+			}
 			break;
 		case "setMcpServers":
 			if (
@@ -152,6 +187,7 @@ export function parseControlLine(line: string): ParsedControlLine | null {
 				return missing("force");
 			break;
 		case "listModels":
+		case "waitForIdle":
 		case "listImageModels":
 		case "listVideoModels":
 		case "listTools":

@@ -127,6 +127,8 @@ import { ILocalPtyService, LocalReconnectConstants, TerminalIpcChannels, Termina
 import { ElectronPtyHostStarter } from '../../platform/terminal/electron-main/electronPtyHostStarter.js';
 import { PtyHostService } from '../../platform/terminal/node/ptyHostService.js';
 import { ElectronAgentHostStarter } from '../../platform/agentHost/electron-main/electronAgentHostStarter.js';
+import { ByokKeyStoreMainService } from '../../platform/agentHost/electron-main/byokKeyStoreMainService.js';
+import { BYOK_KEY_STORE_CHANNEL } from '../../platform/agentHost/common/byokKeyStore.js';
 import { AgentHostProcessManager } from '../../platform/agentHost/node/agentHostService.js';
 import { isAgentHostEnabled } from '../../platform/agentHost/common/agentService.js';
 import { NODE_REMOTE_RESOURCE_CHANNEL_NAME, NODE_REMOTE_RESOURCE_IPC_METHOD_NAME, NodeRemoteResourceResponse, NodeRemoteResourceRouter } from '../../platform/remote/common/electronRemoteResources.js';
@@ -163,6 +165,7 @@ export class CodeApplication extends Disposable {
 	private auxiliaryWindowsMainService: IAuxiliaryWindowsMainService | undefined;
 	private nativeHostMainService: INativeHostMainService | undefined;
 	private _browserViewCdpEndpointService: BrowserViewCdpEndpointMainService | undefined;
+	private _agentHostProcessManager: AgentHostProcessManager | undefined;
 
 	constructor(
 		private readonly mainProcessNodeIpcServer: NodeIPCServer,
@@ -1189,6 +1192,7 @@ export class CodeApplication extends Disposable {
 		if (isAgentHostEnabled(this.configurationService)) {
 			const agentHostStarter = new ElectronAgentHostStarter(this._browserViewCdpEndpointService, this.configurationService, this.environmentMainService, this.lifecycleMainService, this.logService);
 			const agentHostProcessManager = this._register(new AgentHostProcessManager(agentHostStarter, this.logService, this.loggerService));
+			this._agentHostProcessManager = agentHostProcessManager;
 			agentHostProcessManager.ensureStarted();
 		}
 
@@ -1311,6 +1315,13 @@ export class CodeApplication extends Disposable {
 		// Encryption
 		const encryptionChannel = ProxyChannel.fromService(accessor.get(IEncryptionMainService), disposables);
 		mainProcessElectronServer.registerChannel('encryption', encryptionChannel);
+
+		// Backboard provider API keys: one owner for persistence and activation,
+		// so no two windows can race a replacement against a removal.
+		if (this._agentHostProcessManager) {
+			const byokKeyStore = disposables.add(accessor.get(IInstantiationService).createInstance(ByokKeyStoreMainService, this._agentHostProcessManager));
+			mainProcessElectronServer.registerChannel(BYOK_KEY_STORE_CHANNEL, ProxyChannel.fromService(byokKeyStore, disposables));
+		}
 
 		// Browser View
 		const browserViewChannel = ProxyChannel.fromService(accessor.get(IBrowserViewMainService), disposables);

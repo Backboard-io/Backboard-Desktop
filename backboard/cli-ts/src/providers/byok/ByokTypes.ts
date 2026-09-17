@@ -6,6 +6,10 @@ import type {
 	ProviderEvent,
 	ProviderToolCall,
 } from "../backboard/types.ts";
+import type {
+	ProviderCredential,
+	ProviderTransport,
+} from "./ProviderCredential.ts";
 
 /** A local file sent inline with a user message (images are inlined as base64). */
 export interface ByokAttachment {
@@ -48,6 +52,7 @@ export type ByokMessage =
 	| { role: "tool"; results: ByokToolResult[] };
 
 export interface ByokStreamRequest {
+	transport?: ProviderTransport;
 	/** Vendor model id, e.g. "claude-opus-5" - never the "provider/model" form. */
 	model: string;
 	systemPrompt: string;
@@ -76,6 +81,7 @@ export interface ProviderAdapter {
 	readonly consoleUrl: string;
 	/** Human hint for the expected key shape, e.g. "sk-ant-...". */
 	readonly keyHint: string;
+	modelCapabilities?(model: string): Partial<ModelCatalogItem>;
 
 	/** Cheap local shape check run before spending a network round-trip. */
 	looksLikeKey(key: string): boolean;
@@ -84,18 +90,33 @@ export interface ProviderAdapter {
 	 * Confirms the key works. Must reject with a readable message on 401/403
 	 * and resolve on success; used by the BYOK setup flow before saving.
 	 */
-	validateKey(key: string, signal?: AbortSignal): Promise<void>;
+	validateKey(
+		key: ProviderCredential,
+		signal?: AbortSignal,
+		transport?: ProviderTransport,
+	): Promise<void>;
 
 	/** The vendor's chat models, already filtered to ones worth selecting. */
-	listModels(key: string, signal?: AbortSignal): Promise<ModelCatalogItem[]>;
+	listModels(
+		key: ProviderCredential,
+		signal?: AbortSignal,
+		transport?: ProviderTransport,
+	): Promise<ModelCatalogItem[]>;
 
 	/**
 	 * Whether this specific model accepts the provider's thinking controls.
 	 * Catalog-backed providers may resolve this asynchronously with the active
 	 * key; static providers can return their answer directly.
 	 */
-	supportsThinking(model: string, key: string): boolean | Promise<boolean>;
+	supportsThinking(
+		model: string,
+		key: ProviderCredential,
+		transport?: ProviderTransport,
+	): boolean | Promise<boolean>;
 
 	/** Streams one assistant turn as the same ProviderEvents Backboard yields. */
-	stream(request: ByokStreamRequest, key: string): AsyncIterable<ProviderEvent>;
+	stream(
+		request: ByokStreamRequest,
+		key: ProviderCredential,
+	): AsyncIterable<ProviderEvent>;
 }

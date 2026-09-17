@@ -175,7 +175,7 @@ class RelativeWriteClient extends CompletingClient {
 function runnerWith(client: BackboardClient, tools: Tool[]): SubAgentRunner {
 	return new SubAgentRunner({
 		client,
-		getModel: () => TEST_MODEL,
+		getRoute: () => ({ ...TEST_MODEL, source: "byok" }),
 		memory: "off",
 		memoryProfile: "code",
 		getThinking: async () => undefined,
@@ -207,6 +207,27 @@ describe("SubAgentRunner", () => {
 		expect(client.messageRequests[0]?.system_prompt).toBe(
 			"you are a sub-agent",
 		);
+		// The worker bills to the route its parent captured, never to a guess.
+		expect(client.messageRequests[0]?.source).toBe("byok");
+	});
+
+	it("uses the submitting turn's route even when a worker starts after the picker changes", async () => {
+		const client = new CompletingClient();
+		const runner = runnerWith(client, []);
+		await runner.run({
+			route: { provider: "google", model: "gemini-2.5-flash", source: "byok" },
+			prompt: "report",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+		expect(
+			client.messageRequests.map((request) => [
+				request.llm_provider,
+				request.model_name,
+				request.source,
+			]),
+		).toEqual([["google", "gemini-2.5-flash", "byok"]]);
 	});
 
 	it("propagates the depth into the sub-agent tool context", async () => {

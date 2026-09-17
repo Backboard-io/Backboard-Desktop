@@ -403,6 +403,24 @@ suite('ChatModelSelectionLogic', () => {
 			assert.strictEqual(findBestMatchingModel(prev, [target])?.identifier, target.identifier);
 		});
 
+		test('never carries a selection across billing routes', () => {
+			// A vanished key-billed row must not become the same model on
+			// Backboard billing, nor a Backboard row one billed to the user's key;
+			// within its own route the usual id/family/name matching applies.
+			const keyBilled = createModel('openai-key/gpt-5.5', 'GPT-5.5', { vendor: 'agent-host-backboard', family: 'openai-key/gpt-5.5' });
+			const backboard = createModel('openai/gpt-5.5', 'GPT-5.5', { vendor: 'agent-host-backboard', family: 'openai/gpt-5.5' });
+			const otherKeyRow = createModel('openai-key/gpt-5-mini', 'GPT-5.5', { vendor: 'agent-host-backboard', family: 'openai-key/gpt-5-mini' });
+			assert.deepStrictEqual({
+				keyToBackboard: findBestMatchingModel(keyBilled, [backboard]),
+				backboardToKey: findBestMatchingModel(backboard, [keyBilled]),
+				keyToSameRouteByName: findBestMatchingModel(keyBilled, [backboard, otherKeyRow])?.identifier,
+			}, {
+				keyToBackboard: undefined,
+				backboardToKey: undefined,
+				keyToSameRouteByName: otherKeyRow.identifier,
+			});
+		});
+
 		test('returns undefined when nothing matches', () => {
 			const prev = createModel('gpt-5', 'GPT-5', { family: 'gpt-5' });
 			const pool = [createSessionModel('claude', 'Claude', 'agent-host-copilotcli', { family: 'claude' })];

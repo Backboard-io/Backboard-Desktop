@@ -96,9 +96,12 @@ export class SubAgentRunner {
 				isToolEnabled: this.deps.isToolEnabled,
 			});
 
-			const model = this.deps.getModel();
+			// Inherit the submitting turn, including for delayed and detached workers.
+			const route = Object.freeze({
+				...(params.route ?? this.deps.getRoute()),
+			});
 			const thinkingResolver = this.deps.getThinkingResolver
-				? await this.deps.getThinkingResolver()
+				? await this.deps.getThinkingResolver(route)
 				: undefined;
 			const thinking = thinkingResolver
 				? undefined
@@ -125,7 +128,8 @@ export class SubAgentRunner {
 				systemPrompt: params.isolatedWorkspace
 					? `${this.deps.systemPrompt}\n\nYou are running in an isolated native Git worktree at ${params.parentCwd}. This path is authoritative even if delegated prose names a different project directory. Prefer workspace-relative paths and use this worktree as the root for every file and terminal operation. Modify files only with Write, Edit, or ApplyPatch—not shell redirection, mkdir, installers, formatters, or other shell commands that mutate the checkout. Execute is read-only for the checkout; only its private scratch/cache is writable. Never read from or write to the coordinator checkout or another worker worktree. Backboard automatically collects and integrates successful file-tool edits into the coordinator workspace after you finish. In your final report, describe completed edits and verification; never tell the parent to copy, merge, cherry-pick, or open files from this private worktree.`
 					: this.deps.systemPrompt,
-				model,
+				model: { provider: route.provider, model: route.model },
+				source: route.source,
 				openRouterProvider: this.deps.getOpenRouterProvider?.(),
 				memory: this.deps.memory,
 				memoryProfile: this.deps.memoryProfile,
@@ -145,6 +149,7 @@ export class SubAgentRunner {
 				: undefined;
 
 			const ctx: ToolContext = {
+				modelRoute: route,
 				sessionId: session.sessionId,
 				cwd: params.parentCwd,
 				isolatedWorkspaceRoot: params.isolatedWorkspace

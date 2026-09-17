@@ -240,6 +240,10 @@ export class AgentTaskManager {
 		for (const controller of this.controllers.values()) controller.abort();
 	}
 
+	get hasActiveTasks(): boolean {
+		return this.registrations.size > 0 || this.operations.size > 0;
+	}
+
 	async waitForIdle(): Promise<void> {
 		// Registrations can still be waiting for their durable queued write and
 		// are not operations yet. Drain both, including operations they create.

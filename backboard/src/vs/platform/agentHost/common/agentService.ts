@@ -511,6 +511,11 @@ export interface AuthenticateResult {
 export interface IAgentCommandParams {
 	readonly provider: AgentProvider;
 	readonly command: string;
+	/**
+	 * Structured command arguments. A value stored under the key `key` is a
+	 * secret: transports redact it from logs and must never persist it.
+	 */
+	readonly args?: Readonly<Record<string, unknown>>;
 }
 
 /** User-facing result returned by a provider-owned command. */
@@ -518,6 +523,8 @@ export interface IAgentCommandResult {
 	readonly message: string;
 	/** A connection preflight requires the vendor sign-in flow. */
 	readonly requiresSignIn?: boolean;
+	/** Structured result data for callers that need more than a message. */
+	readonly data?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -866,7 +873,7 @@ export interface IAgent {
 	readonly models: IObservable<readonly IAgentModelInfo[]>;
 
 	/** Run a provider-owned account/setup command outside a session. */
-	executeCommand?(command: string): Promise<IAgentCommandResult>;
+	executeCommand?(command: string, args?: Readonly<Record<string, unknown>>): Promise<IAgentCommandResult>;
 
 	/** List persisted sessions from this provider. */
 	listSessions(): Promise<IAgentSessionMetadata[]>;

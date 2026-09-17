@@ -32,10 +32,19 @@ import type {
 	ByokMessage,
 	ProviderAdapter,
 } from "./ByokTypes.ts";
+import {
+	CredentialChangedError,
+	credentialKey,
+	type ProviderCredential,
+	type ProviderTransport,
+} from "./ProviderCredential.ts";
 import { BYOK_ADAPTER_LIST, byokAdapterFor } from "./registry.ts";
+import { scrubSecret } from "./scrubSecret.ts";
 
 /** Resolves the usable key for a provider, or null when none is enabled. */
-export type ProviderKeyResolver = (provider: ByokProviderId) => string | null;
+export type ProviderKeyResolver = (
+	provider: ByokProviderId,
+) => ProviderCredential | null;
 
 /**
  * A locally held conversation. Vendor APIs are stateless, so the client keeps
@@ -104,6 +113,7 @@ export class ByokClient implements AgentClient {
 		private readonly resolveKey: ProviderKeyResolver,
 		private readonly serverLog?: ServerEventLog,
 		private readonly conversationStore?: ByokConversationStore,
+		private readonly transport?: ProviderTransport,
 	) {}
 
 	async *runMessage(
@@ -311,7 +321,7 @@ export class ByokClient implements AgentClient {
 	 */
 	private async *streamTurn(
 		adapter: ProviderAdapter,
-		key: string,
+		key: ProviderCredential,
 		thread: ByokThread,
 		tools: SubmitToolOutputsRequest["tools"],
 		options: {
@@ -333,7 +343,7 @@ export class ByokClient implements AgentClient {
 		const commit = async (): Promise<string | null> => {
 			if (committed) return null;
 			committed = true;
-			if (text || calls.length > 0) {
+			if (text || calls.length > 0 || providerMetadata) {
 				thread.messages.push({
 					role: "assistant",
 					content: text,
@@ -362,6 +372,7 @@ export class ByokClient implements AgentClient {
 			for await (const rawEvent of adapter.stream(
 				{
 					model: thread.model,
+					transport: this.transport,
 					systemPrompt: thread.systemPrompt,
 					tools: tools ?? [],
 					messages: thread.messages,
@@ -382,6 +393,7 @@ export class ByokClient implements AgentClient {
 				if (event.kind === "completed") {
 					terminal = true;
 					if (event.finalText) text = event.finalText;
+					providerMetadata = event.providerMetadata;
 					const warning = await commit();
 					if (warning) yield { kind: "warning", message: warning };
 				}
@@ -408,7 +420,7 @@ export class ByokClient implements AgentClient {
 				);
 			}
 		} catch (err) {
-			error = errorMessage(err);
+			error = scrubSecret(errorMessage(err), credentialKey(key));
 			if (options.signal?.aborted && !committed) {
 				thread.messages.push({
 					role: "assistant",
@@ -425,6 +437,11 @@ export class ByokClient implements AgentClient {
 				options.attempt.keepInput = true;
 				if (warning) yield { kind: "warning", message: warning };
 			}
+			if (err instanceof CredentialChangedError) {
+				yield { kind: "failed", error: err.message, retryable: false };
+				return;
+			}
+			if (error !== errorMessage(err)) throw new Error(error);
 			throw err;
 		} finally {
 			this.serverLog?.response({
@@ -494,8 +511,13 @@ export class ByokClient implements AgentClient {
 		return {
 			provider,
 			model,
+			...adapter?.modelCapabilities?.(model),
 			supports_thinking: adapter
-				? await adapter.supportsThinking(model, this.keyFor(adapter))
+				? await adapter.supportsThinking(
+						model,
+						this.keyFor(adapter),
+						this.transport,
+					)
 				: false,
 		};
 	}
@@ -507,7 +529,7 @@ export class ByokClient implements AgentClient {
 				const key = this.resolveKey(adapter.id);
 				if (!key) return [];
 				try {
-					return await adapter.listModels(key, options.signal);
+					return await adapter.listModels(key, options.signal, this.transport);
 				} catch {
 					// One vendor being down or its key revoked must not empty the
 					// whole picker.
@@ -704,7 +726,7 @@ export class ByokClient implements AgentClient {
 		return adapter;
 	}
 
-	private keyFor(adapter: ProviderAdapter): string {
+	private keyFor(adapter: ProviderAdapter): ProviderCredential {
 		const key = this.resolveKey(adapter.id);
 		if (!key) {
 			throw new Error(

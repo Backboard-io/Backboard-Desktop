@@ -1,0 +1,111 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.backboard-api-keys-editor {
+	height: 100%;
+	overflow: auto;
+	max-width: 900px;
+	margin: 0 auto;
+	padding: 15px 24px 24px 24px;
+	box-sizing: border-box;
+}
+
+.backboard-api-keys-title {
+	margin: 0 0 6px 0;
+	font-size: 20px;
+	font-weight: 600;
+}
+
+.backboard-api-keys-description {
+	margin: 0 0 20px 0;
+	color: var(--vscode-descriptionForeground);
+	line-height: 1.5;
+}
+
+.backboard-api-keys-row {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	padding: 14px 16px;
+	margin-bottom: 10px;
+	border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+	border-radius: 6px;
+	background-color: var(--vscode-editorWidget-background);
+}
+
+.backboard-api-keys-icon {
+	flex: 0 0 auto;
+	width: 24px;
+	height: 24px;
+	background-color: currentColor;
+	opacity: 0.85;
+}
+
+.backboard-api-keys-icon.provider-openai {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_open_ai.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_open_ai.svg') center / contain no-repeat;
+}
+
+.backboard-api-keys-icon.provider-anthropic {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_anthropic.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_anthropic.svg') center / contain no-repeat;
+}
+
+.backboard-api-keys-icon.provider-google {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_google.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_google.svg') center / contain no-repeat;
+}
+
+.backboard-api-keys-icon.provider-openrouter {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_open_router.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_open_router.svg') center / contain no-repeat;
+}
+
+.backboard-api-keys-icon.provider-xai {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_x_ai.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_x_ai.svg') center / contain no-repeat;
+}
+
+.backboard-api-keys-main {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.backboard-api-keys-name {
+	font-weight: 600;
+}
+
+.backboard-api-keys-status {
+	color: var(--vscode-descriptionForeground);
+	overflow-wrap: anywhere;
+}
+
+.backboard-api-keys-status.error {
+	color: var(--vscode-errorForeground);
+}
+
+.backboard-api-keys-console {
+	color: var(--vscode-textLink-foreground);
+	cursor: pointer;
+	font-size: 12px;
+}
+
+.backboard-api-keys-console:hover {
+	text-decoration: underline;
+}
+
+.backboard-api-keys-actions {
+	flex: 0 0 auto;
+	display: flex;
+	gap: 8px;
+}
+
+.backboard-api-keys-actions .monaco-button {
+	padding: 4px 12px;
+	white-space: nowrap;
+}
