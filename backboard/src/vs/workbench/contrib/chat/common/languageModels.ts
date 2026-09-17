@@ -190,6 +190,9 @@ export interface ILanguageModelConfigurationSchema extends IJSONSchema {
 	};
 }
 
+/** Who bills a request: the Backboard platform, the user's own provider key, or a connected subscription. */
+export type LanguageModelBillingSource = 'backboard' | 'byok' | 'subscription';
+
 export interface ILanguageModelChatMetadata {
 	readonly extension: ExtensionIdentifier;
 
@@ -201,6 +204,11 @@ export interface ILanguageModelChatMetadata {
 	readonly detail?: string;
 	readonly multiplierNumeric?: number;
 	readonly isBYOK?: boolean;
+	/**
+	 * Billing route reported by the Backboard agent host. Undefined for models
+	 * that do not come from the Backboard catalog.
+	 */
+	readonly billingSource?: LanguageModelBillingSource;
 	readonly pricing?: string;
 	readonly inputCost?: number;
 	readonly cacheCost?: number;
