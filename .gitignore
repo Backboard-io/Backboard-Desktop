@@ -21,6 +21,8 @@ node_modules/
 /windows-release/
 /backboard/extensions/backboard/bin/
 /backboard/cli-ts/.*.bun-build
+/backboard/cua-driver/rust/target/
+/output/
 
 # Local build state for the product source tree.
 /backboard/.build/
