@@ -4570,14 +4570,60 @@ function buildProviderHandoffConversationContext(turns: readonly CliTsStoredTurn
 	);
 }
 
-function buildConversationHandoffContext(turns: readonly CliTsStoredTurn[], reason: string): string {
-	const transcript = turns.map(turn => ({
-		user: turn.prompt,
-		attachments: turn.attachments,
-		assistant: turn.response,
-		tools: turn.parts?.filter(part => part.kind === 'tool'),
-		...(turn.failed ? { responseFailed: true } : {}),
-	}));
+/** Per-field caps for handoff tool records; see projectHandoffToolPart. */
+const HANDOFF_TOOL_FIELD_LIMIT = 600;
+const HANDOFF_TOOL_OUTPUT_LIMIT = 2_000;
+
+/**
+ * A stored tool part carries the raw tool input and the full captured terminal
+ * output (up to 80KB per call). Replaying those verbatim made a handoff grow
+ * into megabytes, which the next provider pays for on every turn of the resumed
+ * chat. Keep what identifies the call and a bounded window of what it produced.
+ */
+function projectHandoffToolPart(part: Extract<CliTsStoredPart, { kind: 'tool' }>): Record<string, unknown> {
+	const detail = part.detail ? clampHandoffText(part.detail, HANDOFF_TOOL_OUTPUT_LIMIT) : undefined;
+	// detail is already a head preview of the same stream; only fall back to the
+	// raw capture, tail-first, when there is no preview to describe the result.
+	const output = detail === undefined && part.terminalOutput?.text
+		? clampHandoffText(part.terminalOutput.text, HANDOFF_TOOL_OUTPUT_LIMIT, 'tail')
+		: undefined;
+	return {
+		name: part.name,
+		...(part.inputSummary ? { inputSummary: clampHandoffText(part.inputSummary, HANDOFF_TOOL_FIELD_LIMIT) } : {}),
+		...(part.terminalCommand ? { terminalCommand: clampHandoffText(part.terminalCommand, HANDOFF_TOOL_FIELD_LIMIT) } : {}),
+		...(part.agentName ? { agentName: part.agentName } : {}),
+		...(part.title ? { title: clampHandoffText(part.title, HANDOFF_TOOL_FIELD_LIMIT) } : {}),
+		...(detail !== undefined ? { detail } : {}),
+		...(output !== undefined ? { output } : {}),
+		...(part.terminalOutput?.exitCode !== undefined ? { exitCode: part.terminalOutput.exitCode } : {}),
+		...(part.terminalOutput?.timedOut ? { timedOut: true } : {}),
+		...(part.failed ? { failed: true } : {}),
+	};
+}
+
+function clampHandoffText(value: string, limit: number, keep: 'head' | 'tail' = 'head'): string {
+	if (value.length <= limit) {
+		return value;
+	}
+	const omitted = value.length - limit;
+	return keep === 'head'
+		? `${value.slice(0, limit)}\n[+${omitted} characters omitted]`
+		: `[${omitted} characters omitted]\n${value.slice(value.length - limit)}`;
+}
+
+export function buildConversationHandoffContext(turns: readonly CliTsStoredTurn[], reason: string): string {
+	const transcript = turns.map(turn => {
+		const tools = turn.parts
+			?.filter((part): part is Extract<CliTsStoredPart, { kind: 'tool' }> => part.kind === 'tool')
+			.map(projectHandoffToolPart);
+		return {
+			user: turn.prompt,
+			attachments: turn.attachments,
+			assistant: turn.response,
+			...(tools?.length ? { tools } : {}),
+			...(turn.failed ? { responseFailed: true } : {}),
+		};
+	});
 	return [
 		`${reason} Treat the JSON transcript below as authoritative prior user/assistant history, then answer the current user message as the next turn. Do not mention this handoff unless the user asks about it.`,
 		'<prior_conversation_json>',

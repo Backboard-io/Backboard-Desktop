@@ -389,4 +389,46 @@ describe("BackboardClient attachment endpoints", () => {
 			client.createAssistant({ name: "a", system_prompt: "s", tools: [] }),
 		).rejects.toBeInstanceOf(BackboardError);
 	});
+
+	it("retries a transient gateway failure on non-stream requests", async () => {
+		let posts = 0;
+		globalThis.fetch = (async () => {
+			posts++;
+			if (posts < 3) {
+				return new Response("<html>502 Bad Gateway</html>", {
+					status: 502,
+				});
+			}
+			return Response.json({ thread_id: "thread_1", messages: [] });
+		}) as unknown as typeof fetch;
+
+		const client = new BackboardClient({
+			apiKey: "test",
+			apiUrl: "https://api.example.test",
+		});
+
+		await expect(client.getThread("thread_1")).resolves.toEqual({
+			thread_id: "thread_1",
+			messages: [],
+		});
+		expect(posts).toBe(3);
+	});
+
+	it("does not retry non-retryable statuses on non-stream requests", async () => {
+		let posts = 0;
+		globalThis.fetch = (async () => {
+			posts++;
+			return new Response(JSON.stringify({ detail: "nope" }), {
+				status: 400,
+			});
+		}) as unknown as typeof fetch;
+
+		const client = new BackboardClient({
+			apiKey: "test",
+			apiUrl: "https://api.example.test",
+		});
+
+		await expect(client.listThreads()).rejects.toBeInstanceOf(BackboardError);
+		expect(posts).toBe(1);
+	});
 });

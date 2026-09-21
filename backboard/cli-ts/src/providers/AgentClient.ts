@@ -12,6 +12,8 @@ import type {
 	ProviderEvent,
 	SendMessageRequest,
 	SubmitToolOutputsRequest,
+	SystemOneRequest,
+	SystemOneResult,
 	VideoModelsListResponse,
 } from "./backboard/types.ts";
 
@@ -118,6 +120,12 @@ export interface AgentClient {
 		request: GenerateVideoRequest,
 		options?: RequestOptions,
 	): Promise<GenerateVideoResult>;
+
+	/** Backboard System One decisions (TypeSafe Jev); absent on non-Backboard clients. */
+	systemOne?(
+		request: SystemOneRequest,
+		options?: RequestOptions,
+	): Promise<SystemOneResult>;
 
 	listAssistants(
 		options?: RequestOptions,

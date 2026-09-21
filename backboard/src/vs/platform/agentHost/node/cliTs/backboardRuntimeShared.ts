@@ -753,7 +753,7 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 					[BACKBOARD_COMPUTER_USE_CONFIG_KEY]: {
 						type: 'boolean',
 						title: localize('backboard.config.computerUse.title', "Computer Use"),
-						description: localize('backboard.config.computerUse.description', "Lets Backboard control the desktop (screenshots, mouse, and keyboard) to complete tasks."),
+						description: localize('backboard.config.computerUse.description', "Lets Backboard operate desktop apps. Jev presses labelled controls in the background without screenshots; screenshots, mouse, and keyboard are the fallback."),
 						default: false,
 						sessionMutable: true,
 					},

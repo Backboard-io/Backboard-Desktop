@@ -21,7 +21,7 @@ import { ActionType } from '../../common/state/sessionActions.js';
 import { CustomizationType, McpServerStatus } from '../../common/state/protocol/channels-session/state.js';
 import { buildSubagentSessionUri, FileEditKind, ResponsePartKind, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ToolCallResponsePart, type ToolResultFileEditContent } from '../../common/state/sessionState.js';
 import { AgentHostCheckpointService } from '../../node/agentHostCheckpointService.js';
-import { assertUsableClaudeSubscriptionLogin, CliTsAgent, cliTsToolExecutionFailed, getBackboardWorktreeBranchName, getBackboardWorktreesRoot, hasUsableChatGptSubscriptionLogin, isChatGptSubscriptionModel, isClaudeSubscriptionModel, requiresProviderThreadHandoff, withChatGptSubscriptionConnectionState, withClaudeSubscriptionConnectionState } from '../../node/cliTs/cliTsAgent.js';
+import { assertUsableClaudeSubscriptionLogin, buildConversationHandoffContext, CliTsAgent, cliTsToolExecutionFailed, getBackboardWorktreeBranchName, getBackboardWorktreesRoot, hasUsableChatGptSubscriptionLogin, isChatGptSubscriptionModel, isClaudeSubscriptionModel, requiresProviderThreadHandoff, withChatGptSubscriptionConnectionState, withClaudeSubscriptionConnectionState } from '../../node/cliTs/cliTsAgent.js';
 import { SessionDatabase } from '../../node/sessionDatabase.js';
 import { FileEditTracker, parseSessionDbUri } from '../../node/shared/fileEditTracker.js';
 import { NullEditSurvivalReporterFactory } from '../../node/shared/editSurvivalReporter.js';
@@ -383,6 +383,29 @@ suite('CliTsAgent tool metadata', () => {
 		assert.strictEqual(session.forkContext, undefined);
 		assert.match(session.providerHandoffContext ?? '', /ORCHID/);
 		assert.match(session.providerHandoffContext ?? '', /changed model providers/);
+	});
+
+	test('bounds tool records in a conversation handoff instead of replaying captured output', () => {
+		const context = buildConversationHandoffContext([{
+			prompt: 'run the build',
+			response: 'done',
+			parts: [{
+				kind: 'tool',
+				id: 'call-1',
+				name: 'execute',
+				input: { command: 'npm run build', secretPadding: 'x'.repeat(50_000) },
+				result: 'y'.repeat(50_000),
+				inputSummary: 'npm run build',
+				terminalCommand: 'npm run build',
+				terminalOutput: { text: 'z'.repeat(80_000), exitCode: 0 },
+			}],
+		}], 'Test handoff.');
+
+		assert.ok(context.length < 6_000, `handoff was ${context.length} characters`);
+		assert.ok(!context.includes('secretPadding'));
+		assert.match(context, /npm run build/);
+		assert.match(context, /characters omitted/);
+		assert.match(context, /"exitCode":0/);
 	});
 
 	test('waits for runtime workers and coalesces model selections before applying one', async () => {

@@ -19,6 +19,12 @@ export const CHAT_PROVIDER_PRIORITY = [
 	"aws-bedrock",
 ] as const;
 
+/** Backboard provider that serves System One decision models. */
+export const SYSTEM_ONE_PROVIDER = "typesafe";
+
+/** TypeSafe's rolling Jev alias; pinned versions are `jev-<semver>`. */
+export const SYSTEM_ONE_DEFAULT_MODEL = "jev-latest";
+
 export const BACKBOARD_STREAM_EVENTS = {
 	userMessage: "user_message",
 	contentStreaming: "content_streaming",

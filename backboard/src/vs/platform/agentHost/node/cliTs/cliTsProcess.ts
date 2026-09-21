@@ -478,6 +478,12 @@ export class CliTsServeProcess extends Disposable {
 		if (this.options.sessionId) {
 			env['BACKBOARD_SESSION_ID'] = this.options.sessionId;
 		}
+		// A dev runtime is started through Bun, so it cannot find the driver
+		// beside its own executable the way a packaged runtime does.
+		const cuaDriverPath = env[CUA_DRIVER_BIN_ENV]?.trim() || resolveBundledCuaDriver();
+		if (cuaDriverPath) {
+			env[CUA_DRIVER_BIN_ENV] = cuaDriverPath;
+		}
 		if (this.options.extraPathDirs?.length) {
 			const sep = process.platform === 'win32' ? ';' : ':';
 			env['PATH'] = [...this.options.extraPathDirs, env['PATH'] ?? ''].join(sep);
@@ -691,6 +697,20 @@ export class CliTsServeProcess extends Disposable {
 	private resolveCliTsInvocation(): CliTsInvocation {
 		return resolveCliTsInvocation(this.logService);
 	}
+}
+
+/** Read by cli-ts to locate the Cua Driver that executes Jev computer-use tasks. */
+const CUA_DRIVER_BIN_ENV = 'BACKBOARD_CUA_DRIVER_BIN';
+
+/**
+ * The open-source Cua Driver (vendored in `cua-driver/`) ships beside the
+ * cli-ts binary. It is optional: without it cli-ts falls back to its built-in
+ * platform layer.
+ */
+function resolveBundledCuaDriver(appRoot = dirname(FileAccess.asFileUri('').fsPath)): string | undefined {
+	const executable = process.platform === 'win32' ? 'cua-driver.exe' : 'cua-driver';
+	const candidate = join(appRoot, 'extensions', 'backboard', 'bin', executable);
+	return fs.existsSync(candidate) ? candidate : undefined;
 }
 
 /**

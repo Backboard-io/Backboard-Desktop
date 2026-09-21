@@ -1,6 +1,6 @@
 import { BackboardError, BackboardTransportError } from "./errors.ts";
 
-export const DEFAULT_STREAM_SERVER_ERROR_RETRIES = 2;
+export const DEFAULT_STREAM_SERVER_ERROR_RETRIES = 4;
 export const STREAM_SERVER_ERROR_RETRIES_ENV = "STREAM_SERVER_ERROR_RETRIES";
 
 const RETRYABLE_STATUS_CODES = new Set([502, 503, 504]);

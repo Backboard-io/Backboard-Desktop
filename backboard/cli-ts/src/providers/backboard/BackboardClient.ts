@@ -9,7 +9,11 @@ import type {
 	RequestOptions,
 	RunMessageOptions,
 } from "../AgentClient.ts";
-import { MODEL_PAGE_LIMIT } from "./constants.ts";
+import {
+	MODEL_PAGE_LIMIT,
+	SYSTEM_ONE_DEFAULT_MODEL,
+	SYSTEM_ONE_PROVIDER,
+} from "./constants.ts";
 import { BackboardError, BackboardTransportError } from "./errors.ts";
 import {
 	BackboardStreamEventMapper,
@@ -17,6 +21,11 @@ import {
 } from "./mappers.ts";
 import { isSelectableProvider } from "./modelCatalog.ts";
 import { parseSseFrame, readSseFrames } from "./sse.ts";
+import {
+	isRetryableStreamServerError,
+	streamRetryDelayMs,
+	streamServerErrorRetries,
+} from "./streamRetry.ts";
 import type {
 	AssistantInfo,
 	BackboardResponse,
@@ -33,6 +42,8 @@ import type {
 	ProvidersListResponse,
 	SendMessageRequest,
 	SubmitToolOutputsRequest,
+	SystemOneRequest,
+	SystemOneResult,
 	VideoModelsListResponse,
 } from "./types.ts";
 
@@ -100,7 +111,17 @@ export class BackboardClient implements AgentClient {
 		};
 	}
 
-	private async post<T>(
+	private post<T>(
+		path: string,
+		body: unknown,
+		options: RequestOptions,
+	): Promise<T> {
+		return this.withTransientRetry(options.signal, () =>
+			this.postOnce<T>(path, body, options),
+		);
+	}
+
+	private async postOnce<T>(
 		path: string,
 		body: unknown,
 		options: RequestOptions,
@@ -154,7 +175,13 @@ export class BackboardClient implements AgentClient {
 		return parsed as T;
 	}
 
-	private async get<T>(path: string, options: RequestOptions): Promise<T> {
+	private get<T>(path: string, options: RequestOptions): Promise<T> {
+		return this.withTransientRetry(options.signal, () =>
+			this.getOnce<T>(path, options),
+		);
+	}
+
+	private async getOnce<T>(path: string, options: RequestOptions): Promise<T> {
 		const url = `${this.env.apiUrl}${path}`;
 		const headers = this.headers();
 		const started = Date.now();
@@ -193,6 +220,35 @@ export class BackboardClient implements AgentClient {
 		return parsed as T;
 	}
 
+	/**
+	 * Replays request/response calls through the same transient-failure policy
+	 * the stream consumer applies: retryable statuses (502/503/504) and
+	 * matching transport errors back off and resend; aborts and everything
+	 * else throw immediately. Non-stream calls have no consumer above them,
+	 * so without this a single gateway blip fails the whole turn.
+	 */
+	private async withTransientRetry<T>(
+		signal: AbortSignal | undefined,
+		run: () => Promise<T>,
+	): Promise<T> {
+		const maxAttempts = 1 + streamServerErrorRetries();
+		for (let attempt = 1; ; attempt++) {
+			try {
+				return await run();
+			} catch (err) {
+				if (
+					attempt >= maxAttempts ||
+					isAbortError(err) ||
+					signal?.aborted ||
+					!isRetryableStreamServerError(err)
+				) {
+					throw err;
+				}
+				await sleepBeforeRetry(streamRetryDelayMs(attempt), signal);
+			}
+		}
+	}
+
 	async sendMessage(
 		req: SendMessageRequest,
 		options: RequestOptions = {},
@@ -225,6 +281,41 @@ export class BackboardClient implements AgentClient {
 			throw new Error("Backboard did not return a generated video.");
 		}
 		return media;
+	}
+
+	/**
+	 * Asks a System One decision model (TypeSafe Jev) a bounded set of
+	 * questions. Text in, probabilities out: no generation controls, tools, or
+	 * attachments apply, and the request is never streamed.
+	 */
+	async systemOne(
+		request: SystemOneRequest,
+		options: RequestOptions = {},
+	): Promise<SystemOneResult> {
+		const response = await this.post<
+			BackboardResponse & {
+				system_one?: { model?: string; answers?: SystemOneResult["answers"] };
+			}
+		>(
+			"/threads/messages",
+			{
+				llm_provider: SYSTEM_ONE_PROVIDER,
+				model_name: request.model_name ?? SYSTEM_ONE_DEFAULT_MODEL,
+				stream: false,
+				...(request.thread_id ? { thread_id: request.thread_id } : {}),
+				system_one: { state: request.state, questions: request.questions },
+			},
+			options,
+		);
+		const answers = response.system_one?.answers;
+		if (!answers) {
+			throw new Error("Backboard did not return System One answers.");
+		}
+		return {
+			thread_id: response.thread_id,
+			model: response.system_one?.model ?? SYSTEM_ONE_DEFAULT_MODEL,
+			answers,
+		};
 	}
 
 	async *runMessage(
@@ -637,4 +728,29 @@ function safeJson(text: string): unknown {
 
 function isAbortError(err: unknown): boolean {
 	return err instanceof Error && err.name === "AbortError";
+}
+
+function abortReason(signal: AbortSignal | undefined): unknown {
+	return (
+		signal?.reason ??
+		new DOMException("The operation was aborted.", "AbortError")
+	);
+}
+
+function sleepBeforeRetry(
+	ms: number,
+	signal: AbortSignal | undefined,
+): Promise<void> {
+	if (signal?.aborted) return Promise.reject(abortReason(signal));
+	return new Promise<void>((resolve, reject) => {
+		const onAbort = () => {
+			clearTimeout(timeout);
+			reject(abortReason(signal));
+		};
+		const timeout = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		signal?.addEventListener("abort", onAbort, { once: true });
+	});
 }

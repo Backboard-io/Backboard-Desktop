@@ -17,6 +17,7 @@ import type {
 	BackboardClient,
 	RequestOptions,
 } from "../src/providers/backboard/BackboardClient.ts";
+import { DEFAULT_STREAM_SERVER_ERROR_RETRIES } from "../src/providers/backboard/streamRetry.ts";
 import type {
 	AssistantInfo,
 	BackboardResponse,
@@ -1163,7 +1164,9 @@ describe("AgentController loop (mocked Backboard)", () => {
 		const status = await ctrl.submit("do it");
 
 		expect(status).toBe("failed");
-		expect(client.messageRequests).toHaveLength(3);
+		expect(client.messageRequests).toHaveLength(
+			1 + DEFAULT_STREAM_SERVER_ERROR_RETRIES,
+		);
 	});
 
 	it("does not retry non-retryable stream failures", async () => {

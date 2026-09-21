@@ -215,6 +215,51 @@ export interface GenerateVideoResult {
 	label?: string;
 }
 
+/**
+ * One System One question. Backboard routes these to a decision model
+ * (TypeSafe Jev) that answers with probabilities instead of generated text.
+ */
+export type SystemOneQuestion =
+	| {
+			type: "noul";
+			instructions: string;
+			criteria?: { true: string; false: string };
+	  }
+	| { type: "choice"; instructions: string; criteria: Record<string, string> }
+	| { type: "score"; instructions: string; criteria: string[] };
+
+export type SystemOneAnswer =
+	| { type: "noul"; noul: number }
+	| {
+			type: "choice";
+			choice: string;
+			confidence: number;
+			probabilities: Record<string, number>;
+	  }
+	| {
+			type: "score";
+			score: number;
+			confidence: number;
+			probabilities: Record<string, number>;
+			legend: Record<string, string>;
+	  };
+
+export interface SystemOneRequest {
+	/** Defaults to `jev-latest`. */
+	model_name?: string;
+	/** Reuses one Backboard thread across a decision loop instead of creating one per call. */
+	thread_id?: string;
+	/** Text-only context the questions are answered against. */
+	state: Record<string, string>;
+	questions: Record<string, SystemOneQuestion>;
+}
+
+export interface SystemOneResult {
+	thread_id: string;
+	model: string;
+	answers: Record<string, SystemOneAnswer>;
+}
+
 export interface SubmitToolOutputsRequest {
 	thread_id: string;
 	run_id?: string;

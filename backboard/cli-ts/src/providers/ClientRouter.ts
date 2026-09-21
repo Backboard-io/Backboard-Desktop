@@ -21,6 +21,8 @@ import type {
 	ProviderEvent,
 	SendMessageRequest,
 	SubmitToolOutputsRequest,
+	SystemOneRequest,
+	SystemOneResult,
 	VideoModelsListResponse,
 } from "./backboard/types.ts";
 import { byokAdapterFor } from "./byok/registry.ts";
@@ -270,6 +272,19 @@ export class ClientRouter implements AgentClient {
 			);
 		}
 		return backboard.generateVideo(request, options);
+	}
+
+	async systemOne(
+		request: SystemOneRequest,
+		options?: RequestOptions,
+	): Promise<SystemOneResult> {
+		const backboard = this.backboard();
+		if (!backboard?.systemOne) {
+			throw new Error(
+				"Jev computer use requires a signed-in Backboard account.",
+			);
+		}
+		return backboard.systemOne(request, options);
 	}
 
 	createAssistant(
