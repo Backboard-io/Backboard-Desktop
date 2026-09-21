@@ -13,7 +13,7 @@ suite('ChatViewPane CSS', () => {
 
 	const css = readFileSync(join(process.cwd(), 'src/vs/workbench/contrib/chat/browser/widgetHosts/viewPane/media/chatViewPane.css'), 'utf8');
 	const chatCss = readFileSync(join(process.cwd(), 'src/vs/workbench/contrib/chat/browser/widget/media/chat.css'), 'utf8');
-	const panelCss = readFileSync(join(process.cwd(), 'src/vs/workbench/contrib/chat/browser/widget/media/chatPanelCursorLook.css'), 'utf8');
+	const panelCss = readFileSync(join(process.cwd(), 'src/vs/workbench/contrib/chat/browser/widget/media/chatPanelLayout.css'), 'utf8');
 	const sessionsCss = readFileSync(join(process.cwd(), 'src/vs/sessions/browser/media/style.css'), 'utf8');
 
 	function ruleBody(source: string, selector: string): string {
@@ -344,16 +344,33 @@ suite('ChatViewPane CSS', () => {
 		assert.match(panelCss, /\.monaco-workbench \.part\.auxiliarybar:has\(> \.composite\.title\.has-chat-tabs\)\s*\{/);
 	});
 
-	test('collapses the right-panel chat header to one shared-style Backboard pill', () => {
+	test('keeps every open session as a Devin-style tab in the right-panel header', () => {
 		const hiddenChatSwitcher = ruleBody(panelCss, '.action-item[data-composite-id=\'workbench.panel.chat\']:not(.icon)');
 		const sharedAgentPill = ruleBody(panelCss, '.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab,');
-		const emptyBackboardButton = ruleBody(panelCss, '.chat-view-title-container.chat-view-title-empty .chat-view-title-tab-active');
+		const activeTab = ruleBody(panelCss, '.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active,');
+		const panelToggle = ruleBody(panelCss, '.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .global-actions {');
 
 		assert.match(hiddenChatSwitcher, /display:\s*none/);
-		assert.match(sharedAgentPill, /padding:\s*3px 6px/);
+		assert.match(sharedAgentPill, /padding:\s*0 10px/);
 		assert.match(sharedAgentPill, /border:\s*none/);
-		assert.doesNotMatch(emptyBackboardButton, /(?:padding|border|background|color):/);
-		assert.match(emptyBackboardButton, /cursor:\s*pointer/);
+		assert.match(sharedAgentPill, /height:\s*35px/);
+		assert.match(sharedAgentPill, /background:\s*transparent/);
+		assert.match(activeTab, /box-shadow:\s*inset 0 1px 0 var\(--vscode-focusBorder\)/);
+		assert.match(panelToggle, /display:\s*flex/);
+		// The strip never collapses to a single header tab — the draft and every
+		// open session stay visible as tabs.
+		assert.doesNotMatch(panelCss, /chat-view-title-empty/);
+		assert.doesNotMatch(panelCss, /chat-view-title-history/);
+		// ...and starting a new chat must not hide the strip with them: the
+		// empty home no longer suppresses the title row, and its own action
+		// column would duplicate the strip's toolbar.
+		assert.doesNotMatch(panelCss, /:has\(\.chat-composer-empty\)[^{]*\.composite\.title/);
+		assert.match(ruleBody(panelCss, '.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-home-actions {'), /display:\s*none/);
+
+		// Tabs squeeze to a readable floor before the strip starts scrolling.
+		const compressingTab = ruleBody(panelCss, '.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab {\n\tflex');
+		assert.match(compressingTab, /flex:\s*0 1 auto/);
+		assert.match(compressingTab, /min-width:\s*92px/);
 	});
 
 	test('uses one semantic transcript hook and one editor-panel rail', () => {
@@ -366,7 +383,7 @@ suite('ChatViewPane CSS', () => {
 		const panelShell = ruleBody(panelCss, '.monaco-workbench .part.auxiliarybar:has(> .composite.title.has-chat-tabs)');
 		const panelTranscript = ruleBody(panelCss, '.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript');
 		const panelComposer = ruleBody(panelCss, '.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part');
-		assert.match(panelShell, /--bb-editor-panel-gutter:\s*14px/);
+		assert.match(panelShell, /--bb-editor-panel-gutter:\s*16px/);
 		assert.match(panelTranscript, /--bb-cursor-transcript-gutter:\s*var\(--bb-editor-panel-gutter\)/);
 		assert.match(panelComposer, /margin:\s*0 var\(--bb-editor-panel-gutter\)/);
 	});

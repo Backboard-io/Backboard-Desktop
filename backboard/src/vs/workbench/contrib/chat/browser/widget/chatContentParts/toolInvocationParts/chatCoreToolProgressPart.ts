@@ -6,6 +6,8 @@
 import { addDisposableListener } from '../../../../../../../base/browser/dom.js';
 import { Codicon } from '../../../../../../../base/common/codicons.js';
 import { IMarkdownString } from '../../../../../../../base/common/htmlContent.js';
+import { FileAccess } from '../../../../../../../base/common/network.js';
+import { URI } from '../../../../../../../base/common/uri.js';
 import { ThemeIcon } from '../../../../../../../base/common/themables.js';
 import { localize } from '../../../../../../../nls.js';
 import { IChatCoreToolInvocationData, IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind } from '../../../../common/chatService/chatService.js';
@@ -31,6 +33,13 @@ export interface ICoreToolCardItem {
 	readonly state?: 'pending' | 'active' | 'complete' | 'error' | 'skipped';
 }
 
+export interface ICoreToolScreenshot {
+	readonly path: string;
+	readonly width?: number;
+	readonly height?: number;
+	readonly alt: string;
+}
+
 export interface ICoreToolCardPreview {
 	readonly label: string;
 	readonly text: string;
@@ -45,10 +54,12 @@ export interface ICoreToolCardViewModel {
 	readonly toolKind: IChatCoreToolInvocationData['toolKind'];
 	readonly title: string;
 	readonly summary?: string;
+	readonly locationLabel?: string;
 	readonly icon: ThemeIcon;
 	readonly metrics?: readonly ICoreToolCardMetric[];
 	readonly items?: readonly ICoreToolCardItem[];
 	readonly preview?: ICoreToolCardPreview;
+	readonly screenshots?: readonly ICoreToolScreenshot[];
 	readonly emptyMessage?: string;
 	readonly useCompletionMessage?: boolean;
 	readonly hasOutput: boolean;
@@ -84,10 +95,13 @@ export function createCoreToolCardViewModel(data: IChatCoreToolInvocationData): 
 			const mimeType = firstString(output, ['mimeType', 'imageMediaType']);
 			const isImage = output.contentType === 'image' || mimeType?.startsWith('image/');
 			const sizeBytes = firstNumber(output, ['sizeBytes']);
+			const startLine = Math.max(0, offset ?? 0) + 1;
+			const endLine = Math.min(totalLines ?? Infinity, startLine + (limit ?? 2400) - 1);
 			return {
 				...common,
 				title: localize('chat.coreTool.read.label', "Read"),
 				summary: filePath,
+				locationLabel: !isImage && Number.isFinite(endLine) && endLine >= startLine ? `#L${startLine}-${endLine}` : undefined,
 				icon: Codicon.file,
 				metrics: compactMetrics([
 					totalLines !== undefined ? {
@@ -334,11 +348,27 @@ function automationViewModel(
 	const results = recordArray(output.results);
 	const rowCount = Math.max(inputActions.length, results.length);
 	const items: ICoreToolCardItem[] = [];
+	const screenshots: ICoreToolScreenshot[] = [];
 	for (let index = 0; index < Math.min(rowCount, MAX_ITEMS); index++) {
 		const action = inputActions[index] ?? results[index] ?? {};
 		const result = results[index];
 		const actionName = firstString(action, ['action', 'type']) ?? firstString(result, ['action']) ?? localize('chat.coreTool.automation.actionFallback', "Action {0}", index + 1);
 		const succeeded = result?.success;
+		const observation = result?.observation ? asRecord(result.observation) : asRecord(result);
+		const screenshotPath = firstString(observation, ['screenshotPath']);
+		// Only completed screenshot actions replace their activity row. Failed,
+		// pending, and non-screenshot actions retain their normal feedback.
+		if (actionName === 'screenshot' && succeeded === true && !common.failed && output.success !== false
+			&& screenshotPath && (/^\//.test(screenshotPath) || /^[a-z]:[\\/]/i.test(screenshotPath))) {
+			const size = asRecord(observation?.imageSize ?? observation?.screenSize);
+			screenshots.push({
+				path: screenshotPath,
+				width: firstNumber(size, ['width']),
+				height: firstNumber(size, ['height']),
+				alt: firstString(observation, ['windowTitle', 'appName']) ?? localize('chat.coreTool.screenshot.alt', "Computer screenshot"),
+			});
+			continue;
+		}
 		items.push({
 			title: automationActionLabel(actionName),
 			detail: automationItemDetail(action, result),
@@ -351,6 +381,7 @@ function automationViewModel(
 						: 'pending',
 		});
 	}
+	const visibleActionCount = items.length;
 	const navigatedUrls = toolKind === 'browser'
 		? inputActions.map(action => firstString(action, ['url'])).filter((value): value is string => !!value)
 		: [];
@@ -361,14 +392,15 @@ function automationViewModel(
 		title: toolKind === 'browser'
 			? localize('chat.coreTool.browser.title', "Browser actions")
 			: localize('chat.coreTool.computer.title', "Computer actions"),
-		summary: navigatedUrl ? displayUrl(navigatedUrl) : rowCount
-			? rowCount === 1
+		summary: navigatedUrl ? displayUrl(navigatedUrl) : visibleActionCount
+			? visibleActionCount === 1
 				? localize('chat.coreTool.automation.summary.one', "1 action")
-				: localize('chat.coreTool.automation.summary.other', "{0} actions", rowCount)
+				: localize('chat.coreTool.automation.summary.other', "{0} actions", visibleActionCount)
 			: undefined,
 		icon: toolKind === 'browser' ? Codicon.browser : Codicon.deviceDesktop,
-		metrics: rowCount ? [{ label: localize('chat.coreTool.actions', "Actions"), value: String(rowCount) }] : undefined,
+		metrics: visibleActionCount ? [{ label: localize('chat.coreTool.actions', "Actions"), value: String(visibleActionCount) }] : undefined,
 		items,
+		screenshots: screenshots.length ? screenshots : undefined,
 		emptyMessage: rowCount === 0 ? localize('chat.coreTool.automation.empty', "No action details were returned.") : undefined,
 		uiTruncated: common.uiTruncated || rowCount > MAX_ITEMS,
 	};
@@ -391,7 +423,7 @@ export class ChatCoreToolProgressPart extends BaseChatToolInvocationSubPart {
 				const expanded = rendered.disclosureButton!.ariaExpanded !== 'true';
 				rendered.disclosureButton!.ariaExpanded = String(expanded);
 				rendered.details!.hidden = !expanded;
-				rendered.domNode.classList.toggle('chat-core-tool-card-expanded', expanded);
+				rendered.disclosureButton!.closest('.chat-core-tool-card')?.classList.toggle('chat-core-tool-card-expanded', expanded);
 			}));
 		}
 	}
@@ -434,6 +466,26 @@ interface IRenderedCoreToolCard {
 
 function renderCoreToolCard(view: ICoreToolCardViewModel, invocation: IInvocationPresentation): IRenderedCoreToolCard {
 	const outcome: InvocationOutcome = invocation.kind === 'complete' && view.failed ? 'error' : invocation.kind;
+	if (view.screenshots?.length && invocation.kind === 'complete' && !view.failed) {
+		const container = document.createElement('div');
+		container.className = 'chat-computer-screenshots';
+		const activity = view.items?.length ? renderCoreToolCard({ ...view, screenshots: undefined }, invocation) : undefined;
+		if (activity) {
+			container.appendChild(activity.domNode);
+		}
+		for (const screenshot of view.screenshots) {
+			const image = document.createElement('img');
+			image.className = 'chat-computer-screenshot';
+			image.alt = screenshot.alt;
+			image.src = FileAccess.uriToBrowserUri(URI.file(screenshot.path)).toString(true);
+			if (screenshot.width && screenshot.height && screenshot.width > 0 && screenshot.height > 0) {
+				image.width = screenshot.width;
+				image.height = screenshot.height;
+			}
+			container.appendChild(image);
+		}
+		return { ...activity, domNode: container };
+	}
 	const errorMessage = invocation.error ?? view.errorMessage;
 	const hasDetails = !!view.items?.length || !!view.preview || view.uiTruncated || view.resultTruncated;
 	const showResultState = outcome === 'complete' && view.hasOutput;
@@ -447,6 +499,12 @@ function renderCoreToolCard(view: ICoreToolCardViewModel, invocation: IInvocatio
 	const card = document.createElement('section');
 	card.classList.add('chat-core-tool-card', `chat-core-tool-card-${view.toolKind}`, `chat-core-tool-card-${outcome}`);
 	card.classList.toggle('chat-core-tool-card-partial', view.resultTruncated === true);
+	// A task list's completion ratio feeds the header's inline progress track.
+	if (view.toolKind === 'todo' && view.items?.length) {
+		const completeCount = view.items.filter(item => item.state === 'complete').length;
+		card.classList.add('chat-core-tool-card-progress');
+		card.style.setProperty('--bb-core-tool-progress', `${Math.round(completeCount / view.items.length * 100)}%`);
+	}
 
 	const header = document.createElement(hasDetails ? 'button' : 'div');
 	header.classList.add('chat-core-tool-card-header');
@@ -483,7 +541,13 @@ function renderCoreToolCard(view: ICoreToolCardViewModel, invocation: IInvocatio
 	if (view.summary && !isVideoRunning) {
 		const summary = document.createElement('span');
 		summary.classList.add('chat-core-tool-card-summary');
-		summary.textContent = view.toolKind === 'read' ? view.summary.split(/[\\/]/).pop() || view.summary : view.summary;
+			summary.textContent = view.toolKind === 'read' ? view.summary.split(/[\\/]/).pop() || view.summary : view.summary;
+			if (view.locationLabel) {
+				const location = document.createElement('span');
+				location.classList.add('chat-core-tool-card-location');
+				location.textContent = view.locationLabel;
+				summary.appendChild(location);
+			}
 		titleLine.appendChild(summary);
 	}
 	heading.appendChild(titleLine);

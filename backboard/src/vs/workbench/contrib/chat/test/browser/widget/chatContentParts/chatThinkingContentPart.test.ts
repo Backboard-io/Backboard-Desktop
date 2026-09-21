@@ -706,6 +706,35 @@ suite('ChatThinkingContentPart', () => {
 			mockConfigurationService.setUserConfiguration('chat.agent.thinkingStyle', ThinkingDisplayMode.StreamThenCollapse);
 		});
 
+		test('editor-panel thinking and command headers open only their own disclosure', () => {
+			const context = createMockRenderContext(false);
+			context.container.className = 'part auxiliarybar backboard-clean-chat backboard-cursor-transcript';
+			const part = disposables.add(instantiationService.createInstance(ChatThinkingContentPart,
+				createThinkingPart('Inspecting the tool output'), context, mockMarkdownRenderer, false));
+			context.container.appendChild(part.domNode);
+			mainWindow.document.body.appendChild(context.container);
+			disposables.add(toDisposable(() => context.container.remove()));
+			const thought = part.domNode.querySelector<HTMLButtonElement>('.chat-thinking-cursor-reasoning-label')!;
+			assert.strictEqual(thought.ariaExpanded, 'true', 'live reasoning opens automatically in the editor panel');
+			assert.strictEqual((thought.nextElementSibling as HTMLElement).hidden, false);
+			thought.click();
+			assert.strictEqual((thought.nextElementSibling as HTMLElement).hidden, true);
+			const first = createNativeTerminalDisclosure(context, 'pwd', '/project');
+			const second = createNativeTerminalDisclosure(context, 'printf hello', 'hello');
+			context.container.append(first.disclosure.domNode, second.disclosure.domNode);
+			const header = first.disclosure.domNode.querySelector<HTMLButtonElement>('.chat-terminal-card-header')!;
+			assert.strictEqual(first.disclosure.domNode.querySelector('.chat-terminal-card-command')?.textContent, 'pwd');
+			for (let repeat = 0; repeat < 3; repeat++) {
+				header.click();
+				assert.strictEqual(first.disclosure.expanded.get(), true);
+				assert.strictEqual(header.ariaExpanded, 'true');
+				assert.strictEqual(second.disclosure.expanded.get(), false);
+				header.click();
+				assert.strictEqual(first.disclosure.expanded.get(), false);
+				assert.strictEqual(header.ariaExpanded, 'false');
+			}
+		});
+
 		function createCursorPart(thinkingText: string): ChatThinkingContentPart {
 			const context = createMockRenderContext(false);
 			context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');

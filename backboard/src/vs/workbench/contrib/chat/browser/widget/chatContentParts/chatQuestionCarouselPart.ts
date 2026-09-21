@@ -52,6 +52,8 @@ const NEXT_QUESTION_ACTION_ID = 'workbench.action.chat.nextQuestion';
 export interface IChatQuestionCarouselOptions {
 	onSubmit: (answers: Map<string, IChatQuestionAnswerValue> | undefined) => void;
 	shouldAutoFocus?: boolean;
+	/** The host composer supplies the free-form field for a single question. */
+	useComposerInput?: boolean;
 }
 
 type IOrderedQuestionOption = {
@@ -87,6 +89,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 	private readonly _textInputBoxes: Map<string, InputBox> = new Map();
 	private readonly _singleSelectItems: Map<string, { items: HTMLElement[]; selectedIndex: number; optionIndices: number[] }> = new Map();
 	private readonly _multiSelectCheckboxes: Map<string, { checkboxes: Checkbox[]; optionIndices: number[] }> = new Map();
+	private readonly _isEditorPanel: boolean;
 	private readonly _freeformTextareas: Map<string, HTMLTextAreaElement> = new Map();
 	private readonly _inputBoxes: DisposableStore = this._register(new DisposableStore());
 	private readonly _questionRenderStore = this._register(new MutableDisposable<DisposableStore>());
@@ -118,7 +121,9 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 	) {
 		super();
 
+		this._isEditorPanel = !!context.container?.closest('.part.auxiliarybar') || !!context.container?.ownerDocument.querySelector('.agent-sessions-workbench');
 		this.domNode = dom.$('.chat-question-carousel-container');
+		this.domNode.classList.toggle('chat-question-editor-panel', this._isEditorPanel);
 		this.domNode.id = generateUuid();
 		this._inChatQuestionCarouselContextKey = ChatContextKeys.inChatQuestionCarousel.bindTo(this._contextKeyService);
 		this._chatQuestionCarouselHasTerminalContextKey = ChatContextKeys.chatQuestionCarouselHasTerminal.bindTo(this._contextKeyService);
@@ -511,7 +516,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		this.domNode.focus();
 		const question = this.carousel.questions[this._currentIndex];
 		if (question) {
-			const questionText = question.message ?? question.title;
+			const questionText = (this._isEditorPanel ? question.detailedMessage ?? question.description : undefined) ?? question.message ?? question.title;
 			const messageContent = this.getQuestionText(questionText);
 			const questionCount = this.carousel.questions.length;
 			const alertMessage = questionCount === 1
@@ -776,7 +781,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			return;
 		}
 
-		const questionText = question.message ?? question.title;
+		const questionText = (this._isEditorPanel ? question.detailedMessage ?? question.description : undefined) ?? question.message ?? question.title;
 		const messageContent = this.getQuestionText(questionText);
 		const questionCount = this.carousel.questions.length;
 
@@ -877,14 +882,14 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			headerRow.appendChild(carouselMessage);
 		}
 
-		const questionText = question.message ?? question.title;
+		const questionText = (this._isEditorPanel ? question.detailedMessage ?? question.description : undefined) ?? question.message ?? question.title;
 		if (questionText) {
 			const title = dom.$('.chat-question-title');
 			const messageContent = this.getQuestionText(questionText);
 			title.setAttribute('aria-label', messageContent);
 
 			const rawValue = isMarkdownString(questionText) ? questionText.value : questionText;
-			const suffixed = question.required ? `${rawValue} *` : rawValue;
+			const suffixed = question.required && !this._isEditorPanel ? `${rawValue} *` : rawValue;
 			const md = isMarkdownString(questionText)
 				? MarkdownString.lift({ ...questionText, value: suffixed })
 				: new MarkdownString(suffixed);
@@ -915,7 +920,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		this._questionContainer.appendChild(headerRow);
 
 		// Render description if present
-		if (question.description) {
+		if (question.description && question.description !== questionText && !this._isEditorPanel) {
 			const descriptionEl = dom.$('.chat-question-description');
 			descriptionEl.textContent = question.description;
 			this._questionContainer.appendChild(descriptionEl);
@@ -925,7 +930,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		const inputContainer = dom.$('.chat-question-input-container');
 
 		// Render detailed markdown message inside the scrollable input area
-		if (question.detailedMessage) {
+		if (question.detailedMessage && !this._isEditorPanel) {
 			const detailedMd = isMarkdownString(question.detailedMessage)
 				? MarkdownString.lift(question.detailedMessage)
 				: new MarkdownString(question.detailedMessage);
@@ -953,6 +958,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		this._questionContainer.appendChild(this._validationMessageElement);
 
 		const isSingleQuestion = this.carousel.questions.length === 1;
+		this.domNode.classList.toggle('chat-question-panel-single-select', this._isEditorPanel && isSingleQuestion && question.type === 'singleSelect');
 
 		// Render footer before first layout so the scrollable area is measured against
 		// its final available height and does not visibly resize twice.
@@ -1115,9 +1121,9 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			const actions = dom.$('.chat-question-single-actions');
 			if (this.carousel.allowSkip) {
 				const dismissLabel = localize('chat.questionCarousel.dismiss', 'Dismiss');
-				const dismissButton = interactiveStore.add(new Button(actions, { ...defaultButtonStyles, secondary: true }));
+				const dismissButton = interactiveStore.add(new Button(actions, { ...defaultButtonStyles, secondary: true, supportIcons: this._isEditorPanel }));
 				dismissButton.element.classList.add('chat-question-dismiss-button');
-				dismissButton.label = dismissLabel;
+				dismissButton.label = this._isEditorPanel ? `$(${Codicon.close.id})` : dismissLabel;
 				dismissButton.element.setAttribute('aria-keyshortcuts', 'Escape');
 				dismissButton.element.setAttribute('aria-label', localize('chat.questionCarousel.dismissWithEscape', 'Dismiss (Escape)'));
 				interactiveStore.add(dismissButton.onDidClick(() => this.ignore()));
@@ -1288,7 +1294,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			listItem.tabIndex = -1;
 
 			const number = dom.$('.chat-question-list-number');
-			number.textContent = `${index + 1}`;
+			number.textContent = this._isEditorPanel ? String.fromCharCode(65 + index) : `${index + 1}`;
 			listItem.appendChild(number);
 
 			// Up/down chevrons hint that arrow keys navigate between options.
@@ -1353,7 +1359,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 		// Show freeform input only when explicitly allowed
 		let freeformTextarea: HTMLTextAreaElement | undefined;
-		if (question.allowFreeformInput !== false) {
+		if (question.allowFreeformInput !== false && !this._options.useComposerInput) {
 			const freeformContainer = dom.$('.chat-question-freeform');
 
 			const freeformNumber = dom.$('.chat-question-freeform-number');
@@ -1362,7 +1368,9 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			freeformContainer.appendChild(freeformNumber);
 
 			freeformTextarea = dom.$<HTMLTextAreaElement>('textarea.chat-question-freeform-textarea');
-			freeformTextarea.placeholder = localize('chat.questionCarousel.enterCustomAnswer', 'Or type your own answer');
+			freeformTextarea.placeholder = this._isEditorPanel
+				? localize('chat.questionCarousel.otherAnswer', 'Other answer')
+				: localize('chat.questionCarousel.enterCustomAnswer', 'Or type your own answer');
 			freeformTextarea.rows = 1;
 
 			if (previousFreeform !== undefined) {
@@ -1425,6 +1433,14 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 					freeformTextarea.focus();
 				}
 				return;
+			}
+
+			if (this._isEditorPanel && !e.metaKey && !e.ctrlKey && !e.altKey && /^[a-z]$/i.test(e.key)) {
+				const letterIndex = e.key.toUpperCase().charCodeAt(0) - 65;
+				if (letterIndex < listItems.length) {
+					e.preventDefault();
+					newIndex = letterIndex;
+				}
 			}
 
 			if (newIndex !== data.selectedIndex && newIndex >= 0) {
@@ -1494,7 +1510,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			listItem.tabIndex = -1;
 
 			const number = dom.$('.chat-question-list-number');
-			number.textContent = `${index + 1}`;
+			number.textContent = this._isEditorPanel ? String.fromCharCode(65 + index) : `${index + 1}`;
 			listItem.appendChild(number);
 
 			// Create checkbox using the VS Code Checkbox component
@@ -1561,7 +1577,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 
 		// Show freeform input only when explicitly allowed
 		let freeformTextarea: HTMLTextAreaElement | undefined;
-		if (question.allowFreeformInput !== false) {
+		if (question.allowFreeformInput !== false && !this._options.useComposerInput) {
 			const freeformContainer = dom.$('.chat-question-freeform');
 
 			// Number indicator for freeform (comes after all options)
@@ -1571,7 +1587,9 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			freeformContainer.appendChild(freeformNumber);
 
 			freeformTextarea = dom.$<HTMLTextAreaElement>('textarea.chat-question-freeform-textarea');
-			freeformTextarea.placeholder = localize('chat.questionCarousel.enterCustomAnswer', 'Or type your own answer');
+			freeformTextarea.placeholder = this._isEditorPanel
+				? localize('chat.questionCarousel.otherAnswer', 'Other answer')
+				: localize('chat.questionCarousel.enterCustomAnswer', 'Or type your own answer');
 			freeformTextarea.rows = 1;
 
 			if (previousFreeform !== undefined) {
@@ -1778,7 +1796,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			const summaryItem = dom.$('.chat-question-summary-item');
 
 			const questionRow = dom.$('div.chat-question-summary-label');
-			const questionText = question.message ?? question.title;
+			const questionText = (this._isEditorPanel ? question.detailedMessage ?? question.description : undefined) ?? question.message ?? question.title;
 			let labelText = typeof questionText === 'string' ? questionText : questionText.value;
 			labelText = labelText.replace(/[:\s]+$/, '');
 			questionRow.textContent = localize('chat.questionCarousel.summaryQuestion', 'Q: {0}', labelText);

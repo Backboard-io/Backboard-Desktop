@@ -4228,6 +4228,17 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this._chatArtifactsWidget.value?.setSessionResource(undefined);
 	}
 
+	private questionComposerPlaceholder: { value: string | undefined } | undefined;
+	private readonly questionComposerPlaceholderListener = this._register(new MutableDisposable<IDisposable>());
+
+	private restoreQuestionComposerPlaceholder(): void {
+		this.questionComposerPlaceholderListener.clear();
+		if (this.questionComposerPlaceholder) {
+			this._inputEditor.updateOptions({ placeholder: this.questionComposerPlaceholder.value });
+			this.questionComposerPlaceholder = undefined;
+		}
+	}
+
 	renderQuestionCarousel(carousel: IChatQuestionCarousel, context: IChatContentPartRenderContext, options: IChatQuestionCarouselOptions): ChatQuestionCarouselPart {
 
 		const carouselKey = carousel.resolveId ?? `${isResponseVM(context.element) ? context.element.requestId : ''}_${context.contentIndex}`;
@@ -4244,9 +4255,39 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			this._questionCarouselSessionResources.set(carouselKey, context.element.sessionResource);
 		}
 
-		const part = this.instantiationService.createInstance(ChatQuestionCarouselPart, carousel, context, options);
+		// Backboard already routes composer submissions to the pending question.
+		// Use that editor instead of presenting a second free-form textarea.
+		const useComposerInput = (!!this.chatQuestionCarouselContainer.closest('.part.auxiliarybar') || !!this.chatQuestionCarouselContainer.ownerDocument.querySelector('.agent-sessions-workbench'))
+			&& isResponseVM(context.element)
+			&& getChatSessionType(context.element.sessionResource) === SessionType.AgentHostBackboard
+			&& carousel.questions.length === 1
+			&& carousel.questions[0].type === 'singleSelect'
+			&& carousel.questions[0].allowFreeformInput === true;
+		if (useComposerInput) {
+			this.questionComposerPlaceholder ??= { value: this._inputEditor.getRawOptions().placeholder };
+			const placeholder = localize('chat.question.otherAnswer', "Other answer");
+			// Session restoration can update the normal placeholder after mounting
+			// the question. Keep its answer prompt until the question is resolved.
+			this.questionComposerPlaceholderListener.value = this._inputEditor.onDidChangeConfiguration(() => {
+				if (this._inputEditor.getRawOptions().placeholder !== placeholder) {
+					this._inputEditor.updateOptions({ placeholder });
+				}
+			});
+			this._inputEditor.updateOptions({ placeholder });
+		}
+		const part = this.instantiationService.createInstance(ChatQuestionCarouselPart, carousel, context, {
+			...options,
+			useComposerInput,
+			onSubmit: answers => {
+				if (useComposerInput) {
+					this.restoreQuestionComposerPlaceholder();
+				}
+				options.onSubmit(answers);
+			}
+		});
 		this._chatQuestionCarouselWidgets.set(carouselKey, part);
 		this._hasQuestionCarouselContextKey?.set(true);
+
 
 		dom.append(this.chatQuestionCarouselContainer, part.domNode);
 
@@ -4284,6 +4325,9 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			dom.clearNode(this.chatQuestionCarouselContainer);
 		}
 		this._hasQuestionCarouselContextKey?.set(this._chatQuestionCarouselWidgets.size > 0);
+		if (this._chatQuestionCarouselWidgets.size === 0) {
+			this.restoreQuestionComposerPlaceholder();
+		}
 	}
 
 	get questionCarousel(): ChatQuestionCarouselPart | undefined {

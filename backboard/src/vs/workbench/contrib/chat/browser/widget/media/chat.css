@@ -9512,6 +9512,12 @@ have to be updated for changes to the rules above, or to support more deeply nes
 		animation: none !important;
 	}
 
+	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-running:not(.chat-core-tool-card-generateVideo) :is(.chat-core-tool-card-title, .chat-core-tool-card-summary) {
+		animation: none !important;
+		background: none;
+		-webkit-text-fill-color: currentColor;
+	}
+
 	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live::after,
 	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-generateVideo.chat-core-tool-card-running :is(
 		.chat-core-tool-card-title-live,
@@ -9664,6 +9670,11 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	min-height: 30px;
 	padding: 5px 0 5px var(--bb-cursor-terminal-inline-inset);
 	background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+	transition: background-color 80ms ease-out;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label .monaco-button:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label :is(.monaco-button-mdlabel, .monaco-button-label) {
@@ -9687,6 +9698,12 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	font-size: 12px;
 	line-height: 20px;
 	user-select: none;
+}
+
+/* A failed command flags its prompt glyph, so the state reads even when the
+ * badge has scrolled out of the eye's path. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label .monaco-button > .codicon-error:not(.chat-collapsible-hover-chevron) ~ :is(.monaco-button-mdlabel, .monaco-button-label)::before {
+	color: var(--vscode-errorForeground);
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label .chat-terminal-status-text {
@@ -9990,10 +10007,11 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	border-radius: 5px;
 	font-size: 13px;
 	line-height: 20px;
+	transition: background-color 80ms ease-out, color 80ms ease-out;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card button.chat-core-tool-card-header:hover {
-	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
 	color: var(--vscode-foreground);
 }
 
@@ -10040,7 +10058,22 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card .chat-core-tool-card-summary {
 	flex: 0 1 auto;
-	color: inherit;
+	/* The subject (file, query, URL) is the part worth scanning for, so it
+	 * sits one step brighter than the muted verb — the same weighting the
+	 * terminal rows give their command text. */
+	color: color-mix(in srgb, var(--vscode-foreground) 55%, var(--bb-cursor-transcript-muted));
+}
+
+/* Monospace subjects run optically large next to the 13px sans verb; one
+ * size down restores the balance. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card:is(
+	.chat-core-tool-card-read,
+	.chat-core-tool-card-grep,
+	.chat-core-tool-card-glob,
+	.chat-core-tool-card-fetchUrl,
+	.chat-core-tool-card-browser
+) .chat-core-tool-card-summary {
+	font-size: 12px;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card :is(.chat-core-tool-card-count, .chat-core-tool-card-subtitle-error) {
@@ -10050,12 +10083,48 @@ have to be updated for changes to the rules above, or to support more deeply nes
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card .chat-core-tool-card-count {
+	padding: 0 6px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
+	color: var(--bb-cursor-transcript-muted);
 	font-family: inherit;
-	opacity: 0.8;
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+	line-height: 18px;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card .chat-core-tool-card-subtitle:not(.chat-core-tool-card-subtitle-error) {
 	display: none;
+}
+
+/* Failure keeps the row quiet but unmistakable: the glyph and verb pick up
+ * the error color while the red detail text names the cause. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-error .chat-core-tool-card-icon,
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-error .chat-core-tool-card-title {
+	color: color-mix(in srgb, var(--vscode-errorForeground) 85%, var(--vscode-foreground));
+}
+
+/* Cancelled work recedes rather than reporting a state. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-cancelled .chat-core-tool-card-header {
+	opacity: 0.72;
+}
+
+/* A running row visibly works: the label carries the shared thinking shimmer
+ * while the spinner keeps the discrete state for assistive tech. The video
+ * card keeps its own richer live treatment. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-running:not(.chat-core-tool-card-generateVideo) :is(.chat-core-tool-card-title, .chat-core-tool-card-summary) {
+	background: linear-gradient(90deg,
+			var(--bb-cursor-transcript-muted) 0%,
+			var(--bb-cursor-transcript-muted) 30%,
+			var(--vscode-chat-thinkingShimmer) 50%,
+			var(--bb-cursor-transcript-muted) 70%,
+			var(--bb-cursor-transcript-muted) 100%);
+	background-clip: text;
+	-webkit-background-clip: text;
+	background-size: 400% 100%;
+	-webkit-text-fill-color: transparent;
+	animation: chat-thinking-shimmer 2s linear infinite;
+	will-change: background-position;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-todo .chat-core-tool-card-title-line:has(.chat-core-tool-card-summary) .chat-core-tool-card-title {
@@ -10066,11 +10135,30 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	box-sizing: border-box;
 	width: 100%;
 	margin: 4px 0 8px;
-	padding: 8px 10px;
+	padding: 6px 8px;
 	border: 1px solid var(--bb-cursor-diff-border);
 	border-radius: 6px;
 	background: var(--bb-core-tool-surface);
 	color: var(--vscode-foreground);
+}
+
+/* The opened box already supplies the 8px inset; inner sections sit flush so
+ * lists, previews and labels share one left edge. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card .chat-core-tool-card-details .chat-core-tool-card-item {
+	margin-inline: 0;
+	padding-inline: 6px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card .chat-core-tool-card-details .chat-core-tool-card-preview pre {
+	margin: 2px 0 4px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card .chat-core-tool-card-details .chat-core-tool-card-section-label {
+	padding-inline: 6px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card .chat-core-tool-card-details .chat-core-tool-card-truncated {
+	padding-inline: 6px;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-generating {

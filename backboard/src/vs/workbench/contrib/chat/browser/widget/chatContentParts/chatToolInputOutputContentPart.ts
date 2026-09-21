@@ -117,6 +117,10 @@ export class ChatCollapsibleInputOutputContentPart extends Disposable {
 		const spacer = document.createElement('span');
 		spacer.style.flexGrow = '1';
 
+		const activityTitle = (typeof title === 'string' ? title : title.value).trim();
+		const staticActivityRow = !!context.container.closest('.part.auxiliarybar, .agent-sessions-workbench .part.sessionspart')
+			&& (/^MCP\b/i.test(activityTitle) || /^(?:Ran|Running|Waited for|Waiting for) Playwright code(?: to complete)?(?:\.\.\.)?$/i.test(activityTitle));
+		container.root.classList.toggle('chat-tool-io-static-activity', staticActivityRow);
 		const btn = this._register(new ButtonWithIcon(elements.root, {}));
 		btn.element.classList.add('chat-confirmation-widget-title', 'monaco-text-button');
 		btn.labelElement.append(titleEl.root);
@@ -134,6 +138,12 @@ export class ChatCollapsibleInputOutputContentPart extends Disposable {
 		} catch {
 			// Plain code and text already make an appropriate prompt header.
 		}
+		if (context.container.closest('.part.auxiliarybar, .agent-sessions-workbench .part.sessionspart') && context.container.closest('.backboard-cursor-transcript')) {
+			// Plain-string MCP arguments are subjects, not tool names. Keep the
+			// actual operation in the row and put its input behind the disclosure.
+			container.root.classList.add('chat-tool-io-activity');
+			inputHeader.textContent = (typeof title === 'string' ? title : title.value).replace(/:\s*\{[\s\S]*$/, '');
+		}
 		btn.element.title = `${typeof title === 'string' ? title : title.value}\n${input.data}`;
 		btn.labelElement.appendChild(inputHeader);
 		const activityIcon = dom.$('span.chat-io-activity-icon', { 'aria-hidden': 'true' });
@@ -142,12 +152,18 @@ export class ChatCollapsibleInputOutputContentPart extends Disposable {
 		// Add hover chevron indicator on the right (decorative, hide from screen readers)
 		const hoverChevron = dom.$('span.chat-collapsible-hover-chevron.codicon.codicon-chevron-right');
 		hoverChevron.setAttribute('aria-hidden', 'true');
-		btn.element.appendChild(hoverChevron);
+		if (!staticActivityRow) {
+			btn.element.appendChild(hoverChevron);
+		} else {
+			btn.element.removeAttribute('role');
+			btn.element.removeAttribute('href');
+			btn.element.tabIndex = -1;
+		}
 
 		// Only show leading icon for errors, or for checkmarks/loading when the accessibility setting is on
 		const showCheckmarks = observableConfigValue(AccessibilityWorkbenchSettingId.ShowChatCheckmarks, false, this.configurationService);
 
-		const expanded = this._expanded = observableValue(this, initiallyExpanded);
+		const expanded = this._expanded = observableValue(this, initiallyExpanded && !staticActivityRow);
 		this._register(autorun(r => {
 			const value = expanded.read(r);
 			const checkmarksEnabled = showCheckmarks.read(r);
@@ -157,7 +173,9 @@ export class ChatCollapsibleInputOutputContentPart extends Disposable {
 			const activityThemeIcon = isError ? Codicon.error : isInProgress ? ThemeIcon.modify(Codicon.loading, 'spin') : input.languageId === 'javascript' ? Codicon.code : Codicon.tools;
 			activityIcon.className = 'chat-io-activity-icon';
 			activityIcon.classList.add(...ThemeIcon.asClassNameArray(activityThemeIcon));
-			btn.element.setAttribute('aria-expanded', String(value));
+			if (!staticActivityRow) {
+				btn.element.setAttribute('aria-expanded', String(value));
+			}
 			if (isError) {
 				btn.icon = Codicon.error;
 			} else {
@@ -183,6 +201,7 @@ export class ChatCollapsibleInputOutputContentPart extends Disposable {
 		}));
 
 		const toggle = (e: Event) => {
+			e.stopPropagation();
 			if (!e.defaultPrevented) {
 				const value = expanded.get();
 				expanded.set(!value, undefined);
@@ -193,7 +212,9 @@ export class ChatCollapsibleInputOutputContentPart extends Disposable {
 			}
 		};
 
-		this._register(btn.onDidClick(toggle));
+		if (!staticActivityRow) {
+			this._register(btn.onDidClick(toggle));
+		}
 
 		const topLevelResources = this.output?.parts
 			.filter(p => p.kind === 'data')

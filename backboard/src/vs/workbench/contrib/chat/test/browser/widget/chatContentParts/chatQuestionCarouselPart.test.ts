@@ -5,6 +5,8 @@
 
 import assert from 'assert';
 import { mainWindow } from '../../../../../../../base/browser/window.js';
+import '../../../../browser/widget/media/chat.css';
+import '../../../../browser/widget/media/chatPanelCursorLook.css';
 import { MarkdownString } from '../../../../../../../base/common/htmlContent.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../base/test/common/utils.js';
 import { workbenchInstantiationService } from '../../../../../../test/browser/workbenchTestServices.js';
@@ -48,6 +50,49 @@ suite('ChatQuestionCarouselPart', () => {
 			widget.domNode.parentNode.removeChild(widget.domNode);
 		}
 		submittedAnswers = null;
+	});
+
+	test('editor-panel questions show the full prompt and lettered choices without radio chrome', () => {
+		const host = document.createElement('div');
+		host.className = 'monaco-workbench vs-dark';
+		host.style.width = '360px';
+		host.innerHTML = '<div class="part auxiliarybar"><div class="chat-viewpane"><div class="backboard-composer"><div class="interactive-session"><div class="interactive-input-part"><div class="chat-input-container"><div class="chat-editor-container">Normal editor</div><div class="chat-input-toolbars">Model toolbar</div></div></div></div></div></div></div>';
+		const container = host.querySelector<HTMLElement>('.chat-input-container')!;
+		mainWindow.document.body.appendChild(host);
+		store.add({ dispose: () => host.remove() });
+		const instantiationService = workbenchInstantiationService(undefined, store);
+		widget = store.add(instantiationService.createInstance(ChatQuestionCarouselPart, createMockCarousel([
+			{ id: 'q1', type: 'singleSelect', title: 'Next step', description: 'What would you like me to do next?', required: true, allowFreeformInput: true, options: [
+				{ id: 'review', label: 'Review your edits - Read the changed files and give feedback', value: 'review' },
+				{ id: 'style', label: 'Keep styling - Continue refining the panel', value: 'style' },
+			] },
+		]), { ...createMockContext(), container }, { onSubmit: answers => { submittedAnswers = answers; }, shouldAutoFocus: false }));
+		const normalBorder = getComputedStyle(container).borderTopWidth;
+		const questionContainer = document.createElement('div');
+		questionContainer.className = 'chat-question-carousel-widget-container';
+		questionContainer.appendChild(widget.domNode);
+		container.before(questionContainer);
+		assert.notStrictEqual(getComputedStyle(container.querySelector<HTMLElement>('.chat-editor-container')!).display, 'none');
+		assert.strictEqual(container.contains(questionContainer), false);
+		assert.strictEqual(getComputedStyle(container).borderTopWidth, normalBorder);
+		assert.strictEqual(widget.domNode.querySelector('.chat-question-title')?.textContent, 'What would you like me to do next?');
+		assert.deepStrictEqual([...widget.domNode.querySelectorAll('.chat-question-list-number')].map(e => e.textContent), ['A', 'B']);
+		const marker = widget.domNode.querySelector<HTMLElement>('.chat-question-list-number')!;
+		assert.strictEqual(getComputedStyle(marker).borderTopWidth, '0px');
+		const textarea = widget.domNode.querySelector<HTMLTextAreaElement>('textarea')!;
+		assert.strictEqual(textarea.placeholder, 'Other answer');
+		assert.strictEqual(getComputedStyle(textarea).alignContent, 'start');
+		assert.ok(textarea.getBoundingClientRect().height >= 32);
+		const list = widget.domNode.querySelector<HTMLElement>('.chat-question-list')!;
+		list.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true }));
+		const choices = widget.domNode.querySelectorAll<HTMLElement>('.chat-question-list-item');
+		assert.strictEqual(getComputedStyle(choices[0]).padding, '2px 6px 2px 12px');
+		assert.strictEqual(getComputedStyle(choices[0]).gap, '8px');
+		assert.strictEqual(getComputedStyle(list).rowGap, '0px');
+		assert.strictEqual(getComputedStyle(widget.domNode.querySelector<HTMLElement>('.chat-question-title-row')!).paddingLeft, '14px');
+		assert.strictEqual(choices[1].getAttribute('aria-selected'), 'true');
+		choices[1].click();
+		assert.deepStrictEqual(submittedAnswers?.get('q1'), { selectedValue: 'style', freeformValue: undefined });
 	});
 
 	suite('Basic Rendering', () => {

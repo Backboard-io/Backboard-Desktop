@@ -12,9 +12,19 @@ import { shouldRerenderToolInvocationSubPart } from '../../../../browser/widget/
 import { IChatCoreToolInvocationData, IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind } from '../../../../common/chatService/chatService.js';
 import { ToolDataSource } from '../../../../common/tools/languageModelToolsService.js';
 import '../../../../browser/widget/media/chat.css';
+import '../../../../browser/widget/media/chatPanelCursorLook.css';
 
 suite('ChatCoreToolProgressPart', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('read locations use one-based lines and stop at the end of the file', () => {
+		const location = (offset: number, limit: number, totalLines: number) => createCoreToolCardViewModel({
+			kind: 'coreTool', toolKind: 'read', input: { path: '/workspace/example.ts', offset, limit }, output: { totalLines, content: 'example' },
+		}).locationLabel;
+		assert.strictEqual(location(0, 20, 295), '#L1-20');
+		assert.strictEqual(location(10, 20, 15), '#L11-15');
+		assert.strictEqual(location(20, 10, 15), undefined);
+	});
 
 	test('actual tool headers keep their icon rail and fit narrow transcripts', () => {
 		const host = document.createElement('div');
@@ -48,6 +58,49 @@ suite('ChatCoreToolProgressPart', () => {
 						centerOffset: glyph.y + glyph.height / 2 - row.y - row.height / 2,
 						fits: header.scrollWidth <= header.clientWidth + 1,
 					}, { height: 24, iconWidth: 16, iconInset: 0, centerOffset: 0, fits: true }, `${data.toolKind} at ${width}px`);
+				}
+			}
+		} finally {
+			host.remove();
+		}
+	});
+
+	test('editor-panel disclosures align and reveal their real body with the complete style cascade', () => {
+		const host = document.createElement('div');
+		host.className = 'monaco-workbench vs-dark';
+		host.innerHTML = '<div class="part auxiliarybar"><div class="chat-viewpane"><div class="backboard-clean-chat"><div class="interactive-list backboard-cursor-transcript"></div></div></div></div>';
+		document.body.appendChild(host);
+		const transcript = host.querySelector<HTMLElement>('.interactive-list')!;
+		try {
+			for (const width of [280, 414, 760]) {
+				host.style.width = `${width}px`;
+				for (const data of [
+					{ kind: 'coreTool', toolKind: 'read', input: { path: '/workspace/a-long-filename-to-check-truncation.ts' }, output: { content: 'export const greeting = "Hello";' } },
+					{ kind: 'coreTool', toolKind: 'grep', input: { pattern: 'a long pattern with enough words to fill a narrow sidebar' }, output: { matches: 'a matching line' } },
+					{ kind: 'coreTool', toolKind: 'fetchUrl', input: { url: 'https://example.com/long/path' }, output: { text: 'page content' } },
+				] satisfies IChatCoreToolInvocationData[]) {
+					const part = createPart(data);
+					transcript.replaceChildren(part.domNode);
+					const header = part.domNode.querySelector<HTMLButtonElement>('.chat-core-tool-card-header')!;
+					const icon = header.querySelector<HTMLElement>('.chat-core-tool-card-icon')!;
+					const arrow = header.querySelector<HTMLElement>('.chat-core-tool-card-disclosure')!;
+					const details = part.domNode.querySelector<HTMLElement>('.chat-core-tool-card-details')!;
+					const row = header.getBoundingClientRect();
+					assert.strictEqual(row.height, 16, `${data.toolKind}: reference row height`);
+					assert.strictEqual(icon.getBoundingClientRect().x, row.x);
+					assert.strictEqual(arrow.getBoundingClientRect().x, row.x);
+					assert.strictEqual(arrow.getBoundingClientRect().y, row.y);
+					assert.ok(header.scrollWidth <= header.clientWidth + 1, `${data.toolKind}: no horizontal overflow at ${width}`);
+					for (let repeat = 0; repeat < 3; repeat++) {
+						arrow.click();
+						assert.strictEqual(header.ariaExpanded, 'true');
+						assert.ok(details.getBoundingClientRect().height > 0, 'opening must expose actual content');
+						assert.ok(details.getBoundingClientRect().right <= row.right + 1, 'details stay inside the transcript');
+						assert.strictEqual(details.getBoundingClientRect().x - row.x, 24, 'details follow the label rail');
+						arrow.click();
+						assert.strictEqual(header.ariaExpanded, 'false');
+						assert.strictEqual(details.getBoundingClientRect().height, 0, 'closed content takes no space');
+					}
 				}
 			}
 		} finally {
@@ -295,7 +348,7 @@ suite('ChatCoreToolProgressPart', () => {
 			hasControlledId: true,
 			controlsDetails: true,
 			detailsHidden: true,
-			summary: 'read.ts',
+			summary: 'read.ts#L6-105',
 			fullPathInTooltip: true,
 			subtitle: 'Starts at: 5 · Limit: 100',
 			verboseInSummary: false,
@@ -428,6 +481,43 @@ suite('ChatCoreToolProgressPart', () => {
 		});
 	});
 
+	test('renders a completed computer screenshot as only an image', () => {
+		const part = createPart({
+			kind: 'coreTool', toolKind: 'computer', input: { actions: [{ action: 'screenshot' }] },
+			output: { results: [{ action: 'screenshot', success: true, screenshotPath: '/tmp/capture with spaces.png', imageSize: { width: 1280, height: 832 }, windowTitle: 'Backboard Studio' }] },
+		});
+		const image = part.domNode.querySelector('img')!;
+		assert.ok(image);
+		assert.ok(image.src.includes('/tmp/capture'));
+		assert.strictEqual(image.alt, 'Backboard Studio');
+		assert.strictEqual(image.width, 1280);
+		assert.strictEqual(image.height, 832);
+		assert.strictEqual(part.domNode.textContent, '');
+		assert.strictEqual(part.domNode.querySelector('.chat-core-tool-card, button, [aria-expanded]'), null);
+	});
+
+	test('keeps other actions while rendering screenshots outside their disclosure', () => {
+		const part = createPart({
+			kind: 'coreTool', toolKind: 'computer', input: { actions: [{ action: 'click' }, { action: 'screenshot' }] },
+			output: { results: [{ success: true }, { success: true, observation: { screenshotPath: '/tmp/capture.png' } }] },
+		});
+		assert.strictEqual(part.domNode.querySelectorAll('img').length, 1);
+		assert.strictEqual(part.domNode.querySelector('.chat-core-tool-card-details img'), null);
+		assert.strictEqual(part.domNode.querySelector('.chat-core-tool-card-summary')?.textContent, '1 action');
+		const header = part.domNode.querySelector<HTMLButtonElement>('button')!;
+		header.click();
+		assert.strictEqual(header.ariaExpanded, 'true');
+		assert.strictEqual(part.domNode.querySelectorAll('.chat-core-tool-card-item').length, 1);
+	});
+
+	test('retains screenshot failure and missing-path feedback', () => {
+		for (const result of [{ success: false, error: 'Capture denied' }, { success: true }, { success: true, screenshotPath: 'https://example.com/image.png' }]) {
+			const part = createPart({ kind: 'coreTool', toolKind: 'computer', input: { actions: [{ action: 'screenshot' }] }, output: { results: [result] } });
+			assert.strictEqual(part.domNode.querySelector('img'), null);
+			assert.ok(part.domNode.querySelector('.chat-core-tool-card-header'));
+		}
+	});
+
 	test('shows redacted automation metadata and marks an unexecuted final action skipped', () => {
 		const part = createPart({
 			kind: 'coreTool',
@@ -537,6 +627,27 @@ suite('ChatCoreToolProgressPart', () => {
 
 		assert.strictEqual(viewModel.items?.[0]?.state, 'complete');
 		assert.strictEqual(viewModel.summary, '1 / 1 tasks done');
+	});
+
+	test('exposes the task completion ratio as the header progress track', () => {
+		const part = createPart({
+			kind: 'coreTool',
+			toolKind: 'todo',
+			output: {
+				todos: [
+					{ content: 'Queued', status: 'pending' },
+					{ content: 'Working', status: 'in_progress' },
+					{ content: 'Finished', status: 'completed' },
+				],
+			},
+		});
+		const card = part.domNode;
+
+		assert.strictEqual(card.classList.contains('chat-core-tool-card-progress'), true);
+		assert.strictEqual(card.style.getPropertyValue('--bb-core-tool-progress'), '33%');
+
+		const emptyList = createPart({ kind: 'coreTool', toolKind: 'todo', output: { todos: [] } });
+		assert.strictEqual(emptyList.domNode.classList.contains('chat-core-tool-card-progress'), false);
 	});
 
 	test('animates a film-frame shell while generate_video is running', () => {

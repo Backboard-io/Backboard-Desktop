@@ -290,6 +290,10 @@ suite('ChatExternalEditContentPart performance', () => {
 			() => part.domNode.querySelector<HTMLElement>('.chat-external-edit-diff-body')?.dataset.renderMode === 'preview',
 			'Collapsed preview did not render',
 		);
+		await waitFor(
+			() => !!part.domNode.querySelector('.chat-external-edit-diff-text .monaco-tokenized-source span[class]'),
+			'Preview did not preserve syntax-token classes',
+		);
 		const bodyIdentity = part.domNode.querySelector<HTMLElement>('.chat-external-edit-diff-body');
 		assert.ok(bodyIdentity);
 		const initialKinds = Array.from(bodyIdentity.querySelectorAll<HTMLElement>('.chat-external-edit-diff-row')).map(row =>

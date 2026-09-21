@@ -830,6 +830,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private streamThenCollapseMode: boolean = false;
 	private readonly wasStreamingLive: boolean;
 	private readonly useCursorPanelPresentation: boolean;
+	private readonly useEditorPanelPresentation: boolean;
 	private readonly useCursorTranscriptPresentation: boolean;
 	private readonly _collapseAnimation = this._register(new MutableDisposable<DisposableStore>());
 	private readonly _elapsedTimer = this._register(new MutableDisposable<IDisposable>());
@@ -983,6 +984,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 		super(extractedTitle, context, undefined, hoverService, configurationService);
 		this.useCursorTranscriptPresentation = isBackboardCursorTranscript(context.container);
+		this.useEditorPanelPresentation = this.useCursorTranscriptPresentation && context.container.closest('.part.auxiliarybar, .agent-sessions-workbench .part.sessionspart') !== null;
 		this.useCursorPanelPresentation = context.container.closest('.backboard-clean-chat, .part.auxiliarybar') !== null
 			|| context.container.ownerDocument.querySelector('.agent-sessions-workbench') !== null;
 
@@ -2309,7 +2311,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			}
 			this.latestCoreTodoWrapper = itemWrapper;
 		}
-		if ((this.useCursorPanelPresentation || this.useCursorTranscriptPresentation) && isCoreTool && (!this.useCursorTranscriptPresentation || isCoreTodo || coreToolKind === 'read' || coreToolKind === 'generateVideo')) {
+		if ((this.useCursorPanelPresentation || this.useCursorTranscriptPresentation) && isCoreTool && (!this.useCursorTranscriptPresentation || this.useEditorPanelPresentation || isCoreTodo || coreToolKind === 'read' || coreToolKind === 'generateVideo')) {
 			// Core tools already own a compact header, lifecycle status, and optional
 			// details disclosure. Mount that native card directly: wrapping it in a
 			// generic work row or activity group creates two competing summaries and
@@ -2327,7 +2329,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			);
 			itemWrapper.classList.add('chat-thinking-core-tool-row');
 			this.finishActiveActivityGroup();
-			if (coreToolKind === 'read') {
+			if (coreToolKind === 'read' && !this.useEditorPanelPresentation) {
 				this.appendCoreReadRow(itemWrapper, metadata);
 			} else {
 				this.appendToWrapper(itemWrapper);

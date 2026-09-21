@@ -879,9 +879,8 @@ referencesExpandedWhenEmptyResponse: false,
 						() => (this._widget?.viewModel?.model.getRequests().length ?? 0) === 0)
 					: undefined,
 				supportsChangingModes: !isBackboardProduct(),
-				// Compact, Cursor-sized composer: two lines at rest, grows with
-				// content. Four lines reads as an oversized card in the panel.
-				inputEditorMinLines: 2,
+				// One line at rest in the editor panel; longer prompts grow naturally.
+				inputEditorMinLines: isBackboardProduct() ? 1 : 2,
 				dndContainer: parent,
 			},
 			{

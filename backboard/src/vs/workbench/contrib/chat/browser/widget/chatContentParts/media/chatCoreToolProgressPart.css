@@ -7,6 +7,7 @@
 	container-type: inline-size;
 	--bb-core-tool-border: var(--bb-cursor-diff-border, var(--vscode-chat-requestBorder));
 	--bb-core-tool-surface: var(--bb-cursor-diff-surface, var(--vscode-editor-background));
+	--bb-core-tool-inset-surface: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
 	display: block;
 	box-sizing: border-box;
 	width: 100%;
@@ -19,6 +20,17 @@
 	color: var(--vscode-foreground);
 	font-size: 12px;
 	line-height: 18px;
+	transition: border-color 100ms ease-out;
+}
+
+.chat-core-tool-card:hover {
+	border-color: color-mix(in srgb, var(--vscode-foreground) 12%, var(--bb-core-tool-border));
+}
+
+/* A failed call reads from across the transcript: quiet red accent on the
+ * card's leading edge instead of a loud filled banner. */
+.chat-core-tool-card-error {
+	border-inline-start: 2px solid color-mix(in srgb, var(--vscode-errorForeground) 55%, transparent);
 }
 
 .chat-core-tool-card-header {
@@ -41,10 +53,15 @@
 
 button.chat-core-tool-card-header {
 	cursor: pointer;
+	transition: background-color 80ms ease-out, color 80ms ease-out;
 }
 
 button.chat-core-tool-card-header:hover {
-	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+}
+
+button.chat-core-tool-card-header:hover .chat-core-tool-card-disclosure {
+	color: var(--vscode-foreground);
 }
 
 button.chat-core-tool-card-header:focus-visible {
@@ -106,6 +123,10 @@ button.chat-core-tool-card-header:focus-visible {
 	font-size: 11px;
 }
 
+.chat-core-tool-card-location {
+	display: none;
+}
+
 .chat-core-tool-card-subtitle {
 	flex: 0 1 auto;
 	font-size: 11px;
@@ -133,10 +154,13 @@ button.chat-core-tool-card-header:focus-visible {
 	grid-column: -4 / -3;
 	max-width: 100px;
 	overflow: hidden;
+	padding: 0 6px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
 	color: var(--vscode-descriptionForeground);
-	font-family: var(--monaco-monospace-font);
 	font-size: 11px;
 	font-variant-numeric: tabular-nums;
+	line-height: 18px;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -156,6 +180,19 @@ button.chat-core-tool-card-header:focus-visible {
 .chat-core-tool-card-status-complete {
 	color: var(--vscode-terminalCommandDecoration-successBackground, var(--vscode-descriptionForeground));
 	opacity: 0.72;
+	animation: bb-core-tool-status-pop 160ms ease-out;
+}
+
+@keyframes bb-core-tool-status-pop {
+	0% {
+		opacity: 0;
+		transform: scale(0.6);
+	}
+
+	100% {
+		opacity: 0.72;
+		transform: scale(1);
+	}
 }
 
 .chat-core-tool-card-status-error,
@@ -214,6 +251,22 @@ button.chat-core-tool-card-header:focus-visible {
 	background: var(--bb-core-tool-surface);
 }
 
+.chat-core-tool-card-details:not([hidden]) {
+	animation: bb-core-tool-details-in 140ms ease-out;
+}
+
+@keyframes bb-core-tool-details-in {
+	0% {
+		opacity: 0;
+		transform: translateY(-2px);
+	}
+
+	100% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
 .chat-core-tool-card-details[hidden] {
 	display: none;
 }
@@ -231,9 +284,13 @@ button.chat-core-tool-card-header:focus-visible {
 	display: flex;
 	box-sizing: border-box;
 	min-width: 0;
+	min-height: 22px;
 	align-items: flex-start;
 	gap: 6px;
-	padding: 3px 9px;
+	margin: 0 4px;
+	padding: 3px 5px;
+	border-radius: 4px;
+	transition: background-color 80ms ease-out;
 }
 
 .chat-core-tool-card-item-marker {
@@ -316,24 +373,27 @@ a.chat-core-tool-card-item-title:hover {
 }
 
 .chat-core-tool-card-section-label {
-	padding: 2px 9px;
+	padding: 3px 9px 2px;
 	color: var(--vscode-descriptionForeground);
-	font-size: 11px;
-	font-weight: 500;
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
 }
 
 .chat-core-tool-card-preview pre {
 	box-sizing: border-box;
 	max-height: 260px;
-	margin: 0;
-	padding: 3px 9px 6px;
+	margin: 2px 8px 6px;
+	padding: 7px 9px;
 	overflow: auto;
 	border: 0;
-	background: transparent;
+	border-radius: 6px;
+	background: var(--bb-core-tool-inset-surface);
 	color: var(--vscode-editor-foreground);
 	font-family: var(--monaco-monospace-font);
 	font-size: 12px;
-	line-height: 19px;
+	line-height: 18px;
 	tab-size: 4;
 	scrollbar-width: thin;
 	white-space: pre;
@@ -362,7 +422,23 @@ a.chat-core-tool-card-item-title:hover {
 }
 
 .chat-core-tool-card-item:hover {
-	background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+}
+
+/* Task lists carry their completion ratio (set by the renderer) as a small
+ * inline track after the "n / m tasks done" summary. */
+.chat-core-tool-card-progress .chat-core-tool-card-summary::after {
+	display: inline-block;
+	width: 48px;
+	height: 4px;
+	border-radius: 2px;
+	margin-inline-start: 8px;
+	background: linear-gradient(
+		to right,
+		var(--vscode-progressBar-background) var(--bb-core-tool-progress, 0%),
+		color-mix(in srgb, var(--vscode-foreground) 12%, transparent) 0);
+	content: '';
+	vertical-align: 1px;
 }
 
 .monaco-workbench:is(.hc-black, .hc-light) .chat-core-tool-card {
@@ -623,8 +699,16 @@ a.chat-core-tool-card-item-title:hover {
 		animation: none;
 	}
 
+	.chat-core-tool-card,
+	button.chat-core-tool-card-header,
+	.chat-core-tool-card-item,
 	.chat-core-tool-card-disclosure {
 		transition: none;
+	}
+
+	.chat-core-tool-card-status-complete,
+	.chat-core-tool-card-details:not([hidden]) {
+		animation: none;
 	}
 
 	.chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-title-live,
@@ -647,4 +731,22 @@ a.chat-core-tool-card-item-title:hover {
 	.chat-core-tool-card-generating-sweep {
 		display: none;
 	}
+}
+
+/* Screenshot results are the image itself, with no activity card or disclosure. */
+.chat-computer-screenshots {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 0;
+	width: 100%;
+}
+
+.chat-computer-screenshot {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	object-fit: contain;
+	border: 0;
+	border-radius: 4px;
 }

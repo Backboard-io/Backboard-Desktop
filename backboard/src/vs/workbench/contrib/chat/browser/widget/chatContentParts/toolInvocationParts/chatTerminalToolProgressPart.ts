@@ -153,7 +153,7 @@ function removeEchoedTerminalCommand(lines: string[], commandText: string | unde
 	}
 }
 
-export function getCollapsedTerminalOutputPreview(output: string | undefined, commandText?: string): ICollapsedTerminalOutputPreview | undefined {
+export function getPlainTerminalOutput(output: string | undefined, commandText?: string): string {
 	const lines = removeAnsiEscapeCodes(output ?? '').split(/\r?\n/);
 	removeEchoedTerminalCommand(lines, commandText);
 	while (lines.length && !lines[0].trim()) {
@@ -162,9 +162,15 @@ export function getCollapsedTerminalOutputPreview(output: string | undefined, co
 	while (lines.length && !lines[lines.length - 1].trim()) {
 		lines.pop();
 	}
-	if (!lines.length) {
+	return lines.join('\n');
+}
+
+export function getCollapsedTerminalOutputPreview(output: string | undefined, commandText?: string): ICollapsedTerminalOutputPreview | undefined {
+	const plain = getPlainTerminalOutput(output, commandText);
+	if (!plain) {
 		return undefined;
 	}
+	const lines = plain.split('\n');
 
 	let overflowing = lines.length > COMPACT_TERMINAL_PREVIEW_LINES;
 	const visibleLines = lines.slice(0, COMPACT_TERMINAL_PREVIEW_LINES).map(line => {
@@ -437,6 +443,7 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 	private _thinkingCollapsibleWrapper: ChatTerminalThinkingCollapsibleWrapper | undefined;
 	private readonly _useCursorTranscriptPresentation: boolean;
 	private _collapsedOutputPreviewElement: HTMLElement | undefined;
+	private _snapshotOutputElement: HTMLElement | undefined;
 	private readonly _terminalContentElement: HTMLElement;
 
 	private markdownPart: ChatMarkdownContentPart | undefined;
@@ -802,12 +809,23 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 		const outputPreview = getCollapsedTerminalOutputPreview(output ?? this._terminalData.terminalCommandOutput?.text, this._commandText);
 		if (!outputPreview) {
 			this._collapsedOutputPreviewElement?.remove();
+			this._snapshotOutputElement?.remove();
+			this._thinkingCollapsibleWrapper.domNode.classList.remove('chat-terminal-has-snapshot');
 			return;
 		}
 		this._collapsedOutputPreviewElement ??= dom.$('.chat-terminal-collapsed-output-preview');
 		this._collapsedOutputPreviewElement.textContent = outputPreview.text;
 		this._collapsedOutputPreviewElement.classList.toggle('chat-terminal-collapsed-output-preview-overflowing', outputPreview.overflowing);
 		this._thinkingCollapsibleWrapper.domNode.appendChild(this._collapsedOutputPreviewElement);
+		// Completed panel commands use selectable DOM output, matching the
+		// reference card and avoiding a hidden xterm's blank first paint on restore.
+		const hasSnapshot = IChatToolInvocation.isComplete(this.toolInvocation);
+		this._thinkingCollapsibleWrapper.domNode.classList.toggle('chat-terminal-has-snapshot', hasSnapshot);
+		if (hasSnapshot) {
+			this._snapshotOutputElement ??= dom.$('pre.chat-terminal-snapshot-output', { tabIndex: 0, role: 'region', 'aria-label': localize('chat.terminal.outputLabel', "Command output") });
+			this._snapshotOutputElement.textContent = getPlainTerminalOutput(output ?? this._terminalData.terminalCommandOutput?.text, this._commandText);
+			this._thinkingCollapsibleWrapper.domNode.appendChild(this._snapshotOutputElement);
+		}
 	}
 
 	private async _initializeTerminalActions(): Promise<void> {
@@ -2202,6 +2220,7 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 	private readonly _onFocusTerminal: (() => void) | undefined;
 	private readonly _showLinkDisposables = this._register(new MutableDisposable<DisposableStore>());
 	private _showLinkElement: HTMLElement | undefined;
+	private _cardHeader: HTMLButtonElement | undefined;
 
 	constructor(
 		compactCommandText: string,
@@ -2246,6 +2265,24 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 		this._onFocusTerminal = onFocusTerminal;
 
 		this.domNode.classList.add('chat-terminal-thinking-collapsible');
+		if (this._useCursorTranscriptPresentation) {
+			const header = dom.$<HTMLButtonElement>('button.chat-terminal-card-header', { type: 'button' });
+			header.appendChild(dom.$('span.codicon.codicon-terminal', { 'aria-hidden': 'true' }));
+			header.appendChild(dom.$('span.chat-terminal-card-title', {}, localize('chat.terminal.commandHeading', "Command {0}", compactCommandText.trim().split(/\s+/, 1)[0])));
+			header.appendChild(dom.$('span.chat-terminal-card-chevron.codicon.codicon-chevron-right', { 'aria-hidden': 'true' }));
+			this._cardHeader = header;
+			this.domNode.prepend(header);
+			const command = dom.$('div.chat-terminal-card-command');
+			command.appendChild(dom.$('code', {}, fullCommandText));
+			header.after(command);
+			this._register(dom.addDisposableListener(header, dom.EventType.CLICK, event => {
+				event.stopPropagation();
+				this._collapseButton?.element.click();
+			}));
+			this._register(autorun(reader => {
+				header.ariaExpanded = String(this.expanded.read(reader));
+			}));
+		}
 		if (this._collapseButton) {
 			this._register(this._collapseButton.onDidClick(onDidUserToggle));
 		}
@@ -2273,6 +2310,10 @@ export class ChatTerminalThinkingCollapsibleWrapper extends ChatCollapsibleConte
 		const labelElement = this._collapseButton.labelElement;
 		labelElement.classList.toggle('chat-terminal-command-label', this._useCursorTranscriptPresentation);
 		labelElement.textContent = '';
+		// The panel header controls the same disclosure as the command line.
+		if (this._cardHeader) {
+			this._cardHeader.title = this._collapseButton.element.ariaLabel ?? this._compactCommandText;
+		}
 
 		if (this._isSandboxWrapped) {
 			const prefixText = this._isSkipped

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, clearNode, EventHelper } from '../../../../../../base/browser/dom.js';
+import { safeSetInnerHtml } from '../../../../../../base/browser/domSanitize.js';
 import { disposableTimeout, timeout } from '../../../../../../base/common/async.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
@@ -14,6 +15,7 @@ import { URI } from '../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../nls.js';
 import { DetailedLineRangeMapping } from '../../../../../../editor/common/diff/rangeMapping.js';
 import { ILanguageService } from '../../../../../../editor/common/languages/language.js';
+import { tokenizeToString } from '../../../../../../editor/common/languages/textToHtmlTokenizer.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { IEditorWorkerService } from '../../../../../../editor/common/services/editorWorker.js';
 import { ITextModelService } from '../../../../../../editor/common/services/resolverService.js';
@@ -328,9 +330,8 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 	private renderCardControls(): void {
 		this.element.classList.add('chat-external-edit-card');
 
-		const chevron = $('span.codicon.codicon-chevron-right.chat-external-edit-expand', {
-			role: 'button',
-			tabindex: '0',
+		const chevron = $('button.codicon.codicon-chevron-right.chat-external-edit-expand', {
+			type: 'button',
 			'aria-expanded': 'false',
 			'aria-label': localize('chat.externalEdit.showDiff', "Show Diff"),
 		});
@@ -339,12 +340,9 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		this.element.appendChild(chevron);
 
 		const toggle = () => this.toggleDiffBody();
-		this._register(addDisposableListener(chevron, 'click', toggle));
-		this._register(addDisposableListener(chevron, 'keydown', e => {
-			if (e.key === 'Enter' || e.key === ' ') {
-				e.preventDefault();
-				toggle();
-			}
+		this._register(addDisposableListener(chevron, 'click', event => {
+			event.stopPropagation();
+			toggle();
 		}));
 
 		if (this.edit.beforeContentUri && this.edit.afterContentUri) {
@@ -684,12 +682,22 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		row.appendChild($('span.chat-external-edit-diff-gutter', {}, String(lineNumber)));
 		row.appendChild($('span.chat-external-edit-diff-marker', { 'aria-hidden': 'true' }, kind === 'added' ? '+' : kind === 'removed' ? '-' : ''));
 		const textElement = $('span.chat-external-edit-diff-text');
-		// Row-level add/remove styling carries the important visual signal. Keep
-		// code as plain text so expanding a large file never tokenizes its entire
-		// contents merely to show at most 400 lines.
+		// Paint immediately, then color only the bounded rows shown in the card.
+		// Long generated lines stay plain so a preview never tokenizes a huge file.
 		textElement.textContent = text;
 		row.appendChild(textElement);
 		body.appendChild(row);
+		if (text.length > 0 && text.length <= 2000) {
+			const languageId = this.languageService.guessLanguageIdByFilepathOrFirstLine(this.edit.uri);
+			void tokenizeToString(this.languageService, text, languageId).then(html => {
+				if (!this._store.isDisposed && body.contains(row)) {
+					safeSetInnerHtml(textElement, html, {
+						allowedTags: { override: ['div', 'span', 'br'] },
+						allowedAttributes: { override: ['class'] },
+					});
+				}
+			}, onUnexpectedError);
+		}
 	}
 
 	private renderOneSidedDiffRows(body: HTMLElement, kind: 'added' | 'removed', lines: readonly string[], maxRows: number, showTruncationNote: boolean): void {

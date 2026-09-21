@@ -10,7 +10,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../ba
 import { runWithFakedTimers } from '../../../../../../../base/test/common/timeTravelScheduler.js';
 import { timeout } from '../../../../../../../base/common/async.js';
 import { TerminalToolAutoExpand, TerminalToolAutoExpandTimeout } from '../../../../browser/widget/chatContentParts/toolInvocationParts/terminalToolAutoExpand.js';
-import { calculateTerminalOutputContentHeight, getTerminalCollapsibleLabel, getTerminalInitialExpandedState, getTerminalOutputViewportHeight, getTerminalWheelScrollLines, resolveStoredTerminalOutputLineCount, shouldAutoCollapseTerminalOnCompletion, shouldAutoExpandTerminalFailure, shouldRenderStoredTerminalOutputFirst } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.js';
+import { calculateTerminalOutputContentHeight, getPlainTerminalOutput, getTerminalCollapsibleLabel, getTerminalInitialExpandedState, getTerminalOutputViewportHeight, getTerminalWheelScrollLines, resolveStoredTerminalOutputLineCount, shouldAutoCollapseTerminalOnCompletion, shouldAutoExpandTerminalFailure, shouldRenderStoredTerminalOutputFirst } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatTerminalToolProgressPart.js';
 import { shouldRerenderToolInvocationSubPart } from '../../../../browser/widget/chatContentParts/toolInvocationParts/chatToolInvocationPart.js';
 import { IChatToolInvocation } from '../../../../common/chatService/chatService.js';
 import { ChatToolInvocation } from '../../../../common/model/chatProgressTypes/chatToolInvocation.js';
@@ -18,6 +18,12 @@ import { ToolDataSource } from '../../../../common/tools/languageModelToolsServi
 
 suite('ChatTerminalToolProgressPart Auto-Expand Logic', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('expanded DOM output preserves all lines and literal markup while removing terminal escapes', () => {
+		const lines = ['<script>literal output</script>', ...Array.from({ length: 50 }, (_, i) => `line ${i}`)];
+		assert.strictEqual(getPlainTerminalOutput(`\u001b[32m${lines.join('\n')}\u001b[0m\n`), lines.join('\n'));
+		assert.strictEqual(getPlainTerminalOutput('Success\n$ pwd\n/workspace\n', 'pwd'), '/workspace');
+	});
 
 	// Mocked events
 	let onCommandExecuted: Emitter<unknown>;

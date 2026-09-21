@@ -182,6 +182,11 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 	}
 
 	private hasCompositeTitle(): boolean {
+		// Session tabs remain visible for empty drafts too. Reserve their height
+		// so the chat composer cannot extend underneath the status bar.
+		if (this.element?.querySelector('.composite.title.has-chat-tabs')) {
+			return true;
+		}
 		return !(this.getActivePaneComposite()?.getId() === 'workbench.panel.chat'
 			&& this.element?.querySelector('.backboard-composer .chat-composer-empty'));
 	}

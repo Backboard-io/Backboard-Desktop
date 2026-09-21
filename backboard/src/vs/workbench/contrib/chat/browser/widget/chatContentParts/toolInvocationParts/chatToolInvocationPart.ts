@@ -55,7 +55,7 @@ interface ICoreToolRerenderState {
 }
 
 function captureCoreToolRerenderState(domNode: HTMLElement): ICoreToolRerenderState | undefined {
-	if (!domNode.classList.contains('chat-core-tool-card')) {
+	if (!domNode.matches('.chat-core-tool-card, .chat-computer-screenshots')) {
 		return undefined;
 	}
 
@@ -69,7 +69,7 @@ function captureCoreToolRerenderState(domNode: HTMLElement): ICoreToolRerenderSt
 }
 
 function restoreCoreToolRerenderState(domNode: HTMLElement, state: ICoreToolRerenderState): void {
-	if (!domNode.classList.contains('chat-core-tool-card')) {
+	if (!domNode.matches('.chat-core-tool-card, .chat-computer-screenshots')) {
 		return;
 	}
 
@@ -102,6 +102,10 @@ function getCoreToolFocusableElements(domNode: HTMLElement): HTMLElement[] {
 }
 
 function getCoreToolDisclosure(domNode: HTMLElement): HTMLButtonElement | undefined {
+	if (domNode.classList.contains('chat-computer-screenshots')) {
+		const card = domNode.querySelector<HTMLElement>(':scope > .chat-core-tool-card');
+		return card ? getCoreToolDisclosure(card) : undefined;
+	}
 	for (const child of domNode.children) {
 		if (dom.isHTMLButtonElement(child) && child.classList.contains('chat-core-tool-card-header') && child.hasAttribute('aria-expanded')) {
 			return child;
@@ -227,7 +231,7 @@ export class ChatToolInvocationPart extends Disposable implements IChatContentPa
 			this.subPart = partStore.add(this.createToolInvocationSubPart());
 			subPartDomNode.replaceWith(this.subPart.domNode);
 			subPartDomNode = this.subPart.domNode;
-			if (subPartDomNode.classList.contains('chat-core-tool-card')) {
+			if (subPartDomNode.matches('.chat-core-tool-card, .chat-computer-screenshots')) {
 				restoreCoreToolRerenderState(subPartDomNode, {
 					expanded: coreToolExpanded,
 					focusedElementIndex: previousCoreToolState?.focusedElementIndex,
