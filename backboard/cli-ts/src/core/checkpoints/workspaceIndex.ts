@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
 import type { Dirent } from "node:fs";
-import { lstat, readdir, readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { lstat, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { errorMessage } from "../../utils/errors.ts";
+import { ensureDir, renameOver } from "../../utils/fs.ts";
+import { shortId } from "../../utils/id.ts";
 import { type BlobStore, sha256Hex } from "./blobStore.ts";
 
 /**
@@ -31,6 +33,35 @@ const DENY_DIRS = new Set([
 	".turbo",
 	"coverage",
 ]);
+
+/**
+ * Files stat-ed/hashed at once during a refresh. The scan is I/O bound, so a
+ * sequential walk leaves a cold first scan of a large tree several times slower
+ * than it needs to be; the cap bounds open files and buffered content.
+ */
+const REFRESH_CONCURRENCY = 16;
+
+const INDEX_CACHE_VERSION = 1;
+
+/** On-disk form of the index, shared by every session of one workspace. */
+interface PersistedIndex {
+	version: number;
+	root: string;
+	refreshedAt: number;
+	entries: IndexEntry[];
+}
+
+/**
+ * Where the index of `root` is persisted. It lives inside the blob store it
+ * describes, so a `stored` flag read back from it can never outlive its blobs.
+ */
+export function workspaceIndexCachePath(
+	objectsRoot: string,
+	root: string,
+): string {
+	const id = sha256Hex(Buffer.from(indexPathKey(root))).slice(0, 16);
+	return join(objectsRoot, "workspace-index", `${id}.json`);
+}
 
 const RIPGREP_IGNORED_DIR_GLOBS = [...DENY_DIRS].flatMap((dir) => [
 	`!${dir}/**`,
@@ -74,15 +105,24 @@ export interface WorkspaceDiff {
  * whose mtime is too close to the previous refresh to be trusted — the blob
  * write for a changed file doubles as its pre-image capture. Symlinks are never
  * followed and deny-listed directories are never entered.
+ *
+ * With a `cachePath` the index survives the process: a new session seeds itself
+ * from the last persisted refresh, so its first scan is a stat walk instead of
+ * a re-read of the whole tree - which otherwise stalls the first turn of every
+ * session for as long as the workspace takes to hash.
  */
 export class WorkspaceIndex {
 	private readonly entries: WorkspaceSnapshot = new Map();
 	private disabledReason: string | null = null;
 	/** Wall-clock start of the refresh that produced `entries` (racy check). */
 	private lastRefreshAt = 0;
+	private cacheLoaded = false;
 	readonly root: string;
 
-	constructor(root: string) {
+	constructor(
+		root: string,
+		private readonly cachePath?: string,
+	) {
 		this.root = resolve(root);
 	}
 
@@ -107,6 +147,7 @@ export class WorkspaceIndex {
 	): Promise<WorkspaceSnapshot | null> {
 		const storeBlobs = opts.storeBlobs ?? true;
 		if (this.disabledReason) return null;
+		await this.loadCache();
 		const startedAt = Date.now();
 		const prevRefreshAt = this.lastRefreshAt;
 		const paths: string[] = [];
@@ -118,31 +159,96 @@ export class WorkspaceIndex {
 		}
 		if (this.disabledReason) return null;
 
-		const next: WorkspaceSnapshot = new Map();
-		for (const path of paths) {
-			let stats: Awaited<ReturnType<typeof lstat>>;
-			try {
-				stats = await lstat(path);
-			} catch {
-				// Deleted between readdir and stat (build churn): not a file now.
-				continue;
+		const scanned = new Array<IndexEntry | null>(paths.length).fill(null);
+		let cursor = 0;
+		const scanNext = async (): Promise<void> => {
+			while (cursor < paths.length) {
+				const slot = cursor++;
+				const path = paths[slot] as string;
+				let stats: Awaited<ReturnType<typeof lstat>>;
+				try {
+					stats = await lstat(path);
+				} catch {
+					// Deleted between readdir and stat (build churn): not a file now.
+					continue;
+				}
+				if (!stats.isFile()) continue;
+				scanned[slot] = await this.entryFor(
+					path,
+					stats,
+					blobs,
+					storeBlobs,
+					prevRefreshAt,
+				);
 			}
-			if (!stats.isFile()) continue;
-			const key = indexPathKey(path);
-			const entry = await this.entryFor(
-				path,
-				stats,
-				blobs,
-				storeBlobs,
-				prevRefreshAt,
-			);
-			if (entry === null) continue;
-			next.set(key, entry);
+		};
+		await Promise.all(
+			Array.from({ length: REFRESH_CONCURRENCY }, () => scanNext()),
+		);
+
+		// Slots keep the walk order, so snapshots stay deterministic.
+		const next: WorkspaceSnapshot = new Map();
+		for (const entry of scanned) {
+			if (entry) next.set(indexPathKey(entry.path), entry);
 		}
+		const changed = !sameSnapshot(this.entries, next);
 		this.entries.clear();
 		for (const [key, entry] of next) this.entries.set(key, entry);
 		this.lastRefreshAt = startedAt;
+		if (changed) await this.saveCache(startedAt);
 		return next;
+	}
+
+	/**
+	 * Seeds an empty index from the persisted one, once per process. The
+	 * persisted refresh time becomes `lastRefreshAt`, so the racy-mtime rule
+	 * applies to seeded entries exactly as it does to in-memory ones. Anything
+	 * unreadable or mismatched is ignored: the refresh then hashes from scratch.
+	 */
+	private async loadCache(): Promise<void> {
+		if (this.cacheLoaded) return;
+		this.cacheLoaded = true;
+		if (!this.cachePath || this.entries.size > 0) return;
+		try {
+			const persisted = JSON.parse(
+				await readFile(this.cachePath, "utf8"),
+			) as PersistedIndex;
+			if (
+				persisted.version !== INDEX_CACHE_VERSION ||
+				indexPathKey(persisted.root) !== indexPathKey(this.root) ||
+				!Array.isArray(persisted.entries) ||
+				!(persisted.refreshedAt <= Date.now())
+			) {
+				return;
+			}
+			for (const entry of persisted.entries) {
+				this.entries.set(indexPathKey(entry.path), entry);
+			}
+			this.lastRefreshAt = persisted.refreshedAt;
+		} catch {
+			// Missing or truncated cache: not an error, just a cold scan.
+		}
+	}
+
+	/** Best-effort: a failed write only costs the next session a cold scan. */
+	private async saveCache(refreshedAt: number): Promise<void> {
+		if (!this.cachePath) return;
+		const persisted: PersistedIndex = {
+			version: INDEX_CACHE_VERSION,
+			root: this.root,
+			refreshedAt,
+			entries: [...this.entries.values()],
+		};
+		const temp = `${this.cachePath}.${shortId("tmp")}`;
+		try {
+			await ensureDir(dirname(this.cachePath), 0o700);
+			await writeFile(temp, JSON.stringify(persisted), { mode: 0o600 });
+			// Sessions of one workspace share this file; rename keeps readers
+			// from ever seeing a half-written index.
+			await renameOver(temp, this.cachePath);
+		} catch {
+			await rm(temp, { force: true }).catch(() => {});
+		}
 	}
 
 	/** Per-path changes between two snapshots returned by `refresh()`. */
@@ -314,6 +420,24 @@ function listFilesWithRipgrep(root: string): Promise<string[] | null> {
 			resolvePromise(output.split("\0").filter(Boolean));
 		});
 	});
+}
+
+function sameSnapshot(a: WorkspaceSnapshot, b: WorkspaceSnapshot): boolean {
+	if (a.size !== b.size) return false;
+	for (const [key, entry] of b) {
+		const prev = a.get(key);
+		if (
+			!prev ||
+			prev.hash !== entry.hash ||
+			prev.size !== entry.size ||
+			prev.mtimeMs !== entry.mtimeMs ||
+			prev.mode !== entry.mode ||
+			prev.stored !== entry.stored
+		) {
+			return false;
+		}
+	}
+	return true;
 }
 
 /** Same case-normalization as CheckpointStore.pathKey. */

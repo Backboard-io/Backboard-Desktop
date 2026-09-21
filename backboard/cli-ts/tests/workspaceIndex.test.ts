@@ -13,7 +13,11 @@ import { join } from "node:path";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import { BlobStore } from "../src/core/checkpoints/blobStore.ts";
 import { CheckpointStore } from "../src/core/checkpoints/CheckpointStore.ts";
-import { WorkspaceIndex } from "../src/core/checkpoints/workspaceIndex.ts";
+import {
+	RACY_MTIME_WINDOW_MS,
+	WorkspaceIndex,
+	workspaceIndexCachePath,
+} from "../src/core/checkpoints/workspaceIndex.ts";
 import type { SessionPaths } from "../src/core/session/SessionStore.ts";
 
 let root: string;
@@ -98,6 +102,32 @@ describe("WorkspaceIndex", () => {
 		const third = await index.refresh(blobs);
 		expect(blobs.puts).toBe(3);
 		expect(third?.size).toBe(2);
+	});
+
+	it("seeds a new session from the persisted index instead of re-reading the tree", async () => {
+		const { utimes } = await import("node:fs/promises");
+		const blobs = new CountingBlobStore(join(root, "objects"));
+		const cachePath = workspaceIndexCachePath(blobs.root, work);
+		const old = new Date(Date.now() - 10 * RACY_MTIME_WINDOW_MS);
+		for (const name of ["a.txt", "b.txt"]) {
+			await writeFile(join(work, name), name, "utf8");
+			await utimes(join(work, name), old, old);
+		}
+		const first = await new WorkspaceIndex(work, cachePath).refresh(blobs);
+		if (!first) throw new Error("expected a snapshot");
+
+		// Edited while no session was running: only this file is re-read.
+		await writeFile(join(work, "a.txt"), "edited", "utf8");
+		await utimes(join(work, "a.txt"), old, new Date(old.getTime() + 1000));
+
+		const next = new WorkspaceIndex(work, cachePath);
+		const second = await next.refresh(blobs);
+		if (!second) throw new Error("expected a snapshot");
+		expect({
+			puts: blobs.puts,
+			modified: next.diff(first, second).modified.map((entry) => entry.path),
+			stored: [...second.values()].every((entry) => entry.stored),
+		}).toEqual({ puts: 3, modified: [join(work, "a.txt")], stored: true });
 	});
 
 	it("detects a same-size rewrite landing in the same mtime tick (racy)", async () => {

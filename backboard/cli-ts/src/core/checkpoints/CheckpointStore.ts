@@ -33,9 +33,10 @@ import type {
 	UndoStartJournalRecord,
 } from "./journalTypes.ts";
 import {
-	WorkspaceIndex,
 	type IndexEntry,
+	WorkspaceIndex,
 	type WorkspaceSnapshot,
+	workspaceIndexCachePath,
 } from "./workspaceIndex.ts";
 
 const TURN_LABEL_MAX = 60;
@@ -708,7 +709,7 @@ export class CheckpointStore implements CheckpointRecorder {
 		const callKey = ctx.toolCallId ?? "unknown";
 		await this.enqueueShellOp(async () => {
 			try {
-				this.shellIndex ??= new WorkspaceIndex(cwd);
+				this.shellIndex ??= this.createShellIndex(cwd);
 				// Back-to-back commands: if a storing refresh just completed (the
 				// previous command's end walk), reuse its snapshot instead of
 				// re-walking the tree. Hand edits inside this small window are
@@ -750,7 +751,7 @@ export class CheckpointStore implements CheckpointRecorder {
 	warmShellCapture(cwd: string): void {
 		void this.enqueueShellOp(async () => {
 			try {
-				this.shellIndex ??= new WorkspaceIndex(cwd);
+				this.shellIndex ??= this.createShellIndex(cwd);
 				const snapshot = await this.shellIndex.refresh(this.blobs, {
 					storeBlobs: false,
 				});
@@ -759,6 +760,13 @@ export class CheckpointStore implements CheckpointRecorder {
 				// Warm-up is purely opportunistic; a real begin reports failures.
 			}
 		});
+	}
+
+	private createShellIndex(cwd: string): WorkspaceIndex {
+		return new WorkspaceIndex(
+			cwd,
+			workspaceIndexCachePath(this.blobs.root, cwd),
+		);
 	}
 
 	private enqueueShellOp(op: () => Promise<void>): Promise<void> {
