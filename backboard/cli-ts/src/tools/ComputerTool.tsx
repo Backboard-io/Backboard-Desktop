@@ -4,6 +4,10 @@ import type {
 	ComputerAction,
 	ComputerQueueResult,
 } from "../core/computer/ComputerTypes.ts";
+import {
+	JEV_DEFAULT_MAX_STEPS,
+	JEV_MAX_STEPS_LIMIT,
+} from "../core/computer/JevUseLoop.ts";
 import { stripNullProps, Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
@@ -24,6 +28,7 @@ const actionNameSchema = z.enum([
 	"key",
 	"wait",
 	"openApp",
+	"task",
 ]);
 const keySchema = z.object({
 	key: z
@@ -62,6 +67,12 @@ const actionSchema = z.discriminatedUnion("action", [
 	z.object({
 		action: z.literal("openApp"),
 		appName: z.string().min(1),
+	}),
+	z.object({
+		action: z.literal("task"),
+		goal: z.string().min(1),
+		appName: z.string().min(1),
+		maxSteps: z.number().int().min(1).max(JEV_MAX_STEPS_LIMIT).optional(),
 	}),
 ]);
 
@@ -117,7 +128,25 @@ const publicActionSchema = z.object({
 	appName: z
 		.string()
 		.min(1)
-		.describe("Application name for the openApp action.")
+		.describe(
+			"Application name for the openApp action, and the app a task acts on.",
+		)
+		.optional(),
+	goal: z
+		.string()
+		.min(1)
+		.describe(
+			"For the task action: the user's whole request for appName, in their words, including anything to type or search for. The agent plans its own steps.",
+		)
+		.optional(),
+	maxSteps: z
+		.number()
+		.int()
+		.min(1)
+		.max(JEV_MAX_STEPS_LIMIT)
+		.describe(
+			`For the task action: element presses allowed. Default ${JEV_DEFAULT_MAX_STEPS}.`,
+		)
 		.optional(),
 });
 
@@ -152,6 +181,10 @@ export class ComputerTool extends Tool<Input, ComputerQueueResult> {
 
 	override prompt(context: PromptContext = {}): string {
 		return getToolPrompt(this.name, context);
+	}
+
+	override async dispose(): Promise<void> {
+		await this.runtime.dispose();
 	}
 
 	override isReadOnly(): boolean {
@@ -207,6 +240,8 @@ function computerResultTitle(
 			return `Waited ${actions[0].durationMs}ms`;
 		case "openApp":
 			return `Opened ${actions[0].appName}`;
+		case "task":
+			return `Completed task in ${actions[0].appName}`;
 		default:
 			return "Completed";
 	}
@@ -234,6 +269,31 @@ function normalizeComputerInput(raw: unknown): unknown {
 				const { type: actionType, ...rest } = item;
 				normalized = { ...rest, action: actionType };
 			}
+			const alias =
+				typeof normalized.action === "string"
+					? ACTION_ALIASES[normalized.action]
+					: undefined;
+			if (alias) normalized = { ...normalized, action: alias };
+			if (normalized.action === "click" && !isRecord(normalized.target)) {
+				const target = clickTarget(normalized);
+				if (target) normalized = { ...normalized, target };
+			}
+			if (normalized.action === "openApp" || normalized.action === "task") {
+				const appName = firstString(normalized, APP_NAME_KEYS);
+				if (appName) normalized = { ...normalized, appName };
+			}
+			if (
+				normalized.action === "task" &&
+				typeof normalized.goal === "string" &&
+				typeof normalized.text === "string" &&
+				!normalized.goal.includes(normalized.text)
+			) {
+				// The agent composes its own text now; a supplied value is just detail.
+				normalized = {
+					...normalized,
+					goal: `${normalized.goal} (enter: ${JSON.stringify(normalized.text)})`,
+				};
+			}
 			if (normalized.action === "key" && normalized.key !== undefined) {
 				return { ...normalized, key: normalizeKeyInput(normalized.key) };
 			}
@@ -245,6 +305,60 @@ function normalizeComputerInput(raw: unknown): unknown {
 			return normalized;
 		}),
 	};
+}
+
+/**
+ * Shapes models actually send. Every one of these was rejected in a real
+ * session, leaving the model unable to click at all after a failed task.
+ */
+const ACTION_ALIASES: Record<string, string> = {
+	clickElement: "click",
+	click_element: "click",
+	left_click: "click",
+	tap: "click",
+	open_app: "openApp",
+	launchApp: "openApp",
+	launch_app: "openApp",
+};
+const ELEMENT_ID_KEYS = ["elementId", "element_id", "ref", "id"];
+const APP_NAME_KEYS = ["appName", "app_name", "name", "app", "application"];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function firstString(
+	item: Record<string, unknown>,
+	keys: readonly string[],
+): string | undefined {
+	for (const key of keys) {
+		const value = item[key];
+		if (typeof value === "string" && value.trim()) return value;
+	}
+	return undefined;
+}
+
+/** Lifts a flat `x`/`y`, a `coordinate` pair, or a bare element id into `target`. */
+function clickTarget(
+	item: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+	if (typeof item.target === "string" && item.target.trim()) {
+		return { elementId: item.target };
+	}
+	const elementId = firstString(item, ELEMENT_ID_KEYS);
+	if (elementId) return { elementId };
+	if (typeof item.x === "number" && typeof item.y === "number") {
+		return { x: item.x, y: item.y };
+	}
+	const pair = item.coordinate ?? item.coordinates;
+	if (
+		Array.isArray(pair) &&
+		typeof pair[0] === "number" &&
+		typeof pair[1] === "number"
+	) {
+		return { x: pair[0], y: pair[1] };
+	}
+	return undefined;
 }
 
 function normalizeKeyInput(raw: unknown): unknown {

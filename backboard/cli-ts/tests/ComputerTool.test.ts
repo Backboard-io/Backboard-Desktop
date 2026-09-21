@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PNG } from "pngjs";
 import { Config } from "../src/config/Config.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import { ComputerPaths } from "../src/core/computer/ComputerPaths.ts";
@@ -77,6 +78,28 @@ class FakePlatform implements Platform {
 }
 
 describe("ComputerTool", () => {
+	it("accepts the click and openApp shapes models actually send", () => {
+		// Each input is a call a real session had rejected verbatim.
+		const tool = new ComputerTool();
+		expect(
+			tool.parseInput({
+				actions: [
+					{ action: "clickElement", element: "Allow button", id: "el_5" },
+					{ action: "click", element: "Allow button", ref: "el_5" },
+					{ action: "click", x: 735, y: 419 },
+					{ action: "openApp", name: "Safari" },
+				],
+			}),
+		).toEqual({
+			actions: [
+				{ action: "click", target: { elementId: "el_5" } },
+				{ action: "click", target: { elementId: "el_5" } },
+				{ action: "click", target: { x: 735, y: 419 } },
+				{ action: "openApp", appName: "Safari" },
+			],
+		});
+	});
+
 	it("accepts queued actions and rejects single-action input", () => {
 		const tool = new ComputerTool();
 		expect(
@@ -420,8 +443,5 @@ describe("ComputerTool", () => {
 });
 
 function tinyPng(): Buffer {
-	return Buffer.from(
-		"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l6py3wAAAABJRU5ErkJggg==",
-		"base64",
-	);
+	return PNG.sync.write(new PNG({ width: 1, height: 1 }));
 }

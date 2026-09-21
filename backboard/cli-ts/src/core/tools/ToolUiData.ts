@@ -387,6 +387,13 @@ function safeAction(
 	if (kind === "computer" && name === "openApp") {
 		return compact({ action: name, appName: text(value.appName, 256) });
 	}
+	if (kind === "computer" && name === "task") {
+		return compact({
+			action: name,
+			appName: text(value.appName, 256),
+			goal: text(value.goal, 1_000),
+		});
+	}
 	if (kind === "browser" && name === "navigate") {
 		return compact({ action: name, url: text(value.url, MAX_URL_CHARS) });
 	}
@@ -462,6 +469,8 @@ function actionResult(
 				: undefined,
 		summary: text(value.summary, 1_000),
 		error: text(value.error, 1_000),
+		outcome: kind === "computer" ? text(value.outcome, 64) : undefined,
+		surface: kind === "computer" ? text(value.surface, 64) : undefined,
 		observation:
 			kind === "computer" && asRecord(value.observation)
 				? observation(

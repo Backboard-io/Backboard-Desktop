@@ -8,7 +8,7 @@ import type {
 
 type PlatformComputerAction = Exclude<
 	ComputerAction,
-	{ action: "screenshot" } | { action: "wait" }
+	{ action: "screenshot" } | { action: "wait" } | { action: "task" }
 >;
 
 export function toPlatformAction(

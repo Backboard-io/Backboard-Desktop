@@ -1,25 +1,64 @@
+import type { ModelRoute } from "../../providers/backboard/types.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import { createPlatform, type Platform } from "../platform/index.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
+import { ComputerPaths } from "./ComputerPaths.ts";
 import { toPlatformAction } from "./ComputerPlatformAction.ts";
 import type {
 	ComputerAction,
 	ComputerActionResult,
 	ComputerObservation,
 	ComputerQueueResult,
+	JevTaskResult,
 } from "./ComputerTypes.ts";
+import { CuaBrowserSurface } from "./CuaBrowserSurface.ts";
+import {
+	CuaDriverSurface,
+	isBrowserApp,
+	resolveCuaDriverBinary,
+} from "./CuaDriverSurface.ts";
+import { describeStep, JevSubagent } from "./JevSubagent.ts";
+import {
+	type JevDecider,
+	JevUseLoop,
+	type JevWriterPacket,
+} from "./JevUseLoop.ts";
+import { PlatformJevSurface } from "./PlatformJevSurface.ts";
 import { ScreenCapture } from "./ScreenCapture.ts";
+
+/**
+ * The writer is a model request, so it must be billed on the route the user's
+ * turn was captured with. The IDE's host-managed runtime refuses any request
+ * without one, which killed every task at its first TYPE_TEXT.
+ */
+export type RoutedJevWriter = (
+	packet: JevWriterPacket,
+	options: { signal: AbortSignal; modelRoute?: Readonly<ModelRoute> },
+) => Promise<string | null>;
 
 export interface ComputerRuntimeOptions {
 	platform?: Platform;
+	/** Backboard's System One route to Jev; without it `task` actions are refused. */
+	jevDecider?: JevDecider;
+	/** Composes typed text and addresses, since Jev itself can only choose. */
+	jevWriter?: RoutedJevWriter;
+	/** Injectable for tests; defaults to the bundled or installed Cua Driver. */
+	resolveCuaDriver?: () => string | undefined;
 }
 
 export class ComputerRuntime {
 	private readonly platform: Platform;
+	private readonly jevDecider?: JevDecider;
+	private readonly jevWriter?: RoutedJevWriter;
+	private readonly resolveCuaDriver: () => string | undefined;
 	private lastObservation: ComputerObservation | null = null;
+	private readonly browsers = new Map<string, CuaBrowserSurface>();
 
 	constructor(options: ComputerRuntimeOptions = {}) {
 		this.platform = options.platform ?? createPlatform();
+		this.jevDecider = options.jevDecider;
+		this.jevWriter = options.jevWriter;
+		this.resolveCuaDriver = options.resolveCuaDriver ?? resolveCuaDriverBinary;
 	}
 
 	async execute(
@@ -78,6 +117,8 @@ export class ComputerRuntime {
 			};
 		}
 
+		if (action.action === "task") return this.runJevTask(action, ctx);
+
 		const validation = this.validateAction(action);
 		if (validation) return validation;
 
@@ -112,6 +153,125 @@ export class ComputerRuntime {
 				error: errorMessage(err),
 			};
 		}
+	}
+
+	/**
+	 * Hands a goal to Jev. Prefers the Cua Driver, which presses elements in the
+	 * background; without it the built-in platform layer drives the real pointer.
+	 */
+	private async runJevTask(
+		action: Extract<ComputerAction, { action: "task" }>,
+		ctx: ToolContext,
+	): Promise<JevTaskResult | ComputerActionResult> {
+		if (!this.jevDecider || !this.jevWriter) {
+			return {
+				success: false,
+				action: "task",
+				verification: "failed",
+				summary: "Jev tasks are unavailable.",
+				error:
+					"Jev runs through Backboard. Sign in to Backboard, or use direct actions instead.",
+			};
+		}
+		const driver = this.resolveCuaDriver();
+		const surface =
+			(driver && isBrowserApp(action.appName)
+				? await this.browserSurface(driver, action.appName, ctx.signal)
+				: undefined) ??
+			(driver
+				? new CuaDriverSurface(driver, action.appName)
+				: new PlatformJevSurface(this.platform, action.appName));
+		// Shown to a host as a sub-agent of this tool call, with Jev as its brain.
+		const subagent = ctx.toolCallId
+			? new JevSubagent(ctx.bus, ctx.toolCallId)
+			: undefined;
+		const progress = (line: string) => {
+			if (!ctx.toolCallId) return;
+			ctx.bus.emit({
+				type: "tool:progress",
+				toolCallId: ctx.toolCallId,
+				data: { kind: "terminal-output", text: `${line}\n` },
+			});
+		};
+		subagent?.start(action.appName, action.goal);
+		try {
+			// Any earlier screenshot is stale once Jev has pressed things.
+			this.lastObservation = null;
+			const writer = this.jevWriter;
+			const result = await new JevUseLoop(
+				surface,
+				this.jevDecider,
+				(packet, options) =>
+					writer(packet, { ...options, modelRoute: ctx.modelRoute }),
+			).run(
+				{
+					goal: action.goal,
+					maxSteps: action.maxSteps,
+					onStepStart: (step) => subagent?.stepStarted(step),
+					onStep: (step) => {
+						subagent?.stepFinished(step);
+						// Also streamed as text, for hosts that do not render sub-agents.
+						progress(`${step.step}. ${describeStep(step)}`);
+					},
+					onStatus: (message) => progress(`${message}...`),
+				},
+				ctx.signal,
+			);
+			subagent?.endWith(result);
+			if (surface instanceof CuaBrowserSurface && !ctx.signal.aborted) {
+				try {
+					return {
+						...result,
+						...(await surface.capture(
+							await new ComputerPaths(ctx.sessionId).nextScreenshotPath(),
+							ctx.signal,
+						)),
+					};
+				} catch (error) {
+					return {
+						...result,
+						summary: `${result.summary} Final screenshot unavailable: ${errorMessage(error)}`,
+					};
+				}
+			}
+			return result;
+		} catch (err) {
+			subagent?.end(ctx.signal.aborted ? "cancelled" : "failed");
+			throw err;
+		} finally {
+			if (surface instanceof CuaDriverSurface) await surface.dispose();
+		}
+	}
+
+	/**
+	 * The DOM-driven browser, shared by every task of this runtime: closing it
+	 * with each task would throw away the page the user asked to be taken to.
+	 * Undefined when the requested browser cannot expose a DOM route, in which
+	 * case the caller drives the named browser through accessibility instead.
+	 */
+	private async browserSurface(
+		driver: string,
+		appName: string,
+		signal: AbortSignal,
+	): Promise<CuaBrowserSurface | undefined> {
+		const key = appName.toLowerCase().trim();
+		const existing = this.browsers.get(key);
+		if (existing) return existing;
+		const surface = new CuaBrowserSurface(driver, appName);
+		try {
+			await surface.observe(signal);
+			this.browsers.set(key, surface);
+			return surface;
+		} catch {
+			await surface.dispose();
+			return undefined;
+		}
+	}
+
+	async dispose(): Promise<void> {
+		const browsers = [...this.browsers.values()];
+		this.browsers.clear();
+		await Promise.all(browsers.map((browser) => browser.dispose()));
 	}
 
 	private validateAction(action: ComputerAction): ComputerActionResult | null {
