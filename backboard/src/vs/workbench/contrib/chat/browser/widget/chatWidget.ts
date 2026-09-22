@@ -2273,8 +2273,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			} else {
 				this.inputPart.element.classList.add('editing');
 			}
-			if (currentElement.modelId) {
-				this.input.switchModelByIdentifier(currentElement.modelId);
+			const editModelId = currentElement.modelId ?? this.inputPart.currentLanguageModel;
+			if (!editModelId || !this.input.switchModelByIdentifier(editModelId)) {
+				const currentModelId = this.inputPart.currentLanguageModel;
+				if (currentModelId) {
+					this.input.switchModelByIdentifier(currentModelId);
+				}
 			}
 
 			this.inputPart.toggleChatInputOverlay(!isInput);
@@ -2392,7 +2396,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			this.inputContainer = dom.$('.empty-chat-state');
 
 			// only dispose if we know the input is not the bottom input object.
-			this.input.dispose();
+			this.inlineInputPartDisposable.clear();
 		}
 
 		if (isInput) {
@@ -2438,6 +2442,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	}
 
 	private createInput(container: HTMLElement, options?: { renderFollowups: boolean; renderStyle?: 'compact' | 'minimal'; renderInputToolbarBelowInput?: boolean }): void {
+		const inputDisposables = this.viewModel?.editing ? this._editRequestDisposables.value! : this._store;
 		const commonConfig: IChatInputPartOptions = {
 			renderFollowups: options?.renderFollowups ?? true,
 			renderStyle: options?.renderStyle === 'minimal' ? 'compact' : options?.renderStyle,
@@ -2462,7 +2467,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 		if (this.viewModel?.editing) {
 			const editedRequest = this.listWidget.getTemplateDataForRequestId(this.viewModel?.editing?.id);
-			const scopedInstantiationService = this._register(this.instantiationService.createChild(new ServiceCollection([IContextKeyService, editedRequest?.contextKeyService])));
+			const scopedInstantiationService = inputDisposables.add(this.instantiationService.createChild(new ServiceCollection([IContextKeyService, editedRequest?.contextKeyService])));
 			this.inlineInputPartDisposable.value = scopedInstantiationService.createInstance(ChatInputPart,
 				this.location,
 				commonConfig,
@@ -2476,7 +2481,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				this.styles,
 				false
 			);
-			this._register(autorun(reader => {
+			inputDisposables.add(autorun(reader => {
 				this.inputPart.height.read(reader);
 				if (!this.listWidget) {
 					// This is set up before the list/renderer are created
@@ -2500,11 +2505,11 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			this.input.layout(this.bodyDimension.width);
 		}
 
-		this._register(this.input.onDidLoadInputState(() => {
+		inputDisposables.add(this.input.onDidLoadInputState(() => {
 			this.refreshParsedInput();
 		}));
-		this._register(this.input.onDidFocus(() => this._onDidFocus.fire()));
-		this._register(this.input.onDidAcceptFollowup(e => {
+		inputDisposables.add(this.input.onDidFocus(() => this._onDidFocus.fire()));
+		inputDisposables.add(this.input.onDidAcceptFollowup(e => {
 			if (!this.viewModel) {
 				return;
 			}
@@ -2546,16 +2551,16 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				},
 			});
 		}));
-		this._register(this.inputEditor.onDidChangeModelContent(() => {
+		inputDisposables.add(this.inputEditor.onDidChangeModelContent(() => {
 			this.parsedChatRequest = undefined;
 			this.updateChatInputContext();
 		}));
-		this._register(this.chatAgentService.onDidChangeAgents(() => {
+		inputDisposables.add(this.chatAgentService.onDidChangeAgents(() => {
 			this.parsedChatRequest = undefined;
 			// Tools agent loads -> welcome content changes
 			this.renderWelcomeViewContentIfNeeded();
 		}));
-		this._register(this.input.onDidChangeCurrentChatMode(() => {
+		inputDisposables.add(this.input.onDidChangeCurrentChatMode(() => {
 			this.renderWelcomeViewContentIfNeeded();
 			this.refreshParsedInput();
 			this.renderFollowups();
@@ -2563,7 +2568,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		}));
 		const foregroundSessionCountContextKeys = new Set([ChatContextKeys.foregroundSessionCount.key]);
 		const hasByokModelsContextKeys = new Set([ChatEntitlementContextKeys.hasByokModels.key]);
-		this._register(this.contextKeyService.onDidChangeContext(e => {
+		inputDisposables.add(this.contextKeyService.onDidChangeContext(e => {
 			if (e.affectsSome(foregroundSessionCountContextKeys) && this.isEmpty()) {
 				this.renderGettingStartedTipIfNeeded();
 			}
@@ -2572,7 +2577,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			}
 		}));
 		let previousModelIdentifier: string | undefined;
-		this._register(autorun(reader => {
+		inputDisposables.add(autorun(reader => {
 			const modelIdentifier = this.inputPart.selectedLanguageModel.read(reader)?.identifier;
 			if (previousModelIdentifier === undefined) {
 				previousModelIdentifier = modelIdentifier;
@@ -2591,7 +2596,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			this.chatTipService.getWelcomeTip(this.contextKeyService);
 		}));
 
-		this._register(autorun(r => {
+		inputDisposables.add(autorun(r => {
 			const toolSetIds = new Set<string>();
 			const toolIds = new Set<string>();
 			for (const [entry, enabled] of this.input.selectedToolsModel.entriesMap.read(r)) {
@@ -3158,10 +3163,10 @@ export class ChatWidget extends Disposable implements IChatWidget {
 				options.queue = undefined;
 			}
 
-			// For agents that support checkpoints, preserve the checkpoint
-			// through finishedEditing so blocked requests are removed below
-			// and the agent host can dispatch a protocol truncation action.
-			const preserveCheckpoint = this._lockedAgent && !!this._attachmentCapabilities.supportsCheckpoints;
+			// Restoring file snapshots does not replace conversation history. Keep the
+			// sent request's checkpoint until its turn and subsequent turns are removed
+			// below; agent-host providers also use that removal to truncate their history.
+			const preserveCheckpoint = editingPendingRequest === undefined;
 			if (preserveCheckpoint) {
 				this.recentlyRestoredCheckpoint = true;
 			}

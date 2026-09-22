@@ -3201,6 +3201,18 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 
 	render(container: HTMLElement, initialValue: string, widget: IChatWidget) {
 		this._widget = widget;
+		// Inline editors mount after the view-model change event has already fired.
+		// Initialize their session scope without binding to (and overwriting) the main draft.
+		if (this.inline && widget.viewModel) {
+			const sessionResource = widget.viewModel.sessionResource;
+			this._currentSessionType = getChatSessionType(sessionResource);
+			const chatModes = this.chatModeService.createModes(sessionResource);
+			this._currentChatModes.value = chatModes;
+			this._currentChatModesObservable.set(chatModes, undefined);
+			this.updateAgentSessionTypeContextKey();
+			this.initSelectedModel();
+			this.checkModelInSessionPool();
+		}
 		this.getVisibleOptionGroupsModeAndUpdateContextKeys(this.getCurrentSessionResource());
 
 		// Initialize lock state when rendering with a pre-selected session provider (e.g., welcome view restore)
@@ -3375,7 +3387,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => this.updateComposerLocation()));
 		this._register(widget.onDidChangeViewModel(() => this.updateComposerLocation()));
 		const editorContainer = this.editorContainer = elements.editorContainer;
-		this.chatInputOverlay = editorContainer.appendChild(dom.$('.chat-input-overlay'));
+		this.chatInputOverlay = this.container.appendChild(dom.$('.chat-input-overlay'));
 		this.attachmentsContainer = elements.attachmentsContainer;
 		this.attachedContextContainer = elements.attachedContextContainer;
 		const toolbarsContainer = elements.inputToolbars;
@@ -4055,6 +4067,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	}
 
 	public toggleChatInputOverlay(editing: boolean): void {
+		this.container.classList.toggle('chat-input-inactive', editing);
 		this.chatInputOverlay.classList.toggle('disabled', editing);
 		if (editing) {
 			this.overlayClickListener.value = dom.addStandardDisposableListener(this.chatInputOverlay, dom.EventType.CLICK, e => {
@@ -5262,8 +5275,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		if (!this.previousInputEditorDimension || (this.previousInputEditorDimension.width !== newDimension.width || this.previousInputEditorDimension.height !== newDimension.height)) {
 			// This layout call has side-effects that are hard to understand. eg if we are calling this inside a onDidChangeContent handler, this can trigger the next onDidChangeContent handler
 			// to be invoked, and we have a lot of these on this editor. Only doing a layout this when the editor size has actually changed makes it much easier to follow.
-			this._inputEditor.layout(newDimension);
+			// Monaco can synchronously emit content-size changes from layout().
+			// Publish the dimensions first so that listener cannot re-enter with stale geometry.
 			this.previousInputEditorDimension = newDimension;
+			this._inputEditor.layout(newDimension);
 		}
 
 		if (allowRecurse && (initialEditorScrollWidth < 10 || editorWidthChanged)) {

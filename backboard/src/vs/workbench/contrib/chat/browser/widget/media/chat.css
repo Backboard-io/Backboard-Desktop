@@ -618,6 +618,12 @@
 	gap: 4px;
 }
 
+/* Copy remains useful while later responses are covered by the edit overlay. */
+.chat-row-disabled-overlay.disabled + .interactive-item-container .chat-footer-toolbar .menu-entry.chat-copy-action {
+	position: relative;
+	z-index: 102;
+}
+
 .interactive-item-container .chat-footer-toolbar .menu-entry.chat-copy-action .action-label,
 .interactive-result-code-block .interactive-result-code-block-toolbar .menu-entry.chat-copy-action .action-label {
 	position: relative;
@@ -4848,6 +4854,18 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .interactive-item-container .chat-edit-input-container {
 	width: 100%;
+	min-width: 0;
+}
+
+/* Keep the inline editor's layout and controls within the request bubble. */
+.monaco-workbench .backboard-composer .interactive-session .chat-edit-input-container .interactive-input-part {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.monaco-workbench .backboard-composer .interactive-session .chat-edit-input-container .backboard-composer-location {
+	display: none;
 }
 
 .chat-row-disabled-overlay,
@@ -4866,6 +4884,19 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	z-index: 101;
 	user-select: none;
 	cursor: default;
+}
+
+/* Inactive bottom composers dim as one card. A transparent hit target covers
+ * the editor and controls, without painting a dark rectangle over the prompt. */
+.interactive-session .interactive-input-part.chat-input-inactive {
+	position: relative;
+	opacity: 0.6;
+}
+
+.interactive-session .interactive-input-part > .chat-input-overlay.disabled {
+	background: transparent;
+	opacity: 1;
+	z-index: 104;
 }
 
 .interactive-session .focused-input-dom {

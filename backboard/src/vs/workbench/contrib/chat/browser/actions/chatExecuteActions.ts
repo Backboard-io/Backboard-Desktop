@@ -84,15 +84,16 @@ abstract class SubmitAction extends Action2 {
 			}
 
 			const session = chatModel.editingSession;
-			if (!session) {
-				return;
-			}
-
 			const requestId = widget.viewModel?.editing.id;
 
-			if (requestId) {
+			// Provider-owned sessions can edit messages without a local file-editing session.
+			// Only snapshot restoration depends on that session; submission does not.
+			if (requestId && session) {
 				const chatRequests = chatModel.getRequests();
 				const itemIndex = chatRequests.findIndex(request => request.id === requestId);
+				if (itemIndex < 0) {
+					return;
+				}
 				const editsToUndo = chatRequests.length - itemIndex;
 
 				const requestsToRemove = chatRequests.slice(itemIndex);
@@ -167,7 +168,7 @@ abstract class SubmitAction extends Action2 {
 		} else if (widget?.viewModel?.model.checkpoint) {
 			widget.viewModel.model.setCheckpoint(undefined);
 		}
-		widget?.acceptInput(context?.inputValue);
+		await widget?.acceptInput(context?.inputValue);
 	}
 
 	private async handleDelegation(accessor: ServicesAccessor, widget: IChatWidget, delegationTarget: Exclude<AgentSessionTarget, AgentSessionProviders.Local>): Promise<void> {
@@ -239,7 +240,8 @@ export class ChatSubmitAction extends SubmitAction {
 					alt: {
 						id: 'workbench.action.chat.sendToNewChat',
 						title: localize2('chat.newChat.label', "Send to New Chat"),
-						icon: Codicon.plus
+						icon: Codicon.plus,
+						precondition: ContextKeyExpr.and(ChatContextKeys.currentlyEditing.negate(), ChatContextKeys.currentlyEditingInput.negate())
 					}
 				}, {
 					id: MenuId.ChatEditorInlineExecute,
@@ -1300,7 +1302,8 @@ export class ChatEditingSessionSubmitAction extends SubmitAction {
 					alt: {
 						id: 'workbench.action.chat.sendToNewChat',
 						title: localize2('chat.newChat.label', "Send to New Chat"),
-						icon: Codicon.plus
+						icon: Codicon.plus,
+						precondition: ContextKeyExpr.and(ChatContextKeys.currentlyEditing.negate(), ChatContextKeys.currentlyEditingInput.negate())
 					}
 				}]
 		});
@@ -1388,9 +1391,9 @@ export class ChatSubmitWithCodebaseAction extends Action2 {
 	}
 }
 
-class SendToNewChatAction extends Action2 {
+export class SendToNewChatAction extends Action2 {
 	constructor() {
-		const precondition = ChatContextKeys.inputHasText;
+		const precondition = ContextKeyExpr.and(ChatContextKeys.inputHasText, ChatContextKeys.currentlyEditing.negate(), ChatContextKeys.currentlyEditingInput.negate());
 
 		super({
 			id: 'workbench.action.chat.sendToNewChat',
@@ -1410,16 +1413,22 @@ class SendToNewChatAction extends Action2 {
 		const context = args[0] as IChatExecuteActionContext | undefined;
 
 		const widgetService = accessor.get(IChatWidgetService);
+		const widget = resolveChatWidgetFromActionContext(widgetService, context);
+		if (!widget) {
+			return;
+		}
+		// A stale modifier-key menu item or direct command must never move an edit
+		// into another conversation. Use the same snapshot/rewind path as Send.
+		if (widget.viewModel?.editing) {
+			await new ChatSubmitAction().run(accessor, { ...context, widget });
+			return;
+		}
+
 		const viewsService = accessor.get(IViewsService);
 		const dialogService = accessor.get(IDialogService);
 		const chatService = accessor.get(IChatService);
 		const configurationService = accessor.get(IConfigurationService);
 		const chatSessionsService = accessor.get(IChatSessionsService);
-		const widget = context?.widget ?? widgetService.lastFocusedWidget;
-		if (!widget) {
-			return;
-		}
-
 		const inputBeforeClear = widget.getInput();
 
 		// Cancel any in-progress request before clearing
@@ -1526,6 +1535,12 @@ export class CancelEdit extends Action2 {
 			category: CHAT_CATEGORY,
 			icon: Codicon.x,
 			menu: [
+				{
+					id: MenuId.ChatExecute,
+					group: 'navigation',
+					order: 3,
+					when: ChatContextKeys.currentlyEditingInput
+				},
 				{
 					id: MenuId.ChatMessageTitle,
 					group: 'navigation',

@@ -8,16 +8,24 @@ import { DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { constObservable, observableValue } from '../../../../../../base/common/observable.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
+import { MenuId } from '../../../../../../platform/actions/common/actions.js';
+import { ChatContextKeys } from '../../../common/actions/chatContextKeys.js';
 import { CommandsRegistry } from '../../../../../../platform/commands/common/commands.js';
 import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { IChatWidget, IChatWidgetService } from '../../../browser/chat.js';
-import { GetHandoffsActionId, ExecuteHandoffActionId, encodeBackboardRealtimePcm, registerChatExecuteActions } from '../../../browser/actions/chatExecuteActions.js';
+import { ChatSubmitAction, ChatEditingSessionSubmitAction, SendToNewChatAction, GetHandoffsActionId, ExecuteHandoffActionId, encodeBackboardRealtimePcm, registerChatExecuteActions } from '../../../browser/actions/chatExecuteActions.js';
 import { IChatMode, IChatModes, IChatModeService, ICustomAgentInfo } from '../../../common/chatModes.js';
 import { ChatModeKind } from '../../../common/constants.js';
 import { IHandOff } from '../../../common/promptSyntax/promptFileParser.js';
 import { Target } from '../../../common/promptSyntax/promptTypes.js';
 import { MockChatWidgetService } from '../widget/mockChatWidget.js';
 import { MockChatModeService } from '../../common/mockChatModeService.js';
+import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
+import { IDialogService } from '../../../../../../platform/dialogs/common/dialogs.js';
+import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
+import { IChatService } from '../../../common/chatService/chatService.js';
+import { IChatModel } from '../../../common/model/chatModel.js';
+
 
 interface IExecuteHandoffResult {
 	success: boolean;
@@ -406,5 +414,73 @@ suite('SwitchToNextPinnedModelAction', () => {
 		assert.ok(handler);
 
 		await runCommandAsync<void>(handler, instantiationService);
+	});
+});
+
+
+suite('ChatSubmitAction message editing', () => {
+	const store = new DisposableStore();
+	teardown(() => store.clear());
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	for (const Action of [ChatSubmitAction, SendToNewChatAction]) {
+		test(`${Action.name} resends an edited message in the original session`, async () => {
+			const instantiationService = store.add(new TestInstantiationService());
+			const sessionResource = URI.parse('agent-host-codex:/session');
+			let submitted: string | undefined;
+			const widget = {
+				input: {},
+				viewModel: { sessionResource, editing: { id: 'request-1' } },
+				acceptInput: async (value: string) => { submitted = value; },
+			} as unknown as IChatWidget;
+			instantiationService.stub(IChatWidgetService, { getWidgetsByLocations: () => [widget], lastFocusedWidget: widget });
+			instantiationService.stub(IChatService, { getSession: () => ({ editingSession: undefined } as IChatModel) });
+			instantiationService.stub(IConfigurationService, {});
+			instantiationService.stub(IDialogService, {});
+			instantiationService.stub(ITelemetryService, {});
+
+			await new Action().run(instantiationService, { widget, inputValue: 'edited message' });
+			assert.strictEqual(submitted, 'edited message');
+			assert.strictEqual(widget.viewModel?.sessionResource, sessionResource);
+		});
+	}
+
+	for (const Action of [ChatSubmitAction, ChatEditingSessionSubmitAction]) {
+		test(`${Action.name} disables its new-chat variant while editing`, () => {
+			const menu = new Action().desc.menu;
+			assert.ok(Array.isArray(menu));
+			const alternative = menu.find(item => item.id === MenuId.ChatExecute)?.alt;
+			assert.ok(alternative?.precondition);
+			for (const key of [ChatContextKeys.currentlyEditing.key, ChatContextKeys.currentlyEditingInput.key]) {
+				assert.strictEqual(alternative.precondition.evaluate({ getValue: <T>(candidate: string) => (candidate === key) as T }), false);
+			}
+			assert.strictEqual(alternative.precondition.evaluate({ getValue: <T>() => false as T }), true);
+		});
+	}
+
+	test('restores local file edits before resending a message', async () => {
+		const instantiationService = store.add(new TestInstantiationService());
+		const sessionResource = URI.parse('vscode-chat-session:/session');
+		const calls: string[] = [];
+		const widget = {
+			input: {},
+			viewModel: { sessionResource, editing: { id: 'request-1' } },
+			acceptInput: async () => { calls.push('submit'); },
+		} as unknown as IChatWidget;
+		const model = {
+			getRequests: () => [{ id: 'request-1' }],
+			editingSession: {
+				entries: constObservable([]),
+				restoreSnapshot: async (id: string) => { calls.push(id); },
+			},
+		} as unknown as IChatModel;
+		instantiationService.stub(IChatWidgetService, { getWidgetsByLocations: () => [widget], lastFocusedWidget: widget });
+		instantiationService.stub(IChatService, { getSession: () => model });
+		instantiationService.stub(IConfigurationService, { getValue: () => 'inline' });
+		instantiationService.stub(IDialogService, {});
+		instantiationService.stub(ITelemetryService, { publicLog2: () => {} });
+
+		await new ChatSubmitAction().run(instantiationService, { widget });
+		assert.deepStrictEqual(calls, ['request-1', 'submit']);
 	});
 });

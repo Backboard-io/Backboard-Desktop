@@ -58,7 +58,7 @@ export class ChatCopyActionViewItem extends MenuEntryActionViewItem {
 		this.label.style.backgroundImage = '';
 		this.label.classList.remove('icon');
 		this.label.textContent = '';
-		this.label.setAttribute('aria-hidden', 'true');
+		this.label.removeAttribute('aria-hidden');
 
 		const iconContainer = dom.append(this.label, dom.$('.chat-copy-action-icons'));
 		const copyIcon = dom.append(iconContainer, dom.$('.chat-copy-action-icon.chat-copy-action-icon-copy'));
@@ -79,7 +79,7 @@ export class ChatCopyActionViewItem extends MenuEntryActionViewItem {
 	}
 
 	protected override updateAriaLabel(): void {
-		this.element?.setAttribute('aria-label', this.copied
+		this.label?.setAttribute('aria-label', this.copied
 			? localize('interactive.copyItem.copiedAriaLabel', "Copied")
 			: localize('interactive.copyItem.ariaLabel', "Copy"));
 	}
@@ -202,8 +202,10 @@ export function registerChatCopyActions() {
 			const chatWidgetService = accessor.get(IChatWidgetService);
 			const clipboardService = accessor.get(IClipboardService);
 
-			const widget = chatWidgetService.lastFocusedWidget;
-			let item = args[0] as ChatTreeItem | undefined;
+			const context = args[0];
+			const hasItemContext = isRequestVM(context) || isResponseVM(context);
+			const widget = (hasItemContext && chatWidgetService.getWidgetBySessionResource(context.sessionResource)) || chatWidgetService.lastFocusedWidget;
+			let item = context as ChatTreeItem | undefined;
 			if (!isChatTreeItem(item)) {
 				item = widget?.getFocus();
 				if (!item) {
@@ -215,7 +217,9 @@ export function registerChatCopyActions() {
 			// Otherwise, context menu with no selection -> copy the full item
 			const nativeSelection = dom.getActiveWindow().getSelection();
 			const selectedText = nativeSelection?.toString();
-			if (widget && selectedText && selectedText.length > 0 && dom.isAncestor(dom.getActiveElement(), widget.domNode)) {
+			if (widget && selectedText && nativeSelection?.anchorNode && nativeSelection.focusNode &&
+				widget.domNode.contains(nativeSelection.anchorNode) && widget.domNode.contains(nativeSelection.focusNode) &&
+				dom.isAncestor(dom.getActiveElement(), widget.domNode)) {
 				await clipboardService.writeText(selectedText);
 				return;
 			}
