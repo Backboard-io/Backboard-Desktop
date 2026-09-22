@@ -40,14 +40,23 @@ because the Rust workspace reads fixtures from sibling directories
    (`title`, tooltips, IDs, and explicitly marked CSS class fallbacks) for icon
    controls whose accessibility name is empty; expose visible canvases as pointer
    targets; do not mark checkbox/radio/button/color/range inputs as text fields.
+   Use DOMSnapshot's `nodes.isClickable` evidence to retain controls with
+   JavaScript-installed click handlers and no inline onclick/role/tabindex (such
+   as JS Paint's tool buttons). Read its sparse indexes in DOM order, not layout
+   order; static panels and disabled controls gain no click action.
 3. `browser/tools.rs` and `browser/semantic_click.js`: the explicit `dom_event`
    click route sends pointer/mouse down and up before click. Editors such as
    Pixlr listen to `mousedown`. Recheck target visibility, disabled state, and
    occlusion, and report JavaScript exceptions rather than claiming dispatch.
+   Clicks track the synthetic hover target; moving to another control or canvas
+   sends leave events so tooltips do not remain over the drawing.
 4. `browser/pointer.rs` and `browser/canvas_stroke.js`: optional bounded `path`
-   for `browser_pointer` drag. It requires an exact live canvas ref, `dom_event`,
-   2–256 normalized points, and no destination. Live bounds and hit testing are
-   checked before input. The stroke sends continuous pointer/mouse movement and
+   or whole-plan `strokes` for `browser_pointer` drag. It requires an exact live
+   canvas ref, `dom_event`, 2–256 normalized points per stroke, and no destination.
+   A complete drawing is limited to 48 strokes and 4096 points. The driver fits
+   the whole plan uniformly into the canvas center with margins, checking every
+   stroke and intervening segment for obstruction before any brush-down input.
+   This avoids workspace margins and floating editor controls. The drawing sends continuous pointer/mouse movement and
    restores temporary synthetic pointer-capture support on completion or error.
    It never executes model-generated JavaScript or writes canvas pixels directly.
 

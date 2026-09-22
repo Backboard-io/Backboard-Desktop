@@ -1,0 +1,2532 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*
+ * Clean, compact, Cursor-inspired restyle of the chat panel. Layered on top of
+ * chat.css / chatViewTitleControl.css. Selectors are deliberately at least as
+ * specific as the rules they refine so the restyle wins without !important.
+ */
+
+/* --- One tab strip: chat sessions + installed agent panels ---------------- */
+
+/*
+ * The right panel has a single row of tabs, Devin-style: every Backboard chat
+ * session opened in this window is a tab, and every agent panel installed
+ * from the marketplace (Claude Code, Codex) is a tab beside them. One is
+ * active and owns the whole surface.
+ *
+ * Two DOM strips make up that row and they are styled to be indistinguishable:
+ *   .chat-view-title-container  the session tabs, re-parented into this row by
+ *                               ChatViewPane so they share the line
+ *   .composite-bar-container    the workbench switcher, one item per view
+ *                               container living in the auxiliary bar
+ * Sessions come first (`order`), then the panels, then the actions pinned right.
+ */
+
+/* Shared tab metrics. Defined on the integrated chat row itself so both strips
+   inherit them without restyling unrelated auxiliary-bar views. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs {
+	--bb-agent-tab-radius: 0px;
+	--bb-agent-tab-inset: 0px;
+	--bb-agent-tab-gap: 0px;
+	--bb-agent-tab-hover-background: color-mix(in srgb, var(--vscode-list-inactiveSelectionBackground) 55%, transparent);
+}
+
+/* Sessions ARE the chat surface: hide the chat container's own switcher item —
+   the behavior `mergeTabsIntoTitleBar()` documents. Clicking any session tab
+   re-activates the chat composite (see `openChatSession` in ChatViewPane), so
+   the item is redundant next to the session tabs and Cursor shows no such
+   self-tab. Foreign panels (Claude Code, Codex) keep their items.
+   Include the same `:not(.icon)` qualifier as the shared tab rule below plus
+   the container id, so this stays more specific than that rule's later
+   `display: flex`. */
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item[data-composite-id='workbench.panel.chat']:not(.icon) {
+	display: none;
+}
+
+/* Exactly one tab reads selected across both strips: while a foreign panel
+   (Claude Code, Codex) owns the surface, the active chat session tab drops its
+   pill fill and bright foreground and reads like the other inactive tabs. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs:has(.composite-bar .action-item[data-composite-id='workbench.panel.chat']:not(.checked)) .chat-view-title-tab-active {
+	background: transparent;
+	color: var(--vscode-panelTitle-inactiveForeground, var(--vscode-descriptionForeground));
+}
+
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .title-label {
+	display: none;
+}
+
+/* Sessions ahead of the panels. The switcher is prepended into the row by
+   `updateCompositeBar()`, so DOM order alone would put the panels first. */
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .chat-view-title-container {
+	order: -1;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs {
+	align-items: center;
+	padding-inline: var(--bb-agent-tab-inset);
+	column-gap: var(--bb-agent-tab-gap);
+}
+
+/* The switcher never paints over its neighbours: it shrink-wraps its tabs and
+   clips when the row runs out of room (the session strip gives up its space
+   first — see the higher flex-shrink on `.chat-view-title-container`). */
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container {
+	align-items: center;
+	display: flex;
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar {
+	box-sizing: border-box;
+	height: 35px;
+}
+
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar:not(.vertical) .actions-container {
+	align-items: center;
+	flex-wrap: nowrap;
+	gap: var(--bb-agent-tab-gap);
+	min-width: 0;
+	padding-left: 0;
+}
+
+/* Actions sit at the far end of the row, after the tabs. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .title-actions {
+	align-items: center;
+	display: flex;
+	flex-shrink: 0;
+	gap: 0;
+	margin-left: auto;
+	padding-left: var(--bb-agent-tab-inset);
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .title-actions .monaco-action-bar:not(.vertical) .action-item {
+	border-radius: var(--bb-agent-tab-radius);
+	box-sizing: border-box;
+	height: auto;
+	margin: 0;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .title-actions .monaco-action-bar .action-label {
+	border-radius: var(--bb-agent-tab-radius);
+	padding: 4px;
+}
+
+/* The tab strip was moved out of `.chat-viewpane`, so its original flex layout
+   no longer applies — re-establish a single horizontal, scrolling row here.
+   The high shrink factor makes the session tabs give up room (they scroll
+   internally) before the agent-panel switcher or the action cluster are
+   touched, so nothing ever overlaps. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-container {
+	display: flex;
+	flex: 0 4 auto;
+	align-items: center;
+	min-width: 48px;
+	height: 100%;
+	margin: 0;
+	padding: 0;
+	border-bottom: none;
+	background: transparent;
+	overflow: hidden;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-inner {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 0;
+	height: 100%;
+	width: 100%;
+	min-width: 0;
+	padding: 0;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tabs {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 100%;
+	gap: var(--bb-agent-tab-gap);
+	padding: 0;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+	/* The base strip fades its last 96px to hint at scroll; in this row that
+	   would fade the seam into the panel tabs instead. A short fade still
+	   softens the cut when tabs overflow past their compression floor. */
+	mask-image: none;
+	-webkit-mask-image: none;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tabs::-webkit-scrollbar {
+	display: none;
+}
+
+/* --- The tab itself, shared by both strips -------------------------------- */
+
+/* Full-height text tabs meet the transcript surface. A fine top rule marks
+ * the selected session; separators preserve each inactive tab's boundary. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon) {
+	display: flex;
+	align-items: center;
+	box-sizing: border-box;
+	/* Tabs compress (labels truncate) rather than overflow, so every tab
+	   stays on the row. */
+	flex: 0 1 auto;
+	min-width: 36px;
+	height: 35px;
+	max-width: 180px;
+	margin: 0;
+	padding: 0 10px;
+	border: none;
+	border-right: 1px solid var(--bb-tab-divider);
+	border-radius: var(--bb-agent-tab-radius);
+	background: transparent;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 18px;
+	text-transform: none;
+	transition: background-color 80ms linear, color 80ms linear;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab {
+	width: auto;
+	gap: 4px;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked {
+	flex: 1 1 auto;
+	min-width: 64px;
+	max-width: 200px;
+	background: var(--vscode-tab-activeBackground, var(--bb-panel-surface));
+	box-shadow: none;
+	color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground));
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab {
+	color: var(--vscode-panelTitle-inactiveForeground, var(--vscode-descriptionForeground));
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:hover,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon):hover {
+	color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground));
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:not(.chat-view-title-tab-active):hover,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon):not(.checked):hover {
+	background: var(--bb-agent-tab-hover-background);
+}
+
+/* Keep readable tab widths and let the strip scroll instead of squeezing
+   every title. The action cluster remains outside the scrolling region. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tabs {
+	scroll-behavior: auto;
+	touch-action: pan-x;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab {
+	flex: 0 0 auto;
+	width: max-content;
+	min-width: 136px;
+	max-width: 200px;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab.chat-view-title-tab-active {
+	flex: 0 0 auto;
+	min-width: 136px;
+	max-width: 200px;
+}
+
+/* Devin's tabs are text-only — no per-tab agent mark on either strip. The
+   provider identity reads from the label ("Claude Code", "Codex") alone. The
+   one exception is the working spinner, which is state, not identity. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-status {
+	display: flex;
+	align-items: center;
+	flex: 0 0 auto;
+	font-size: 12px;
+	opacity: 0.8;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-icon,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item .composite-bar-action-icon {
+	display: none;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-label,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon) .action-label {
+	background: transparent;
+	box-sizing: border-box;
+	flex: 1 1 auto;
+	max-width: 100%;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 18px;
+}
+
+/* The top rule is the selected state. Keyboard focus keeps its own indicator. */
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked:not(:focus) .active-item-indicator:before,
+.monaco-workbench .part.auxiliarybar > .title.has-composite-bar.has-chat-tabs > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon).checked.clicked:focus .active-item-indicator:before {
+	border-top-color: transparent !important;
+}
+
+/* Close ✕ appears only while hovering its tab — it reserves no space
+   otherwise, so tabs read as plain text at rest. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-close {
+	width: 0;
+	opacity: 0;
+	overflow: hidden;
+	flex: 0 0 auto;
+	transition: opacity 0.1s ease;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:hover .chat-view-title-tab-close {
+	width: 16px;
+	opacity: 0.7;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab .chat-view-title-tab-close:hover {
+	opacity: 1;
+}
+
+/* --- Trim header: drop the nav toolbar (Go Back arrow + "Backboard" session
+   label) and the Sessions-sidebar toggle — the tabs already show the session. */
+
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .chat-view-title-navigation-toolbar {
+	display: none;
+}
+
+/* Devin's strip ends in exactly four controls: + / history / ⋯ / panel
+   toggle. The first three live in the session strip's own toolbar
+   (`.chat-view-title-actions-toolbar`, re-parented to the end of the row by
+   `mergeTabsIntoTitleBar`) so they persist whichever composite is active. The
+   per-composite `.title-actions` toolbar only duplicates them for chat, so it
+   is dropped entirely; maximize stays reachable from the ⋯ menu / palette. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .title-actions,
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .global-actions .action-item:has(.codicon-auxiliarybar-maximize) {
+	display: none;
+}
+
+/* The strip's own + / history / ⋯ cluster, pinned to the right end of the row
+   just before the global panel toggle. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	margin-left: auto;
+	padding-left: var(--bb-agent-tab-inset);
+}
+
+/* The native auxiliary-bar toggle stays as the strip's far-right control —
+   Devin's trailing ✕ that closes the panel. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .global-actions {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+}
+
+/* ‹ back chevron at the head of the strip, shown while a delegated session
+   owns the surface and a parent session waits behind it. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-back {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 22px;
+	height: 24px;
+	padding: 0;
+	border: none;
+	border-radius: var(--bb-agent-tab-radius);
+	background: transparent;
+	color: var(--vscode-panelTitle-inactiveForeground, var(--vscode-descriptionForeground));
+	cursor: pointer;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-back:hover {
+	background: var(--bb-agent-tab-hover-background);
+	color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground));
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-back-icon {
+	font-size: 14px;
+}
+
+.monaco-workbench .part.auxiliarybar .cursor-external-edit-action {
+	min-width: 0;
+	height: 24px;
+	padding: 0 7px;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: inherit;
+	cursor: pointer;
+}
+
+.monaco-workbench .part.auxiliarybar .cursor-external-edit-action:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar .cursor-external-edit-action.primary {
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar .monaco-action-bar:not(.vertical) .action-item {
+	border-radius: var(--bb-agent-tab-radius);
+	box-sizing: border-box;
+	height: auto;
+	margin: 0;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar .monaco-action-bar .action-label {
+	border-radius: var(--bb-agent-tab-radius);
+	padding: 4px;
+}
+
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .title-actions .action-item:has(.codicon-arrow-left),
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .title-actions .action-item:has(.codicon-layout-sidebar-right-off),
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .title-actions .action-item:has(.codicon-layout-sidebar-right) {
+	display: none;
+}
+
+/* --- Surfaces & separators ----------------------------------------------- */
+
+/*
+ * Two distinct surfaces make the "bleed" read clearly:
+ *   --bb-panel-surface : the chat body + the SELECTED tab (they merge)
+ *   --bb-header-surface : the header strip (inactive tabs + actions) — a step
+ *                          lighter so the selected tab visibly pops and flows down.
+ * Defined on `.part.auxiliarybar` so both the composite title and the pane body
+ * (which are separate DOM subtrees) can read them.
+ */
+.monaco-workbench .part.auxiliarybar:has(> .composite.title.has-chat-tabs),
+.monaco-workbench.optimus-window .part.auxiliarybar:has(.optimus-chat-view) {
+	/* Semantic workbench tokens keep the entire right panel native to the
+	   selected VS Code theme, including light and high-contrast themes. */
+	--bb-panel-surface: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	/* The auxiliary bar is intentionally narrow. Keep one compact content rail
+	   instead of stacking the wider full-page chat insets inside this panel. */
+	--bb-editor-panel-gutter: 16px;
+	--bb-composer-surface: var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+	--bb-composer-border: var(--vscode-input-border, var(--vscode-widget-border, var(--vscode-contrastBorder, transparent)));
+	/*
+	 * Header strip + inactive tabs match the sideBar surface — the same shade as
+	 * the global titlebar row above when the window is FOCUSED, so the tab strip
+	 * reads as a continuation of that row. The active tab (--bb-panel-surface,
+	 * the editor-background shade) is what pops in contrast, not the header
+	 * itself.
+	 *
+	 * Deliberately NOT --vscode-titleBar-activeBackground: titlebarPart.ts
+	 * swaps the real titlebar's background (inline style) to
+	 * TITLE_BAR_INACTIVE_BACKGROUND when the window loses focus, but that swap
+	 * has no reflection in a plain CSS var — "activeBackground" always means
+	 * the focused-window color. Referencing it here would make our header
+	 * strip diverge from the real titlebar's color the moment the window is
+	 * unfocused. --vscode-sideBar-background has no such focus-dependent swap,
+	 * so anchoring to it keeps our own surfaces internally consistent always,
+	 * even though it only matches the titlebar's rendered color while focused.
+	 */
+	/* Cursor's panel is one flat surface — the strip shares the body's shade
+	   rather than sitting on a lighter header band. */
+	--bb-header-surface: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	/* Use the theme's own structural border so contrast follows its palette. */
+	--bb-tab-divider: var(--vscode-sideBar-border, var(--vscode-panel-border, var(--vscode-contrastBorder, transparent)));
+	/* Separator between the middle editor and the right panel uses the same
+	   semantic border as the tab dividers above.
+	   !important: Part.updateStyles() sets border-left as an inline style from
+	   the theme's auxiliaryBar.border color at runtime, which otherwise always
+	   wins over any external stylesheet rule regardless of specificity. */
+	border-left: 1px solid var(--bb-tab-divider, var(--vscode-panel-border, transparent)) !important;
+}
+
+/* Chat body + active tab share one surface → the selected tab flows into it.
+   `.chat-welcome-view-container` (the "New Agent" empty state) is included —
+   chatViewPane.css otherwise pins it to --vscode-sideBar-background, which is
+   a different shade than the panel surface and reads as a mismatched block. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-controls-container,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-welcome-view-container,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list .monaco-list,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list .monaco-scrollable-element,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list .monaco-list-rows {
+	background-color: var(--bb-panel-surface);
+}
+
+/*
+ * `.monaco-list-rows` (the scrollable rows container ListView owns one level
+ * inside `.monaco-list`) carries the theme's list background — a different,
+ * lighter shade than our panel surface — and was never covered above. Since
+ * individual `.monaco-list-row` elements are transparent by default, that wrong
+ * shade showed through everywhere EXCEPT when a row happened to be
+ * `.focused`/`.selected` (see rule below, which paints the row itself opaquely
+ * and so incidentally masked it) — which is why the color only looked "fixed"
+ * after clicking into the list/row. Fixing the real layer above removes that
+ * dependency on focus state entirely.
+ *
+ * ListWidget (listWidget.ts `style()`) ALSO injects its own <style> tag at
+ * runtime with rules like `.monaco-list.monaco-list-id-N:focus
+ * .monaco-list-row.focused { background-color: ... }`, added to the document
+ * AFTER our stylesheet. That always wins on cascade order regardless of
+ * selector specificity, which is why the focused/selected row itself showed
+ * the list's focus color. !important is the only way to reliably beat a
+ * dynamically-inserted, later-in-source-order rule like this.
+ *
+ * The same injected stylesheet also adds
+ * `.monaco-list-row:hover:not(.selected):not(.focused) { background-color:
+ * listHoverBackground }` — a lighter hover tint meant for genuinely selectable
+ * lists (file trees, quick-pick), which reads as a mismatch here since chat
+ * rows aren't selectable items. Covered below, same !important reasoning.
+ */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list .monaco-list-row.focused,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list .monaco-list-row.selected,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list .monaco-list-row:hover {
+	background-color: var(--bb-panel-surface, var(--vscode-editor-background)) !important;
+}
+
+/* Keep chat history visibly scrollable in the editor's narrow right panel.
+ * Monaco still owns the scrolling and virtualization; this only gives its
+ * persistent rail a restrained, theme-native treatment and a useful hit area. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list.right-panel-chat-scroll > .monaco-list > .monaco-scrollable-element > .scrollbar.vertical {
+	background: transparent;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list.right-panel-chat-scroll > .monaco-list > .monaco-scrollable-element > .scrollbar.vertical > .slider {
+	left: 2px !important;
+	width: 5px !important;
+	border-radius: 999px;
+	background: var(--vscode-scrollbarSlider-background);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list.right-panel-chat-scroll > .monaco-list > .monaco-scrollable-element > .scrollbar.vertical > .slider:hover {
+	background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list.right-panel-chat-scroll > .monaco-list > .monaco-scrollable-element > .scrollbar.vertical > .slider.active {
+	background: var(--vscode-scrollbarSlider-activeBackground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-list.right-panel-chat-scroll > .chat-scroll-down {
+	z-index: 12;
+	right: 14px;
+	box-shadow: 0 2px 8px color-mix(in srgb, var(--vscode-widget-shadow) 45%, transparent);
+}
+
+/* Header strip: lighter surface. No border-bottom here — the divider is drawn
+   per-element below (inactive tabs + actions toolbar) instead of on this
+   container, because `.chat-view-title-tabs` clips overflow-y:hidden, which
+   would clip any box-shadow/border trick trying to "erase" a container-level
+   border under just the active tab. Owning the border per-child avoids that. */
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs {
+	background-color: var(--bb-header-surface);
+}
+
+/* --- Input box: roomy, soft, focus-aware --------------------------------- */
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-input-part:not(.compact) {
+	margin: 0 12px 12px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-input-part .chat-input-container {
+	border-radius: 12px;
+	/* Symmetric 8px on all sides — matches the 8px gap `.chat-input-toolbars`
+	   margin-top puts between the editor and the toolbar row, so the spacing
+	   above the text, between text and toolbar, and below the toolbar all read
+	   as the same rhythm instead of the bottom edge looking tighter. */
+	padding: 8px 12px;
+	box-shadow: 0 1px 3px color-mix(in srgb, var(--vscode-widget-shadow) 35%, transparent);
+	transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-input-part .chat-input-container.focused,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-input-part .chat-input-container:focus-within {
+	box-shadow: 0 1px 5px color-mix(in srgb, var(--vscode-widget-shadow) 48%, transparent);
+}
+
+/* Cursor's composer never swaps to the accent focus ring — the hairline stays
+   neutral whether or not the input has focus. Scoped to the right panel so
+   dialogs/editors keep the stock focus treatment. !important: the
+   backboard-composer block in chat.css pins its focused border-color (a
+   focusBorder mix) with !important, so only another !important can undo it. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-input-container.focused,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-container.focused {
+	border-color: var(--bb-composer-border) !important;
+	box-shadow: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-input-part .interactive-input-editor {
+	min-height: 42px;
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+/* --- Bottom toolbar: compact and calm ------------------------------------ */
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-input-toolbars {
+	margin-top: 8px;
+}
+
+/* --- Message rows: lighter, cleaner rhythm ------------------------------- */
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-item-container {
+	padding-top: 10px;
+	padding-bottom: 10px;
+	border-top-color: transparent;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .interactive-item-container .value {
+	line-height: 1.55;
+}
+
+/* --- Empty (new chat) state: Cursor's top-anchored composer --------------- */
+
+/*
+ * Cursor's new-agent tab pins the composer directly under the tab strip with
+ * nothing beneath it. Scoped to the editor window's right panel
+ * (`.chat-viewpane` only exists there) so the Agents window keeps its own
+ * centered, chip-decorated home.
+ */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session.chat-empty-centered {
+	justify-content: flex-start;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session.chat-empty-centered > .chat-empty-below-composer {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session.chat-empty-centered .interactive-input-part:not(.compact) {
+	margin-top: 10px;
+}
+
+/* Cursor lets the conversation itself establish authorship: responses begin
+   directly with activity/prose, without repeating the provider avatar/name. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response > .header {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response .chat-footer-details {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response .chat-footer-toolbar .monaco-action-bar {
+	opacity: 0;
+	visibility: hidden;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response:hover .chat-footer-toolbar .monaco-action-bar,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response:focus-within .chat-footer-toolbar .monaco-action-bar {
+	opacity: 1;
+	visibility: visible;
+}
+
+/* Cursor's expanded activity is a compact text outline. Remove the timeline
+   rail and category glyphs used by the larger chat surfaces while preserving
+   the disclosure chevrons and hover affordances. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box:not(.chat-used-context-collapsed)::after,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-tool-wrapper::before,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-item.markdown-content::before,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-spinner-item::before {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-used-context-list.chat-thinking-collapsible {
+	margin-left: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-icon {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-group-header {
+	padding: 4px 4px 4px 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-group-header .chat-thinking-group-chevron {
+	opacity: 0.72;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-group-body {
+	padding-left: 14px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-item.markdown-content,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-spinner-item,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-tool-wrapper .chat-markdown-part.rendered-markdown,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-tool-wrapper > .chat-codeblock-pill-container,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-tool-invocation-part {
+	padding-left: 0;
+}
+
+/* Background tool terminals sit in the same calm session-status stack Cursor
+   uses above its changed-file review controls. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-background-terminals {
+	margin: 0;
+	background: var(--bb-panel-surface, var(--vscode-editor-background));
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminals {
+	border-top: 1px solid color-mix(in srgb, var(--vscode-chat-requestBorder) 65%, transparent);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminals-header,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminal-row {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	min-width: 0;
+	min-height: 32px;
+	padding: 3px 10px;
+	border: 0;
+	font: inherit;
+	color: var(--vscode-descriptionForeground);
+	background: transparent;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminals-header {
+	cursor: pointer;
+	text-align: left;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminals-header:hover,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminal-row:hover {
+	color: var(--vscode-foreground);
+	background: var(--vscode-list-hoverBackground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminals-chevron,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminal-icon {
+	flex: 0 0 auto;
+	margin-right: 7px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminals-label,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminal-title {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminals-body.collapsed {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminal-row {
+	padding-left: 16px;
+	background: color-mix(in srgb, var(--vscode-editor-background) 84%, var(--vscode-list-hoverBackground));
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminal-stop {
+	flex: 0 0 auto;
+	margin-left: 8px;
+	padding: 3px 7px;
+	border: 0;
+	border-radius: 4px;
+	font: inherit;
+	color: var(--vscode-foreground);
+	background: transparent;
+	cursor: pointer;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .cursor-background-terminal-stop:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-collapsible-list-action-bar.custom-actions > .monaco-toolbar {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-collapsible-list-custom-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-collapsible-list-custom-action {
+	display: inline-flex;
+	width: 22px;
+	height: 22px;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font-size: 15px;
+	cursor: pointer;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-collapsible-list-custom-action:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-collapsible-list-custom-action:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session .chat-editing-session .chat-collapsible-list-custom-action:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+/* Latest Cursor reference parity: open-drawer title mode, readable transcript
+ * type and the compact 72px reply composer. */
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open > .composite.title.has-chat-tabs > .composite-bar-container {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open .chat-view-title-tabs .chat-view-title-tab:not(.chat-view-title-tab-active) {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open .chat-view-title-tabs .chat-view-title-tab.chat-view-title-tab-active {
+	max-width: none;
+	padding-inline: 8px;
+	background: transparent;
+	color: var(--vscode-foreground);
+	font-size: 14px;
+	font-weight: 500;
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open .chat-view-title-actions-toolbar .action-item:has(.codicon-history) {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-session {
+	color: var(--vscode-foreground);
+	font-size: 14px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat {
+	/* The shared chat treatment uses a centered 768px reading column. In the
+	 * editor's right panel that leaves a large dead gutter when the panel is
+	 * widened, so let the transcript track the panel and composer instead. */
+	--bb-clean-chat-column: 100%;
+	--bb-backboard-column: 100%;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript {
+	/* One rail for sent messages, queued work, tool cards, and the composer. */
+	--bb-cursor-transcript-gutter: var(--bb-editor-panel-gutter);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-request,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response {
+	/* Share the composer's rail so messages and input stay aligned. */
+	padding-inline: var(--bb-editor-panel-gutter);
+}
+
+/* Keep the editor transcript dense. The shared timeline deliberately leaves
+ * generous breathing room for the full-page chat, but at sidebar scale those
+ * 8-16px part margins read as empty rows between tool activity and prose. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response {
+	position: relative;
+	padding-bottom: 6px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response > .value {
+	padding-block: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response > .value > .rendered-markdown:not(:last-child) {
+	margin-bottom: 4px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-backboard-turn-work:not(.chat-backboard-turn-work-active) {
+	margin-bottom: 8px;
+	padding-block: 2px 4px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-backboard-turn-work:not(.chat-backboard-turn-work-active).chat-backboard-turn-work-expanded > .chat-backboard-turn-work-body {
+	margin-top: 4px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-backboard-turn-work-body > .rendered-markdown,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-backboard-turn-work-body .chat-thinking-box {
+	margin-bottom: 3px;
+}
+
+/* Completed responses keep their actions on hover, but the invisible toolbar
+ * no longer reserves a full 28px row in the transcript. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container.interactive-response:not(.chat-response-loading) > .chat-footer-toolbar {
+	position: absolute;
+	inset-inline-end: var(--bb-editor-panel-gutter);
+	bottom: 4px;
+	z-index: 2;
+	width: auto;
+	height: 22px;
+	padding-top: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container .value,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .interactive-item-container .rendered-markdown {
+	color: var(--vscode-foreground);
+	font-size: 14px;
+	line-height: 1.48;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-title,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-group-header {
+	color: var(--vscode-descriptionForeground);
+	font-size: 14px;
+}
+
+/* Tool activity is a scan-friendly work log rather than a stack of messages.
+ * Keep it on the transcript rail, and keep consecutive calls close while
+ * preserving a full line-height target for each disclosure row. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-work-group > .chat-thinking-group-body {
+	gap: 0;
+	padding-left: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .chat-thinking-box .chat-thinking-work-group .chat-thinking-tool-wrapper {
+	min-height: 20px;
+	padding-block: 0;
+}
+
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars {
+	margin-top: 4px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
+	height: 24px;
+	min-width: 24px;
+	border-radius: 9px !important;
+	font-size: 16px;
+}
+
+/* Keep model names and picker contents on the native workbench UI face. The
+ * selectors deliberately target text-bearing nodes so Codicon glyphs retain
+ * their icon font. */
+.monaco-workbench .backboard-composer .chat-input-picker-label,
+.monaco-workbench .backboard-composer .combined-model-provider-trigger-label,
+.monaco-workbench .combined-model-provider-root,
+.monaco-workbench .combined-model-provider-root input,
+.monaco-workbench .action-widget:has(.chat-model-picker-filter-input),
+.monaco-workbench .action-widget:has(.chat-model-picker-filter-input) input {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif !important;
+	font-size: 13px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-newline,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-stop-circle {
+	width: 28px;
+	height: 28px;
+	min-width: 28px;
+}
+
+/* The Agents drawer owns the entire right edge, including the 35px panel
+ * header. One live width variable keeps the drawer, chat header and sash in
+ * lockstep while the user drags the divider. */
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open > .composite.title.has-chat-tabs {
+	box-sizing: border-box;
+	padding-right: calc(var(--backboard-agents-drawer-width, 292px) + 8px);
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open .chat-viewpane {
+	position: relative;
+	z-index: 2;
+	overflow: visible;
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open > .composite.title.has-chat-tabs {
+	position: relative;
+	z-index: 1;
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open .chat-viewpane > .voice-agent-controls-wrapper {
+	box-sizing: border-box;
+	padding-right: var(--backboard-agents-drawer-width, 292px);
+	overflow: visible;
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open .chat-viewpane .agent-sessions-container.backboard-side-chat-sessions {
+	position: absolute;
+	z-index: 10;
+	top: -35px;
+	left: auto !important;
+	right: 0;
+	bottom: 0;
+	width: var(--backboard-agents-drawer-width, 292px) !important;
+	height: auto !important;
+	padding-top: 47px;
+	border-left: 0 !important;
+	background: var(--backboard-side-chat-bg, var(--bb-panel-surface, var(--vscode-sideBar-background)));
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open .monaco-sash.vertical.backboard-agents-drawer-sash {
+	top: -35px;
+	height: calc(100% + 35px);
+	z-index: 100;
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open > .monaco-sash.vertical.backboard-agents-drawer-sash {
+	top: 0;
+	height: 100%;
+	z-index: 100;
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open .monaco-sash.vertical.backboard-agents-drawer-sash::before {
+	left: calc(50% - 0.5px);
+	width: 1px;
+	background: var(--vscode-sideBar-border, var(--vscode-panel-border, var(--vscode-contrastBorder, transparent)));
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open .monaco-sash.vertical.backboard-agents-drawer-sash:is(.hover, .active)::before {
+	left: calc(50% - 1px);
+	width: 2px;
+	background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder));
+}
+
+/* The + and … controls belong to the conversation side. The drawer toggle
+ * belongs to the drawer, so place only that final action at its far-right edge. */
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar,
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar .monaco-action-bar,
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar .actions-container {
+	overflow: visible;
+}
+
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar .action-item:has(.codicon-layout-sidebar-right),
+.monaco-workbench .part.auxiliarybar.backboard-agents-drawer-open > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar .action-item:has(.codicon-layout-sidebar-right-off) {
+	position: absolute;
+	z-index: 110;
+	top: 4px;
+	right: 8px;
+}
+
+/* --- Cohesive Backboard composer -----------------------------------------
+ * Keep one restrained surface and one sizing scale across the prompt editor,
+ * model chip and action row. This intentionally comes last so it resolves the
+ * older shared/T3/Cursor composer rules without affecting chat elsewhere. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer {
+	--bb-composer-surface: var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+	--bb-composer-border: var(--vscode-input-border, var(--vscode-widget-border, var(--vscode-contrastBorder, transparent)));
+	--bb-composer-control-hover: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+	--bb-composer-model-background: var(--vscode-dropdown-background, var(--bb-composer-surface));
+	--bb-composer-model-foreground: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+	--bb-composer-model-border: var(--vscode-dropdown-border, var(--bb-composer-border));
+	--bb-composer-control-size: 28px;
+	--bb-composer-icon-size: 16px;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part {
+	box-sizing: border-box;
+	width: auto;
+	margin: 0 var(--bb-editor-panel-gutter);
+	padding: 0 0 24px;
+}
+
+/* Sent chats use a compact reply composer. The empty/new-chat state keeps the
+ * larger drafting surface below, while this state gives more room back to the
+ * transcript without crowding the footer controls. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part {
+	padding: 6px 0 10px;
+	--bb-composer-control-size: 24px;
+	--bb-composer-icon-size: 14px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container {
+	height: auto;
+	min-height: 110px;
+	max-height: none;
+	padding: 10px 12px;
+	gap: 6px;
+	border: 1px solid var(--bb-composer-border) !important;
+	border-radius: 22px !important;
+	background: var(--bb-composer-surface);
+	box-shadow: none;
+	overflow: visible;
+	--bb-composer-surface-background: var(--bb-composer-surface);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-editor-container {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	padding: 0 2px;
+	background: transparent;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .interactive-input-editor {
+	min-width: 0;
+	flex: 1 1 auto;
+	min-height: 32px;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .chat-input-container {
+	min-height: 58px;
+	padding: 5px 8px;
+	gap: 2px;
+	border-radius: 15px !important;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .chat-editor-container {
+	padding-inline: 1px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .interactive-input-editor {
+	min-height: 22px;
+}
+
+/* Include the input editor hierarchy so the panel surface wins over the
+ * shared clean-chat and Advanced-mode T3 editor backgrounds. Keep a solid
+ * fill for Monaco's reverse-rounded selection corners. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container .chat-editor-container .interactive-input-editor .monaco-editor,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container .chat-editor-container .interactive-input-editor .monaco-editor .margin {
+	background-color: var(--bb-composer-surface) !important;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars {
+	flex: 0 0 var(--bb-composer-control-size);
+	min-height: var(--bb-composer-control-size);
+	height: var(--bb-composer-control-size);
+	margin-top: 0;
+	padding: 0;
+	gap: 4px;
+	align-items: center;
+	background: transparent;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars .monaco-action-bar .actions-container {
+	align-items: center;
+	gap: 2px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item {
+	height: var(--bb-composer-control-size);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
+	height: var(--bb-composer-control-size);
+	min-width: var(--bb-composer-control-size);
+	padding: 0 6px;
+	border-radius: 7px !important;
+	background: transparent;
+	font-size: 16px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label:not(.model-picker-split):hover,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label.codicon-mic:hover {
+	background: var(--bb-composer-control-hover);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-picker-item .action-label.model-picker-split {
+	height: var(--bb-composer-control-size);
+	padding: 0;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
+	font-size: 13px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-picker-item .action-label.model-picker-split .model-picker-section {
+	height: var(--bb-composer-control-size);
+	padding: 0 6px;
+	border-radius: 7px;
+	background: transparent;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-picker-label,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .combined-model-provider-trigger-label,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .sessions-chat-dropdown-label {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 18px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label.codicon,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger-icon .codicon {
+	font-size: 16px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label .codicon-chevron-down,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger-chevron .codicon {
+	font-size: 11px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-newline,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-stop-circle {
+	width: var(--bb-composer-control-size);
+	height: var(--bb-composer-control-size);
+	min-width: var(--bb-composer-control-size);
+	padding: 0;
+	font-size: calc(var(--bb-composer-icon-size) - 1px);
+	box-shadow: none;
+}
+
+/* Composer footer: one quiet control language. Controls stay transparent
+ * until hover and no separators fragment the row into mini-containers. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .actions-container > .action-item + .action-item::before {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars {
+	height: var(--bb-composer-control-size);
+	min-height: var(--bb-composer-control-size);
+	gap: 6px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
+	box-sizing: border-box;
+	height: var(--bb-composer-control-size);
+	min-width: 0;
+	max-width: min(190px, 42cqi);
+	padding: 0 6px !important;
+	gap: 5px;
+	border: 0;
+	border-radius: 7px !important;
+	background: transparent !important;
+	box-shadow: none;
+	color: var(--bb-composer-model-foreground);
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
+	font-size: 12.5px;
+	font-weight: 400;
+}
+
+/* Anchor the model control to the trailing cluster beside Mic. It remains the
+ * flexible item so narrow panels truncate its label before clipping icons. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-picker-item {
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: min(190px, 42cqi);
+	margin-left: auto;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .action-item:has(.action-label.codicon-add),
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .action-item:has(.action-label.codicon-settings-gear),
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .action-item {
+	flex: 0 0 auto;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger:hover,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger[aria-expanded='true'] {
+	border-color: transparent;
+	background: var(--bb-composer-control-hover) !important;
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger-label,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger-thinking {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12.5px;
+	line-height: 18px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger-icon .codicon {
+	font-size: 14px;
+	color: var(--vscode-icon-foreground, var(--vscode-foreground));
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger-chevron,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger-chevron .codicon {
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .action-label.codicon-add,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .action-label.codicon-settings-gear,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .action-label.codicon-mic {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: var(--bb-composer-control-size);
+	height: var(--bb-composer-control-size);
+	min-width: var(--bb-composer-control-size);
+	padding: 0;
+	border-radius: 7px !important;
+	background: transparent;
+	color: var(--vscode-icon-foreground, var(--vscode-foreground));
+	font-size: var(--bb-composer-icon-size);
+	line-height: 1;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .action-item:not(.disabled) .action-label.codicon-add:hover,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .action-item:not(.disabled) .action-label.codicon-settings-gear:hover,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .action-item:not(.disabled) .action-label.codicon-mic:hover {
+	background: var(--bb-composer-control-hover);
+	color: var(--vscode-foreground);
+}
+
+/* Preserve the same proportions when the editor panel gets narrow. All five
+ * controls step down together; the model label continues to ellipsize first. */
+@container chat-input-part (max-width: 360px) {
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-container {
+		--bb-composer-control-size: 26px;
+		--bb-composer-icon-size: 15px;
+	}
+
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger,
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-picker-item {
+		max-width: 40cqi;
+	}
+}
+
+/* --- Reference empty-chat home ------------------------------------------
+ * The editor panel's resting state is a working history surface: three live
+ * recent chats at the top, a quiet identity mark in the open space, and the
+ * draft composer anchored to the bottom. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty {
+	justify-content: flex-start;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty > .chat-welcome-view-container {
+	display: block !important;
+	min-height: 0;
+	background: var(--bb-panel-surface);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-home {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
+	box-sizing: border-box;
+	width: 100%;
+	height: 100%;
+	min-height: 0;
+	padding: 9px 10px 0;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chats {
+	min-width: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-view-all {
+	display: flex;
+	align-items: center;
+	box-sizing: border-box;
+	width: 100%;
+	height: 30px;
+	min-width: 0;
+	margin: 0;
+	padding: 0 2px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--vscode-foreground);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat:hover,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat:focus-visible {
+	background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 72%, transparent);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-title {
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 14px;
+	font-weight: 400;
+	line-height: 20px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-time {
+	flex: 0 0 auto;
+	margin-left: 12px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	line-height: 20px;
+}
+
+/* Leading status indicator on recent chats: spinner while working, colored
+ * dot otherwise (green completed, orange needs input, red failed, grey opened).
+ * Both states share the same fixed, centered box so the dot rows and the
+ * spinner rows line up on a single vertical and horizontal axis. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: center;
+	width: 14px;
+	height: 20px;
+	margin-right: 8px;
+	font-size: 13px;
+	line-height: 20px;
+	text-align: center;
+}
+
+/* The dot is drawn as a pseudo element so the running state can keep the same
+ * box while the codicon glyph occupies it instead. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status:not(.running)::before {
+	content: '';
+	display: block;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background-color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.completed::before {
+	background-color: var(--vscode-charts-green);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.needs-input::before {
+	background-color: var(--vscode-charts-orange);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.failed::before {
+	background-color: var(--vscode-charts-red);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.opened::before {
+	background-color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.running {
+	color: var(--vscode-textLink-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chat-status.running::before {
+	display: block;
+	width: 14px;
+	height: 14px;
+	line-height: 14px;
+	font-size: 14px;
+	text-align: center;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-view-all {
+	width: auto;
+	height: 29px;
+	margin-top: 0;
+	color: color-mix(in srgb, var(--vscode-descriptionForeground) 74%, transparent);
+	font-size: 13px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-view-all:hover,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-view-all:focus-visible {
+	background: transparent;
+	color: var(--vscode-foreground);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-view-all:focus-visible {
+	outline: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-mark {
+	align-self: center;
+	justify-self: center;
+	width: 50px;
+	height: 68px;
+	margin-bottom: 4px;
+	filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.2));
+	opacity: 0.78;
+	pointer-events: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark {
+	display: block;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base {
+	fill: #bcd9e8;
+	opacity: 0.34;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-current,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-glint {
+	transform-box: fill-box;
+	transform-origin: center;
+	will-change: transform;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-current {
+	opacity: 0.96;
+	animation: backboard-panel-water-flow var(--backboard-panel-water-duration, 3.4s) linear var(--backboard-panel-water-delay, 0s) infinite;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-glint {
+	mix-blend-mode: screen;
+	opacity: 0.78;
+	animation: backboard-panel-water-glint var(--backboard-panel-water-duration, 4.8s) linear var(--backboard-panel-water-delay, 0s) infinite;
+}
+
+@keyframes backboard-panel-water-flow {
+	from {
+		transform: translateY(0);
+	}
+
+	to {
+		transform: translateY(86px);
+	}
+}
+
+@keyframes backboard-panel-water-glint {
+	from {
+		transform: translate(-4px, -124px) skewX(-2deg);
+	}
+
+	to {
+		transform: translate(4px, 0) skewX(2deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-current,
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-glint {
+		animation: none;
+		transform: none;
+	}
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar .actions-container {
+	gap: 2px;
+}
+
+.monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs > .chat-view-title-actions-toolbar .action-label {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	font-size: 16px;
+}
+
+@container chat-input-part (max-width: 360px) {
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part {
+		width: auto;
+		margin-inline: 10px;
+	}
+
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-home {
+		padding-inline: 8px;
+	}
+
+}
+
+/* Keep short turns visually connected in the editor panel. The checkpoint
+ * actions are the only rail between the request bubble and the response; do
+ * not add a second spacer around that already-visible 18px row. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-item-container.interactive-request {
+	padding-bottom: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-item-container.interactive-request > .checkpoint-container {
+	height: 18px;
+	min-height: 18px;
+	margin-top: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-item-container.interactive-request > .checkpoint-container .monaco-toolbar .action-label {
+	height: 18px;
+	line-height: 18px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .chat-backboard-turn-work:not(.chat-backboard-turn-work-active) {
+	padding-top: 0;
+}
+
+/* The shared Cursor transcript skin lives in chat.css so every Backboard
+ * ChatWidget host uses the editor panel experience. */
+
+/* Blue currents retain definition against a light canvas without a white glow. */
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-empty-mark {
+	opacity: 1;
+	filter: drop-shadow(0 3px 7px rgba(23, 92, 140, 0.12));
+}
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base {
+	fill: #276b92;
+	opacity: 0.38;
+}
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-water-glint {
+	mix-blend-mode: normal;
+	opacity: 0.3;
+}
+
+/* Light composer: a quiet raised surface with readable, responsive controls. */
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer {
+	--bb-composer-border: #d5d9df;
+	--bb-composer-control-hover: #edf2f8;
+	--bb-composer-model-foreground: #344054;
+	--vscode-icon-foreground: #596579;
+	--vscode-descriptionForeground: #596579;
+	--vscode-input-placeholderForeground: #667085;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container {
+	border-radius: 18px !important;
+	box-shadow: 0 2px 8px rgba(25, 40, 65, 0.05);
+	transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container:focus-within {
+	border-color: #87aee1 !important;
+	box-shadow: 0 0 0 2px rgba(23, 105, 210, 0.09), 0 2px 8px rgba(25, 40, 65, 0.05);
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
+	background: transparent !important;
+	color: #344054;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger:is(:hover, [aria-expanded='true']) {
+	background: #e7edf5 !important;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label:is(.codicon-arrow-up, .codicon-newline, .codicon-stop-circle) {
+	background: #1769d2;
+	color: #fff !important;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label:is(.codicon-arrow-up, .codicon-newline, .codicon-stop-circle):hover {
+	background: #125bb8;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label:is(.codicon-arrow-up, .codicon-newline) {
+	background: #e8ecf1;
+	color: #667085 !important;
+	opacity: 1;
+}
+
+.monaco-workbench.vs.monaco-reduce-motion .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container {
+	transition: none;
+}
+
+/* The tab strip is the panel's constant chrome: it stays on the empty home
+ * too, so opening a new chat never hides the tabs already in the strip. The
+ * home's own +/settings/history column would then duplicate the strip's
+ * toolbar, so it only renders where there is no strip. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chats {
+	position: relative;
+	min-height: 96px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-home-actions {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-home-action {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-home-action:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-home-action:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+}
+
+/* Compact Codex proportions: comfortable draft area, one aligned control row. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part {
+	margin-inline: 12px;
+	padding-bottom: 12px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container {
+	min-height: 80px;
+	padding: 10px 10px 8px;
+	gap: 6px;
+	border-radius: 22px !important;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .chat-input-container {
+	min-height: 72px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
+	border-radius: 14px !important;
+	padding-inline: 9px !important;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer {
+	--bb-composer-border: #e2e1df;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container {
+	box-shadow: 0 2px 8px rgba(30, 35, 40, 0.04);
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container:focus-within {
+	border-color: #c4cfdd !important;
+	box-shadow: 0 0 0 2px rgba(23, 105, 210, 0.05);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-picker-item .action-label.model-picker-split {
+	border-radius: 14px !important;
+	overflow: hidden;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-picker-item .action-label.model-picker-split {
+	background: transparent;
+	color: #344054;
+}
+
+@container chat-input-part (max-width: 380px) {
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .model-picker-name:has(.model-picker-provider-icon) .chat-input-picker-label,
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .backboard-access-mode-trigger .agent-host-chat-input-picker-label {
+		display: none;
+	}
+
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .model-picker-name .model-picker-provider-icon {
+		display: inline-block;
+	}
+
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .backboard-access-mode-trigger {
+		min-width: 28px;
+		justify-content: center;
+	}
+}
+
+/* Anchor the prompt to a consistent inset at every panel width. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part {
+	margin: 0 12px;
+	padding: 0 0 8px;
+	flex-shrink: 0;
+}
+
+/* An oversized, cropped outline of our mark sits behind the home content. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-home {
+	position: relative;
+	isolation: isolate;
+	overflow: hidden;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chats {
+	z-index: 1;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-mark {
+	position: absolute;
+	left: 58%;
+	top: 60%;
+	width: max(150%, 700px);
+	height: max(165%, 940px);
+	margin: 0;
+	transform: translate(-50%, -50%) rotate(-24deg);
+	filter: none;
+	opacity: 0.08;
+	color: var(--vscode-foreground);
+	z-index: 0;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-empty-mark {
+	filter: none;
+	opacity: 0.07;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base {
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1;
+	vector-effect: non-scaling-stroke;
+	opacity: 1;
+}
+
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base {
+	fill: none;
+	opacity: 1;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark > g {
+	display: none;
+}
+
+@container chat-input-part (max-width: 420px) {
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
+		min-width: 0;
+		max-width: 100%;
+	}
+
+	/* Keep the selected model discoverable while resizing. Drop the secondary
+	 * reasoning label first; the model name can ellipsize in the remaining space. */
+
+	.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .combined-model-provider-trigger-chevron {
+		flex: 0 0 auto;
+	}
+}
+
+/* A soft, anchored Add menu with full-width rounded hover rows. */
+.monaco-workbench .action-widget:has(.backboard-composer-add-menu) {
+	border-radius: 12px !important;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+	box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.06);
+	padding: 6px;
+	overflow: hidden;
+	max-width: calc(100vw - 24px);
+}
+
+.monaco-workbench .backboard-composer-add-menu .monaco-list-row {
+	border-radius: 9px !important;
+}
+
+.monaco-workbench .backboard-composer-add-menu .monaco-list-row.action {
+	padding-inline: 9px;
+}
+
+.monaco-workbench .backboard-composer-add-menu .description {
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy {
+	align-self: center;
+	justify-self: center;
+	text-align: center;
+	z-index: 1;
+	padding: 24px;
+	pointer-events: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-title {
+	font-size: 18px;
+	font-weight: 700;
+	line-height: 24px;
+	letter-spacing: 0.6px;
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-subtitle {
+	margin-top: 3px;
+	font-size: 13px;
+	font-weight: 500;
+	line-height: 20px;
+	letter-spacing: 0;
+	color: var(--vscode-foreground);
+	opacity: 0.88;
+}
+
+/* Restore the flowing blue currents while keeping the background restrained. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark > g {
+	display: initial;
+	opacity: 0.35;
+}
+
+.monaco-workbench.monaco-reduce-motion .part.auxiliarybar .chat-viewpane .backboard-panel-water-current,
+.monaco-workbench.monaco-reduce-motion .part.auxiliarybar .chat-viewpane .backboard-panel-water-glint {
+	animation: none;
+}
+
+/* Context menus stay anchored to the composer without changing its layout. */
+.monaco-workbench .interactive-input-part:has(> .backboard-composer-flow) { position: relative; }
+.monaco-workbench .backboard-composer .chat-input-container { position: relative; }
+.monaco-workbench .backboard-composer-flow {
+	position: absolute;
+	margin: 0;
+	z-index: 100;
+	box-sizing: border-box;
+	width: 224px;
+	max-width: calc(100% - 16px);
+	max-height: min(440px, 65vh);
+	display: flex;
+	flex-direction: column;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+	border-radius: 10px !important;
+	background: var(--vscode-editorWidget-background);
+	color: var(--vscode-foreground);
+	box-shadow: 0 8px 24px #00000020, 0 2px 6px #00000010;
+	overflow: hidden;
+	font: 13px/1.5 var(--vscode-font-family);
+	transform-origin: bottom left;
+	animation: backboard-context-enter 120ms cubic-bezier(.16, 1, .3, 1);
+}
+@keyframes backboard-context-enter {
+	from { opacity: 0; transform: translateY(4px) scale(.97); }
+	to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.monaco-workbench.monaco-reduce-motion .backboard-composer-flow { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench .backboard-composer-flow { animation: none; }
+}
+.monaco-workbench .backboard-composer-context-menu > .backboard-composer-flow-header,
+.monaco-workbench .backboard-composer-inline-picker > .backboard-composer-flow-header { display: none; }
+.monaco-workbench .backboard-composer-inline-picker { width: 288px; }
+.monaco-workbench .backboard-composer-flow .backboard-composer-menu-separator {
+	border-top: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	margin: 4px 6px;
+}
+.monaco-workbench .backboard-composer-flow .backboard-composer-context-result {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	background: transparent;
+	min-height: 29px;
+	flex-shrink: 0;
+	padding: 4px 8px;
+}
+.backboard-composer-result-label { display: flex; flex-direction: column; min-width: 0; }
+.backboard-composer-result-label > :is(span, small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backboard-composer-result-label small { font-size: 11px; color: var(--vscode-descriptionForeground); }
+.backboard-composer-context-result > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.monaco-workbench .backboard-composer-flow .backboard-composer-context-result[aria-selected="true"] {
+	background: var(--vscode-list-hoverBackground);
+}
+.monaco-workbench .backboard-composer-flow-status:empty { display: none; }
+.monaco-workbench .backboard-composer-flow-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 6px 12px 0;
+	color: var(--vscode-descriptionForeground);
+	flex-shrink: 0;
+}
+.monaco-workbench .backboard-composer-flow-header strong { font-weight: 400; }
+.monaco-workbench .backboard-composer-flow-header button { padding: 2px 6px; font-size: 11px; }
+.monaco-workbench .backboard-composer-flow-body {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	padding: 4px;
+	overflow: auto;
+	min-height: 0;
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in srgb, var(--vscode-foreground) 15%, transparent) transparent;
+}
+
+.monaco-workbench .backboard-composer-flow .backboard-composer-drawer-option {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-shrink: 0;
+	border: 0;
+	min-height: 28px;
+	padding: 4px 8px;
+	border-radius: 5px !important;
+	background: transparent;
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.backboard-composer-drawer-value { margin-left: auto; font-size: 11px; color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backboard-composer-drawer-heading { padding: 12px 6px 4px; color: var(--vscode-descriptionForeground); }
+.backboard-composer-drawer-option > .codicon { flex: 0 0 14px; font-size: 14px; }
+.backboard-composer-drawer-option > span:not(.backboard-composer-drawer-value) { flex-shrink: 0; }
+
+.backboard-capability-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.monaco-workbench .backboard-capability-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 1px 5px;
+	border: 1px dashed color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
+	border-radius: 3px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: italic 11px/16px var(--vscode-font-family);
+	cursor: pointer;
+}
+.backboard-capability-chip .codicon { font-size: 12px; }
+.backboard-capability-chip:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+.monaco-workbench .backboard-composer-flow label { display: flex; flex-direction: column; gap: 5px; }
+.monaco-workbench .backboard-composer-flow :is(input, textarea) {
+	box-sizing: border-box;
+	width: 100%;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
+	border-radius: 8px !important;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	padding: 8px 10px;
+	font: inherit;
+}
+.monaco-workbench .backboard-composer-flow textarea { min-height: 92px; resize: vertical; }
+.monaco-workbench .backboard-composer-flow button {
+	border: 0;
+	border-radius: 8px !important;
+	padding: 7px 10px;
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.monaco-workbench .backboard-composer-flow button:hover { background: var(--vscode-list-hoverBackground); }
+.monaco-workbench .backboard-composer-flow :is(button, input, textarea):focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.monaco-workbench .backboard-composer-flow-status { margin: 0; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+
+/*
+ * Image/video model picker: a compact single-column popover modal matching
+ * the composer's context menu and the model provider routing dialog.
+ */
+.monaco-workbench .backboard-composer-flow.backboard-composer-model-picker {
+	width: 240px;
+	max-width: calc(100% - 16px);
+	padding: 0;
+}
+.monaco-workbench .backboard-composer-flow.backboard-composer-model-picker .backboard-composer-flow-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	padding: 9px 10px 8px;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-widget-border)) 52%, transparent);
+}
+.monaco-workbench .backboard-composer-model-heading {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	flex: 1;
+}
+.monaco-workbench .backboard-composer-flow-header .backboard-composer-model-heading strong {
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 16px;
+	color: var(--vscode-foreground);
+}
+.monaco-workbench .backboard-composer-model-subtitle {
+	overflow: hidden;
+	margin-top: 1px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 9.5px;
+	line-height: 13px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.monaco-workbench .backboard-composer-flow-header .backboard-composer-model-actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	flex-shrink: 0;
+}
+.monaco-workbench .backboard-composer-flow-header button.backboard-composer-model-refresh {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	flex-shrink: 0;
+}
+.monaco-workbench .backboard-composer-flow-header button.backboard-composer-model-refresh:hover:not(:disabled) {
+	background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground));
+	color: var(--vscode-foreground);
+}
+.monaco-workbench .backboard-composer-flow-header button.backboard-composer-model-refresh:disabled {
+	opacity: 0.6;
+	pointer-events: none;
+}
+.monaco-workbench .backboard-composer-flow.backboard-composer-model-picker .backboard-composer-flow-body {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	padding: 4px;
+	overflow: hidden;
+}
+.monaco-workbench .backboard-composer-flow .backboard-composer-model-search {
+	box-sizing: border-box;
+	width: calc(100% - 4px);
+	height: 28px;
+	margin: 2px 2px 4px;
+	padding: 0 8px;
+	border: 1px solid color-mix(in srgb, var(--vscode-editorWidget-border, var(--vscode-widget-border)) 62%, transparent);
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--vscode-input-background, var(--vscode-editorWidget-background)) 78%, transparent);
+	color: var(--vscode-input-foreground, var(--vscode-foreground));
+	font-family: inherit;
+	font-size: 11.5px;
+	outline: none;
+}
+.monaco-workbench .backboard-composer-flow .backboard-composer-model-search:focus {
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 70%, transparent);
+}
+.monaco-workbench .backboard-composer-model-list {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	max-height: min(280px, 45vh);
+	overflow-y: auto;
+	padding: 2px;
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in srgb, var(--vscode-foreground) 22%, transparent) transparent;
+}
+.monaco-workbench .backboard-composer-flow .backboard-composer-model-choice {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 16px;
+	align-items: center;
+	gap: 7px;
+	width: 100%;
+	min-height: 29px;
+	padding: 4px 8px;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--vscode-foreground);
+	font: inherit;
+	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+}
+.monaco-workbench .backboard-composer-flow .backboard-composer-model-choice:hover,
+.monaco-workbench .backboard-composer-flow .backboard-composer-model-choice.keyboard-focused {
+	background: var(--vscode-list-hoverBackground);
+}
+.monaco-workbench .backboard-composer-flow .backboard-composer-model-choice.selected {
+	background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+}
+.monaco-workbench .backboard-composer-model-choice-copy {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	overflow: hidden;
+}
+.monaco-workbench .backboard-composer-model-choice-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12px;
+	line-height: 16px;
+}
+.monaco-workbench .backboard-composer-model-choice.selected .backboard-composer-model-choice-label {
+	font-weight: 500;
+}
+.monaco-workbench .backboard-composer-model-check {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--vscode-foreground);
+	font-size: 13px;
+}
+
+/* Reuse the actual animated mark as a quiet, cropped background watermark. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-mark,
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-empty-mark {
+	position: static;
+	order: -1;
+	width: 36px;
+	height: 48px;
+	margin: 0 0 14px;
+	transform: none;
+	opacity: 0.85;
+	filter: none;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base {
+	fill: #72a5c6;
+	stroke: none;
+	opacity: 0.3;
+}
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base { fill: #276b92; opacity: 0.4; }
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark > g { opacity: 0.8; }
+
+/* Keep onboarding's flowing layers visible in the centered identity mark. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy .backboard-panel-water-mark > g {
+	display: initial;
+	opacity: 1;
+}
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy .backboard-panel-water-mark,
+.monaco-workbench.hc-light .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy .backboard-panel-water-mark {
+	filter: saturate(1.25) brightness(0.62);
+}
+
+/* Quiet labels and consistent unboxed icons in the composer Add menu. */
+.monaco-workbench .backboard-composer-add-menu .monaco-list-row.action .codicon {
+	font-size: 16px;
+	color: var(--vscode-descriptionForeground);
+	background: transparent;
+}
+.monaco-workbench .backboard-composer-add-menu .monaco-list-row.action .description {
+	margin-left: auto;
+	padding-left: 16px;
+	font-size: 11px;
+	text-align: right;
+}
+
+/* One clear identity mark above the welcome text, with no animated backdrop. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy > .backboard-panel-empty-mark {
+	width: 54px;
+	height: 72px;
+	margin-bottom: 20px;
+	opacity: 1;
+}
+
+/* Editor composer proportions and controls across Simple, Editor and Advanced. */
+/* Reserve the full control height; the 28px model/send controls previously
+ * overflowed a 24px toolbar and were cropped by its overflow boundary. */
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .interactive-input-part {
+	--bb-composer-control-size: 28px;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .chat-input-toolbars {
+	flex: 0 0 28px;
+	height: 28px;
+	min-height: 28px;
+	align-items: center;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .chat-input-toolbars :is(.chat-input-toolbar, .chat-execute-toolbar, .monaco-action-bar, .actions-container, .action-item) {
+	min-height: 28px;
+	box-sizing: border-box;
+	align-items: center;
+}
+
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .interactive-input-part .chat-input-container {
+	border-radius: 22px !important;
+	padding: 8px 8px 6px !important;
+	gap: 4px !important;
+	min-height: 80px;
+	--bb-composer-surface: var(--vscode-editorWidget-background);
+	background: var(--bb-composer-surface) !important;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent) !important;
+	box-shadow: 0 2px 8px #0000000a !important;
+}
+:is(.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.vs.agent-sessions-workbench, .monaco-workbench.vs) .interactive-session .interactive-input-part .chat-input-container {
+	--bb-composer-surface: #fff;
+	background: var(--bb-composer-surface) !important;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .interactive-input-part .chat-input-container:focus-within {
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 45%, var(--vscode-editorWidget-background)) !important;
+	box-shadow: 0 0 0 2px #1769d20d !important;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .chat-input-toolbars .combined-model-provider-trigger {
+	height: 28px !important;
+	border-radius: 14px !important;
+	padding: 0 4px !important;
+	gap: 4px;
+	background: transparent !important;
+	border: 0 !important;
+	box-shadow: none !important;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .combined-model-provider-trigger-thinking {
+	display: inline !important;
+	flex: 0 0 auto !important;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label:is(.codicon-arrow-up, .codicon-newline, .codicon-stop-circle) {
+	width: 28px !important;
+	height: 28px !important;
+	min-width: 28px !important;
+	padding: 0 !important;
+	border-radius: 50% !important;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: #1769d2 !important;
+	color: #fff !important;
+}
+:is(.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer, .monaco-workbench.agent-sessions-workbench, .monaco-workbench) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label:is(.codicon-arrow-up, .codicon-newline) {
+	background: color-mix(in srgb, var(--vscode-foreground) 10%, var(--vscode-editorWidget-background)) !important;
+	color: var(--vscode-descriptionForeground) !important;
+	opacity: 1 !important;
+}
+
+/* Consistent gaps and optical centering without expanding the control row. */
+.monaco-workbench .interactive-session .chat-input-toolbars {
+	column-gap: 4px;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .chat-input-toolbars .monaco-action-bar .actions-container {
+	gap: 4px;
+}
+.monaco-workbench .interactive-session .chat-input-toolbars .combined-model-provider-trigger-chevron {
+	margin: 0;
+	width: 12px;
+	flex: 0 0 12px;
+	text-align: center;
+}
+.monaco-workbench .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label:is(.codicon-arrow-up, .codicon-newline, .codicon-stop-circle)::before {
+	font-size: 16px;
+	line-height: 16px;
+	width: 16px;
+	height: 16px;
+	margin: 0;
+	transform: none;
+	color: inherit;
+	opacity: 1;
+}
+.monaco-workbench .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label:is(.codicon-arrow-up, .codicon-newline)::before {
+	color: var(--vscode-descriptionForeground) !important;
+}
+
+/* Light-blue onboarding flow, with deeper blue definition on light themes. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy .backboard-panel-water-mark {
+	filter: none !important;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark linearGradient:first-child stop {
+	stop-color: #A6DEFA;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark linearGradient:first-child stop:is(:first-child, :last-child) {
+	stop-color: #77BCE5;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-mark linearGradient:first-child stop:nth-child(3) {
+	stop-color: #428FBE;
+}
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-water-strand-base {
+	fill: #6BB1DB;
+	opacity: 1;
+}
+.monaco-workbench.vs .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy .backboard-panel-water-mark {
+	filter: saturate(1.15) brightness(0.86) !important;
+}
+
+/* Editor-panel treatment measured against Devin's local chat. Keep these
+ * overrides on this host: full-page chat and the model picker retain their
+ * own presentation. The prompt dots occupy the outside gutter. */
+.monaco-workbench .part.auxiliarybar:has(> .composite.title.has-chat-tabs) {
+	--bb-editor-panel-gutter: 16px;
+	--bb-devin-card-surface: color-mix(in srgb, var(--vscode-foreground) 4%, var(--bb-panel-surface));
+	--bb-devin-card-border: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-recent-chats {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy {
+	font-weight: 400;
+	text-transform: none;
+}
+
+
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .chat-view-title-tab:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -2px;
+}
+
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .chat-view-title-tab:focus-within .chat-view-title-tab-close {
+	width: 16px;
+	opacity: 0.7;
+}
+
+.monaco-workbench:is(.hc-black, .hc-light) .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session .interactive-input-part .chat-input-container:focus-within {
+	border-color: var(--vscode-focusBorder) !important;
+}
+
+/* Individual activity disclosures provide the navigation within an open
+ * turn. Retain the turn-level control only for previously collapsed turns. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-backboard-turn-work-expanded > .chat-backboard-turn-fold {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-backboard-turn-work {
+	padding-block: 0;
+	border: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-terminal-thinking-collapsible > .chat-used-context-label,
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-terminal-collapsed-output-preview {
+	border: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-terminal-thinking-collapsible > .chat-used-context-label .monaco-button :is(.monaco-button-label, .monaco-button-mdlabel)::before {
+	content: '●';
+	color: var(--vscode-textLink-foreground);
+	font-size: 8px;
+}
+
+/* Diff previews have a filename header, trailing counts, and unnumbered
+ * syntax-highlighted lines, just like the reference's native edit cards. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview {
+	border-radius: 10px;
+	border-color: var(--bb-devin-card-border);
+	background: var(--bb-devin-card-surface);
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview > .chat-codeblock-pill-widget {
+	width: 100%;
+	min-height: 36px;
+	padding: 9px 12px;
+	font-size: 12px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview > .chat-codeblock-pill-widget .icon-label {
+	flex: 1 1 auto;
+	font-weight: 400;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview > .chat-codeblock-pill-widget :is(.label-added, .label-removed) {
+	flex: 0 0 auto;
+	font-size: 11px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview :is(.chat-external-edit-diff-gutter, .chat-external-edit-diff-marker) {
+	display: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview .chat-external-edit-diff-row {
+	min-height: 18px;
+	padding-inline: 8px;
+	font-size: 12px;
+	line-height: 18px;
+	box-shadow: none;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-diff-text .monaco-tokenized-source {
+	background: transparent;
+	font: inherit;
+	line-height: inherit;
+}
+
+.monaco-workbench.vs-dark .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript {
+	--bb-cursor-diff-added-background: #29372d;
+	--bb-cursor-diff-removed-background: #432c30;
+}
+
+.monaco-workbench:is(.hc-black, .hc-light) .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview .chat-external-edit-diff-marker {
+	display: block;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview {
+	margin-block: 8px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview > .chat-external-edit-copy {
+	position: absolute;
+	top: 9px;
+	right: 8px;
+	margin: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview > .chat-external-edit-copy + .chat-external-edit-copy {
+	right: 28px;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview:is(:hover, :focus-within) > .chat-codeblock-pill-widget :is(.label-added, .label-removed) {
+	visibility: hidden;
+}
+
+/* With recents in the history pop-out, the welcome mark owns the remaining
+ * space. Flex sizing also keeps an empty draft's controls above the status
+ * bar as attachments or a wrapped prompt change the composer's height. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-composer .interactive-session.chat-composer-empty > .chat-welcome-view-container {
+	flex: 1 1 0;
+	height: auto !important;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-home {
+	grid-template-rows: minmax(0, 1fr);
+	place-items: center;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-title {
+	font-size: 16px;
+	font-weight: 400;
+	letter-spacing: 0;
+}
+
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-welcome-copy > .backboard-panel-empty-mark {
+	width: 54px;
+	height: 72px;
+	margin-bottom: 18px;
+}
+
+
+/* A delegated conversation is a compact child chip beside its parent tab. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab.chat-view-title-tab-subagent {
+	flex: 0 0 auto;
+	min-width: 0;
+	max-width: 160px;
+	height: 24px;
+	margin: 0 6px;
+	padding: 0 8px;
+	gap: 6px;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+	box-shadow: none;
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab.chat-view-title-tab-subagent.chat-view-title-tab-active {
+	border-color: color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-subagent .chat-view-title-tab-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 14px;
+	width: 14px;
+	height: 14px;
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-subagent .chat-view-title-tab-label {
+	font-size: 12px;
+	line-height: 16px;
+}
+
+/* Sparse logo-inspired contours leave the welcome content unobstructed. */
+.monaco-workbench .part.auxiliarybar .chat-viewpane .backboard-panel-empty-home::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+	background-color: var(--vscode-foreground);
+	opacity: 0.24;
+	mask: url('./chatWelcomeContours.svg') center / cover no-repeat;
+	-webkit-mask: url('./chatWelcomeContours.svg') center / cover no-repeat;
+}
+
+.monaco-workbench:is(.hc-black, .hc-light) .part.auxiliarybar .chat-viewpane .backboard-panel-empty-home::before {
+	display: none;
+}

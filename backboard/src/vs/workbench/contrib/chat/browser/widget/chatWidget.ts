@@ -2711,8 +2711,8 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 		this.listWidget.setViewModel(this.viewModel);
 
-		const rightPanelInputPlaceholder = this.container.closest('.part.auxiliarybar')
-			? localize('chat.input.placeholder.editorRightPanel', "Do anything")
+		const rightPanelInputPlaceholder = this.container.closest('.part.auxiliarybar, .part.sessionspart, .optimus-chat-view')
+			? localize('chat.input.placeholder.backboardContextTip', "Tip: Type @ conversation to bring in context from another chat")
 			: undefined;
 
 		if (rightPanelInputPlaceholder) {
@@ -2729,6 +2729,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			this.inputEditor.updateOptions({ placeholder: this.viewModel.inputPlaceholder });
 		}
 
+		// The placeholder is assigned after the input's initial layout. Measure it
+		// once the mounted composer has its final width, without requiring resize.
+		this.viewModelDisposables.add(dom.scheduleAtNextAnimationFrame(dom.getWindow(this.container), () => {
+			this.inputPart.layout(this.bodyDimension?.width ?? this.container.clientWidth);
+		}));
+
 		const renderImmediately = this.configurationService.getValue<boolean>('chat.experimental.renderMarkdownImmediately');
 		const delay = renderImmediately ? MicrotaskDelay : 0;
 		this.viewModelDisposables.add(Event.runAndSubscribe(Event.accumulate(this.viewModel.onDidChange, delay), (events => {
@@ -2744,6 +2750,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			// Update the editor's placeholder text when it changes in the view model
 			if (events?.some(e => e?.kind === 'changePlaceholder')) {
 				this.inputEditor.updateOptions({ placeholder: rightPanelInputPlaceholder ?? this.viewModel.inputPlaceholder });
+				this.inputPart.layout(this.bodyDimension?.width ?? this.container.clientWidth);
 			}
 
 			const itemChangeEvents = events?.filter((event): event is IChatItemChangeEvent => event?.kind === 'changeItem');
@@ -2855,6 +2862,10 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 	setInputPlaceholder(placeholder: string): void {
 		this.viewModel?.setInputPlaceholder(placeholder);
+		this.inputEditor.updateOptions({ placeholder });
+		if (this.inputPart) {
+			this.inputPart.layout(this.bodyDimension?.width ?? this.container.clientWidth);
+		}
 	}
 
 	resetInputPlaceholder(): void {

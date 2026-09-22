@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 @import url('./codexTheme.css');
+@import url('../../../workbench/contrib/chat/browser/widget/media/chatDevinPresentation.css');
 
 /* T3 Code's chat treatment, applied to the Simple-mode transcript.
  * Ported from https://github.com/pingdotgg/t3code (apps/web/src/index.css).
@@ -361,4 +362,39 @@
 	border-color: var(--backboard-border);
 	background: var(--backboard-muted);
 	color: var(--backboard-muted-foreground);
+}
+
+/* Questions keep the normal composer's inset and editor size. Only the
+ * question area scrolls when its contents would take over the chat. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.sessionspart .backboard-composer .interactive-session > .interactive-input-part:has(.chat-question-editor-panel:not(.chat-question-carousel-used), .chat-tool-confirmation-carousel) {
+	padding: 6px 28px 10px !important;
+	background: transparent !important;
+
+	.chat-question-carousel-widget-container,
+	.chat-tool-confirmation-carousel-container {
+		min-height: 0;
+		max-height: min(252px, calc(30vh + 12px));
+		overflow-y: auto;
+		overscroll-behavior-y: contain;
+		padding: 6px;
+		box-sizing: border-box;
+		border-radius: 14px 14px 0 0;
+		background: var(--bb-devin-card-surface);
+	}
+
+	.chat-question-editor-panel:not(.chat-question-carousel-used),
+	.chat-tool-confirmation-carousel {
+		box-sizing: border-box;
+		max-height: min(240px, 30vh);
+		overflow-y: auto;
+		margin-bottom: 0;
+	}
+
+	.interactive-input-and-side-toolbar {
+		flex-shrink: 0;
+		padding: 0 6px 6px;
+		box-sizing: border-box;
+		border-radius: 0 0 14px 14px;
+		background: var(--bb-devin-card-surface);
+	}
 }

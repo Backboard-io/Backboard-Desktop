@@ -72,9 +72,12 @@ export function createBackboardSessionTypePickerDelegate(
 			if (!canChangeSessionProvider()) {
 				return;
 			}
-			commandService
-				.executeCommand(`workbench.action.chat.openNewChatSessionInPlace.${provider}`)
-				.then(undefined, () => { /* provider not registered; the rail keeps its current selection */ });
+			return commandService
+				// The in-place action requires a destination even for the sidebar.
+				// Omitting it leaves the draft on its previous provider, so the
+				// newly selected model cannot be used and Send stays disabled.
+				.executeCommand(`workbench.action.chat.openNewChatSessionInPlace.${provider}`, 'sidebar')
+				.then(() => undefined);
 		},
 
 		getAllowedSessionProviders: () => {

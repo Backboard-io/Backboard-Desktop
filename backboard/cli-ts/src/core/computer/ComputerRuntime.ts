@@ -1,4 +1,5 @@
 import type { ModelRoute } from "../../providers/backboard/types.ts";
+import { canonicalAppName } from "../../utils/appNames.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import { createPlatform, type Platform } from "../platform/index.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
@@ -20,6 +21,7 @@ import {
 import { describeStep, JevSubagent } from "./JevSubagent.ts";
 import {
 	type JevDecider,
+	type JevSurface,
 	JevUseLoop,
 	type JevWriterPacket,
 } from "./JevUseLoop.ts";
@@ -44,6 +46,7 @@ export interface ComputerRuntimeOptions {
 	jevWriter?: RoutedJevWriter;
 	/** Injectable for tests; defaults to the bundled or installed Cua Driver. */
 	resolveCuaDriver?: () => string | undefined;
+	browserFactory?: (path: string, name: string) => CuaBrowserSurface;
 }
 
 export class ComputerRuntime {
@@ -53,12 +56,19 @@ export class ComputerRuntime {
 	private readonly resolveCuaDriver: () => string | undefined;
 	private lastObservation: ComputerObservation | null = null;
 	private readonly browsers = new Map<string, CuaBrowserSurface>();
+	private readonly browserFactory: (
+		path: string,
+		name: string,
+	) => CuaBrowserSurface;
 
 	constructor(options: ComputerRuntimeOptions = {}) {
 		this.platform = options.platform ?? createPlatform();
 		this.jevDecider = options.jevDecider;
 		this.jevWriter = options.jevWriter;
 		this.resolveCuaDriver = options.resolveCuaDriver ?? resolveCuaDriverBinary;
+		this.browserFactory =
+			options.browserFactory ??
+			((path, name) => new CuaBrowserSurface(path, name));
 	}
 
 	async execute(
@@ -79,7 +89,8 @@ export class ComputerRuntime {
 		if (
 			actions.length > 1 &&
 			results.every((r) => r.success) &&
-			actions[actions.length - 1]?.action !== "screenshot"
+			actions[actions.length - 1]?.action !== "screenshot" &&
+			actions[actions.length - 1]?.action !== "task"
 		) {
 			const observation = await new ScreenCapture(
 				ctx.sessionId,
@@ -99,6 +110,41 @@ export class ComputerRuntime {
 		ctx: ToolContext,
 	): Promise<ComputerObservation | ComputerActionResult> {
 		if (action.action === "screenshot") {
+			if (action.appName) {
+				// This image is window-relative evidence, not a desktop-coordinate
+				// observation authorizing direct clicks on whichever app is foreground.
+				this.lastObservation = null;
+				const surface = this.browsers.get(
+					canonicalAppName(action.appName).toLowerCase(),
+				);
+				if (!surface)
+					return {
+						success: false,
+						action: "screenshot",
+						verification: "failed",
+						summary: `No active computer-use browser for ${action.appName}. Start a task in that app first.`,
+					};
+				try {
+					return {
+						success: true,
+						action: "screenshot",
+						verification: "unknown",
+						summary: `Captured the exact ${action.appName} task window. Coordinates are window-relative; continue with a task action.`,
+						...(await surface.capture(
+							await new ComputerPaths(ctx.sessionId).nextScreenshotPath(),
+							ctx.signal,
+						)),
+					};
+				} catch (error) {
+					return {
+						success: false,
+						action: "screenshot",
+						verification: "failed",
+						summary: `Could not capture ${action.appName}.`,
+						error: errorMessage(error),
+					};
+				}
+			}
 			const observation = await new ScreenCapture(
 				ctx.sessionId,
 				this.platform,
@@ -174,13 +220,34 @@ export class ComputerRuntime {
 			};
 		}
 		const driver = this.resolveCuaDriver();
-		const surface =
-			(driver && isBrowserApp(action.appName)
-				? await this.browserSurface(driver, action.appName, ctx.signal)
-				: undefined) ??
-			(driver
-				? new CuaDriverSurface(driver, action.appName)
-				: new PlatformJevSurface(this.platform, action.appName));
+		let surface: JevSurface;
+		try {
+			if (isBrowserApp(action.appName)) {
+				if (!driver)
+					throw new Error(
+						"Cua Driver is unavailable. Browser tasks require its DOM and canvas support.",
+					);
+				if (/\b(safari|firefox|orion)\b/i.test(action.appName)) {
+					throw new Error(
+						`${action.appName} does not support the driver's DOM/canvas route. Use Brave, Chrome, or Edge; when the user did not specify a browser, use appName "Browser". Do not retry this task through browser toolbar accessibility.`,
+					);
+				}
+				surface = await this.browserSurface(driver, action.appName, ctx.signal);
+			} else {
+				surface = driver
+					? new CuaDriverSurface(driver, action.appName)
+					: new PlatformJevSurface(this.platform, action.appName);
+			}
+		} catch (error) {
+			if (ctx.signal.aborted) throw error;
+			return {
+				success: false,
+				action: "task",
+				verification: "failed",
+				summary: `Could not prepare computer use in ${action.appName}.`,
+				error: errorMessage(error),
+			};
+		}
 		// Shown to a host as a sub-agent of this tool call, with Jev as its brain.
 		const subagent = ctx.toolCallId
 			? new JevSubagent(ctx.bus, ctx.toolCallId)
@@ -246,25 +313,25 @@ export class ComputerRuntime {
 	/**
 	 * The DOM-driven browser, shared by every task of this runtime: closing it
 	 * with each task would throw away the page the user asked to be taken to.
-	 * Undefined when the requested browser cannot expose a DOM route, in which
-	 * case the caller drives the named browser through accessibility instead.
+	 * Preparation errors remain visible. Falling back to browser toolbar-only
+	 * accessibility silently removes DOM/canvas support and can loop indefinitely.
 	 */
 	private async browserSurface(
 		driver: string,
 		appName: string,
 		signal: AbortSignal,
-	): Promise<CuaBrowserSurface | undefined> {
-		const key = appName.toLowerCase().trim();
+	): Promise<CuaBrowserSurface> {
+		const key = canonicalAppName(appName).toLowerCase();
 		const existing = this.browsers.get(key);
 		if (existing) return existing;
-		const surface = new CuaBrowserSurface(driver, appName);
+		const surface = this.browserFactory(driver, appName);
 		try {
 			await surface.observe(signal);
 			this.browsers.set(key, surface);
 			return surface;
-		} catch {
-			await surface.dispose();
-			return undefined;
+		} catch (error) {
+			await surface.dispose().catch(() => {});
+			throw error;
 		}
 	}
 

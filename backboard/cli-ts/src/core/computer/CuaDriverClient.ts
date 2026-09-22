@@ -49,7 +49,11 @@ export class CuaDriverClient {
 		const client = await this.connect(signal);
 		const result = await client.callTool({ name, arguments: args }, undefined, {
 			signal,
-			timeout: CALL_TIMEOUT_MS,
+			// A bounded drawing can contain 4096 points paced at 8ms each.
+			timeout:
+				name === "browser_pointer" && Array.isArray(args.strokes)
+					? 60_000
+					: CALL_TIMEOUT_MS,
 		});
 		const data = (result.structuredContent ?? {}) as T & {
 			status?: string;
@@ -80,7 +84,9 @@ export class CuaDriverClient {
 			return {
 				ok: false,
 				data,
-				error: contentText(result.content) || `refused: ${data.escalation?.reason ?? "no effect"}`,
+				error:
+					contentText(result.content) ||
+					`refused: ${data.escalation?.reason ?? "no effect"}`,
 				inputNotDispatched: isUndispatchedRefusal(contentText(result.content)),
 			};
 		}
@@ -140,5 +146,9 @@ function contentText(content: unknown): string {
 /** Driver's canonical action projection puts the detailed refusal in text.
  * Only these exact pre-dispatch outcomes permit a new observation/decision. */
 export function isUndispatchedRefusal(text: string): boolean {
-	return /^refused \(browser_ref_stale\):/.test(text) || text === "refused (browser_action_unavailable): click target is no longer visible, enabled, or unobstructed";
+	return (
+		/^refused \(browser_ref_stale\):/.test(text) ||
+		text ===
+			"refused (browser_action_unavailable): click target is no longer visible, enabled, or unobstructed"
+	);
 }

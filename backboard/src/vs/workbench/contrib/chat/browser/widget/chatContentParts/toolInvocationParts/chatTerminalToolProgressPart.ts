@@ -822,7 +822,13 @@ export class ChatTerminalToolProgressPart extends BaseChatToolInvocationSubPart 
 		const hasSnapshot = IChatToolInvocation.isComplete(this.toolInvocation);
 		this._thinkingCollapsibleWrapper.domNode.classList.toggle('chat-terminal-has-snapshot', hasSnapshot);
 		if (hasSnapshot) {
-			this._snapshotOutputElement ??= dom.$('pre.chat-terminal-snapshot-output', { tabIndex: 0, role: 'region', 'aria-label': localize('chat.terminal.outputLabel', "Command output") });
+			if (!this._snapshotOutputElement) {
+				this._snapshotOutputElement = dom.$('pre.chat-terminal-snapshot-output', { tabIndex: 0, role: 'region', 'aria-label': localize('chat.terminal.outputLabel', "Command output") });
+				// Let the native output viewport scroll without the chat list consuming the gesture.
+				this._register(dom.addDisposableListener(this._snapshotOutputElement, dom.EventType.MOUSE_WHEEL, event => {
+					event.stopPropagation();
+				}, { passive: true }));
+			}
 			this._snapshotOutputElement.textContent = getPlainTerminalOutput(output ?? this._terminalData.terminalCommandOutput?.text, this._commandText);
 			this._thinkingCollapsibleWrapper.domNode.appendChild(this._snapshotOutputElement);
 		}
@@ -1690,6 +1696,9 @@ class ChatTerminalToolOutputSection extends Disposable {
 		// The terminal's bounded viewport owns output scrolling. Capture wheel
 		// gestures so the chat does not move while the user reads terminal history.
 		this._register(dom.addDisposableListener(this.domNode, dom.EventType.MOUSE_WHEEL, event => {
+			if (!this.isExpanded || event.ctrlKey || event.metaKey) {
+				return;
+			}
 			// Always prevent scrolling the chat list when mouse is over terminal output
 			if (this.isExpanded) {
 				event.preventDefault();
@@ -1697,11 +1706,16 @@ class ChatTerminalToolOutputSection extends Disposable {
 			}
 
 			// Try to scroll the terminal if we have delta
-			if (!this.isExpanded || !event.deltaY || event.ctrlKey || event.metaKey || event.shiftKey) {
-				return;
-			}
-			const lines = getTerminalWheelScrollLines(event.deltaY, event.deltaMode, this._computeRowHeightPx());
-			const didScroll = this._mirror?.scrollByLines(lines) ?? this._snapshotMirror?.scrollByLines(lines) ?? false;
+			const horizontal = event.shiftKey ? event.deltaY || event.deltaX : event.deltaX;
+			const vertical = event.shiftKey ? 0 : event.deltaY;
+			const lines = getTerminalWheelScrollLines(vertical, event.deltaMode, this._computeRowHeightPx());
+			const didScroll = vertical !== 0 && (this._mirror?.scrollByLines(lines) || this._snapshotMirror?.scrollByLines(lines) || false);
+			const position = this._scrollableContainer!.getScrollPosition();
+			const scale = event.deltaMode === 1 ? this._computeRowHeightPx() : event.deltaMode === 2 ? this.domNode.clientHeight : 1;
+			this._scrollableContainer!.setScrollPosition({
+				scrollLeft: position.scrollLeft + horizontal * scale,
+				scrollTop: position.scrollTop + (didScroll ? 0 : vertical * scale)
+			});
 			if (didScroll) {
 				this._isAtBottom = this._computeIsAtBottom();
 			}

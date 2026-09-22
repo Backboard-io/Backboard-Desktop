@@ -43,6 +43,18 @@ suite('ChatViewPane CSS', () => {
 		assert.match(sideChat, /background:\s*var\(--backboard-side-chat-bg\)/);
 	});
 
+	test('keeps editor chat surfaces theme-driven without a selected-tab accent', () => {
+		const surfaces = ruleBody(panelCss, '.monaco-workbench .part.auxiliarybar:has(> .composite.title.has-chat-tabs),');
+		const activeTab = ruleBody(panelCss, '.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-active,');
+		const keyboardFocus = ruleBody(panelCss, '.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .chat-view-title-tab:focus-visible');
+
+		assert.match(surfaces, /--bb-panel-surface:\s*var\(--vscode-sideBar-background/);
+		assert.match(surfaces, /--bb-header-surface:\s*var\(--vscode-sideBar-background/);
+		assert.doesNotMatch(panelCss, /--bb-(?:panel-surface|header-surface|tab-divider|devin-card-surface|devin-card-border):\s*(?:#|rgb)/);
+		assert.match(activeTab, /box-shadow:\s*none/);
+		assert.match(keyboardFocus, /outline:\s*1px solid var\(--vscode-focusBorder\)/);
+	});
+
 	test('renders queued messages as one compact shared section', () => {
 		const transcriptRoot = '.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript';
 		const pendingDivider = ruleBody(chatCss, `${transcriptRoot} .interactive-item-container.pending-divider:not(.system-initiated-divider)`);
@@ -355,7 +367,7 @@ suite('ChatViewPane CSS', () => {
 		assert.match(sharedAgentPill, /border:\s*none/);
 		assert.match(sharedAgentPill, /height:\s*35px/);
 		assert.match(sharedAgentPill, /background:\s*transparent/);
-		assert.match(activeTab, /box-shadow:\s*inset 0 1px 0 var\(--vscode-focusBorder\)/);
+		assert.match(activeTab, /box-shadow:\s*none/);
 		assert.match(panelToggle, /display:\s*flex/);
 		// The strip never collapses to a single header tab — the draft and every
 		// open session stay visible as tabs.

@@ -45,7 +45,7 @@ suite('Editor-panel approval question presentation', () => {
 		const choices = widget.domNode.querySelectorAll<HTMLElement>('.chat-buttons .monaco-button:not(.monaco-dropdown-button)');
 		assert.strictEqual(choices.length, 2);
 		assert.strictEqual(getComputedStyle(choices[0]).backgroundColor, 'rgba(0, 0, 0, 0)');
-		assert.strictEqual(getComputedStyle(choices[0]).fontSize, '14px');
+		assert.strictEqual(getComputedStyle(choices[0]).fontSize, '13px');
 		assert.ok(getComputedStyle(choices[0], '::before').content.includes('approval-choice'));
 		assert.strictEqual(getComputedStyle(widget.domNode.querySelector('.chat-buttons')!).flexDirection, 'column');
 		assert.ok(widget.domNode.querySelector('.monaco-dropdown-button'));

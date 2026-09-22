@@ -510,6 +510,18 @@ suite('ChatCoreToolProgressPart', () => {
 		assert.strictEqual(part.domNode.querySelectorAll('.chat-core-tool-card-item').length, 1);
 	});
 
+	test('shows exact-window task evidence alongside success or failure feedback', () => {
+		for (const success of [true, false]) {
+			const part = createPart({
+				kind: 'coreTool', toolKind: 'computer', input: { actions: [{ action: 'task' }] },
+				output: { success, results: [{ action: 'task', success, screenshotPath: '/tmp/task.png', windowTitle: 'Pixlr', outcome: success ? 'done' : 'stalled' }] },
+			});
+			assert.strictEqual(part.domNode.querySelectorAll('img').length, 1);
+			assert.strictEqual(part.domNode.querySelector('img')?.alt, 'Pixlr');
+			assert.ok(part.domNode.querySelector('.chat-core-tool-card-header'));
+		}
+	});
+
 	test('retains screenshot failure and missing-path feedback', () => {
 		for (const result of [{ success: false, error: 'Capture denied' }, { success: true }, { success: true, screenshotPath: 'https://example.com/image.png' }]) {
 			const part = createPart({ kind: 'coreTool', toolKind: 'computer', input: { actions: [{ action: 'screenshot' }] }, output: { results: [result] } });

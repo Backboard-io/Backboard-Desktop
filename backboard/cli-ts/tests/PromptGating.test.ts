@@ -14,6 +14,20 @@ function activeToolNames(config: Config): string[] {
 }
 
 describe("prompt tool gating", () => {
+	it("routes all model profiles through the same goal-preserving computer agent", () => {
+		for (const profile of ["default", "openai", "anthropic", "glm"] as const) {
+			const prompt = getToolPrompt("Computer", {
+				profile,
+				enabledTools: ["Computer"],
+			});
+			expect(prompt).toContain("WHOLE request");
+			expect(prompt).toContain('use appName "Browser"');
+			expect(prompt).toContain("Do not choose Safari or Firefox");
+			expect(prompt).toContain("Do not change drawing into AI generation");
+			expect(prompt).toContain('"action":"task"');
+			expect(prompt).toContain('"action":"screenshot","appName":"Brave"');
+		}
+	});
 	it("shares capability assembly and concise workflow rules across profiles", () => {
 		for (const profile of ["default", "openai", "anthropic", "glm"] as const) {
 			const withoutClient = getSystemPrompt({ profile, enabledTools: [] });

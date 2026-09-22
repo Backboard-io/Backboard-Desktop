@@ -141,7 +141,7 @@
 	height: 14px;
 	flex: 0 0 auto;
 	background-color: currentColor;
-	opacity: 0.82;
+	opacity: 1;
 }
 
 .combined-model-provider-rail-provider-icon.provider-claude,
@@ -851,4 +851,309 @@
 
 .monaco-workbench.monaco-reduce-motion .combined-model-provider-refresh-spinning {
 	animation: none;
+}
+
+/* Model identity stays visible independently of the billing provider. */
+.combined-model-logo {
+	display: inline-block;
+	width: 16px;
+	height: 16px;
+	flex: 0 0 16px;
+	align-self: center;
+	background-color: currentColor;
+}
+.combined-model-provider-row > .combined-model-logo { margin-right: 0; }
+
+.combined-model-logo.provider-inclusionai {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_inclusionai.png') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-inference {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_inference.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-deep-seek {
+	mask: url('../../media/model-provider-icons/ai_deep_seek.svg') center / contain no-repeat;
+	background-color: #4d6bfe;
+}
+
+:is(.combined-model-logo, .combined-model-provider-rail-provider-icon, .combined-model-provider-brand-icon).provider-open-ai {
+	mask: url('../../media/model-provider-icons/ai_open_ai.svg') center / contain no-repeat;
+	background-color: #10a37f;
+}
+
+:is(.combined-model-logo, .combined-model-provider-rail-provider-icon, .combined-model-provider-brand-icon).provider-claude {
+	mask: url('../../media/model-provider-icons/ai_claude.svg') center / contain no-repeat;
+	background-color: #d97757;
+}
+
+:is(.combined-model-logo, .combined-model-provider-rail-provider-icon, .combined-model-provider-brand-icon).provider-google {
+	mask: url('../../media/model-provider-icons/ai_google.svg') center / contain no-repeat;
+	background-color: #4285f4;
+}
+
+.combined-model-logo.provider-mistral {
+	mask: url('../../media/model-provider-icons/ai_mistral.svg') center / contain no-repeat;
+	background-color: #ff7000;
+}
+
+:is(.combined-model-logo, .combined-model-provider-rail-provider-icon, .combined-model-provider-brand-icon).provider-cohere {
+	mask: url('../../media/model-provider-icons/ai_cohere.svg') center / contain no-repeat;
+	background-color: #d18ee2;
+}
+
+:is(.combined-model-logo, .combined-model-provider-rail-provider-icon, .combined-model-provider-brand-icon).provider-x-ai {
+	mask: url('../../media/model-provider-icons/ai_x_ai.svg') center / contain no-repeat;
+	background-color: var(--vscode-foreground);
+}
+
+:is(.combined-model-logo, .combined-model-provider-rail-provider-icon, .combined-model-provider-brand-icon).provider-backboard {
+	mask: url('../../media/model-provider-icons/ai_backboard.svg') center / contain no-repeat;
+	background-color: #8b9dff;
+}
+
+:is(.combined-model-logo, .combined-model-provider-rail-provider-icon, .combined-model-provider-brand-icon).provider-anthropic {
+	mask: url('../../media/model-provider-icons/ai_anthropic.svg') center / contain no-repeat;
+	background-color: #d97757;
+}
+
+:is(.combined-model-logo, .combined-model-provider-rail-provider-icon, .combined-model-provider-brand-icon).provider-bedrock {
+	mask: url('../../media/model-provider-icons/ai_bedrock.svg') center / contain no-repeat;
+	background-color: #ff9900;
+}
+
+:is(.combined-model-logo, .combined-model-provider-rail-provider-icon, .combined-model-provider-brand-icon).provider-cerebras {
+	mask: url('../../media/model-provider-icons/ai_cerebras.svg') center / contain no-repeat;
+	background-color: #f47d44;
+}
+
+:is(.combined-model-logo, .combined-model-provider-rail-provider-icon, .combined-model-provider-brand-icon).provider-open-router {
+	mask: url('../../media/model-provider-icons/ai_open_router.svg') center / contain no-repeat;
+	background-color: #a7a0ff;
+}
+
+.combined-model-logo.provider-qwen {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_qwen-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-kimi {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_kimi-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-meta {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_meta-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-nvidia {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_nvidia-color.svg') center / contain no-repeat;
+}
+
+:is(.combined-model-logo, .combined-model-provider-rail-provider-icon, .combined-model-provider-brand-icon).provider-google {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_google-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-microsoft {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_microsoft-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-minimax {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_minimax-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-perplexity {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_perplexity-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-zai {
+	mask: url('../../media/model-provider-icons/brand_zai.svg') center / contain no-repeat;
+	background-color: #a0a7ff;
+}
+
+.combined-model-logo.provider-ibm {
+	mask: url('../../media/model-provider-icons/brand_ibm.svg') center / contain no-repeat;
+	background-color: #4589ff;
+}
+
+.combined-model-logo.provider-inception {
+	mask: url('../../media/model-provider-icons/brand_inception.svg') center / contain no-repeat;
+	background-color: #a5b4fc;
+}
+
+.combined-model-logo.provider-liquid {
+	mask: url('../../media/model-provider-icons/brand_liquid.svg') center / contain no-repeat;
+	background-color: #38bdf8;
+}
+
+.combined-model-logo.provider-kwaipilot {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_kwaipilot-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-ai21 {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_ai21-brand-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-baidu {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_baidu-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-bytedance {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_bytedance-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-tencent {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_tencent-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-stepfun {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_stepfun-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-xiaomi {
+	mask: url('../../media/model-provider-icons/brand_xiaomimimo.svg') center / contain no-repeat;
+	background-color: #ff6900;
+}
+
+.combined-model-logo.provider-arcee {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_arcee-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-essentialai {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_essentialai-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-nous {
+	mask: url('../../media/model-provider-icons/brand_nousresearch.svg') center / contain no-repeat;
+	background-color: #d6b98c;
+}
+
+.combined-model-logo.provider-upstage {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_upstage-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-morph {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_morph-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-aionlabs {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_aionlabs-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-mistral {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_mistral-color.svg') center / contain no-repeat;
+}
+
+:is(.combined-model-logo, .combined-model-provider-rail-provider-icon, .combined-model-provider-brand-icon).provider-cohere {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_cohere-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-dotsstudio {
+	mask: url('../../media/model-provider-icons/brand_dotsstudio.svg') center / contain no-repeat;
+	background-color: #d3b4ff;
+}
+
+.combined-model-logo.provider-longcat {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_longcat-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-perceptron {
+	mask: url('../../media/model-provider-icons/brand_perceptron.svg') center / contain no-repeat;
+	background-color: #ddd;
+}
+
+.combined-model-logo.provider-poolside {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_poolside-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-reka {
+	mask: url('../../media/model-provider-icons/brand_reka.svg') center / contain no-repeat;
+	background-color: #bda9ff;
+}
+
+.combined-model-logo.provider-relace {
+	mask: url('../../media/model-provider-icons/brand_relace.svg') center / contain no-repeat;
+	background-color: #ddd;
+}
+
+.combined-model-logo.provider-sakana {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_sakana-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-unionalpha {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_unionalpha-color.svg') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-thinkingmachines {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_thinkingmachines.png') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-nexagi {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_nexagi.png') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-writer {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_writer.png') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-anthracite {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_anthracite.png') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-thedrummer {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_thedrummer.webp') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-gryphe {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_gryphe.png') center / contain no-repeat;
+}
+
+.combined-model-logo.provider-undi {
+	mask: none;
+	background: url('../../media/model-provider-icons/brand_undi.png') center / contain no-repeat;
+}
+
+/* Mancer's own wordmark uses the lightning symbol. */
+.combined-model-logo.provider-mancer {
+	mask: none;
+	background: none;
+	line-height: 16px;
+	text-align: center;
+}
+
+.combined-model-logo.provider-mancer::before {
+	content: '⚡';
+	font-family: 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
+	font-size: 16px;
 }

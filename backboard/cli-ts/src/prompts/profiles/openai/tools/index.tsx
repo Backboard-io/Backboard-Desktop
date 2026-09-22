@@ -12,6 +12,7 @@ import {
 	agentSpawnBatch,
 } from "../../../tools/agentSpawn.tsx";
 import { agentWait } from "../../../tools/agentWait.tsx";
+import { computer } from "../../../tools/computer.tsx";
 import { generateVideo } from "../../../tools/generateVideo.tsx";
 import { glob } from "../../../tools/glob.tsx";
 import { grep } from "../../../tools/grep.tsx";
@@ -25,7 +26,6 @@ const execute = definePrompt(buildExecutePrompt(), buildExecutePrompt);
 const fetchUrl = definePrompt(buildFetchUrlPrompt(), buildFetchUrlPrompt);
 const webSearch = definePrompt(buildWebSearchPrompt(), buildWebSearchPrompt);
 const askUser = definePrompt(buildAskUserPrompt());
-const computer = definePrompt(buildComputerPrompt());
 const browser = definePrompt(buildBrowserPrompt());
 
 export const toolPrompts: Record<string, PromptModule> = {
@@ -186,21 +186,6 @@ Guidance:
 - Keep each question short, specific, and actionable, with clear option labels. The user can always type a custom answer, so do not add an "other" option.
 - Include enough context in the question text for the user to understand the tradeoff.
 `.trim();
-}
-
-function buildComputerPrompt(): string {
-	return `Control the local computer through screenshots and direct actions.
-
-Use this only when GUI interaction is required. Prefer element IDs from fresh screenshots; use coordinates only as a fallback.
-
-Safety:
-- Take or rely on a fresh screenshot before acting.
-- Inspect the result after state-changing actions.
-- Ask the user before submitting forms, purchasing, deleting, entering credentials, or changing sensitive settings.
-- Queue only the actions needed for the immediate step.
-
-
-Actions: screenshot, click, type, key, wait, openApp.`.trim();
 }
 
 function buildBrowserPrompt(): string {

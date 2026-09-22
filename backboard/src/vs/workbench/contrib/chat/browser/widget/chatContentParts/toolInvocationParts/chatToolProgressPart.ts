@@ -6,12 +6,10 @@
 import * as dom from '../../../../../../../base/browser/dom.js';
 import { renderAsPlaintext } from '../../../../../../../base/browser/markdownRenderer.js';
 import { status } from '../../../../../../../base/browser/ui/aria/aria.js';
-import { Codicon } from '../../../../../../../base/common/codicons.js';
 import { IMarkdownString, MarkdownString } from '../../../../../../../base/common/htmlContent.js';
 import { stripIcons } from '../../../../../../../base/common/iconLabels.js';
 import { MutableDisposable } from '../../../../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../../../../base/common/observable.js';
-import { ThemeIcon } from '../../../../../../../base/common/themables.js';
 import { IMarkdownRenderer } from '../../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IConfigurationService } from '../../../../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService } from '../../../../../../../platform/instantiation/common/instantiation.js';
@@ -21,7 +19,6 @@ import { IChatCodeBlockInfo } from '../../../chat.js';
 import { IChatContentPartRenderContext } from '../chatContentParts.js';
 import { ChatProgressContentPart } from '../chatProgressContentPart.js';
 import { BaseChatToolInvocationSubPart } from './chatToolInvocationSubPart.js';
-import { shouldShimmerForTool } from './chatToolPartUtilities.js';
 
 export class ChatToolProgressSubPart extends BaseChatToolInvocationSubPart {
 	public readonly domNode: HTMLElement;
@@ -39,6 +36,7 @@ export class ChatToolProgressSubPart extends BaseChatToolInvocationSubPart {
 		super(toolInvocation);
 
 		this.domNode = this.createProgressPart();
+		this.domNode.classList.add('chat-tool-progress-row');
 	}
 
 	private createProgressPart(): HTMLElement {
@@ -61,6 +59,7 @@ export class ChatToolProgressSubPart extends BaseChatToolInvocationSubPart {
 			let lastRenderedContent: IMarkdownString | string | undefined;
 			let lastRenderedMarkdownValue: string | undefined;
 			let hasRendered = false;
+			let lastRenderedIcon: string | undefined;
 			this._register(autorun(reader => {
 				let progressContent: IMarkdownString | string | undefined;
 				const key = this.getAnnouncementKey('progress');
@@ -99,13 +98,15 @@ export class ChatToolProgressSubPart extends BaseChatToolInvocationSubPart {
 				// renders the message; rebuilding and reparsing identical markdown for
 				// each tick is pure work. Preserve the existing DOM until the displayed
 				// content actually changes.
+				const icon = this.getIcon().id;
 				const markdownValue = typeof progressContent === 'string' ? undefined : progressContent!.value;
-				if (hasRendered && lastRenderedContent === progressContent && lastRenderedMarkdownValue === markdownValue) {
+				if (hasRendered && lastRenderedContent === progressContent && lastRenderedMarkdownValue === markdownValue && lastRenderedIcon === icon) {
 					return;
 				}
 				hasRendered = true;
 				lastRenderedContent = progressContent;
 				lastRenderedMarkdownValue = markdownValue;
+				lastRenderedIcon = icon;
 				const shouldAnnounce = this.toolInvocation.kind === 'toolInvocation' && this.hasMeaningfulContent(progressContent) ? this.computeShouldAnnounce(key) : false;
 				const part = this.renderProgressContent(progressContent!, shouldAnnounce);
 				renderedPart.value = part;
@@ -134,13 +135,7 @@ export class ChatToolProgressSubPart extends BaseChatToolInvocationSubPart {
 			this.provideScreenReaderStatus(content);
 		}
 
-		const shouldShimmer = shouldShimmerForTool(this.toolInvocation, content);
-		return this.instantiationService.createInstance(ChatProgressContentPart, progressMessage, this.renderer, this.context, shouldShimmer ? true : undefined, true, this.getProgressIcon(), this.toolInvocation, shouldShimmer);
-	}
-
-	private getProgressIcon(): ThemeIcon {
-		const icon = this.getIcon();
-		return ThemeIcon.isEqual(icon, ThemeIcon.modify(Codicon.loading, 'spin')) ? Codicon.check : icon;
+		return this.instantiationService.createInstance(ChatProgressContentPart, progressMessage, this.renderer, this.context, !IChatToolInvocation.isComplete(this.toolInvocation), true, this.getIcon(), this.toolInvocation, false);
 	}
 
 	private getAnnouncementKey(kind: 'progress' | 'complete'): string {

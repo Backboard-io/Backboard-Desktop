@@ -147,6 +147,7 @@ function bundleESMTask(opts: IBundleESMTaskOpts): NodeJS.ReadWriteStream {
 					'.woff2': 'file',
 					'.svg': 'file',
 					'.png': 'file',
+					'.webp': 'file',
 					'.sh': 'file',
 				},
 				assetNames: 'media/[name]', // moves media assets into a sub-folder "media"
@@ -282,4 +283,3 @@ function getBuildTarget() {
 	const tsconfigPath = path.join(REPO_ROOT_PATH, 'src', 'tsconfig.base.json');
 	return getTargetStringFromTsConfig(tsconfigPath);
 }
-

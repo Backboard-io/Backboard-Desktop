@@ -7,6 +7,7 @@ import { Config } from "../src/config/Config.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import { ComputerPaths } from "../src/core/computer/ComputerPaths.ts";
 import { ComputerRuntime } from "../src/core/computer/ComputerRuntime.ts";
+import { CuaBrowserSurface } from "../src/core/computer/CuaBrowserSurface.ts";
 import type {
 	AccessibilityElement,
 	AccessibilitySnapshot,
@@ -23,6 +24,7 @@ import { BrowserTool } from "../src/tools/BrowserTool.tsx";
 import { ComputerTool } from "../src/tools/ComputerTool.tsx";
 import { ReadTool } from "../src/tools/ReadTool.tsx";
 import { parseCommand } from "../src/ui/commands/index.ts";
+import { canonicalAppName } from "../src/utils/appNames.ts";
 import { makeContext } from "./helpers.ts";
 
 const env = { apiKey: "test-key", apiUrl: "https://example.test/api" };
@@ -78,6 +80,171 @@ class FakePlatform implements Platform {
 }
 
 describe("ComputerTool", () => {
+	it("reports browser preparation failures without degrading to toolbar-only accessibility", async () => {
+		let disposed = false;
+		let decisions = 0;
+		class UnavailableBrowser extends CuaBrowserSurface {
+			override async observe(): Promise<never> {
+				throw new Error("DevTools target unavailable");
+			}
+			override async dispose() {
+				disposed = true;
+			}
+		}
+		const platform = new FakePlatform();
+		const runtime = new ComputerRuntime({
+			platform,
+			resolveCuaDriver: () => "/driver",
+			browserFactory: (path, name) => new UnavailableBrowser(path, name),
+			jevWriter: async () => null,
+			jevDecider: async () => {
+				decisions++;
+				throw new Error("must not decide");
+			},
+		});
+		const result = await runtime.execute(
+			[{ action: "task", appName: "Brave", goal: "Draw a cat" }],
+			makeContext(new AbortController().signal),
+		);
+		expect(result.success).toBe(false);
+		expect(result.results[0]).toMatchObject({
+			error: "DevTools target unavailable",
+		});
+		expect(disposed).toBe(true);
+		expect(decisions).toBe(0);
+		expect(platform.actions).toEqual([]);
+	});
+
+	it("explains unsupported browser canvas routing before launching or taking actions", async () => {
+		let created = 0;
+		const runtime = new ComputerRuntime({
+			platform: new FakePlatform(),
+			resolveCuaDriver: () => "/driver",
+			browserFactory: () => {
+				created++;
+				throw new Error("must not launch");
+			},
+			jevWriter: async () => null,
+			jevDecider: async () => {
+				throw new Error("must not decide");
+			},
+		});
+		const result = await runtime.execute(
+			[{ action: "task", appName: "Safari", goal: "Draw a cat" }],
+			makeContext(new AbortController().signal),
+		);
+		expect(result.success).toBe(false);
+		expect(result.results[0]).toMatchObject({
+			error: expect.stringContaining("Brave, Chrome, or Edge"),
+		});
+		expect(created).toBe(0);
+	});
+	it("normalizes browser aliases without renaming unknown apps", () => {
+		expect(canonicalAppName(" brave ")).toBe("Brave Browser");
+		expect(canonicalAppName("BRAVE BROWSER")).toBe("Brave Browser");
+		expect(canonicalAppName("Chrome")).toBe("Google Chrome");
+		expect(canonicalAppName("Spotify")).toBe("Spotify");
+	});
+
+	it("retains a screenshot's requested app in validated input", () => {
+		expect(
+			new ComputerTool().parseInput({
+				actions: [{ action: "screenshot", appName: "Brave" }],
+			}),
+		).toEqual({ actions: [{ action: "screenshot", appName: "Brave" }] });
+	});
+
+	it("reuses the browser across aliases and captures its exact window without authorizing desktop clicks", async () => {
+		let created = 0;
+		let captured = 0;
+		class FakeBrowser extends CuaBrowserSurface {
+			override async observe() {
+				return { appName: "Brave Browser", elements: [], text: "Editor" };
+			}
+			override async capture(path: string) {
+				captured++;
+				return {
+					screenshotPath: path,
+					appName: "Brave Browser",
+					windowTitle: "Editor",
+					coordinateSpace: "window" as const,
+					__image_base64: tinyPng().toString("base64"),
+					__image_media_type: "image/png" as const,
+				};
+			}
+			override async dispose() {}
+		}
+		const platform = new FakePlatform();
+		const runtime = new ComputerRuntime({
+			platform,
+			resolveCuaDriver: () => "/fake-driver",
+			browserFactory: (path, name) => {
+				created++;
+				return new FakeBrowser(path, name);
+			},
+			jevDecider: async () => ({
+				thread_id: "test",
+				model: "jev",
+				answers: {
+					operation: {
+						type: "choice",
+						choice: "DONE",
+						confidence: 1,
+						probabilities: { DONE: 1 },
+					},
+				},
+			}),
+			jevWriter: async () => null,
+		});
+		const ctx = makeContext(new AbortController().signal);
+		await runtime.execute(
+			[{ action: "task", appName: "Brave", goal: "Inspect editor" }],
+			ctx,
+		);
+		await runtime.execute(
+			[{ action: "task", appName: "Brave Browser", goal: "Inspect editor" }],
+			ctx,
+		);
+		// An older desktop observation must not survive a scoped capture.
+		await runtime.execute([{ action: "screenshot" }], ctx);
+		const shot = await runtime.execute(
+			[{ action: "screenshot", appName: "brave" }],
+			ctx,
+		);
+		expect(created).toBe(1);
+		expect(captured).toBe(3);
+		expect(shot.results[0]).toMatchObject({
+			success: true,
+			action: "screenshot",
+			appName: "Brave Browser",
+			coordinateSpace: "window",
+		});
+		const click = await runtime.execute(
+			[{ action: "click", target: { x: 0, y: 0 } }],
+			ctx,
+		);
+		expect(click.success).toBe(false);
+		expect(platform.actions).toEqual([]);
+		await runtime.dispose();
+	});
+
+	it("refuses a scoped screenshot without an existing browser instead of capturing another app", async () => {
+		const platform = new FakePlatform();
+		let screenshots = 0;
+		const capture = platform.screenshot.bind(platform);
+		platform.screenshot = async (path) => {
+			screenshots++;
+			return capture(path);
+		};
+		const runtime = new ComputerRuntime({ platform });
+		const result = await runtime.execute(
+			[{ action: "screenshot", appName: "Brave" }],
+			makeContext(new AbortController().signal),
+		);
+		expect(result.success).toBe(false);
+		expect(screenshots).toBe(0);
+	});
+
 	it("accepts the click and openApp shapes models actually send", () => {
 		// Each input is a call a real session had rejected verbatim.
 		const tool = new ComputerTool();

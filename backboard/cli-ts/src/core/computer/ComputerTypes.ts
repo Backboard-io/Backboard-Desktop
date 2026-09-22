@@ -32,7 +32,7 @@ export type ComputerKey =
 export type ComputerTarget = { elementId: string } | { x: number; y: number };
 
 export type ComputerAction =
-	| { action: "screenshot" }
+	| { action: "screenshot"; appName?: string }
 	| { action: "click"; target: ComputerTarget; button?: MouseButton }
 	| { action: "type"; text: string }
 	| { action: "key"; key: ComputerKey }
@@ -61,7 +61,13 @@ export interface ComputerObservation extends ImageContentPayload<"image/png"> {
 	summary: string;
 }
 
-export interface ComputerActionResult {
+export interface ComputerActionResult
+	extends Partial<ImageContentPayload<"image/png">> {
+	/** Browser-window evidence must never authorize desktop-coordinate input. */
+	screenshotPath?: string;
+	appName?: string;
+	windowTitle?: string;
+	coordinateSpace?: "window";
 	success: boolean;
 	action: ComputerAction["action"];
 	observationId?: string;
@@ -98,10 +104,7 @@ export interface JevTaskStep {
 }
 
 /** Result of a Jev-driven task. Final browser evidence goes to the caller, never Jev. */
-export interface JevTaskResult
-	extends ComputerActionResult,
-		Partial<ImageContentPayload<"image/png">> {
-	screenshotPath?: string;
+export interface JevTaskResult extends ComputerActionResult {
 	action: "task";
 	outcome: JevTaskOutcome;
 	/** `cua-driver`, or `native` when the driver binary was not found. */

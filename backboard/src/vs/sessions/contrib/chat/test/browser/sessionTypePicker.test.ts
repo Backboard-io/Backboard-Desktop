@@ -127,6 +127,18 @@ suite('SessionTypePicker', () => {
 
 	ensureNoDisposablesAreLeakedInTestSuite();
 
+	test('Backboard allowlist routes remote folders to the remote Backboard session type', () => {
+		management.setSessionTypes([
+			sessionType('agenthost-ec2', 'claude', 'Claude', 'remote-ec2-claude'),
+			sessionType('agenthost-ec2', 'backboard', 'Backboard', 'remote-ec2-backboard'),
+		]);
+		const picker = createPicker(disposables, session, management, storage);
+		picker.setAllowedSessionTypeIds(['agent-host-backboard', 'backboard']);
+		assert.deepStrictEqual(picker.getPreferredSessionType(folder), { providerId: 'agenthost-ec2', sessionTypeId: 'backboard' });
+		picker.pick({ providerId: 'agenthost-ec2', sessionTypeId: 'backboard' });
+		assert.strictEqual(picker.getPickedChatSessionType(folder), 'remote-ec2-backboard');
+	});
+
 	test('preferred session type is the first one and follows session-type changes', () => {
 		management.setSessionTypes([
 			sessionType('local-1', 'local', 'Local'),

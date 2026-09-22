@@ -3,7 +3,7 @@
 	"nameLong": "Backboard Studio",
 	"companyName": "Espri.ai",
 	"applicationName": "backboard-studio-dev",
-	"backboardVersion": "3.1.10",
+	"backboardVersion": "3.1.13",
 	"extensionsGallery": {
 		"serviceUrl": "https://open-vsx.org/vscode/gallery",
 		"itemUrl": "https://open-vsx.org/vscode/item",
@@ -40,6 +40,9 @@
 	"reportIssueUrl": "",
 	"nodejsRepository": "https://nodejs.org",
 	"urlProtocol": "backboard",
+	"linkProtectionTrustedDomains": [
+		"https://app.backboard.io"
+	],
 	"trustedExtensionProtocolHandlers": [
 		"vscode.github-authentication"
 	],

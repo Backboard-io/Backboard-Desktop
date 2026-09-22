@@ -184,6 +184,8 @@ abstract class BaseSimpleChatConfirmationWidget<T> extends Disposable {
 		]);
 		configureAccessibilityContainer(elements.container, title, message);
 		this._domNode = elements.root;
+		// Style approval controls consistently whether mounted inline or in the composer.
+		this._domNode.classList.toggle('chat-question-approval', buttons.length > 0);
 
 		this._register(instantiationService.createInstance(
 			ChatQueryTitlePart,
@@ -369,6 +371,8 @@ abstract class BaseChatConfirmationWidget<T> extends Disposable {
 
 		configureAccessibilityContainer(elements.container, title, message, footerBanner);
 		this._domNode = elements.root;
+		// Style approval controls consistently whether mounted inline or in the composer.
+		this._domNode.classList.toggle('chat-question-approval', buttons.length > 0);
 		this._buttonsDomNode = elements.buttons;
 
 		this._register(instantiationService.createInstance(
@@ -424,6 +428,7 @@ abstract class BaseChatConfirmationWidget<T> extends Disposable {
 	}
 
 	updateButtons(buttons: IChatConfirmationButton<T>[]) {
+		this._domNode.classList.toggle('chat-question-approval', buttons.length > 0);
 		while (this._buttonsDomNode.children.length > 0) {
 			this._buttonsDomNode.children[0].remove();
 		}

@@ -346,7 +346,6 @@ export class NewChatWidget extends Disposable {
 		// {@link WorkspacePicker} is fine — phones never run there.
 		const PickerCtor = isWeb ? WebWorkspacePicker : WorkspacePicker;
 		this._workspacePicker = this._register(this.instantiationService.createInstance(PickerCtor));
-		this._workspacePicker.setLocalOnly(true);
 		this._register(this._pendingPreferredUpgrade);
 
 		// TODO: @sandy081 The session/chat should be passed down. There should not be sessionsService.activeSession read in the widget.
@@ -359,7 +358,9 @@ export class NewChatWidget extends Disposable {
 		});
 
 		this._sessionTypePicker = this._register(this.instantiationService.createInstance(SessionTypePicker, this._session, () => this._workspacePicker.selectedFolderUri));
-		this._sessionTypePicker.setAllowedSessionTypeIds(NEW_CHAT_ALLOWED_SESSION_TYPES);
+		// Remote hosts expose the same Backboard agent under a host-specific
+		// chat session type. Match its stable provider id as well as the local id.
+		this._sessionTypePicker.setAllowedSessionTypeIds([...NEW_CHAT_ALLOWED_SESSION_TYPES, 'backboard']);
 
 		const scopedContextKeyService = this._register(contextKeyService.createScoped(document.createElement('div')));
 		const scopedInstantiationService = this._register(this.instantiationService.createChild(
@@ -381,10 +382,7 @@ export class NewChatWidget extends Disposable {
 				enableWorkingSet: 'explicit',
 				supportsChangingModes: false,
 				isSessionsWindow: true,
-				// T3 Code's draft composer opens on a 70px prompt well. Two Monaco
-				// lines plus the input part's 24px vertical editor padding lands on
-				// the same compact height while still allowing pasted/multiline input
-				// and attachments to grow the shell normally.
+				// Keep the normal two-line editor; multiline input and attachments can grow it.
 				inputEditorMinLines: 2,
 				workspacePickerDelegate: this._createWorkspacePickerDelegate(),
 				sessionTypePickerDelegate: this._createSessionTypePickerDelegate(),
@@ -439,7 +437,12 @@ export class NewChatWidget extends Disposable {
 				}
 				this._sessionTypePicker.selectSessionTypeById(provider, this._workspacePicker.selectedFolderUri);
 			},
-			getAllowedSessionProviders: () => NEW_CHAT_ALLOWED_SESSION_TYPES,
+			getAllowedSessionProviders: () => {
+				const folder = this._workspacePicker.selectedFolderUri;
+				const types = folder ? this.sessionsManagementService.getSessionTypesForFolder(folder) : [];
+				const backboardTypes = types.filter(type => type.sessionType.id === 'backboard').map(type => type.sessionType.chatSessionType ?? type.sessionType.id);
+				return backboardTypes.length ? backboardTypes : NEW_CHAT_ALLOWED_SESSION_TYPES;
+			},
 			canChangeSessionProvider: () => !(this.sessionsService.activeSession.get()?.isCreated.get() ?? false),
 			getSetupCandidateForProvider: provider => this._getSetupCandidateForProvider(provider),
 			runSetup: id => { void this.agentCliSetupService.beginSetup(id); },
@@ -503,9 +506,8 @@ export class NewChatWidget extends Disposable {
 		const composerStack = dom.append(chatWidgetContent, dom.$('.new-chat-composer-stack'));
 		this._composerStackElement = composerStack;
 		this._octopusElement = this._renderPixelOctopus(composerStack);
-		// The workspace picker trigger lives inside the middle heading (the
-		// heading is the dropdown), so the composer workspace row is only needed
-		// on web as a host for the no-agent-host empty state.
+		// Keep the desktop location row hidden until remote-host setup is ready.
+		// Web still needs this container for its no-agent-host empty state.
 		const emptyStateContainer = isWeb ? this._renderComposerWorkspaceRow(composerStack) : undefined;
 		this._widget.render(composerStack);
 		this._placeWorkspaceRowBelowInput(composerStack);
@@ -523,7 +525,7 @@ export class NewChatWidget extends Disposable {
 		}
 
 		this._widget.setVisible(true);
-		this._widget.setInputPlaceholder(localize('newChatInputPlaceholder', "Ask for follow-up changes or attach images"));
+		this._widget.setInputPlaceholder(localize('newChatInputPlaceholder', "Tip: Type @ conversation to bring in context from another chat"));
 		this._makeComposerEasyToFocus();
 		this.layout(NEW_CHAT_COMPOSER_LAYOUT_HEIGHT, chatWidgetContent.clientWidth);
 
@@ -1523,7 +1525,7 @@ export class NewChatWidget extends Disposable {
 			this._widget.setModel(ref.object);
 			// setModel derives the provider's generic "Chat with …" placeholder.
 			// The draft surface deliberately keeps T3 Code's more useful prompt.
-			this._widget.setInputPlaceholder(localize('newChatInputPlaceholder', "Ask for follow-up changes or attach images"));
+			this._widget.setInputPlaceholder(localize('newChatInputPlaceholder', "Tip: Type @ conversation to bring in context from another chat"));
 		}, err => {
 			if (!token.isCancellationRequested) {
 				this.logService.error('[NewChatWidget] Failed to load chat model', err);

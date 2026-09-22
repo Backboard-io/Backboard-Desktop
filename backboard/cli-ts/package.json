@@ -10,6 +10,7 @@
 	},
 	"scripts": {
 		"dev": "bun run src/entrypoints/cli.tsx",
+		"test:computer-use": "bun run scripts/test-computer-use.ts",
 		"test:browser-harness": "bun run scripts/test-browser-harness.ts",
 		"test:codex-subscription": "bun run scripts/codex-subscription-smoke.ts",
 		"test:codex-subscription-cli": "bun run scripts/codex-subscription-cli-smoke.ts",

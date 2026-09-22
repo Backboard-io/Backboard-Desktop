@@ -355,7 +355,11 @@ function openBackboardOAuthAuthorizeUrl(authorizeUrl: string): Promise<void> {
 			});
 		});
 	}
-	return Promise.resolve(vscode.env.openExternal(vscode.Uri.parse(authorizeUrl))).then(() => undefined);
+	return Promise.resolve(vscode.env.openExternal(vscode.Uri.parse(authorizeUrl))).then(opened => {
+		if (!opened) {
+			throw new Error('Could not open the sign-in page in your browser. Please try again.');
+		}
+	});
 }
 
 async function requestBackboardDeviceCode(): Promise<BackboardDeviceCodeResponse> {

@@ -196,6 +196,31 @@ suite('ChatToolProgressSubPart', () => {
 		assert.deepStrictEqual(cases, [true, true, false]);
 	});
 
+	test('stops the ring when an unchanged tool message completes while the response is still running', () => {
+		const state = observableValue<IChatToolInvocation.State>('lifecycle', {
+			type: IChatToolInvocation.StateKind.Executing,
+			parameters: undefined,
+			confirmed: { type: ToolConfirmKind.ConfirmationNotNeeded },
+			progress: observableValue('progress', { progress: undefined })
+		});
+		const invocation = { ...createToolInvocation({ invocationMessage: 'Discovering tests...' }), state };
+		const part = disposables.add(instantiationService.createInstance(
+			ChatToolProgressSubPart, invocation, createRenderContext(false), mockMarkdownRenderer, new Set<string>()
+		));
+		assert.ok(part.domNode.querySelector('.codicon-loading.codicon-modifier-spin'));
+		state.set({
+			type: IChatToolInvocation.StateKind.Completed,
+			parameters: undefined,
+			confirmed: { type: ToolConfirmKind.ConfirmationNotNeeded },
+			resultDetails: undefined,
+			postConfirmed: undefined,
+			contentForModel: []
+		}, undefined);
+		assert.strictEqual(part.domNode.querySelector('.codicon-modifier-spin'), null);
+		assert.strictEqual(part.domNode.textContent, 'Discovering tests...');
+		assert.ok(part.domNode.querySelector('.codicon-check'));
+	});
+
 	test('does not add shimmer styling for active MCP tool progress', () => {
 		const mcpTool = createToolInvocation({
 			source: {
@@ -220,7 +245,7 @@ suite('ChatToolProgressSubPart', () => {
 		assert.strictEqual(part.domNode.querySelector('.shimmer-progress'), null);
 	});
 
-	test('adds shimmer styling only for active ask questions invocation progress', () => {
+	test('uses the same loading ring for question tool progress', () => {
 		const askQuestionsTool = disposables.add(instantiationService.createInstance(
 			ChatToolProgressSubPart,
 			createToolInvocation({
@@ -261,7 +286,7 @@ suite('ChatToolProgressSubPart', () => {
 			askMultipleQuestionsTool.domNode.textContent,
 			!!analyzingAnswersTool.domNode.querySelector('.shimmer-progress'),
 			analyzingAnswersTool.domNode.querySelector('.chat-progress-shimmer-text')?.textContent
-		], [true, 'Asking a question', 'Asking a question (Target)', 'Asking 3 questions', 'Asking 3 questions (What should we work on?, Preferred area, How hands-on?)', false, undefined]);
+		], [false, undefined, 'Asking a question (Target)', undefined, 'Asking 3 questions (What should we work on?, Preferred area, How hands-on?)', false, undefined]);
 	});
 
 	test('streams the actual tool input into a live preview', () => {
@@ -488,7 +513,7 @@ suite('ChatToolProgressSubPart', () => {
 			stats: part.domNode.querySelector('.chat-working-progress-step > span')?.textContent,
 			loading: !!part.domNode.querySelector('.codicon-loading.codicon-modifier-spin'),
 			compactIndicator: !!part.domNode.querySelector('.chat-cursor-working-indicator'),
-			indicatorHiddenFromScreenReaders: part.domNode.querySelector('.chat-cursor-working-indicator')?.getAttribute('aria-hidden'),
+			indicatorHiddenFromScreenReaders: part.domNode.querySelector('.codicon-loading')?.getAttribute('aria-hidden'),
 			shimmer: part.domNode.classList.contains('shimmer-progress'),
 			role: part.domNode.getAttribute('role'),
 			live: part.domNode.getAttribute('aria-live'),
@@ -498,8 +523,8 @@ suite('ChatToolProgressSubPart', () => {
 			cursorRow: true,
 			label: 'Planning next moves',
 			stats: '',
-			loading: false,
-			compactIndicator: true,
+			loading: true,
+			compactIndicator: false,
 			indicatorHiddenFromScreenReaders: 'true',
 			shimmer: false,
 			role: 'status',
@@ -509,7 +534,7 @@ suite('ChatToolProgressSubPart', () => {
 		});
 	});
 
-	test('uses the compact cursor indicator for active provider progress', () => {
+	test('uses the same loading ring for active provider progress', () => {
 		const context = createRenderContext(false);
 		context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
 		const part = disposables.add(instantiationService.createInstance(
@@ -527,7 +552,7 @@ suite('ChatToolProgressSubPart', () => {
 		assert.deepStrictEqual({
 			compactRow: part.domNode.classList.contains('chat-cursor-progress-row'),
 			compactIndicator: !!part.domNode.querySelector('.chat-cursor-working-indicator'),
-			indicatorHiddenFromScreenReaders: part.domNode.querySelector('.chat-cursor-working-indicator')?.getAttribute('aria-hidden'),
+			indicatorHiddenFromScreenReaders: part.domNode.querySelector('.codicon-loading')?.getAttribute('aria-hidden'),
 			shimmer: part.domNode.classList.contains('shimmer-progress'),
 			spinner: !!part.domNode.querySelector('.codicon-loading.codicon-modifier-spin'),
 			status: part.domNode.textContent,
@@ -535,17 +560,17 @@ suite('ChatToolProgressSubPart', () => {
 			live: part.domNode.getAttribute('aria-live'),
 		}, {
 			compactRow: true,
-			compactIndicator: true,
+			compactIndicator: false,
 			indicatorHiddenFromScreenReaders: 'true',
 			shimmer: false,
-			spinner: false,
+			spinner: true,
 			status: 'Loading context…',
 			role: 'status',
 			live: 'polite',
 		});
 	});
 
-	test('does not render a loading icon for run playwright code progress', () => {
+	test('uses the same loading ring for active Playwright progress', () => {
 		const tool = createToolInvocation({
 			toolId: 'run_playwright_code',
 			invocationMessage: 'Running Playwright code...'
@@ -559,7 +584,7 @@ suite('ChatToolProgressSubPart', () => {
 			new Set<string>()
 		));
 
-		assert.strictEqual(part.domNode.querySelector('.codicon-loading'), null);
+		assert.ok(part.domNode.querySelector('.codicon-loading.codicon-modifier-spin'));
 	});
 
 	test('does not add shimmer styling for non-MCP tool progress', () => {

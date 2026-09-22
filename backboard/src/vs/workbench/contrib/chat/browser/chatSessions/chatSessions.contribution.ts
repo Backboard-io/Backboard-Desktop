@@ -1505,7 +1505,17 @@ function registerNewSessionInPlaceAction(type: string, displayName: string): IDi
 				throw new BugIndicatingError(`Invalid chat session position argument: ${chatSessionPosition}`);
 			}
 
+			// Changing a draft's provider must retain its prompt and attachments.
+			const view = chatSessionPosition === ChatSessionPosition.Sidebar
+				? accessor.get(IViewsService).getViewWithId<ChatViewPane>(ChatViewId)
+				: undefined;
+			const draft = view?.widget?.viewModel?.model;
+			const draftState = draft && !draft.hasRequests ? view!.widget.input.getCurrentInputState() : undefined;
 			await openChatSession(accessor, { type: type, displayName: localize('chat', "Chat"), position: chatSessionPosition, replaceEditor: true });
+			if (draftState && view?.widget.viewModel?.model !== draft) {
+				const { inputText, attachments, selections, contrib } = draftState;
+				view?.widget.viewModel?.model.inputModel.setState({ inputText, attachments, selections, contrib });
+			}
 		}
 	});
 }

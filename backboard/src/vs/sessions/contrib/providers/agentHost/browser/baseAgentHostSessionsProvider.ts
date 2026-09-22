@@ -925,17 +925,22 @@ class NewSession extends Disposable {
 	 */
 	async resolveConfig(connection: IAgentConnection): Promise<boolean> {
 		const seq = ++this._configRequestSeq;
+		const requestedValues = this._config?.values;
 		this._isResolvingConfig.set(true, undefined);
 		try {
 			const result = await connection.resolveSessionConfig({
 				provider: this.agentProvider,
 				workingDirectory: this.workspaceUri,
-				config: this._config?.values,
+				config: requestedValues,
 			});
 			if (seq !== this._configRequestSeq) {
 				return false;
 			}
-			this._config = result;
+			// Shared composer chips dispatch optimistically while this resolve
+			// is in flight. Do not replace a newer selection with its old echo.
+			const concurrentChanges = Object.fromEntries(Object.entries(this._config?.values ?? {})
+				.filter(([key, value]) => !equals(value, requestedValues?.[key])));
+			this._config = { ...result, values: { ...result.values, ...concurrentChanges } };
 			return true;
 		} catch {
 			if (seq !== this._configRequestSeq) {
@@ -2474,8 +2479,8 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 
 	/**
 	 * NewSession variant of {@link _applySessionStateUpdate}: writes the
-	 * customizations subset (the only one the agent picker reads) and
-	 * fires `_onDidChangeCustomAgents` when it changes. Skips
+	 * customizations subset and synchronizes shared-composer config changes.
+	 * Fires `_onDidChangeCustomAgents` when customizations change. Skips
 	 * {@link _seedRunningConfigFromState} (NewSession owns its own config
 	 * via `NewSession._config`) and {@link _applySessionMetaFromState}
 	 * (which only applies to cached running sessions).
@@ -2483,6 +2488,24 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	private _handleNewSessionStateUpdate(sessionId: string, state: SessionState): void {
 		const previous = this._lastSessionStates.get(sessionId);
 		this._lastSessionStates.set(sessionId, state);
+		// The shared composer writes straight to the backend subscription.
+		// First Send also forwards this draft's config, so keep it in sync
+		// with optimistic chip changes or stale defaults undo the selection.
+		// Apply deltas only: the initial eager-create snapshot can predate
+		// choices made through the sessions provider's own pickers.
+		const draft = this._getNewSession(sessionId);
+		if (draft && previous) {
+			let changed = false;
+			for (const [key, value] of Object.entries(state.config?.values ?? {})) {
+				if (!equals(value, previous.config?.values[key])) {
+					draft.setConfigValue(key, value);
+					changed = true;
+				}
+			}
+			if (changed) {
+				this._onDidChangeSessionConfig.fire(sessionId);
+			}
+		}
 		if (!previous || customizationsChanged(previous, state)) {
 			this._onDidChangeCustomAgents.fire();
 			this._onDidChangeCustomizations.fire();

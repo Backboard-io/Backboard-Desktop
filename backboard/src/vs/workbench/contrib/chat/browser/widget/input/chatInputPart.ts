@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { CommandsRegistry, ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { openChatEdit } from '../chatEditNavigation.js';
 import { IChatSlashCommandService } from '../../../common/participants/chatSlashCommands.js';
 import { IFileDialogService } from '../../../../../../platform/dialogs/common/dialogs.js';
@@ -41,14 +41,14 @@ import { Schemas } from '../../../../../../base/common/network.js';
 import { equals as objectsEqual, mixin } from '../../../../../../base/common/objects.js';
 import { autorun, constObservable, derived, derivedOpts, IObservable, ISettableObservable, observableFromEvent, observableValue } from '../../../../../../base/common/observable.js';
 import { isMacintosh } from '../../../../../../base/common/platform.js';
-import { isEqual } from '../../../../../../base/common/resources.js';
+import { basename, isEqual } from '../../../../../../base/common/resources.js';
 import { ScrollbarVisibility } from '../../../../../../base/common/scrollable.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { IEditorConstructionOptions } from '../../../../../../editor/browser/config/editorConfiguration.js';
 import { EditorExtensionsRegistry } from '../../../../../../editor/browser/editorExtensions.js';
 import { CodeEditorWidget } from '../../../../../../editor/browser/widget/codeEditor/codeEditorWidget.js';
-import { EditorOptions, IEditorOptions, IEditorScrollbarOptions } from '../../../../../../editor/common/config/editorOptions.js';
+import { EditorOption, EditorOptions, IEditorOptions, IEditorScrollbarOptions } from '../../../../../../editor/common/config/editorOptions.js';
 import { IDimension } from '../../../../../../editor/common/core/2d/dimension.js';
 import { IPosition } from '../../../../../../editor/common/core/position.js';
 import { IRange, Range } from '../../../../../../editor/common/core/range.js';
@@ -72,6 +72,7 @@ import { IActionWidgetService } from '../../../../../../platform/actionWidget/br
 import { IActionWidgetDropdownAction, IActionWidgetDropdownActionProvider, IActionWidgetDropdownOptions } from '../../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../../platform/contextkey/common/contextkey.js';
+import { AnchorPosition } from '../../../../../../base/browser/ui/contextview/contextview.js';
 import { IContextViewService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../../../platform/files/common/files.js';
 import { registerAndCreateHistoryNavigationContext } from '../../../../../../platform/history/browser/contextScopedHistoryWidget.js';
@@ -400,6 +401,69 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private chatInputNotificationContainer!: HTMLElement;
 	private chatGoalBannerContainer!: HTMLElement;
 	private inputContainer!: HTMLElement;
+	private composerLocationLabel: HTMLElement | undefined;
+	private composerFolderLabel: HTMLElement | undefined;
+
+	private showComposerLocationMenu(anchor: HTMLElement): void {
+		if (anchor.getAttribute('aria-expanded') === 'true') {
+			this.composerContextViewService.hideContextView();
+			return;
+		}
+		anchor.setAttribute('aria-expanded', 'true');
+		this.composerContextViewService.showContextView({
+			getAnchor: () => anchor,
+			anchorPosition: AnchorPosition.ABOVE,
+			onHide: () => anchor.setAttribute('aria-expanded', 'false'),
+			render: container => {
+				const store = new DisposableStore();
+				const menu = dom.append(container, dom.$('.backboard-location-menu', { role: 'menu', 'aria-label': localize('composer.location', "Session location") }));
+				const addRow = (icon: ThemeIcon, label: string, disabled = false) => {
+					const row = dom.append(menu, dom.$('button.backboard-location-menu-row', { type: 'button', role: 'menuitem', disabled }));
+					dom.append(row, dom.$(ThemeIcon.asCSSSelector(icon))).setAttribute('aria-hidden', 'true');
+					dom.append(row, dom.$('span', undefined, label));
+					return row;
+				};
+				const local = addRow(Codicon.deviceDesktop, localize('composer.local', "Local"));
+				local.setAttribute('role', 'menuitemradio');
+				local.setAttribute('aria-checked', 'true');
+				dom.append(local, dom.$('.backboard-location-check' + ThemeIcon.asCSSSelector(Codicon.check))).setAttribute('aria-hidden', 'true');
+				store.add(dom.addDisposableListener(local, dom.EventType.CLICK, () => { this.composerContextViewService.hideContextView(); anchor.focus(); }));
+				const cloud = addRow(Codicon.cloud, localize('composer.cloud', "Cloud"), true);
+				dom.append(cloud, dom.$('span.backboard-location-coming-soon', undefined, localize('composer.comingSoon', "Coming soon")));
+				const sshCommand = 'workbench.action.sessions.connectViaSSH';
+				if (CommandsRegistry.getCommand(sshCommand)) {
+					dom.append(menu, dom.$('.backboard-location-menu-divider', { role: 'separator' }));
+					dom.append(menu, dom.$('.backboard-location-menu-heading', undefined, localize('composer.remoteHosts', "Remote agent hosts")));
+					const ssh = addRow(Codicon.add, localize('composer.connectSSH', "Connect to SSH host…"));
+					store.add(dom.addDisposableListener(ssh, dom.EventType.CLICK, () => { this.composerContextViewService.hideContextView(); void this.commandService.executeCommand(sshCommand); }));
+				}
+				store.add(dom.addDisposableListener(menu, dom.EventType.KEY_DOWN, (event: KeyboardEvent) => {
+					if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.composerContextViewService.hideContextView(); anchor.focus(); }
+					if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+						event.preventDefault();
+						const rows = Array.from(menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+						const index = rows.indexOf(dom.getActiveElement() as HTMLButtonElement);
+						rows[(index + (event.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length]?.focus();
+					}
+				}));
+				local.focus();
+				return store;
+			}
+		});
+	}
+
+	private updateComposerLocation(): void {
+		if (!this.composerLocationLabel || !this.composerFolderLabel) {
+			return;
+		}
+		const workspace = this.workspaceContextService.getWorkspace();
+		const directory = this._widget?.viewModel?.model.workingDirectory ?? workspace.folders[0]?.uri;
+		const remote = directory?.scheme === 'vscode-remote' ? directory.authority : this.environmentService.remoteAuthority;
+		this.composerLocationLabel.textContent = remote ? localize('composer.remote', "Remote") : localize('composer.local', "Local");
+		this.composerLocationLabel.parentElement!.title = remote ?? localize('composer.localComputer', "Local computer");
+		this.composerFolderLabel.textContent = directory ? (this.workspaceContextService.getWorkspaceFolder(directory)?.uri.toString() === directory.toString() ? this.workspaceContextService.getWorkspaceFolder(directory)!.name : basename(directory)) : localize('composer.noFolder', "No folder open");
+		this.composerFolderLabel.parentElement!.title = directory?.fsPath ?? this.composerFolderLabel.textContent;
+	}
 	private editorContainer!: HTMLElement;
 	private readonly _notificationWidget = this._register(new MutableDisposable<ChatInputNotificationWidget>());
 	private readonly _goalBannerWidget = this._register(new MutableDisposable<ChatGoalBannerWidget>());
@@ -673,6 +737,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		@IFileService private readonly fileService: IFileService,
 		@IEditorService private readonly editorService: IEditorService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IContextViewService private readonly composerContextViewService: IContextViewService,
 		@IThemeService private readonly themeService: IThemeService,
 		@ITextModelService private readonly textModelResolverService: ITextModelService,
 		@IStorageService private readonly storageService: IStorageService,
@@ -765,7 +830,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this.dnd = this._register(this.instantiationService.createInstance(ChatDragAndDrop, () => this._widget, this._attachmentModel, styles));
 
 		this.inputEditorMaxHeight = this.options.renderStyle === 'compact' ? INPUT_EDITOR_MAX_HEIGHT / 3 : INPUT_EDITOR_MAX_HEIGHT;
-		const padding = this.options.renderStyle === 'compact' ? INPUT_EDITOR_PADDING.compact : INPUT_EDITOR_PADDING.default;
+		const padding = this.options.renderStyle === 'compact' ? INPUT_EDITOR_PADDING.compact : this.options.isSessionsWindow ? { top: 4, bottom: 4 } : INPUT_EDITOR_PADDING.default;
 		this.inputEditorMinHeight = this.options.inputEditorMinLines ? this.options.inputEditorMinLines * INPUT_EDITOR_LINE_HEIGHT + padding.top + padding.bottom : undefined;
 
 		this.inputEditorHasText = ChatContextKeys.inputHasText.bindTo(contextKeyService);
@@ -1207,6 +1272,45 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 				return (sessionResource && this.chatSessionsService.getCustomAgentTargetForSessionType(getChatSessionType(sessionResource))) ?? Target.Undefined;
 			},
 		};
+	}
+
+	private createSessionPermissionPicker(action: MenuItemAction, pickerOptions: IChatInputPickerOptions, iconOnly = false): PermissionPickerActionItem {
+		const delegate: IPermissionPickerDelegate = {
+			currentPermissionLevel: this._currentPermissionLevel,
+			setPermissionLevel: (level: ChatPermissionLevel) => {
+				this.setPermissionLevel(level);
+			},
+			getExtensionPermissions: () => {
+				const sessionResource = this.getCurrentSessionResource();
+				const group = this.getActiveExtensionPermissionGroup(sessionResource);
+				if (!group) {
+					return undefined;
+				}
+				const current = sessionResource ? this.chatSessionsService.getSessionOption(sessionResource, group.id) : undefined;
+				const defaultId = group.selected?.id ?? group.items.find(i => i.default)?.id;
+				const rawSelectedId = current === undefined
+					? defaultId
+					: typeof current === 'string' ? current : current.id;
+				const selectedId = rawSelectedId !== undefined && group.items.some(i => i.id === rawSelectedId)
+					? rawSelectedId
+					: defaultId;
+				const sessionType = sessionResource
+					? getChatSessionType(sessionResource)
+					: (this.options.sessionTypePickerDelegate?.getActiveSessionProvider?.() ?? '');
+				return { sessionType, groupId: group.id, items: group.items, selectedId };
+			},
+			setExtensionPermission: (groupId: string, item: IChatSessionProviderOptionItem) => {
+				this.updateOptionContextKey(groupId, item.id);
+				this.getOrCreateOptionEmitter(groupId).fire(item);
+				const sessionResource = this.getCurrentSessionResource();
+				if (sessionResource) {
+					this.chatSessionsService.setSessionOption(sessionResource, groupId, item);
+				}
+				this.permissionWidget?.refresh();
+			},
+		};
+		const Picker = iconOnly ? ComposerPermissionPickerActionItem : PermissionPickerActionItem;
+		return this.instantiationService.createInstance(Picker, action, delegate, pickerOptions);
 	}
 
 	public openPermissionPicker(): void {
@@ -3252,6 +3356,24 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const inputAndSideToolbar = elements.inputAndSideToolbar; // The chat input and toolbar to the right
 		const inputContainer = elements.inputContainer; // The chat editor, attachments, and toolbars
 		this.inputContainer = inputContainer;
+		const locationFooter = dom.$('.backboard-composer-location');
+		const host = dom.append(locationFooter, dom.$('button.backboard-composer-location-item.backboard-composer-host', { type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }));
+		this._register(dom.addDisposableListener(host, dom.EventType.CLICK, () => this.showComposerLocationMenu(host)));
+		dom.append(host, dom.$(ThemeIcon.asCSSSelector(Codicon.deviceDesktop))).setAttribute('aria-hidden', 'true');
+		this.composerLocationLabel = dom.append(host, dom.$('span'));
+		const folder = dom.append(locationFooter, dom.$('.backboard-composer-location-item.backboard-composer-folder'));
+		dom.append(folder, dom.$(ThemeIcon.asCSSSelector(Codicon.folderOpened))).setAttribute('aria-hidden', 'true');
+		this.composerFolderLabel = dom.append(folder, dom.$('span'));
+		inputAndSideToolbar.after(locationFooter);
+		if (this.options.renderStyle !== 'compact') {
+			// Keep review/diff widgets in the measured input area, above the composer shell.
+			const shell = dom.$('.backboard-composer-shell');
+			inputAndSideToolbar.before(shell);
+			shell.append(inputAndSideToolbar, locationFooter);
+		}
+		this.updateComposerLocation();
+		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => this.updateComposerLocation()));
+		this._register(widget.onDidChangeViewModel(() => this.updateComposerLocation()));
 		const editorContainer = this.editorContainer = elements.editorContainer;
 		this.chatInputOverlay = editorContainer.appendChild(dom.$('.chat-input-overlay'));
 		this.attachmentsContainer = elements.attachmentsContainer;
@@ -3346,7 +3468,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		options.fontFamily = DEFAULT_FONT_FAMILY;
 		options.fontSize = 13;
 		options.lineHeight = INPUT_EDITOR_LINE_HEIGHT;
-		options.padding = this.options.renderStyle === 'compact' ? INPUT_EDITOR_PADDING.compact : INPUT_EDITOR_PADDING.default;
+		options.padding = this.options.renderStyle === 'compact' ? INPUT_EDITOR_PADDING.compact : this.options.isSessionsWindow ? { top: 4, bottom: 4 } : INPUT_EDITOR_PADDING.default;
 		options.cursorWidth = 1;
 		options.wrappingStrategy = 'advanced';
 		options.bracketPairColorization = { enabled: false };
@@ -3614,6 +3736,10 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						? item
 						: new HiddenRenderedActionViewItem(action, item);
 				} else if (action.id === OpenAgentHostClaudeOptionsAction.ID && action instanceof MenuItemAction) {
+					// Extension sessions contribute permission option groups, not agent-host schemas.
+					if (!isAgentHostTarget(this.getCurrentSessionType() ?? '')) {
+						return this.createSessionPermissionPicker(action, pickerOptions, true);
+					}
 					return this.instantiationService.createInstance(AgentHostClaudeOptionsActionViewItem, action, widget, pickerOptions);
 				} else if (action.id === OpenAgentHostFolderPickerAction.ID && action instanceof MenuItemAction) {
 					if (this.options.isSessionsWindow) {
@@ -3767,41 +3893,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						return new HiddenActionViewItem(action);
 					}
 				} else if (action.id === OpenPermissionPickerAction.ID && action instanceof MenuItemAction) {
-					const delegate: IPermissionPickerDelegate = {
-						currentPermissionLevel: this._currentPermissionLevel,
-						setPermissionLevel: (level: ChatPermissionLevel) => {
-							this.setPermissionLevel(level);
-						},
-						getExtensionPermissions: () => {
-							const sessionResource = this.getCurrentSessionResource();
-							const group = this.getActiveExtensionPermissionGroup(sessionResource);
-							if (!group) {
-								return undefined;
-							}
-							const current = sessionResource ? this.chatSessionsService.getSessionOption(sessionResource, group.id) : undefined;
-							const defaultId = group.selected?.id ?? group.items.find(i => i.default)?.id;
-							const rawSelectedId = current === undefined
-								? defaultId
-								: typeof current === 'string' ? current : current.id;
-							const selectedId = rawSelectedId !== undefined && group.items.some(i => i.id === rawSelectedId)
-								? rawSelectedId
-								: defaultId;
-							const sessionType = sessionResource
-								? getChatSessionType(sessionResource)
-								: (this.options.sessionTypePickerDelegate?.getActiveSessionProvider?.() ?? '');
-							return { sessionType, groupId: group.id, items: group.items, selectedId };
-						},
-						setExtensionPermission: (groupId: string, item: IChatSessionProviderOptionItem) => {
-							this.updateOptionContextKey(groupId, item.id);
-							this.getOrCreateOptionEmitter(groupId).fire(item);
-							const sessionResource = this.getCurrentSessionResource();
-							if (sessionResource) {
-								this.chatSessionsService.setSessionOption(sessionResource, groupId, item);
-							}
-							this.permissionWidget?.refresh();
-						},
-					};
-					const widget = this.instantiationService.createInstance(PermissionPickerActionItem, action, delegate, backboardOptionsPickerOptions);
+					const widget = this.createSessionPermissionPicker(action, backboardOptionsPickerOptions);
 					this.permissionWidget = widget;
 					this.permissionWidgetDisposeListener.value = widget.onDidDispose(() => {
 						if (this.permissionWidget === widget) {
@@ -5049,6 +5141,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	 * and detected via ResizeObserver, which updates `inputPartHeight` for the parent to observe.
 	 */
 	layout(width: number) {
+		this.updateComposerLocation();
 		this.cachedWidth = width;
 		this._stableInputPartWidth.set(width, undefined);
 		this._updateWorkingProgressAnimationDuration(width);
@@ -5142,7 +5235,29 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}
 		const effectiveMaxHeight = this._effectiveInputEditorMaxHeight;
 		const clampedContentHeight = Math.min(this._inputEditor.getContentHeight(), effectiveMaxHeight);
-		const inputEditorHeight = this.inputEditorMinHeight ? Math.min(Math.max(this.inputEditorMinHeight, clampedContentHeight), effectiveMaxHeight) : clampedContentHeight;
+		// Measure wrapped placeholder text independently of Monaco's one-line decoration box.
+		let placeholderHeight = 0;
+		const placeholderText = this._widget?.viewModel?.inputPlaceholder ?? this._inputEditor.getRawOptions().placeholder;
+		if (!this._inputEditor.getValue() && placeholderText && this.options.renderStyle !== 'compact') {
+			const font = this._inputEditor.getOption(EditorOption.fontInfo);
+			const padding = this._inputEditor.getOption(EditorOption.padding);
+			const measure = dom.$('div');
+			measure.textContent = placeholderText;
+			Object.assign(measure.style, {
+				position: 'absolute', visibility: 'hidden', pointerEvents: 'none',
+				width: `${Math.max(1, newEditorWidth - 8)}px`, height: 'auto',
+				whiteSpace: 'normal', overflowWrap: 'break-word',
+				fontFamily: font.fontFamily, fontSize: `${font.fontSize}px`,
+				fontWeight: font.fontWeight, lineHeight: `${font.lineHeight}px`,
+				letterSpacing: `${font.letterSpacing}px`
+			});
+			this.editorContainer.appendChild(measure);
+			placeholderHeight = Math.ceil(measure.getBoundingClientRect().height) + padding.top + padding.bottom + 4;
+			measure.remove();
+		}
+
+		const inputEditorHeight = Math.min(Math.max(this.inputEditorMinHeight ?? 0, clampedContentHeight, placeholderHeight), effectiveMaxHeight);
+		const editorWidthChanged = this.previousInputEditorDimension?.width !== newEditorWidth;
 		const newDimension = { width: newEditorWidth, height: inputEditorHeight };
 		if (!this.previousInputEditorDimension || (this.previousInputEditorDimension.width !== newDimension.width || this.previousInputEditorDimension.height !== newDimension.height)) {
 			// This layout call has side-effects that are hard to understand. eg if we are calling this inside a onDidChangeContent handler, this can trigger the next onDidChangeContent handler
@@ -5151,7 +5266,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			this.previousInputEditorDimension = newDimension;
 		}
 
-		if (allowRecurse && initialEditorScrollWidth < 10) {
+		if (allowRecurse && (initialEditorScrollWidth < 10 || editorWidthChanged)) {
 			// This is probably the initial layout. Now that the editor is layed out with its correct width, it should report the correct contentHeight
 			return this._layout(width, false);
 		}
@@ -5987,11 +6102,12 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 	}
 }
 
-/** Consolidates Claude's Approvals and Fast Mode controls into one gear menu. */
+/** Uses the native provider's permission schema for its compact access menu. */
 class AgentHostClaudeOptionsActionViewItem extends ActionWidgetDropdownActionViewItem {
 
 	private readonly permissionPicker: AgentHostChatInputPicker;
 	private readonly fastModePicker: AgentHostChatInputPicker;
+	private readonly sandboxPicker: AgentHostChatInputPicker;
 
 	constructor(
 		action: MenuItemAction,
@@ -6014,7 +6130,9 @@ class AgentHostClaudeOptionsActionViewItem extends ActionWidgetDropdownActionVie
 			listOptions: { minWidth: 220 },
 		};
 		super(action, options, actionWidgetService, keybindingService, contextKeyService, telemetryService);
-		this.permissionPicker = this._register(instantiationService.createInstance(AgentHostChatInputPicker, widget, ClaudeSessionConfigKey.PermissionMode));
+		const isCodex = widget.viewModel?.sessionResource && getAgentSessionProvider(widget.viewModel.sessionResource) === AgentSessionProviders.AgentHostCodex;
+		this.permissionPicker = this._register(instantiationService.createInstance(AgentHostChatInputPicker, widget, isCodex ? 'codex.approvalPolicy' : ClaudeSessionConfigKey.PermissionMode));
+		this.sandboxPicker = this._register(instantiationService.createInstance(AgentHostChatInputPicker, widget, 'codex.sandboxMode'));
 		this.fastModePicker = this._register(instantiationService.createInstance(AgentHostChatInputPicker, widget, ClaudeSessionConfigKey.FastMode));
 	}
 
@@ -6033,6 +6151,15 @@ class AgentHostClaudeOptionsActionViewItem extends ActionWidgetDropdownActionVie
 				icon: Codicon.shield,
 				enabled: true,
 				run: () => this.openNestedPicker(() => this.permissionPicker.show(anchor)),
+			});
+		}
+		if (this.sandboxPicker.hasContext()) {
+			const label = localize('agentHostAccess.sandbox', "Sandbox");
+			actions.push({
+				id: 'agentHostAccess.sandbox', label,
+				description: this.sandboxPicker.getCurrentLabel(),
+				class: undefined, tooltip: label, icon: Codicon.shield, enabled: true,
+				run: () => this.openNestedPicker(() => this.sandboxPicker.show(anchor)),
 			});
 		}
 		if (this.fastModePicker.hasContext()) {
@@ -6076,7 +6203,21 @@ class AgentHostClaudeOptionsActionViewItem extends ActionWidgetDropdownActionVie
 	}
 
 	protected override renderLabel(element: HTMLElement): IDisposable | null {
-		element.classList.add('codicon', 'codicon-settings-gear');
-		return super.renderLabel(element);
+		const result = super.renderLabel(element);
+		element.classList.remove('codicon', 'codicon-settings-gear');
+		element.classList.add('backboard-access-mode-trigger');
+		element.setAttribute('aria-label', localize('agentHostAccess.label', "Access modes"));
+		dom.reset(element, dom.$('span.backboard-access-hand-icon', { 'aria-hidden': 'true' }));
+		return result;
+	}
+}
+
+/** The existing session permission menu, with the compact composer hand trigger. */
+class ComposerPermissionPickerActionItem extends PermissionPickerActionItem {
+	protected override renderLabel(element: HTMLElement): IDisposable | null {
+		const result = super.renderLabel(element);
+		element.classList.add('backboard-access-mode-trigger');
+		dom.reset(element, dom.$('span.backboard-access-hand-icon', { 'aria-hidden': 'true' }));
+		return result;
 	}
 }

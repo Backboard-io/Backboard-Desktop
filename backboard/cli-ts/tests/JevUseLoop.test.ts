@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { JevStaleTargetError } from "../src/core/computer/JevSurfaceError.ts";
 import {
 	describeElement,
 	type JevDecider,
@@ -148,6 +149,55 @@ const run = (
 	);
 
 describe("JevUseLoop", () => {
+	it("allows 60 decisions by default and clamps explicit budgets at 180", async () => {
+		for (const [maxSteps, expected] of [
+			[undefined, 60],
+			[1000, 180],
+		] as const) {
+			const result = await new JevUseLoop(
+				new FakeSurface([[el("Editor")]], { static: true }),
+				decider(Array<Move>(200).fill("SCROLL_DOWN")),
+				writer(null),
+				0,
+				0,
+			).run(
+				{ goal: "Find the next section", maxSteps },
+				new AbortController().signal,
+			);
+			expect(result.outcome).toBe("budget_exhausted");
+			expect(result.steps).toHaveLength(expected);
+		}
+	});
+	it("keeps late overlay controls available on a busy editor page", async () => {
+		const surface = new FakeSurface([
+			[
+				...Array.from({ length: 125 }, (_, n) => el(`Tool ${n}`)),
+				el("Close welcome"),
+			],
+			[],
+		]);
+		await run(surface, decider([{ click: /Close welcome/ }, "DONE"]));
+		expect(surface.log).toEqual(["press Close welcome"]);
+	});
+	it("discards composed text if the page changes while the writer runs", async () => {
+		const surface = new FakeSurface([[field("Recipient")]]);
+		const observe = surface.observe.bind(surface);
+		let changed = false;
+		surface.observe = async () => ({
+			...(await observe()),
+			windowTitle: changed ? "Another page" : "Original page",
+		});
+		const result = await run(
+			surface,
+			decider([{ type: /Recipient/ }, "BLOCKED"]),
+			async () => {
+				changed = true;
+				return "alice@example.com";
+			},
+		);
+		expect(surface.log).toEqual([]);
+		expect(result.steps[0]?.operation).toBe("WAIT");
+	});
 	it("carries a whole multi-step goal by itself: type, submit, click, finish", async () => {
 		const surface = new FakeSurface([
 			[field("Search"), el("Home")],
@@ -338,20 +388,130 @@ describe("JevUseLoop", () => {
 			noise: [refused.outcome, noise.log],
 		}).toEqual({
 			tie: ["done", ["press Justin Bieber"]],
-			noise: ["abstained", []],
+			noise: ["budget_exhausted", []],
 		});
 	});
 
-	it("stalls after three actions that leave the screen unchanged", async () => {
-		const surface = new FakeSurface([[el("Refresh")]], { static: true });
+	it("tries another control instead of quitting after unchanged clicks", async () => {
+		const seen: SystemOneRequest[] = [];
+		const surface = new FakeSurface([[el("Refresh"), el("Continue")]], {
+			static: true,
+		});
 		const result = await run(
 			surface,
-			decider(Array(10).fill({ click: /Refresh/ })),
+			decider(
+				[
+					{ click: /Refresh/ },
+					{ click: /Refresh/ },
+					{ click: /Continue/ },
+					"DONE",
+				],
+				{ seen },
+			),
 		);
-		expect({ outcome: result.outcome, presses: surface.log.length }).toEqual({
-			outcome: "stalled",
-			presses: 3,
-		});
+		expect(result.outcome).toBe("done");
+		expect(surface.log).toEqual([
+			"press Refresh",
+			"press Refresh",
+			"press Continue",
+		]);
+		expect(JSON.stringify(seen[2]?.questions.click_target)).not.toContain(
+			"Refresh",
+		);
+	});
+
+	it("withholds covered controls until the overlay changes, then allows them again", async () => {
+		const seen: SystemOneRequest[] = [];
+		const surface = new FakeSurface([
+			[el("Create"), el("Dialog close"), el("Announcement close")],
+			[el("Create")],
+			[el("Brush")],
+		]);
+		const press = surface.press.bind(surface);
+		surface.press = async (target) => {
+			if (!surface.log.length && target.label !== "Announcement close")
+				throw new JevStaleTargetError("Target has no unobstructed hit point");
+			return press(target);
+		};
+		const result = await run(
+			surface,
+			decider(
+				[
+					{ click: /Create/ },
+					{ click: /Dialog close/ },
+					{ click: /Announcement close/ },
+					{ click: /Create/ },
+					"DONE",
+				],
+				{ seen },
+			),
+		);
+		expect(result.outcome).toBe("done");
+		expect(surface.log).toEqual(["press Announcement close", "press Create"]);
+		expect(JSON.stringify(seen[2]?.questions.click_target)).not.toMatch(
+			/Create|Dialog close/,
+		);
+	});
+
+	it("does not treat three unchanged text observations as proof that actions failed", async () => {
+		const surface = new FakeSurface([[el("Editor")]], { static: true });
+		const result = await run(
+			surface,
+			decider([
+				"SCROLL_DOWN",
+				"SCROLL_DOWN",
+				"SCROLL_DOWN",
+				"SCROLL_DOWN",
+				"DONE",
+			]),
+		);
+		expect(result.outcome).toBe("done");
+		expect(surface.log).toHaveLength(4);
+	});
+
+	it("waits through more than five loading observations and resumes", async () => {
+		const result = await run(
+			new FakeSurface([[el("Loading")]]),
+			decider([...Array<Move>(8).fill("WAIT"), "DONE"]),
+		);
+		expect(result.outcome).toBe("done");
+		expect(result.steps).toHaveLength(9);
+	});
+
+	it("bounds loading by elapsed time, not three or five decisions", async () => {
+		let now = 0;
+		const scripted = decider(Array<Move>(30).fill("WAIT"));
+		const result = await new JevUseLoop(
+			new FakeSurface([[el("Loading")]]),
+			async (request, options) => {
+				now += 10_000;
+				return scripted(request, options);
+			},
+			writer(null),
+			0,
+			0,
+			() => now,
+		).run({ goal: "Wait for the editor" }, new AbortController().signal);
+		expect(result.outcome).toBe("stalled");
+		expect(result.steps).toHaveLength(13);
+		expect(result.error).toContain("120 seconds");
+	});
+
+	it("refreshes after an uncertain choice and can recover on the next decision", async () => {
+		const surface = new FakeSurface([[el("Next")], [el("Complete")]]);
+		const uncertain = decider([{ click: /Next/ }], { probability: 0.1 });
+		const clear = decider([{ click: /Next/ }, "DONE"]);
+		let calls = 0;
+		const result = await run(surface, (request, options) =>
+			(++calls === 1 ? uncertain : clear)(request, options),
+		);
+		expect(result.outcome).toBe("done");
+		expect(result.steps.map((step) => step.operation)).toEqual([
+			"WAIT",
+			"CLICK",
+			"DONE",
+		]);
+		expect(surface.log).toEqual(["press Next"]);
 	});
 
 	it("fails closed when Jev answers outside the offered choices", async () => {
@@ -395,6 +555,22 @@ describe("JevUseLoop", () => {
 });
 
 describe("perception helpers", () => {
+	it("preserves late modal text when a long editor outline is clipped", () => {
+		const text = visibleText([
+			"Editor heading",
+			...Array.from(
+				{ length: 200 },
+				(_, i) => `Tool ${i} with a long descriptive label in the editor`,
+			),
+			"Sign in to continue",
+			"Continue with Google",
+			"Close login",
+		]);
+		expect(text.length).toBeLessThanOrEqual(6000);
+		expect(text).toContain("Editor heading");
+		expect(text).toContain("Sign in to continue");
+		expect(text).toContain("Close login");
+	});
 	it("keeps goal-relevant elements past the cap, in reading order", () => {
 		const filler = Array.from({ length: 60 }, (_, i) => el(`Row ${i}`));
 		const labels = pickCandidates(

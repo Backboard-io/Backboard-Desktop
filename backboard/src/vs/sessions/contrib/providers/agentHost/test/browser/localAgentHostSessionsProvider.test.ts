@@ -1832,6 +1832,60 @@ suite('LocalAgentHostSessionsProvider', () => {
 	});
 
 	// ---- Running session config seeding (from SessionState.config) -------
+	for (const enabled of [true, false]) {
+		test(`first send preserves shared composer Computer toggle ${enabled}`, async () => {
+			const sent: IChatSendRequestOptions[] = [];
+			agentHost.resolveSessionConfigResult = { schema: { type: 'object', properties: {} }, values: { isolation: 'folder', computerUse: false } };
+			const provider = createProvider(disposables, agentHost, undefined, {
+				openSession: true,
+				sendRequest: async (_resource, _message, options): Promise<ChatSendResult> => {
+					if (options) { sent.push(options); }
+					agentHost.addSession(createSession('shared-composer-send'));
+					return { kind: 'sent', data: {} as ChatSendResult extends { kind: 'sent'; data: infer D } ? D : never };
+				},
+			});
+			const session = provider.createNewSession(URI.parse('file:///home/user/project'), provider.sessionTypes[0].id);
+			await timeout(0);
+			const backend = agentHost.createdSessionUris[0];
+			const state: SessionState = {
+				summary: { resource: backend.toString(), provider: backend.scheme, title: '', status: ProtocolSessionStatus.Idle, createdAt: 0, modifiedAt: 0 },
+				lifecycle: SessionLifecycle.Ready, chats: [],
+				config: agentHost.resolveSessionConfigResult,
+			};
+			const update = (computerUse: boolean) => agentHost.setSessionState(AgentSession.id(backend.toString()), backend.scheme, {
+				...state, config: { ...state.config!, values: { ...state.config!.values, computerUse } },
+			});
+			update(false); // initial eager-create snapshot
+			update(true); // synchronous optimistic dispatch from the shared composer
+			if (!enabled) { update(false); }
+			const chat = await provider.createNewChat(session.sessionId);
+			await provider.sendRequest(session.sessionId, chat.resource, { query: 'draw a cat using my computer' });
+			assert.strictEqual(sent[0].agentHostSessionConfig?.computerUse, enabled);
+			assert.strictEqual(sent[0].agentHostSessionConfig?.isolation, 'folder');
+		});
+	}
+
+	test('shared composer config survives an in-flight draft schema resolve', async () => {
+		const provider = createProvider(disposables, agentHost);
+		const session = provider.createNewSession(URI.parse('file:///home/user/project'), provider.sessionTypes[0].id);
+		await timeout(0);
+		const backend = agentHost.createdSessionUris[0];
+		const state: SessionState = {
+			summary: { resource: backend.toString(), provider: backend.scheme, title: '', status: ProtocolSessionStatus.Idle, createdAt: 0, modifiedAt: 0 },
+			lifecycle: SessionLifecycle.Ready, chats: [],
+			config: { schema: { type: 'object', properties: {} }, values: { computerUse: false } },
+		};
+		agentHost.setSessionState(AgentSession.id(backend.toString()), backend.scheme, state);
+		const pending = new DeferredPromise<ResolveSessionConfigResult>();
+		agentHost.resolveSessionConfig = () => pending.p;
+		const resolving = provider.setSessionConfigValue(session.sessionId, 'isolation', 'folder');
+		agentHost.setSessionState(AgentSession.id(backend.toString()), backend.scheme, {
+			...state, config: { ...state.config!, values: { computerUse: true } },
+		});
+		await pending.complete({ schema: { type: 'object', properties: {} }, values: { isolation: 'folder', computerUse: false } });
+		await resolving;
+		assert.strictEqual(provider.getCreateSessionConfig(session.sessionId)?.computerUse, true);
+	});
 
 	test('getSessionConfig seeds running config from session state subscription with full schema', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
 		agentHost.addSession(createSession('seed-1', { summary: 'Seeded Session' }));

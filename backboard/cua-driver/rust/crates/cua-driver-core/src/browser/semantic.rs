@@ -92,6 +92,9 @@ pub(crate) struct DomIndex {
 
 #[derive(Debug, Clone, Default)]
 struct LayoutMeta {
+    // CDP reports JS-installed click handlers even when a custom control has
+    // no role, tabindex, inline onclick, or pointer cursor (e.g. JS Paint).
+    is_clickable: bool,
     bounds: Option<Rect>,
     client_rect: Option<Rect>,
     scroll_rect: Option<Rect>,
@@ -389,6 +392,16 @@ pub(crate) fn build_layout_index(snapshot: &Value) -> LayoutIndex {
         else {
             continue;
         };
+        let clickable_indices = document
+            .pointer("/nodes/isClickable/index")
+            .and_then(Value::as_array)
+            .map(|indices| {
+                indices
+                    .iter()
+                    .filter_map(Value::as_u64)
+                    .collect::<HashSet<_>>()
+            })
+            .unwrap_or_default();
         let layout = document.get("layout").unwrap_or(&Value::Null);
         let node_indices = layout
             .get("nodeIndex")
@@ -442,6 +455,7 @@ pub(crate) fn build_layout_index(snapshot: &Value) -> LayoutIndex {
             out.nodes.insert(
                 backend,
                 LayoutMeta {
+                    is_clickable: clickable_indices.contains(&(node_index as u64)),
                     bounds: bounds.get(layout_idx).and_then(Rect::from_value),
                     client_rect: client_rects.get(layout_idx).and_then(Rect::from_value),
                     scroll_rect: scroll_rects.get(layout_idx).and_then(Rect::from_value),
@@ -872,6 +886,8 @@ fn action_kinds(
     if actions.is_empty()
         && dom.is_some_and(|meta| {
             meta.attrs.contains_key("onclick")
+                || (!matches!(meta.tag.as_str(), "html" | "body")
+                    && layout.is_some_and(|layout| layout.is_clickable))
                 || meta
                     .attrs
                     .get("tabindex")
@@ -1347,6 +1363,50 @@ mod tests {
             .selected
             .iter()
             .all(|node| node.name.as_deref() != Some("Static panel")));
+    }
+
+    #[test]
+    fn javascript_click_handlers_expose_custom_drawing_tools_without_guessing_static_panels() {
+        let dom = build_dom_index(&json!({
+            "nodeType": 9,
+            "children": [
+                {"nodeType": 1, "nodeName": "DIV", "backendNodeId": 10,
+                 "attributes": ["title", "Pencil", "class", "tool selected"]},
+                {"nodeType": 1, "nodeName": "DIV", "backendNodeId": 20,
+                 "attributes": ["title", "Static panel"]},
+                {"nodeType": 1, "nodeName": "DIV", "backendNodeId": 30,
+                 "attributes": ["title", "Brush", "disabled", ""]}
+            ]
+        }));
+        let layout = build_layout_index(&json!({
+            "strings": ["block", "visible", "1", "auto"],
+            "documents": [{
+                "nodes": {"backendNodeId": [10, 20, 30], "isClickable": {"index": [0, 2]}},
+                "layout": {
+                    // Layout order differs from DOM order: rare indexes use DOM indexes.
+                    "nodeIndex": [1, 2, 0],
+                    "bounds": [[10, 10, 30, 30], [10, 50, 30, 30], [50, 50, 30, 30]],
+                    "styles": [[0, 1, 2, 3, 3], [0, 1, 2, 3, 3], [0, 1, 2, 3, 3]]
+                }
+            }]
+        }));
+        let document = compose_accessibility_tree(
+            &json!({"nodes": []}),
+            &dom,
+            &layout,
+            &parse_viewport(&json!({"cssVisualViewport": {
+                "pageX": 0, "pageY": 0, "clientWidth": 800, "clientHeight": 600
+            }})),
+            frame(),
+        );
+        let controls = document
+            .nodes
+            .iter()
+            .filter(|node| node.actions.contains(&BrowserActionKind::Click))
+            .collect::<Vec<_>>();
+        assert_eq!(controls.len(), 1);
+        assert_eq!(controls[0].name.as_deref(), Some("Pencil"));
+        assert_eq!(controls[0].backend_node_id, Some(10));
     }
 
     #[test]

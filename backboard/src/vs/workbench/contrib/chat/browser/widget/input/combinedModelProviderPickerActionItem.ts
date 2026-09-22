@@ -215,7 +215,8 @@ function formatModelLabelPart(part: string): string {
 
 /** Turn provider model ids into compact user-facing labels for the composer. */
 export function formatModelLabel(name: string): string {
-	const rawModelName = name.split('/').pop() || name;
+	const cleanName = name.replace(/^[\p{L}\p{N}. &()-]{1,48}:\s+/u, '');
+	const rawModelName = cleanName.split('/').pop() || cleanName;
 	const modelName = rawModelName.replace(/^(?:[^.]+\.)*anthropic\./i, '');
 	const gptMatch = /^gpt[-_\s]*(\d+(?:\.\d+)*(?:[a-z]+)?)(?:[-_\s]+(.+))?$/i.exec(modelName);
 	if (gptMatch) {
@@ -232,6 +233,65 @@ export function formatModelLabel(name: string): string {
 		.map(formatModelLabelPart)
 		.join(' ');
 	return formatted.replace(/^(Claude(?: [A-Za-z]+)*) (\d+) (\d+)(?= |$)/, '$1 $2.$3');
+}
+
+/** Match the model author, including models routed through aggregators. */
+export function modelBrandIconKey(model: ILanguageModelChatMetadataAndIdentifier): string {
+	const identity = `${model.metadata.id} ${model.metadata.name}`.toLowerCase();
+	if (/dotsstudio|dots3/.test(identity)) { return 'dotsstudio'; }
+	if (/longcat|meituan/.test(identity)) { return 'longcat'; }
+	if (/nex-agi|nex[ -]n2/.test(identity)) { return 'nexagi'; }
+	if (/perceptron/.test(identity)) { return 'perceptron'; }
+	if (/poolside|laguna/.test(identity)) { return 'poolside'; }
+	if (/reka/.test(identity)) { return 'reka'; }
+	if (/relace/.test(identity)) { return 'relace'; }
+	if (/sakana|fugu/.test(identity)) { return 'sakana'; }
+	if (/thinkingmachines|inkling/.test(identity)) { return 'thinkingmachines'; }
+	if (/union[ -]?alpha/.test(identity)) { return 'unionalpha'; }
+	if (/writer|palmyra/.test(identity)) { return 'writer'; }
+	if (/anthracite|magnum/.test(identity)) { return 'anthracite'; }
+	if (/thedrummer|cydonia|skyfall|unslopnemo/.test(identity)) { return 'thedrummer'; }
+	if (/gryphe|mythomax/.test(identity)) { return 'gryphe'; }
+	if (/undi95|remm-slerp/.test(identity)) { return 'undi'; }
+	if (/mancer|weaver/.test(identity)) { return 'mancer'; }
+	if (/inclusionai|(?:^|[ /])ling[ -]/.test(identity)) { return 'inclusionai'; }
+	if (/inference[.-]net|schematron/.test(identity)) { return 'inference'; }
+	// Authors precede architecture names: DeepSeek R1 Distill Llama is DeepSeek.
+	if (/deepseek/.test(identity)) { return 'deep-seek'; }
+	if (/amazon|(?:^|[ /])nova[ -]/.test(identity)) { return 'bedrock'; }
+	if (/ibm|granite/.test(identity)) { return 'ibm'; }
+	if (/inception|mercury/.test(identity)) { return 'inception'; }
+	if (/liquid|(?:^|[ /])lfm/.test(identity)) { return 'liquid'; }
+	if (/kwaipilot|kat-coder/.test(identity)) { return 'kwaipilot'; }
+	if (/ai21|jamba/.test(identity)) { return 'ai21'; }
+	if (/baidu|ernie/.test(identity)) { return 'baidu'; }
+	if (/bytedance|seed[ -]/.test(identity)) { return 'bytedance'; }
+	if (/tencent|hunyuan/.test(identity)) { return 'tencent'; }
+	if (/stepfun|step-/.test(identity)) { return 'stepfun'; }
+	if (/xiaomi|mimo/.test(identity)) { return 'xiaomi'; }
+	if (/arcee/.test(identity)) { return 'arcee'; }
+	if (/essentialai|rnj-/.test(identity)) { return 'essentialai'; }
+	if (/nousresearch|hermes/.test(identity)) { return 'nous'; }
+	if (/upstage|solar[ -]/.test(identity)) { return 'upstage'; }
+	if (/morph/.test(identity)) { return 'morph'; }
+	if (/aionlabs|aion-/.test(identity)) { return 'aionlabs'; }
+	if (/qwen|qwq/.test(identity)) { return 'qwen'; }
+	if (/kimi|moonshot/.test(identity)) { return 'kimi'; }
+	if (/glm|z-ai|zhipu/.test(identity)) { return 'zai'; }
+	if (/llama|meta-llama|muse[ -]/.test(identity)) { return 'meta'; }
+	if (/nvidia|nemotron/.test(identity)) { return 'nvidia'; }
+	if (/microsoft|phi-[234]/.test(identity)) { return 'microsoft'; }
+	if (/minimax/.test(identity)) { return 'minimax'; }
+	if (/perplexity|sonar/.test(identity)) { return 'perplexity'; }
+	if (/gemini|gemma/.test(identity)) { return 'google'; }
+	if (/claude|anthropic/.test(identity)) { return 'claude'; }
+	if (/gpt|openai|(?:^|[ /])o[134](?:[ -]|$)/.test(identity)) { return 'open-ai'; }
+	if (/mistral|mixtral|codestral|devstral/.test(identity)) { return 'mistral'; }
+	if (/grok|x-ai/.test(identity)) { return 'x-ai'; }
+	if (/cohere|command-r|command-a/.test(identity)) { return 'cohere'; }
+	return providerIconKeyForCombinedModelSection(`provider:${upstreamProviderId(model)}`)
+		?? providerIconKeyForCombinedModelSection(`provider:${model.metadata.targetChatSessionType ?? ''}`)
+		?? 'backboard';
 }
 
 /** Builds the compact source label shown below a model name. */
@@ -458,6 +518,7 @@ export function isClaudeSubscriptionConnected(models: readonly ILanguageModelCha
 export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 
 	private _triggerElement: HTMLElement | undefined;
+	private _triggerBrand: HTMLElement | undefined;
 	private _triggerLabel: HTMLElement | undefined;
 	private _triggerThinking: HTMLElement | undefined;
 	private readonly _overlay = this._register(new MutableDisposable());
@@ -508,6 +569,8 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		trigger.setAttribute('role', 'button');
 		trigger.setAttribute('aria-haspopup', 'true');
 		dom.append(trigger, dom.$('span.combined-model-provider-brain', { 'aria-hidden': 'true' }));
+		this._triggerBrand = dom.append(trigger, dom.$('span.combined-model-logo'));
+		this._triggerBrand.setAttribute('aria-hidden', 'true');
 		this._triggerLabel = dom.append(trigger, dom.$('span.combined-model-provider-trigger-label'));
 		this._triggerThinking = dom.append(trigger, dom.$('span.combined-model-provider-trigger-thinking'));
 		dom.append(trigger, dom.$(`span.combined-model-provider-trigger-chevron${ThemeIcon.asCSSSelector(Codicon.chevronDown)}`));
@@ -576,6 +639,9 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		const modelLabel = name ? formatModelLabel(name) : localize('combinedPicker.auto', "Auto");
 		const thinkingLabel = this._thinkingOption(model)?.currentLabel;
 		this._triggerLabel.textContent = modelLabel;
+		if (this._triggerBrand) {
+			this._triggerBrand.className = `combined-model-logo provider-${model ? modelBrandIconKey(model) : 'backboard'}`;
+		}
 		this._triggerThinking.textContent = thinkingLabel ?? '';
 		// The billing route is always visible from the composer, including an
 		// unavailable key-billed selection.
@@ -1042,6 +1108,8 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 					row.classList.add('selected');
 				}
 
+				const logo = dom.append(row, dom.$(`.combined-model-logo.provider-${modelBrandIconKey(model)}`));
+				logo.setAttribute('aria-hidden', 'true');
 				const main = dom.append(row, dom.$('.combined-model-provider-row-main'));
 				const nameRow = dom.append(main, dom.$('.combined-model-provider-row-name'));
 				nameRow.textContent = formatModelLabel(model.metadata.name);
@@ -1062,9 +1130,9 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 					dom.append(main, dom.$('.combined-model-provider-row-sub')).textContent = detail;
 				}
 
-				const commit = () => {
+				const commit = async () => {
 					const choosingOpenRouterModel = upstreamProviderId(model) === 'openrouter';
-					if (!this._commit(providerId, model, choosingOpenRouterModel)) {
+					if (!await this._commit(providerId, model, choosingOpenRouterModel)) {
 						return;
 					}
 					if (choosingOpenRouterModel) {
@@ -1178,7 +1246,7 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		setTimeout(() => search.focus(), 0);
 	}
 
-	private _commit(providerId: string, model: ILanguageModelChatMetadataAndIdentifier, keepOpen = false): boolean {
+	private async _commit(providerId: string, model: ILanguageModelChatMetadataAndIdentifier, keepOpen = false): Promise<boolean> {
 		const activeProvider = this._activeProvider();
 		const providerLocked = this._sessionTypeDelegate.canChangeSessionProvider?.() === false;
 		if (providerLocked && providerId !== activeProvider) {
@@ -1190,7 +1258,11 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			return false;
 		}
 		if (providerId && providerId !== activeProvider && this._sessionTypeDelegate.setActiveSessionProvider) {
-			this._sessionTypeDelegate.setActiveSessionProvider(providerId as AgentSessionTarget);
+			try {
+				await this._sessionTypeDelegate.setActiveSessionProvider(providerId as AgentSessionTarget);
+			} catch {
+				return false;
+			}
 		}
 		this._modelDelegate.setModel(model);
 		this._updateTrigger();

@@ -754,7 +754,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		// which would kill an in-flight sign-in (the extension host dies with the
 		// reload before the device-code flow can open the browser or save the
 		// tokens). So wait for the sign-in to finish before advancing; the
-		// browser opens right away, this page just stays up until approval.
+		// browser opens once the device code is ready, and this page stays up
+		// until approval.
 		const startConnection = async (sourceButton: HTMLButtonElement, action: string, subscription = false): Promise<void> => {
 			if (signInButton.disabled) {
 				return;
@@ -767,7 +768,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			const idleLabel = sourceButton.textContent;
 			sourceButton.textContent = subscription
 				? localize('onboarding.byos.waiting', "Connecting…")
-				: localize('onboarding.backboard.signInWaiting', "Finish Signing In in Your Browser…");
+				: localize('onboarding.backboard.signInConnecting', "Connecting to Backboard…");
 			try {
 				// Resolves true once the tokens are saved; false when the sign-in
 				// failed or was denied (the extension already surfaced that error).

@@ -38,12 +38,12 @@ export class ChatErrorConfirmationContentPart extends Disposable implements ICha
 		const element = context.element;
 		assertIsResponseVM(element);
 
-		this.domNode = $('.chat-error-confirmation');
+		this.domNode = $('.chat-error-confirmation.chat-question-approval');
 		this.domNode.append(this._register(new ChatErrorWidget(kind, content, renderer)).domNode);
 
 		const buttonOptions: IButtonOptions = { ...defaultButtonStyles };
 
-		const buttonContainer = dom.append(this.domNode, $('.chat-buttons-container'));
+		const buttonContainer = dom.append(this.domNode, $('.chat-buttons-container.chat-buttons'));
 		confirmationButtons.forEach(buttonData => {
 			const button = this._register(new Button(buttonContainer, buttonOptions));
 			button.label = buttonData.label;

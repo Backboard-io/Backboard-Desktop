@@ -46,6 +46,7 @@ const keySchema = z.object({
 const actionSchema = z.discriminatedUnion("action", [
 	z.object({
 		action: z.literal("screenshot"),
+		appName: z.string().min(1).optional(),
 	}),
 	z.object({
 		action: z.literal("click"),
@@ -129,7 +130,7 @@ const publicActionSchema = z.object({
 		.string()
 		.min(1)
 		.describe(
-			"Application name for the openApp action, and the app a task acts on.",
+			"Application name for openApp/task. For a web/drawing task without a specified browser use Browser (automatic Chromium selection). DOM/canvas browser tasks support Brave, Chrome, and Edge, not Safari or Firefox. On screenshot, captures the exact browser task window for this app instead of the foreground desktop.",
 		)
 		.optional(),
 	goal: z
@@ -145,7 +146,7 @@ const publicActionSchema = z.object({
 		.min(1)
 		.max(JEV_MAX_STEPS_LIMIT)
 		.describe(
-			`For the task action: element presses allowed. Default ${JEV_DEFAULT_MAX_STEPS}.`,
+			`For the task action: decision budget, including waits and recovery. Default ${JEV_DEFAULT_MAX_STEPS}, maximum ${JEV_MAX_STEPS_LIMIT}. Loading can wait up to 120 seconds.`,
 		)
 		.optional(),
 });
@@ -278,7 +279,11 @@ function normalizeComputerInput(raw: unknown): unknown {
 				const target = clickTarget(normalized);
 				if (target) normalized = { ...normalized, target };
 			}
-			if (normalized.action === "openApp" || normalized.action === "task") {
+			if (
+				normalized.action === "openApp" ||
+				normalized.action === "task" ||
+				normalized.action === "screenshot"
+			) {
 				const appName = firstString(normalized, APP_NAME_KEYS);
 				if (appName) normalized = { ...normalized, appName };
 			}

@@ -471,6 +471,11 @@ function actionResult(
 		error: text(value.error, 1_000),
 		outcome: kind === "computer" ? text(value.outcome, 64) : undefined,
 		surface: kind === "computer" ? text(value.surface, 64) : undefined,
+		appName: kind === "computer" ? text(value.appName, 256) : undefined,
+		windowTitle: text(value.windowTitle, 512),
+		coordinateSpace: value.coordinateSpace === "window" ? "window" : undefined,
+		screenshotPath: text(value.screenshotPath, MAX_PATH_CHARS),
+		imageMediaType: text(value.__image_media_type, 128),
 		observation:
 			kind === "computer" && asRecord(value.observation)
 				? observation(
@@ -501,6 +506,7 @@ function observation(
 		elementCount: elements.length,
 		summary: text(value.summary, 1_000),
 		imageMediaType: text(value.__image_media_type, 128),
+		coordinateSpace: value.coordinateSpace === "window" ? "window" : undefined,
 	});
 }
 

@@ -5,6 +5,35 @@ import {
 } from "../src/core/tools/ToolUiData.ts";
 
 describe("ToolUiData", () => {
+	it("retains task screenshot evidence while stripping image bytes", () => {
+		const result = backboardToolUiResult(
+			"computer",
+			{},
+			{
+				success: false,
+				results: [
+					{
+						action: "task",
+						success: false,
+						outcome: "stalled",
+						screenshotPath: "/tmp/brave.png",
+						__image_base64: "private-pixels",
+						__image_media_type: "image/png",
+					},
+				],
+			},
+		);
+		expect(result?.result?.results).toEqual([
+			{
+				action: "task",
+				success: false,
+				outcome: "stalled",
+				screenshotPath: "/tmp/brave.png",
+				imageMediaType: "image/png",
+			},
+		]);
+		expect(JSON.stringify(result)).not.toContain("private-pixels");
+	});
 	it("keeps search completeness separate from UI preview truncation", () => {
 		const metadata = {
 			truncated: true,

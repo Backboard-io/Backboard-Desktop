@@ -117,6 +117,7 @@ struct PointerRequest {
     delta_x: f64,
     delta_y: f64,
     path: Option<Vec<[f64; 2]>>,
+    strokes: Option<Vec<Vec<[f64; 2]>>>,
 }
 
 fn explicit_session(args: &Value) -> Result<String, ToolResult> {
@@ -197,7 +198,32 @@ fn parse_request(args: &Value) -> Result<PointerRequest, String> {
     } else {
         None
     };
-    if action == PointerAction::Drag && destination.is_none() && path.is_none() {
+    let strokes = if let Some(value) = args.get("strokes") {
+        let strokes: Vec<Vec<[f64; 2]>> = serde_json::from_value(value.clone())
+            .map_err(|_| "strokes must contain arrays of normalized [x,y] pairs".to_owned())?;
+        if action != PointerAction::Drag
+            || route != InputRoute::DomEvent
+            || !matches!(origin, Location::Ref(_))
+            || destination.is_some()
+            || path.is_some()
+            || !(1..=48).contains(&strokes.len())
+            || strokes.iter().map(Vec::len).sum::<usize>() > 4096
+            || strokes.iter().any(|points| {
+                !(2..=256).contains(&points.len())
+                    || points
+                        .iter()
+                        .flatten()
+                        .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
+            })
+        {
+            return Err("strokes requires drag, dom_event, one canvas ref, 1-48 bounded strokes, at most 4096 points, and no path or destination".into());
+        }
+        Some(strokes)
+    } else {
+        None
+    };
+    if action == PointerAction::Drag && destination.is_none() && path.is_none() && strokes.is_none()
+    {
         return Err("action=drag requires destination_ref or to_x/to_y".into());
     }
     if action != PointerAction::Drag && destination.is_some() {
@@ -226,6 +252,7 @@ fn parse_request(args: &Value) -> Result<PointerRequest, String> {
         delta_x,
         delta_y,
         path,
+        strokes,
     })
 }
 
@@ -329,6 +356,7 @@ impl BrowserPointerTool {
                         "x": { "type": "number", "description": "Origin viewport x in CSS pixels." },
                         "y": { "type": "number", "description": "Origin viewport y in CSS pixels." },
                         "path": { "type": "array", "minItems": 2, "maxItems": 256, "items": { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 }, "minItems": 2, "maxItems": 2 }, "description": "Freehand stroke normalized to a live canvas ref. Requires drag with dom_event and no destination. Revalidates canvas bounds and hit testing before dispatch." },
+                        "strokes": { "type": "array", "minItems": 1, "maxItems": 48, "items": { "type": "array", "minItems": 2, "maxItems": 256, "items": { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 }, "minItems": 2, "maxItems": 2 } }, "description": "Complete drawing, at most 4096 points. Fits all strokes together with margins in the unobstructed canvas center and checks the entire plan before brush-down. Requires drag, dom_event, canvas ref, and no path or destination." },
                         "destination_ref": { "type": "string", "description": "Drag destination page ref in the exact same frame." },
                         "to_x": { "type": "number", "description": "Drag destination viewport x in CSS pixels." },
                         "to_y": { "type": "number", "description": "Drag destination viewport y in CSS pixels." },
@@ -459,6 +487,10 @@ impl BrowserPointerTool {
             PointerAction::Scroll => (
                 "function(dx,dy) { const o={deltaX:dx,deltaY:dy,bubbles:true,cancelable:true,composed:true,view:this.ownerDocument.defaultView}; this.dispatchEvent(new WheelEvent('wheel',o)); let n=this; while (n && n !== this.ownerDocument.documentElement) { const s=this.ownerDocument.defaultView.getComputedStyle(n); if (/(auto|scroll)/.test(s.overflow+s.overflowX+s.overflowY)) break; n=n.parentElement; } const target=n || this.ownerDocument.scrollingElement || this.ownerDocument.documentElement; const beforeX=target.scrollLeft; const beforeY=target.scrollTop; target.scrollBy(dx,dy); const changed=target.scrollLeft !== beforeX || target.scrollTop !== beforeY; if (changed) target.dispatchEvent(new Event('scroll')); return changed; }",
                 json!([{ "value": request.delta_x }, { "value": request.delta_y }]),
+            ),
+            PointerAction::Drag if request.strokes.is_some() => (
+                include_str!("canvas_stroke.js"),
+                json!([{ "value": request.strokes }, { "value": true }]),
             ),
             PointerAction::Drag if request.path.is_some() => (
                 include_str!("canvas_stroke.js"),
@@ -972,6 +1004,26 @@ mod tests {
             ("path", json!([[0.0, 0.0], [1.1, 0.5]])),
             ("path", json!([[0.0, 0.0, 0.0], [0.5, 0.5]])),
             ("path", json!(vec![[0.5, 0.5]; 257])),
+            ("action", json!("hover")),
+            ("input_route", json!("trusted")),
+            ("destination_ref", json!("p1:1")),
+        ] {
+            let mut invalid = valid.clone();
+            invalid[key] = value;
+            assert!(parse_request(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn complete_drawings_are_bounded_and_exclusive() {
+        let valid = json!({"action":"drag", "input_route":"dom_event", "ref":"p1:0", "strokes":[[[0.2,0.3],[0.8,0.7]]]});
+        assert_eq!(parse_request(&valid).unwrap().strokes.unwrap().len(), 1);
+        for (key, value) in [
+            ("strokes", json!([])),
+            ("strokes", json!([[[0.5, 0.5]]])),
+            ("strokes", json!(vec![vec![[0.5, 0.5]; 2]; 49])),
+            ("strokes", json!(vec![vec![[0.5, 0.5]; 256]; 17])),
+            ("path", json!([[0.2, 0.3], [0.8, 0.7]])),
             ("action", json!("hover")),
             ("input_route", json!("trusted")),
             ("destination_ref", json!("p1:1")),

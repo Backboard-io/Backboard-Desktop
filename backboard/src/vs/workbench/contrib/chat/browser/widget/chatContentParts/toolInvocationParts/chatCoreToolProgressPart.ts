@@ -356,9 +356,10 @@ function automationViewModel(
 		const succeeded = result?.success;
 		const observation = result?.observation ? asRecord(result.observation) : asRecord(result);
 		const screenshotPath = firstString(observation, ['screenshotPath']);
-		// Only completed screenshot actions replace their activity row. Failed,
-		// pending, and non-screenshot actions retain their normal feedback.
-		if (actionName === 'screenshot' && succeeded === true && !common.failed && output.success !== false
+		// Task evidence also matters when the task stalls. Keep its activity row
+		// beside the image so a captured window never implies task success.
+		const isCompletedScreenshot = actionName === 'screenshot' && succeeded === true && !common.failed && output.success !== false;
+		if ((isCompletedScreenshot || actionName === 'task')
 			&& screenshotPath && (/^\//.test(screenshotPath) || /^[a-z]:[\\/]/i.test(screenshotPath))) {
 			const size = asRecord(observation?.imageSize ?? observation?.screenSize);
 			screenshots.push({
@@ -367,7 +368,9 @@ function automationViewModel(
 				height: firstNumber(size, ['height']),
 				alt: firstString(observation, ['windowTitle', 'appName']) ?? localize('chat.coreTool.screenshot.alt', "Computer screenshot"),
 			});
-			continue;
+			if (isCompletedScreenshot) {
+				continue;
+			}
 		}
 		items.push({
 			title: automationActionLabel(actionName),
@@ -466,7 +469,7 @@ interface IRenderedCoreToolCard {
 
 function renderCoreToolCard(view: ICoreToolCardViewModel, invocation: IInvocationPresentation): IRenderedCoreToolCard {
 	const outcome: InvocationOutcome = invocation.kind === 'complete' && view.failed ? 'error' : invocation.kind;
-	if (view.screenshots?.length && invocation.kind === 'complete' && !view.failed) {
+	if (view.screenshots?.length && invocation.kind === 'complete') {
 		const container = document.createElement('div');
 		container.className = 'chat-computer-screenshots';
 		const activity = view.items?.length ? renderCoreToolCard({ ...view, screenshots: undefined }, invocation) : undefined;

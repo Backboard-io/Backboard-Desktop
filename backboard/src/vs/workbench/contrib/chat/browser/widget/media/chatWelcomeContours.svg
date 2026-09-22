@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1100" fill="none">
+  <defs>
+    <radialGradient id="quietCenter" gradientUnits="userSpaceOnUse" cx="450" cy="525" r="620">
+      <stop offset="0.22" stop-color="white" stop-opacity="0"/>
+      <stop offset="0.58" stop-color="white" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="white" stop-opacity="0.8"/>
+    </radialGradient>
+  </defs>
+  <!-- Sparse, rounded steps borrow the rising/falling silhouette of the Backboard mark. -->
+  <g stroke="url(#quietCenter)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M-80 470 H80 Q116 470 116 434 V318 Q116 282 152 282 H214 Q250 282 250 246 V116 Q250 80 286 80 H348 Q384 80 384 44 V-100"/>
+    <path d="M-80 552 H116 Q198 552 198 470 V364 H250 Q332 364 332 282 V162 H384 Q466 162 466 80 V-100" opacity="0.8"/>
+    <path d="M980 638 H812 Q776 638 776 674 V790 Q776 826 740 826 H678 Q642 826 642 862 V992 Q642 1028 606 1028 H544 Q508 1028 508 1064 V1200"/>
+    <path d="M980 556 H776 Q694 556 694 638 V744 H642 Q560 744 560 826 V946 H508 Q426 946 426 1028 V1200" opacity="0.8"/>
+  </g>
+</svg>

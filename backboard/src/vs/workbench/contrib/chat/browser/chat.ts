@@ -82,7 +82,7 @@ export interface ISessionTypePickerDelegate {
 	 * When provided, the picker will call this instead of executing the openNewChatSessionInPlace command.
 	 * This allows the welcome view to maintain independent state from the main chat panel.
 	 */
-	setActiveSessionProvider?(provider: AgentSessionTarget): void;
+	setActiveSessionProvider?(provider: AgentSessionTarget): void | Promise<void>;
 	/**
 	 * Optional allowlist for picker surfaces that want to expose only a subset
 	 * of session providers while still reusing the shared session picker UI.

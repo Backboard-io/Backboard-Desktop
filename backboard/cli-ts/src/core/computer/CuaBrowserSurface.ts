@@ -1,3 +1,5 @@
+import { canonicalAppName } from "../../utils/appNames.ts";
+import { errorMessage } from "../../utils/errors.ts";
 import { ImageContent } from "../image/ImageContent.ts";
 import type { CanvasDrawing } from "./CanvasDrawing.ts";
 import { CuaDriverClient } from "./CuaDriverClient.ts";
@@ -87,7 +89,7 @@ export class CuaBrowserSurface implements JevSurface {
 
 	async observe(signal: AbortSignal): Promise<JevObservation> {
 		const target = await this.bind(signal);
-		const snapshot = await this.driver.call<PageSnapshot>(
+		const snapshot = await this.readSnapshot(
 			"get_browser_state",
 			{
 				target_id: target.target_id,
@@ -113,6 +115,30 @@ export class CuaBrowserSurface implements JevSurface {
 		};
 	}
 
+	/** Frames can disappear while an ad or navigation loads. Retrying a read
+	 * obtains a new snapshot; a browser mutation is never replayed here. */
+	private async readSnapshot(
+		name: string,
+		args: Record<string, unknown>,
+		signal: AbortSignal,
+	): Promise<PageSnapshot> {
+		for (let attempt = 0; ; attempt++) {
+			try {
+				return await this.driver.call<PageSnapshot>(name, args, signal);
+			} catch (error) {
+				if (
+					signal.aborted ||
+					attempt >= 3 ||
+					!/Frame with the given frameId is not found|Execution context was destroyed|Cannot find context with specified id|document.*changed/i.test(
+						errorMessage(error),
+					)
+				)
+					throw error;
+				await new Promise((resolve) => setTimeout(resolve, 200));
+			}
+		}
+	}
+
 	async press(element: JevElement, signal: AbortSignal): Promise<void> {
 		const target = await this.bind(signal);
 		const args = {
@@ -136,22 +162,21 @@ export class CuaBrowserSurface implements JevSurface {
 		signal: AbortSignal,
 	): Promise<void> {
 		const target = await this.bind(signal);
-		for (const path of drawing.strokes) {
-			if (signal.aborted) throw new Error("aborted");
-			await this.driver.call(
-				"browser_pointer",
-				{
-					target_id: target.target_id,
-					tab_id: target.tab_id,
-					session: this.session,
-					action: "drag",
-					input_route: "dom_event",
-					ref: element.handle,
-					path,
-				},
-				signal,
-			);
-		}
+		// One bounded plan lets the driver fit and preflight every stroke before
+		// sending any brush-down event. Unknown/partial failures are never replayed.
+		await this.driver.call(
+			"browser_pointer",
+			{
+				target_id: target.target_id,
+				tab_id: target.tab_id,
+				session: this.session,
+				action: "drag",
+				input_route: "dom_event",
+				ref: element.handle,
+				strokes: drawing.strokes,
+			},
+			signal,
+		);
 	}
 
 	async type(
@@ -255,7 +280,7 @@ export class CuaBrowserSurface implements JevSurface {
 	/** Exact browser-window evidence for the caller; never sent to Jev. */
 	async capture(path: string, signal: AbortSignal) {
 		const target = await this.bind(signal);
-		await this.driver.call(
+		const captured = await this.driver.call<{ window_title?: string }>(
 			"get_window_state",
 			{
 				pid: target.pid,
@@ -269,6 +294,9 @@ export class CuaBrowserSurface implements JevSurface {
 		);
 		return {
 			screenshotPath: path,
+			appName: this.appName,
+			windowTitle: captured.window_title ?? this.title,
+			coordinateSpace: "window" as const,
 			...ImageContent.fromBytes(await Bun.file(path).bytes(), "image/png"),
 		};
 	}
@@ -290,15 +318,7 @@ export class CuaBrowserSurface implements JevSurface {
 		// Omitting it selects Chrome/Edge regardless of the user's request.
 		let requestedPid: number | undefined;
 		if (!/^browser$/i.test(this.appName)) {
-			const name = /^(brave|chrome|edge)$/i.test(this.appName)
-				? (
-						{
-							brave: "Brave Browser",
-							chrome: "Google Chrome",
-							edge: "Microsoft Edge",
-						} as Record<string, string>
-					)[this.appName.toLowerCase()]
-				: this.appName;
+			const name = canonicalAppName(this.appName);
 			const launched = await this.driver.call<{ pid: number }>(
 				"launch_app",
 				{ name },

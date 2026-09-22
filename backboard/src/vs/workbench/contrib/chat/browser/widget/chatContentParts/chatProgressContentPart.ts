@@ -64,7 +64,9 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 		this.currentContent = progress.content;
 
 		const followingContentStart = context.contentIndex + 1;
-		this.showSpinner = forceShowSpinner ?? shouldShowSpinner(context.content, context.element, followingContentStart);
+		this.showSpinner = toolInvocation
+			? !IChatToolInvocation.isComplete(toolInvocation)
+			: forceShowSpinner ?? shouldShowSpinner(context.content, context.element, followingContentStart);
 		// Progress rows never show elapsed time; the label alone carries the state.
 		this.showLiveElapsed = false;
 		this.isHidden = forceShowMessage !== true && hasNonProgressContent(context.content, followingContentStart);
@@ -80,14 +82,13 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 		}
 		const isLoadingIcon = icon && ThemeIcon.isEqual(icon, ThemeIcon.modify(Codicon.loading, 'spin'));
 		const useCompactCursorIndicator = this.showSpinner && isBackboardCursorTranscript(context.container);
-		// Even if callers request shimmer, only the active (spinner-visible) progress row should animate.
-		// The editor transcript uses a bounded five-pixel opacity pulse instead of
-		// repainting the entire status label with the shimmer gradient.
-		const useShimmer = (shimmer ?? (!icon || isLoadingIcon)) && this.showSpinner && !useCompactCursorIndicator;
-		// if we have shimmer, don't show spinner
-		const codicon = useCompactCursorIndicator
-			? Codicon.circleFilled
-			: (useShimmer ? Codicon.check : (icon ?? (this.showSpinner ? ThemeIcon.modify(Codicon.loading, 'spin') : Codicon.check)));
+		// Tool activity follows the tool lifecycle, never the enclosing response.
+		// Use the same ring in both Backboard presentations, without a second animation on the label.
+		const useShimmer = !toolInvocation && !context.container.closest('.backboard-clean-chat') &&
+			(shimmer ?? (!icon || isLoadingIcon)) && this.showSpinner && !useCompactCursorIndicator;
+		const codicon = this.showSpinner
+			? (useShimmer ? Codicon.check : ThemeIcon.modify(Codicon.loading, 'spin'))
+			: (isLoadingIcon ? Codicon.check : icon ?? Codicon.check);
 		const result = this.chatContentMarkdownRenderer.render(progress.content);
 		result.element.classList.add('progress-step');
 		renderFileWidgets(result.element, this.instantiationService, this.chatMarkdownAnchorService, this._fileWidgetStore);
@@ -105,7 +106,6 @@ export class ChatProgressContentPart extends Disposable implements IChatContentP
 			this.domNode.setAttribute('aria-live', 'polite');
 			this.domNode.setAttribute('aria-atomic', 'true');
 			const indicator = this.domNode.firstElementChild;
-			indicator?.classList.add('chat-cursor-working-indicator');
 			indicator?.setAttribute('aria-hidden', 'true');
 		}
 		if (useShimmer) {
@@ -430,29 +430,14 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		this.isCompleteState = isComplete;
 		this.domNode.classList.toggle('chat-cursor-working-complete', this.useCursorTranscriptPresentation && isComplete);
 
-		if (this.useCursorTranscriptPresentation) {
-			// Keep the editor transcript's progress affordance local to one tiny
-			// opacity-animated dot. Shimmering the entire label repaints a much
-			// larger area for every animation frame in long-running responses.
-			if (!isComplete) {
-				iconElement.classList.add('chat-cursor-working-indicator');
-				iconElement.setAttribute('aria-hidden', 'true');
-				append(this.domNode, iconElement);
-				this.domNode.setAttribute('role', 'status');
-				this.domNode.setAttribute('aria-live', 'polite');
-				this.domNode.setAttribute('aria-atomic', 'true');
-			}
-		} else if (this.useBackboardTimelinePresentation) {
-			this.domNode.classList.add('chat-backboard-working-row');
-			iconElement.classList.add('chat-backboard-working-dots');
-			iconElement.append($('span'), $('span'), $('span'));
-		} else if (isComplete) {
-			iconElement.classList.add(...ThemeIcon.asClassNameArray(Codicon.check));
-		} else {
-			iconElement.classList.add(...ThemeIcon.asClassNameArray(ThemeIcon.modify(Codicon.loading, 'spin')));
-		}
-		if (!this.useCursorTranscriptPresentation) {
-			append(this.domNode, iconElement);
+		iconElement.classList.add(...ThemeIcon.asClassNameArray(isComplete ? Codicon.check : ThemeIcon.modify(Codicon.loading, 'spin')));
+		iconElement.setAttribute('aria-hidden', 'true');
+		append(this.domNode, iconElement);
+		this.domNode.classList.toggle('chat-backboard-working-row', this.useBackboardTimelinePresentation);
+		if (!isComplete) {
+			this.domNode.setAttribute('role', 'status');
+			this.domNode.setAttribute('aria-live', 'polite');
+			this.domNode.setAttribute('aria-atomic', 'true');
 		}
 
 		// Structure: .progress-container > .rendered-markdown.progress-step.chat-working-progress-step > p (shimmered label) + span (stats, no shimmer)

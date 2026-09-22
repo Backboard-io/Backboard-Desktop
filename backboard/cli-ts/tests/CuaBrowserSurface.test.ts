@@ -88,6 +88,7 @@ describe("browser execution", () => {
 		);
 		const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
 		let failClick = false;
+		let transientReads = 1;
 		const driver = {
 			async call<T>(name: string, args: Record<string, unknown>): Promise<T> {
 				calls.push({ name, args });
@@ -104,7 +105,9 @@ describe("browser execution", () => {
 							},
 						],
 					} as T;
-				if (name === "get_browser_state")
+				if (name === "get_browser_state") {
+					if (transientReads-- > 0)
+						throw new Error("Frame with the given frameId is not found");
 					return {
 						page: { title: "Test", url: "https://example.com" },
 						refs: [
@@ -112,8 +115,10 @@ describe("browser execution", () => {
 							ref(2, "generic", null, { actions: ["scroll"] }),
 						],
 					} as T;
+				}
 				if (name === "browser_click" && failClick)
 					throw new Error("delivery uncertain");
+
 				return {} as T;
 			},
 			async tryCall<T>() {
@@ -137,6 +142,9 @@ describe("browser execution", () => {
 			calls.find((call) => call.name === "browser_prepare")?.args.pid,
 		).toBe(10);
 		expect(seen.appName).toBe("Brave");
+		expect(
+			calls.filter((call) => call.name === "get_browser_state"),
+		).toHaveLength(2);
 		const button = seen.elements[0];
 		if (!button) throw new Error("Missing fixture button");
 		await surface.press(button, signal);
@@ -157,6 +165,36 @@ describe("browser execution", () => {
 			input_route: "dom_event",
 			delta_y: 600,
 		});
+		await surface.draw(
+			{ handle: "p1:3", role: "canvas" },
+			{
+				description: "Two lines",
+				strokes: [
+					[
+						[0.2, 0.2],
+						[0.8, 0.8],
+					],
+					[
+						[0.8, 0.2],
+						[0.2, 0.8],
+					],
+				],
+			},
+			signal,
+		);
+		const drawings = calls.filter(
+			(call) => call.name === "browser_pointer" && call.args.action === "drag",
+		);
+		expect(drawings).toHaveLength(1);
+		expect(drawings[0]?.args.strokes).toHaveLength(2);
+		transientReads = 10;
+		const reads = calls.filter(
+			(call) => call.name === "get_browser_state",
+		).length;
+		await expect(surface.observe(signal)).rejects.toThrow("frameId");
+		expect(
+			calls.filter((call) => call.name === "get_browser_state").length - reads,
+		).toBe(4);
 	});
 	it("retains visible unnamed canvases without treating them as text fields", () => {
 		expect(

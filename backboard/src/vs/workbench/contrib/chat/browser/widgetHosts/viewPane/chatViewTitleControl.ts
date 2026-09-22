@@ -497,6 +497,8 @@ export class ChatViewTitleControl extends Disposable {
 		}
 
 		const label = options.label.trim() || ChatViewTitleControl.DEFAULT_TITLE;
+		const resource = options.session?.resource ?? options.sessionResource;
+		const isSubagent = !!resource && !!parseSubagentSessionUri(resource);
 		const tabElements = h('div.chat-view-title-tab@root', { role: 'tab', tabIndex: options.active ? 0 : -1, title: label, ariaLabel: label, ariaSelected: String(options.active) }, [
 			h('span.chat-view-title-tab-icon@icon'),
 			h('span.chat-view-title-tab-status@status'),
@@ -505,7 +507,8 @@ export class ChatViewTitleControl extends Disposable {
 		]);
 		// Not-yet-responded-to sessions show the Backboard mark; sessions with at
 		// least one response show a chat bubble.
-		tabElements.icon.classList.add(...ThemeIcon.asClassNameArray(options.isNew ? ThemeIcon.fromId('backboard-logo') : Codicon.comment));
+		tabElements.icon.classList.add(...ThemeIcon.asClassNameArray(isSubagent ? Codicon.gitBranch : options.isNew ? ThemeIcon.fromId('backboard-logo') : Codicon.comment));
+		tabElements.root.classList.toggle('chat-view-title-tab-subagent', isSubagent);
 		// A chat still working shows the spinner in its tab, so background work
 		// is visible without switching to it.
 		if (options.session && getAgentSessionListStatus(options.session) === 'running') {

@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { canonicalAppName } from "../../utils/appNames.ts";
 import { BasePlatform } from "./BasePlatform.ts";
 import { pngSize, resizeWithCandidates } from "./png.ts";
 import { run, runWithOutput } from "./process.ts";
@@ -101,7 +102,7 @@ export class MacPlatform extends BasePlatform {
 	async execute(action: PlatformAction, signal: AbortSignal): Promise<void> {
 		switch (action.kind) {
 			case "openApp":
-				await run("open", ["-a", action.appName], signal);
+				await run("open", ["-a", canonicalAppName(action.appName)], signal);
 				return;
 			case "type":
 				await runMacAutomation(
