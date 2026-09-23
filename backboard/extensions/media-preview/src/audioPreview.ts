@@ -83,11 +83,11 @@ class AudioPreview extends MediaPreview {
 	<div class="loading-indicator"></div>
 	<div class="loading-error">
 		<p>${vscode.l10n.t("An error occurred while loading the audio file.")}</p>
-		<a href="#" class="open-file-link">${vscode.l10n.t("Open file using VS Code's standard text/binary editor?")}</a>
+		<a href="#" class="open-file-link">${vscode.l10n.t("Open in Text Editor")}</a>
 	</div>
 	<div class="git-lfs-info">
 		<p>${vscode.l10n.t("The audio file is stored with Git LFS and is not available for preview.")}</p>
-		<a href="#" class="open-file-link">${vscode.l10n.t("Open file using VS Code's standard text/binary editor?")}</a>
+		<a href="#" class="open-file-link">${vscode.l10n.t("Open in Text Editor")}</a>
 	</div>
 	<script src="${escapeAttribute(this.extensionResource('media', 'audioPreview.js'))}" nonce="${nonce}"></script>
 </body>
