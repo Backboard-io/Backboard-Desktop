@@ -13,7 +13,8 @@ import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Color } from '../../../../base/common/color.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { Event } from '../../../../base/common/event.js';
-import { DisposableMap, DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
+import { DisposableMap, DisposableStore, IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
+import { isDefined } from '../../../../base/common/types.js';
 import { autorun, IReader } from '../../../../base/common/observable.js';
 import { basename, dirname } from '../../../../base/common/resources.js';
 import { Schemas } from '../../../../base/common/network.js';
@@ -48,6 +49,7 @@ import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../../../wor
 import { BrowserEditor } from '../../../../workbench/contrib/browserView/electron-browser/browserEditor.js';
 import { WebviewEditor } from '../../../../workbench/contrib/webviewPanel/browser/webviewEditor.js';
 import { MultiDiffEditor } from '../../../../workbench/contrib/multiDiffEditor/browser/multiDiffEditor.js';
+import { MultiDiffEditorViewModel } from '../../../../editor/browser/widget/multiDiffEditor/multiDiffEditorViewModel.js';
 import { ExtensionState, IExtension, IExtensionsWorkbenchService } from '../../../../workbench/contrib/extensions/common/extensions.js';
 import { ExtensionsViewPaneContainer } from '../../../../workbench/contrib/extensions/browser/extensionsViewlet.js';
 import { IViewDescriptorService } from '../../../../workbench/common/views.js';
@@ -63,6 +65,8 @@ import { TerminalLocation } from '../../../../platform/terminal/common/terminal.
 import { ITerminalEditorService, ITerminalInstance, ITerminalService, IXtermColorProvider } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import { IAgentHostCustomizationService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostCustomizationService.js';
 import { isIChatSessionFileChange2 } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
+import { IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
+import { IChatWidgetService } from '../../../../workbench/contrib/chat/browser/chat.js';
 import { BACKBOARD_LAST_EDITOR_FOLDER_STORAGE_KEY } from '../../../../workbench/contrib/chat/common/constants.js';
 import { agentsBackground, agentsPanelBackground } from '../../../common/theme.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
@@ -72,6 +76,7 @@ import { SESSIONS_FILES_EMPTY_VIEW_ID, SESSIONS_FILES_VIEW_ID, SessionsExplorerE
 import { createFileIconThemableTreeContainerScope } from '../../../../workbench/contrib/files/browser/views/explorerView.js';
 import { WorkbenchCompressibleObjectTree } from '../../../../platform/list/browser/listService.js';
 import { OptimusChatViewPane } from '../../../../optimus/contrib/chat/browser/optimusChatViewPane.js';
+import { CanvasView, extractCanvasImageGroups, ICanvasComment, ICanvasImage, RightWorkbenchCanvas } from './rightWorkbenchCanvas.js';
 import { buildReviewTreeChildren, IReviewResource, isReviewResource, ReviewTreeDelegate, ReviewTreeElement, ReviewTreeRenderer, ReviewTreeSorter } from './reviewTree.js';
 import { onDidRequestModeEmitter, pendingModeRequest, setPendingModeRequest, type RightWorkbenchMode, type IRightWorkbenchModeRequest, type IRightWorkbenchModeEntry } from './rightWorkbench.js';
 import { createRightWorkbenchReviewContextKey, RightWorkbenchReviewContext } from './rightWorkbenchReviewContext.js';
@@ -181,7 +186,16 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private reviewFilterValue = '';
 	private isReviewRailVisible = true;
 	private reviewWordWrap = false;
-	private appliedReviewOptions: { pane: IEditorPane; input: EditorInput | undefined; key: string } | undefined;
+	private reviewSideBySide = false;
+	private reviewDiffsCollapsed = false;
+	/** Composer attachment ids the Canvas added, replaced as its selection changes. */
+	private canvasAttachmentIds: string[] = [];
+	/** Whether Canvas (rather than the user) maximized the panel. */
+	private canvasMaximizedPanel = false;
+	private canvas: RightWorkbenchCanvas | undefined;
+	/** A chat image to select once Canvas has loaded the thread's images. */
+	private pendingCanvasReveal: { readonly imageKey: string | undefined; readonly view: CanvasView | undefined } | undefined;
+	private appliedReviewOptions: { pane: IEditorPane; input: EditorInput | undefined; viewModel: MultiDiffEditorViewModel | undefined; key: string } | undefined;
 	private reviewLoadFullFiles = true;
 	private reviewRichPreview = false;
 	private reviewWordDiffs = false;
@@ -251,6 +265,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 		@IAgentHostCustomizationService private readonly agentHostCustomizationService: IAgentHostCustomizationService,
 		@IExtensionsWorkbenchService private readonly extensionsWorkbenchService: IExtensionsWorkbenchService,
 		@IStorageService private readonly storageService: IStorageService,
+		@IChatService private readonly chatService: IChatService,
+		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
 		this.editorPool = this._register(this.instantiationService.createInstance(RightWorkbenchEditorPool));
@@ -258,6 +274,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.editorSidebarFolderUri = this.readStoredEditorSidebarFolder();
 		this.reviewLoadFullFiles = !this.useSimpleRightWorkbench;
 		this.reviewWordDiffs = this.useSimpleRightWorkbench;
+		// Simple's panel is narrow, so it opens unified like Codex; the editor
+		// sidebar keeps split view whenever there is room for it.
+		this.reviewSideBySide = !this.useSimpleRightWorkbench;
 		this._register(onDidRequestModeEmitter.event(request => { void this.openMode(request); }));
 		this._register(this.layoutService.onDidChangePartVisibility(e => {
 			if (e.partId === Parts.EDITOR_PART && e.visible) {
@@ -362,17 +381,14 @@ export class RightWorkbenchViewPane extends ViewPane {
 			// The native WebContentsView paints above all workbench DOM. Hide
 			// every view when the pane goes away (e.g. the New Chat page), or
 			// it keeps floating over whatever replaced us.
-			for (const tab of this.tabs) {
-				if (tab.browserInput?.model?.visible) {
-					void tab.browserInput.model.setVisible(false);
-				}
-			}
+			this.hideBrowserViews();
 		}
 	}
 
 	override dispose(): void {
 		this.invalidateReviewSurface();
 		this.suspendRenderedTab();
+		this.hideBrowserViews();
 		for (const tab of this.tabs) {
 			this.disposeTabResources(tab);
 		}
@@ -441,12 +457,17 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.activateSingleSurface();
 		const existing = modeRequest.mode === 'launcher' ? undefined : this.findTabForRequest(modeRequest);
 		const willChangeTab = modeRequest.mode === 'launcher'
-			? this.activeTabId !== undefined
+			? this.activeTabId !== undefined && !modeRequest.preserveActiveTab
 			: existing?.id !== this.activeTabId;
 		// Re-requesting the already-active surface with no new content is a
 		// no-op: tearing down and rebuilding the shell would recreate trees and
-		// editors for nothing.
-		if (!willChangeTab && !modeRequest.browserUrl && !modeRequest.browserViewId && !modeRequest.newChat && (modeRequest.mode === 'launcher' || existing !== undefined)) {
+		// editors for nothing. That includes re-requesting the live browser view
+		// the active tab already shows (the browser tools fire twice per open) —
+		// a rebuild hides and re-shows the native page, which reads as a flicker.
+		const reshowsActiveView = !!modeRequest.browserViewId && existing?.browserInput?.id === modeRequest.browserViewId
+			&& !existing.browserInput.isDisposed();
+		const addsContent = !!modeRequest.browserUrl || !!modeRequest.browserViewId;
+		if (!willChangeTab && (!addsContent || reshowsActiveView) && !modeRequest.newChat && (modeRequest.mode === 'launcher' || existing !== undefined)) {
 			return;
 		}
 		this.applyModeRequest(modeRequest);
@@ -494,12 +515,32 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 		const tab = this.findTabForRequest(request) ?? this.createTab(request.mode);
-		if (request.browserUrl) {
+		if (request.mode === 'canvas' && (request.canvasImage || request.canvasView)) {
+			if (this.canvas && this.activeTabId === tab.id) {
+				this.canvas.reveal(request.canvasImage, request.canvasView);
+			} else {
+				// Applied once the new Canvas surface has loaded the thread's images.
+				this.pendingCanvasReveal = { imageKey: request.canvasImage, view: request.canvasView };
+			}
+		}
+		// A live view already owns its URL; a request's URL for it (the browser
+		// tools pass the URL they opened) is informational. Treating it as a
+		// navigation target reloads pages that redirected (e.g. a login
+		// checkpoint) every time the tab is re-rendered.
+		const adoptsLiveView = !!request.browserViewId && this.browserViewWorkbenchService.getKnownBrowserViews().has(request.browserViewId);
+		if (request.browserUrl && !adoptsLiveView) {
 			tab.browserUrl = this.normalizeBrowserUrl(request.browserUrl);
 		}
 		if (request.browserViewId && tab.browserViewId !== request.browserViewId) {
+			if (adoptsLiveView || !request.browserUrl) {
+				// Drop the previous page's URL, or it navigates the adopted view.
+				tab.browserUrl = undefined;
+			}
 			tab.browserViewId = request.browserViewId;
 			if (tab.browserInput?.id !== request.browserViewId) {
+				// The replaced view stays alive (its session may still drive
+				// it) but nothing references it after this — hide it now.
+				void tab.browserInput?.model?.setVisible(false);
 				tab.browserInput = undefined;
 				this.browserEditorPane = undefined;
 				this.tabStores.get(tab.id)?.clear();
@@ -644,6 +685,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 				break;
 			case 'review':
 				this.renderReview(body);
+				break;
+			case 'canvas':
+				this.renderCanvas(body);
 				break;
 			case 'browser':
 				this.renderBrowser(body);
@@ -1153,6 +1197,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			{ mode: 'review', icon: Codicon.diffMultiple, label: localize('rightWorkbench.review', "Review"), shortcut: 'D' },
 			{ mode: 'terminal', icon: Codicon.terminal, label: localize('rightWorkbench.terminal', "Terminal"), shortcut: 'T' },
 			{ mode: 'files', icon: Codicon.folder, label: localize('rightWorkbench.files', "Files"), shortcut: 'F' },
+			{ mode: 'canvas', icon: Codicon.fileMedia, label: localize('rightWorkbench.canvas', "Canvas"), shortcut: 'C' },
 			{ mode: 'browser', icon: Codicon.globe, label: localize('rightWorkbench.browser', "Browser"), shortcut: 'B' },
 		];
 	}
@@ -1167,6 +1212,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 				return localize('rightWorkbench.filesDescription', "Browse and read workspace files.");
 			case 'review':
 				return localize('rightWorkbench.diffDescription', "Review changes in this thread.");
+			case 'canvas':
+				return localize('rightWorkbench.canvasDescription', "See images generated in this thread.");
 			default:
 				return '';
 		}
@@ -1194,6 +1241,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 				return localize('rightWorkbench.search', "Search");
 			case 'review':
 				return localize('rightWorkbench.sourceControl', "Source Control");
+			case 'canvas':
+				return localize('rightWorkbench.canvas', "Canvas");
 			case 'extensions':
 				return localize('rightWorkbench.extensions', "Extensions");
 			case 'marketplace':
@@ -1209,7 +1258,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private getModePickerEntries(): readonly IRightWorkbenchModeEntry[] {
 		const entries = this.getModeEntries();
-		return entries.filter(entry => entry.mode !== 'review' || !this.tabs.some(tab => tab.mode === entry.mode));
+		// Review and Canvas each describe the whole thread, so one tab of each is enough.
+		return entries.filter(entry => (entry.mode !== 'review' && entry.mode !== 'canvas') || !this.tabs.some(tab => tab.mode === entry.mode));
 	}
 
 	private getModeIcon(mode: RightWorkbenchMode): ThemeIcon {
@@ -1218,6 +1268,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 				return Codicon.commentDiscussionSparkle;
 			case 'review':
 				return Codicon.diffMultiple;
+			case 'canvas':
+				return Codicon.fileMedia;
 			case 'browser':
 				return Codicon.globe;
 			case 'files':
@@ -1241,6 +1293,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 				return localize('rightWorkbench.editor', "Editor");
 			case 'review':
 				return localize('rightWorkbench.review', "Review");
+			case 'canvas':
+				return localize('rightWorkbench.canvas', "Canvas");
 			case 'browser':
 				return localize('rightWorkbench.newTab', "New tab");
 			case 'files':
@@ -1398,6 +1452,157 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.domStore.add(autorun(reader => this.refreshReviewRail(reader)));
 	}
 
+	/**
+	 * Canvas: every image the active chat generated, as Codex's image
+	 * playground. Selecting images makes them the composer's attachments.
+	 */
+	private renderCanvas(container: HTMLElement): void {
+		const store = this.domStore.add(new DisposableStore());
+		const blobUrls: string[] = [];
+		store.add(toDisposable(() => blobUrls.forEach(url => URL.revokeObjectURL(url))));
+		let chatResource: URI | undefined;
+		const canvas = store.add(this.instantiationService.createInstance(RightWorkbenchCanvas, container, {
+			toDisplayUrl: async image => {
+				if (image.src.scheme !== Schemas.file) {
+					return image.key;
+				}
+				try {
+					const content = await this.fileService.readFile(image.src);
+					const url = URL.createObjectURL(new Blob([content.value.buffer.slice()]));
+					blobUrls.push(url);
+					return url;
+				} catch {
+					return undefined;
+				}
+			},
+			setComposerImages: images => {
+				if (chatResource) {
+					void this.setCanvasComposerImages(chatResource, images);
+				}
+			},
+			setFullScreen: fullScreen => this.setCanvasFullScreen(fullScreen),
+			sendComments: comments => {
+				if (chatResource) {
+					void this.sendCanvasComments(chatResource, comments);
+				}
+			},
+		}));
+		this.canvas = canvas;
+		store.add(toDisposable(() => {
+			if (this.canvas === canvas) {
+				this.canvas = undefined;
+			}
+		}));
+		// The shell re-renders on every tab switch; only give the window back
+		// once the user has actually left Canvas, so staying on it never flickers.
+		store.add(toDisposable(() => setTimeout(() => {
+			if (this.activeMode !== 'canvas') {
+				this.setCanvasFullScreen(false);
+			}
+		}, 0)));
+
+		store.add(this.layoutService.onDidChangeAuxiliaryBarMaximized(() => {
+			if (!this.layoutService.isAuxiliaryBarMaximized()) {
+				this.canvasMaximizedPanel = false;
+			}
+		}));
+
+		const modelStore = store.add(new DisposableStore());
+		const responseListeners = store.add(new DisposableMap<object>());
+		let refresh = () => { };
+		const refreshScheduler = store.add(new RunOnceScheduler(() => refresh(), 150));
+		store.add(autorun(reader => {
+			const session = this.sessionsService.activeSession.read(reader);
+			const chat = session?.activeChat.read(reader);
+			chat?.lastTurnEnd.read(reader);
+			const workingDirectory = session?.workspace.read(reader)?.folders[0]?.workingDirectory;
+			modelStore.clear();
+			responseListeners.clearAndDisposeAll();
+			chatResource = chat?.resource;
+			const model = (chat && this.chatService.getSession(chat.resource)) ?? (session && this.chatService.getSession(session.resource));
+			refresh = () => {
+				const requests = model?.getRequests() ?? [];
+				for (const request of requests) {
+					const response = request.response;
+					if (response && !responseListeners.has(response)) {
+						// Generated images stream into a response after it was added.
+						responseListeners.set(response, response.onDidChange(() => refreshScheduler.schedule()));
+					}
+				}
+				canvas.setGroups(extractCanvasImageGroups(requests, workingDirectory), chatResource?.toString());
+				const pending = this.pendingCanvasReveal;
+				if (pending) {
+					this.pendingCanvasReveal = undefined;
+					canvas.reveal(pending.imageKey, pending.view);
+				}
+			};
+			if (model) {
+				modelStore.add(model.onDidChange(() => refreshScheduler.schedule()));
+			}
+			refresh();
+		}));
+	}
+
+	/**
+	 * Codex's comment "Send": one message that attaches every commented image
+	 * and spells out each numbered note with where it was pinned.
+	 */
+	private async sendCanvasComments(chatResource: URI, comments: ReadonlyMap<ICanvasImage, readonly ICanvasComment[]>): Promise<void> {
+		const widget = this.chatWidgetService.getWidgetBySessionResource(chatResource) ?? this.chatWidgetService.lastFocusedWidget;
+		if (!widget) {
+			return;
+		}
+		await this.setCanvasComposerImages(chatResource, [...comments.keys()]);
+		const lines: string[] = [localize('rightWorkbench.canvas.batchEditIntro', "Edit these images based on my comments:")];
+		let number = 0;
+		for (const [image, notes] of comments) {
+			lines.push('', image.label);
+			for (const note of notes) {
+				number++;
+				lines.push(localize('rightWorkbench.canvas.batchEditNote', "{0}. At {1}% across, {2}% down: {3}", number, Math.round(note.x * 100), Math.round(note.y * 100), note.text));
+			}
+		}
+		await widget.acceptInput(lines.join('\n'));
+		this.canvasAttachmentIds = [];
+	}
+
+	/**
+	 * Canvas view takes the whole window like Codex's image playground. The
+	 * panel is only restored if Canvas was what maximized it, so a panel the
+	 * user expanded themselves stays expanded.
+	 */
+	private setCanvasFullScreen(fullScreen: boolean): void {
+		if (fullScreen) {
+			// A hidden panel must never take the window over the chat.
+			if (this.isRightWorkbenchVisible && !this.layoutService.isAuxiliaryBarMaximized()) {
+				this.canvasMaximizedPanel = this.layoutService.setAuxiliaryBarMaximized(true);
+			}
+		} else if (this.canvasMaximizedPanel) {
+			this.canvasMaximizedPanel = false;
+			this.layoutService.setAuxiliaryBarMaximized(false);
+		}
+	}
+
+	/**
+	 * Replaces the images the canvas previously attached to the chat's composer
+	 * with the current selection, leaving the user's own attachments alone.
+	 */
+	private async setCanvasComposerImages(chatResource: URI, images: readonly ICanvasImage[]): Promise<void> {
+		const widget = this.chatWidgetService.getWidgetBySessionResource(chatResource) ?? this.chatWidgetService.lastFocusedWidget;
+		if (!widget) {
+			return;
+		}
+		const previous = this.canvasAttachmentIds.filter(id => widget.attachmentModel.attachments.some(entry => entry.id === id));
+		if (previous.length) {
+			widget.attachmentModel.delete(...previous);
+		}
+		const files = images.map(image => image.localFile).filter(isDefined);
+		this.canvasAttachmentIds = files.map(file => file.toString());
+		for (const file of files) {
+			await widget.attachmentModel.addFile(file);
+		}
+	}
+
 	private renderReviewToolbar(container: HTMLElement): void {
 		// Simple Review is scoped to the selected chat, not the workspace's Git
 		// repository. Repository actions here can otherwise keep pointing at the
@@ -1430,14 +1635,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const actions = append(primary, $('.sessions-right-workbench-review-actions'));
 		const more = this.renderIconButton(actions, Codicon.ellipsis, localize('rightWorkbench.reviewOptions', "Review options"));
 		this.domStore.add(addDisposableListener(more, EventType.CLICK, () => this.showReviewOptionsMenu(more)));
-		const refresh = this.renderIconButton(actions, Codicon.refresh, localize('rightWorkbench.refreshReview', "Refresh"));
-		this.domStore.add(addDisposableListener(refresh, EventType.CLICK, () => {
-			if (repository) {
-				void this.commandService.executeCommand('git.refresh', repository.rootUri);
-			}
-			this.refreshReviewRail(undefined);
-		}));
-		const search = this.renderIconButton(actions, Codicon.search, localize('rightWorkbench.openChangedFile', "Find Changed File"));
+		const search = this.renderIconButton(actions, Codicon.goToFile, localize('rightWorkbench.jumpToFile', "Jump to File"));
 		this.domStore.add(addDisposableListener(search, EventType.CLICK, () => {
 			if (!this.isReviewRailVisible) {
 				this.isReviewRailVisible = true;
@@ -1445,8 +1643,46 @@ export class RightWorkbenchViewPane extends ViewPane {
 			}
 			this.reviewContainer?.querySelector<HTMLInputElement>('.sessions-right-workbench-review-filter input')?.focus();
 		}));
-		const railToggle = this.renderIconButton(actions, Codicon.layoutSidebarRight, localize('rightWorkbench.toggleChangedFiles', "Toggle changed files"));
+		const refresh = this.renderIconButton(actions, Codicon.refresh, localize('rightWorkbench.refreshReview', "Refresh"));
+		this.domStore.add(addDisposableListener(refresh, EventType.CLICK, () => {
+			if (repository) {
+				void this.commandService.executeCommand('git.refresh', repository.rootUri);
+			}
+			this.refreshReviewRail(undefined);
+		}));
+		this.renderReviewToggle(actions, {
+			icon: () => Codicon.wordWrap,
+			label: on => on ? localize('rightWorkbench.disableWordWrap', "Disable word wrap") : localize('rightWorkbench.enableWordWrap', "Enable word wrap"),
+			isOn: () => this.reviewWordWrap,
+			toggle: () => {
+				this.reviewWordWrap = !this.reviewWordWrap;
+				this.applyReviewDiffEditorOptions();
+			},
+		});
+		if (this.useSimpleRightWorkbench) {
+			// Only the stacked multi-file diff has per-file sections to fold.
+			this.renderReviewToggle(actions, {
+				icon: on => on ? Codicon.expandAll : Codicon.collapseAll,
+				label: on => on ? localize('rightWorkbench.expandAllDiffs', "Expand all diffs") : localize('rightWorkbench.collapseAllDiffs', "Collapse all diffs"),
+				isOn: () => this.reviewDiffsCollapsed,
+				toggle: () => {
+					this.reviewDiffsCollapsed = !this.reviewDiffsCollapsed;
+					this.applyReviewDiffsCollapsed();
+				},
+			});
+		}
+		this.renderReviewToggle(actions, {
+			icon: on => on ? Codicon.diffSingle : Codicon.diffSidebyside,
+			label: on => on ? localize('rightWorkbench.switchToUnifiedDiff', "Switch to unified diff") : localize('rightWorkbench.switchToSplitDiff', "Switch to split diff"),
+			isOn: () => this.reviewSideBySide,
+			toggle: () => {
+				this.reviewSideBySide = !this.reviewSideBySide;
+				this.applyReviewDiffEditorOptions();
+			},
+		});
+		const railToggle = this.renderIconButton(actions, Codicon.layoutSidebarRight, this.isReviewRailVisible ? localize('rightWorkbench.hideChangedFiles', "Hide files") : localize('rightWorkbench.showChangedFiles', "Show files"));
 		railToggle.classList.toggle('active', this.isReviewRailVisible);
+		railToggle.setAttribute('aria-pressed', String(this.isReviewRailVisible));
 		this.domStore.add(addDisposableListener(railToggle, EventType.CLICK, () => {
 			this.isReviewRailVisible = !this.isReviewRailVisible;
 			this.renderShell();
@@ -1500,25 +1736,49 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 	}
 
+	/**
+	 * Renders a review toolbar toggle whose icon, label, and pressed state
+	 * update in place, so flipping a view option doesn't rebuild the panel.
+	 */
+	private renderReviewToggle(container: HTMLElement, toggle: { icon: (on: boolean) => ThemeIcon; label: (on: boolean) => string; isOn: () => boolean; toggle: () => void }): void {
+		const button = this.renderIconButton(container, toggle.icon(toggle.isOn()), toggle.label(toggle.isOn()));
+		const update = () => {
+			const on = toggle.isOn();
+			clearNode(button);
+			button.appendChild(renderIcon(toggle.icon(on)));
+			button.ariaLabel = button.title = toggle.label(on);
+			button.setAttribute('aria-pressed', String(on));
+			button.classList.toggle('active', on);
+		};
+		update();
+		this.domStore.add(addDisposableListener(button, EventType.CLICK, () => {
+			toggle.toggle();
+			update();
+		}));
+	}
+
+	private applyReviewDiffsCollapsed(): void {
+		const pane = this.embeddedEditorPart?.activeGroup.activeEditorPane;
+		if (this.activeMode !== 'review' || !(pane instanceof MultiDiffEditor)) {
+			return;
+		}
+		if (this.reviewDiffsCollapsed) {
+			pane.viewModel?.collapseAll();
+		} else {
+			pane.viewModel?.expandAll();
+		}
+	}
+
 	private showReviewOptionsMenu(anchor: HTMLElement): void {
-		const toggle = (key: 'reviewWordWrap' | 'reviewLoadFullFiles' | 'reviewRichPreview' | 'reviewWordDiffs' | 'reviewHideWhitespace') => {
+		const toggle = (key: 'reviewLoadFullFiles' | 'reviewRichPreview' | 'reviewWordDiffs' | 'reviewHideWhitespace') => {
 			this[key] = !this[key];
 			this.applyReviewDiffEditorOptions();
 		};
+		// Refresh and word wrap live on the toolbar; the menu only carries
+		// options that change how diffs are computed or decorated.
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => anchor,
 			getActions: () => [
-				toAction({
-					id: 'sessions.rightWorkbench.review.refresh',
-					label: localize('rightWorkbench.reviewRefresh', "Refresh"),
-					run: () => this.refreshReviewRail(undefined),
-				}),
-				toAction({
-					id: 'sessions.rightWorkbench.review.wordWrap',
-					label: this.reviewWordWrap ? localize('rightWorkbench.disableWordWrap', "Disable word wrap") : localize('rightWorkbench.enableWordWrap', "Enable word wrap"),
-					run: () => toggle('reviewWordWrap'),
-				}),
-				new Separator(),
 				toAction({
 					id: 'sessions.rightWorkbench.review.loadFullFiles',
 					label: this.reviewLoadFullFiles ? localize('rightWorkbench.dontLoadFullFiles', "Don't load full files") : localize('rightWorkbench.loadFullFiles', "Load full files"),
@@ -1588,8 +1848,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 				identityProvider: {
 					getId: (element: ReviewTreeElement) => isReviewResource(element) ? element.key : element.uri.toString(),
 				},
-				indent: this.useSimpleRightWorkbench ? 4 : 8,
-				compressionEnabled: !this.useSimpleRightWorkbench,
+				indent: 8,
+				// Collapse single-child folder chains ("backboard/src/vs") so the
+				// narrow rail spends its width on file names, not nesting.
+				compressionEnabled: true,
 				sorter: new ReviewTreeSorter(),
 			}
 		));
@@ -1858,10 +2120,12 @@ export class RightWorkbenchViewPane extends ViewPane {
 		const multiDiffSource = this.useSimpleRightWorkbench ? this.reviewSource.update(changes, generation) : undefined;
 		for (const change of changes) {
 			const uri = isIChatSessionFileChange2(change) ? change.uri : change.modifiedUri;
+			const kind = !change.originalUri ? 'added' : isIChatSessionFileChange2(change) && !change.modifiedUri ? 'deleted' : 'modified';
 			resources.set(uri.toString(), {
 				key: `session:${uri.toString()}:${change.originalUri?.toString() ?? ''}`,
 				sourceUri: uri,
-				status: localize('rightWorkbench.sessionChange', "Edited"),
+				kind,
+				status: kind === 'added' ? localize('rightWorkbench.sessionAdded', "Added") : kind === 'deleted' ? localize('rightWorkbench.sessionDeleted', "Deleted") : localize('rightWorkbench.sessionChange', "Edited"),
 				additions: change.insertions,
 				deletions: change.deletions,
 				open: async () => {
@@ -2757,6 +3021,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			key: this.getGitReviewResourceKey(change, group),
 			sourceUri: change.uri,
 			status,
+			kind: group === 'untracked' ? 'added' : 'modified',
 			additions: stats?.additions,
 			deletions: stats?.deletions,
 			open: () => this.openGitReviewResource(change, generation),
@@ -3216,21 +3481,36 @@ export class RightWorkbenchViewPane extends ViewPane {
 		if (!pane || !embeddedHost || (!isDiffEditor(control) && !(pane instanceof MultiDiffEditor))) {
 			return;
 		}
-		const renderSideBySide = !this.useSimpleRightWorkbench && embeddedHost.clientWidth >= REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH;
-		const key = [renderSideBySide, this.reviewWordWrap, this.reviewHideWhitespace, this.reviewWordDiffs, this.reviewLoadFullFiles].join(':');
-		if (this.appliedReviewOptions?.pane === pane && this.appliedReviewOptions.input === pane.input && this.appliedReviewOptions.key === key) {
+		// A multi-diff pane resolves its view model after the editor opens;
+		// applying (and caching) before then would drop these options for the
+		// lifetime of the input and leave every file in the default split view.
+		if (pane instanceof MultiDiffEditor && !pane.viewModel) {
 			return;
 		}
-		this.appliedReviewOptions = { pane, input: pane.input, key };
+		// Simple's split toggle is an explicit choice, so honour it at any width;
+		// the editor sidebar keeps its automatic fallback to unified when narrow.
+		const renderSideBySide = this.reviewSideBySide && (this.useSimpleRightWorkbench || embeddedHost.clientWidth >= REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH);
+		const key = [renderSideBySide, this.reviewWordWrap, this.reviewHideWhitespace, this.reviewWordDiffs, this.reviewLoadFullFiles].join(':');
+		// Re-rendering the panel can hand the same pane and input a fresh view
+		// model, which starts from default (split) options — so it must re-apply.
+		const viewModel = pane instanceof MultiDiffEditor ? pane.viewModel : undefined;
+		if (this.appliedReviewOptions?.pane === pane && this.appliedReviewOptions.input === pane.input && this.appliedReviewOptions.viewModel === viewModel && this.appliedReviewOptions.key === key) {
+			return;
+		}
+		this.appliedReviewOptions = { pane, input: pane.input, viewModel, key };
 		const options: IDiffEditorOptions = {
 			renderSideBySide,
-			useInlineViewWhenSpaceIsLimited: true,
+			renderMarginRevertIcon: !this.useSimpleRightWorkbench,
+			renderGutterMenu: !this.useSimpleRightWorkbench,
+			useInlineViewWhenSpaceIsLimited: !this.useSimpleRightWorkbench,
 			renderSideBySideInlineBreakpoint: REVIEW_DIFF_SIDE_BY_SIDE_MIN_WIDTH,
 			compactMode: false,
 			enableSplitViewResizing: renderSideBySide,
-			fontSize: 13,
-			lineHeight: 22,
-			lineNumbersMinChars: 3,
+			// The stacked diff's editors already exist when these options land,
+			// and its inline deleted-line zones don't re-measure a changed line
+			// height (removed rows then overlap added ones). Simple keeps the
+			// editor's own metrics; the single-file diff can take custom ones.
+			...(this.useSimpleRightWorkbench ? {} : { fontSize: 13, lineHeight: 22, lineNumbersMinChars: 3 }),
 			lineDecorationsWidth: 6,
 			scrollBeyondLastLine: false,
 			renderOverviewRuler: false,
@@ -3257,6 +3537,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 		};
 		if (pane instanceof MultiDiffEditor) {
 			pane.viewModel?.editorOptions.set(options, undefined);
+			if (this.reviewDiffsCollapsed) {
+				pane.viewModel?.collapseAll();
+			}
 		} else if (isDiffEditor(control)) {
 			control.updateOptions(options);
 		}
@@ -3355,11 +3638,20 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private hideOtherBrowserViews(): void {
-		const activeBrowserInput = this.activeTab?.browserInput;
-		for (const tab of this.tabs) {
-			const input = tab.browserInput;
-			if (input && input !== activeBrowserInput && input.model?.visible) {
-				void input.model?.setVisible(false);
+		this.hideBrowserViews(this.activeTab?.browserInput);
+	}
+
+	/**
+	 * Hides every native browser view known to this window except `keep`.
+	 * A WebContentsView paints above all workbench DOM at its last bounds, so
+	 * sweeping only the views our tabs still reference leaves any view a tab
+	 * let go of (e.g. one replaced by an agent-opened page) floating over the
+	 * chat once the panel closes.
+	 */
+	private hideBrowserViews(keep?: BrowserEditorInput): void {
+		for (const input of this.browserViewWorkbenchService.getKnownBrowserViews().values()) {
+			if (input !== keep && input.model?.visible) {
+				void input.model.setVisible(false);
 			}
 		}
 	}

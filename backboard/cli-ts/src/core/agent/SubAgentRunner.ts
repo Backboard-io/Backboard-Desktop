@@ -444,13 +444,11 @@ function delegatedPermissions(
 		...parent,
 		// The parent Agent/AgentSpawn call was the interactive approval boundary.
 		// Inside its isolated checkout, ordinary file edits can now proceed while
-		// inherited deny/ask rules remain authoritative.
-		mode:
-			parent.mode === "manual"
-				? "acceptEdits"
-				: parent.mode === "bypass"
-					? "auto"
-					: parent.mode,
+		// inherited deny/ask rules remain authoritative. Bypass stays bypass: a
+		// worker cannot prompt, so downgrading it would auto-deny every command
+		// the user already approved by choosing Full Access. Write tools enforce
+		// the worktree boundary on their own (see isolatedWorkspaceRoot).
+		mode: parent.mode === "manual" ? "acceptEdits" : parent.mode,
 		interactive: false,
 		ruleCwd: parent.ruleCwd ?? coordinatorCwd,
 		mapPathForRules: (absolutePath) => {

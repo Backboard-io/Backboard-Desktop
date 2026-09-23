@@ -12,6 +12,9 @@ import { BlockAnimation } from './blockAnimations.js';
  */
 export const ANIMATION_STYLES = {
 	none: (): IIncrementalRenderingAnimation => ({ animate() { } }),
+	// Word-level typing reveal: blocks get no entrance of their own because
+	// `StreamingTextReveal` times their text and widgets as the frontier arrives.
+	words: (): IIncrementalRenderingAnimation => ({ animate() { } }),
 	fade: (): IIncrementalRenderingAnimation => new BlockAnimation('fade'),
 	rise: (): IIncrementalRenderingAnimation => new BlockAnimation('rise'),
 	blur: (): IIncrementalRenderingAnimation => new BlockAnimation('blur'),

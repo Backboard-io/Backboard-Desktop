@@ -14,35 +14,14 @@ import { BUFFER_MODES, BufferModeName } from './buffers/bufferRegistry.js';
 import { IIncrementalRenderingAnimation } from './animations/animation.js';
 import { ANIMATION_STYLES, AnimationStyleName } from './animations/animationRegistry.js';
 import { ANIMATION_DURATION_MS } from './animations/blockAnimations.js';
+import { StreamingTextReveal } from './animations/textReveal.js';
 
 /**
- * Soft-focus treatment applied to the last top-level block while a response
- * is still streaming: text near the streaming frontier sits in a light blur
- * and fades out at the very bottom edge, then settles into focus as new
- * content pushes it upward.
- *
- * This complements the entrance animations, which only apply to newly
- * inserted blocks and therefore do nothing for the common case of prose
- * growing inside an already mounted paragraph.
+ * Markdown at or beyond this length streams through the lightweight plaintext
+ * presentation, which the word reveal does not decorate, so pacing falls back
+ * to the word buffer's own rate. Matches the threshold in the markdown part.
  */
-const STREAMING_TAIL_CLASS_NAME = 'chat-smooth-streaming-tail';
-
-/**
- * Block-level elements that can carry the streaming soft-focus treatment.
- * Code blocks, tables and other structured widgets are excluded because a
- * blurred or faded edge there reads as broken rendering rather than as
- * text still being written.
- */
-function canCarryStreamingTail(element: HTMLElement): boolean {
-	const tagName = element.tagName;
-	if (tagName === 'P' || tagName === 'UL' || tagName === 'OL' || tagName === 'BLOCKQUOTE') {
-		return true;
-	}
-	if (/^H[1-6]$/.test(tagName)) {
-		return true;
-	}
-	return tagName === 'DIV' && element.classList.contains('chat-markdown-streaming-plaintext');
-}
+const TEXT_REVEAL_MAX_LENGTH = 15_000;
 
 /**
  * Incremental markdown streaming renderer — rAF-batched, append-only.
@@ -95,11 +74,8 @@ export class IncrementalDOMMorpher extends Disposable {
 	private _didFinalize = false;
 	private _suppressNextAnimation = false;
 
-	/**
-	 * The last top-level child currently carrying the streaming
-	 * soft-focus treatment, if any.
-	 */
-	private _streamingTailNode: HTMLElement | undefined;
+	/** Word-level typing reveal; undefined when the animation style is `none`. */
+	private _textReveal: StreamingTextReveal | undefined;
 
 	private _buffer: IIncrementalRenderingBuffer;
 	private _animation: IIncrementalRenderingAnimation;
@@ -111,10 +87,13 @@ export class IncrementalDOMMorpher extends Disposable {
 		super();
 		this._buffer = this._createBuffer();
 		this._animation = this._createAnimation();
+		this._textReveal = this._createTextReveal();
 
 		this._register(this._configService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration(ChatConfiguration.IncrementalRenderingStyle)) {
 				this._animation = this._createAnimation();
+				this._textReveal = this._createTextReveal();
+				this._textReveal?.markAllRevealed();
 			}
 			if (e.affectsConfiguration(ChatConfiguration.IncrementalRenderingBuffering)) {
 				this._buffer.dispose?.();
@@ -142,6 +121,11 @@ export class IncrementalDOMMorpher extends Disposable {
 		return factory();
 	}
 
+	private _createTextReveal(): StreamingTextReveal | undefined {
+		const raw = this._configService.getValue<string>(ChatConfiguration.IncrementalRenderingStyle);
+		return raw === 'words' ? new StreamingTextReveal(this._domNode) : undefined;
+	}
+
 	// ---- public API ----
 
 	/**
@@ -159,7 +143,11 @@ export class IncrementalDOMMorpher extends Disposable {
 	 */
 	updateStreamRate(rate: number, isComplete: boolean, forceFinalRender = false): void {
 		if (this._buffer instanceof WordBuffer) {
-			this._buffer.setRate(rate, isComplete);
+			// While the word reveal paces the visible frontier, the buffer only
+			// throttles DOM commits: holding text back here would starve the
+			// reveal clock of the lead it needs to ride out network jitter.
+			const revealPaces = !!this._textReveal && this._lastMarkdown.length < TEXT_REVEAL_MAX_LENGTH;
+			this._buffer.setRate(revealPaces ? Number.MAX_SAFE_INTEGER : rate, isComplete);
 		}
 
 		// For buffers that don't handle their own flushing (e.g.
@@ -171,23 +159,24 @@ export class IncrementalDOMMorpher extends Disposable {
 		}
 		if (isComplete) {
 			this._didFinalize = true;
-			// The stream is done, so nothing is "still being written" anymore.
-			// Clear immediately: a caught-up response may skip the completion
-			// render entirely and must not keep the soft-focus treatment.
-			this._updateStreamingTail();
 		}
 
 		if (isComplete && !this._buffer.handlesFlush && this._lastMarkdown.length > this._renderedMarkdown.length) {
 			this._suppressNextAnimation = true;
 			this._pendingMarkdown = this._lastMarkdown;
 			this._scheduleRender(0, true);
-		} else if (isComplete && this._buffer.handlesFlush
-			&& (forceFinalRender || this._lastMarkdown.length > this._renderedMarkdown.length)) {
+		} else if (isComplete && this._buffer.handlesFlush && forceFinalRender) {
 			// Word-buffered streams may already have committed the complete textual
 			// prefix using the lightweight long-response presentation. Force one
 			// completion render only for that transient view. Rich DOM that is already
 			// caught up stays mounted, avoiding a redundant whole-answer rebuild.
 			this._suppressNextAnimation = true;
+			this._pendingMarkdown = this._lastMarkdown;
+			this._scheduleRender(0, true);
+		} else if (isComplete && this._buffer.handlesFlush && this._lastMarkdown.length > this._renderedMarkdown.length) {
+			// The drip-feed is still behind the finished stream. Let the buffer
+			// drain the tail at its accelerated completion rate instead of
+			// dumping the remainder into the DOM in a single frame.
 			this._pendingMarkdown = this._lastMarkdown;
 			this._scheduleRender(0, true);
 		}
@@ -211,7 +200,7 @@ export class IncrementalDOMMorpher extends Disposable {
 		if (animateInitial) {
 			this._animateNewChildren();
 		}
-		this._updateStreamingTail();
+		this._textReveal?.markAllRevealed();
 	}
 
 	/**
@@ -314,10 +303,11 @@ export class IncrementalDOMMorpher extends Disposable {
 			this._revealedChildCount = this._domNode.children.length;
 			this._animationStartTime = 0;
 			this._batchChildCount = 0;
+			this._textReveal?.markAllRevealed();
 		} else {
 			this._animateNewChildren();
+			this._textReveal?.onDidRender();
 		}
-		this._updateStreamingTail();
 
 		// If the buffer has more content to reveal, keep the rAF
 		// loop running even though no new tokens arrived.
@@ -359,27 +349,9 @@ export class IncrementalDOMMorpher extends Disposable {
 		this._animation.animate(children, this._revealedChildCount, currentCount, elapsed);
 	}
 
-	/**
-	 * Moves the streaming soft-focus treatment onto the current last block.
-	 * Removes it once the response completes so finished text is crisp.
-	 */
-	private _updateStreamingTail(): void {
-		const children = this._domNode.children;
-		const last = children.length > 0 ? children[children.length - 1] as HTMLElement : undefined;
-		const next = !this._didFinalize && last && canCarryStreamingTail(last) ? last : undefined;
-		if (next === this._streamingTailNode) {
-			return;
-		}
-		this._streamingTailNode?.classList.remove(STREAMING_TAIL_CLASS_NAME);
-		this._streamingTailNode = next;
-		next?.classList.add(STREAMING_TAIL_CLASS_NAME);
-	}
-
 	// ---- lifecycle ----
 
 	override dispose(): void {
-		this._streamingTailNode?.classList.remove(STREAMING_TAIL_CLASS_NAME);
-		this._streamingTailNode = undefined;
 		if (this._rafHandle !== undefined) {
 			getWindow(this._domNode).cancelAnimationFrame(this._rafHandle);
 			this._rafHandle = undefined;

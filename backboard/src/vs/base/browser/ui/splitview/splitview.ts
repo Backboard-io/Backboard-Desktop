@@ -84,6 +84,14 @@ export interface IView<TLayoutContext = undefined> {
 	readonly snap?: boolean;
 
 	/**
+	 * How far, in pixels, the user must drag past the view's minimum size
+	 * before it snaps hidden (or, when hidden, drag out before it snaps visible).
+	 *
+	 * @defaultValue half of the view's minimum size
+	 */
+	readonly snapThreshold?: number;
+
+	/**
 	 * View instances are supposed to fire the {@link IView.onDidChange} event whenever
 	 * any of the constraint properties have changed:
 	 *
@@ -257,6 +265,7 @@ abstract class ViewItem<TLayoutContext, TView extends IView<TLayoutContext>> {
 	get priority(): LayoutPriority | undefined { return this.view.priority; }
 	get proportionalLayout(): boolean { return this.view.proportionalLayout ?? true; }
 	get snap(): boolean { return !!this.view.snap; }
+	get snapThreshold(): number { return this.view.snapThreshold ?? Math.floor(this.view.minimumSize / 2); }
 
 	set enabled(enabled: boolean) {
 		this.container.style.pointerEvents = enabled ? '' : 'none';
@@ -939,22 +948,22 @@ export class SplitView<TLayoutContext = undefined, TView extends IView<TLayoutCo
 
 				if (typeof snapBeforeIndex === 'number') {
 					const viewItem = this.viewItems[snapBeforeIndex];
-					const halfSize = Math.floor(viewItem.viewMinimumSize / 2);
+					const threshold = viewItem.snapThreshold;
 
 					snapBefore = {
 						index: snapBeforeIndex,
-						limitDelta: viewItem.visible ? minDelta - halfSize : minDelta + halfSize,
+						limitDelta: viewItem.visible ? minDelta - threshold : minDelta + threshold,
 						size: viewItem.size
 					};
 				}
 
 				if (typeof snapAfterIndex === 'number') {
 					const viewItem = this.viewItems[snapAfterIndex];
-					const halfSize = Math.floor(viewItem.viewMinimumSize / 2);
+					const threshold = viewItem.snapThreshold;
 
 					snapAfter = {
 						index: snapAfterIndex,
-						limitDelta: viewItem.visible ? maxDelta + halfSize : maxDelta - halfSize,
+						limitDelta: viewItem.visible ? maxDelta + threshold : maxDelta - threshold,
 						size: viewItem.size
 					};
 				}

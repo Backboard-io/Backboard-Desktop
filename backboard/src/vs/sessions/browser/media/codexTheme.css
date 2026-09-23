@@ -1195,9 +1195,21 @@
 }
 
 .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-header {
-	/* A scrolling tab strip must remain interactive across its whole bounds.
-	 * Native drag hit regions can become stale when tabs scroll or panels resize. */
+	/* The header's empty space moves the window like the rest of the top row. */
+	-webkit-app-region: drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-header > .sessions-right-workbench-tabs {
+	/* A scrolling tab strip must remain interactive across its whole bounds —
+	 * native drag hit regions can go stale when tabs scroll — so it only takes
+	 * its content width and the space after it belongs to the header. */
+	flex: 0 1 auto;
 	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-header > .sessions-right-workbench-tabs + * {
+	/* Keeps + (or, in the launcher, the frame controls) pinned right. */
+	margin-left: auto;
 }
 
 .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-header :is(button, input, .sessions-right-workbench-tab, .sessions-right-workbench-tab-add, .sessions-right-workbench-icon-button) {
@@ -1402,7 +1414,10 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	box-shadow: none !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack .chat-empty-below-composer {
+/* The category chips are retired here. Scope to the whole window, not just the
+ * new-chat stack: an opened session with no rendered turns (failed or still
+ * loading) is also `chat-empty-centered` and would otherwise show them. */
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .chat-empty-below-composer {
 	display: none !important;
 }
 
@@ -2348,15 +2363,9 @@ html body .monaco-workbench.agent-sessions-workbench .part.sessionspart :is(.new
 			border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent) !important;
 			box-shadow: none !important;
 		}
-		.chat-editor-container,
-		.interactive-input-editor,
-		.monaco-editor,
-		.monaco-editor-background,
-		.overflow-guard,
-		.monaco-scrollable-element,
-		.lines-content,
-		.view-lines,
-		.margin {
+		/* Scoped to the input box: pending questions share the composer shell and
+		 * their scroll containers must stay on the shell surface. */
+		.chat-input-container :is(.chat-editor-container, .interactive-input-editor, .monaco-editor, .monaco-editor-background, .overflow-guard, .monaco-scrollable-element, .lines-content, .view-lines, .margin) {
 			background-color: var(--bb-composer-surface) !important;
 		}
 		.chat-input-toolbars { height: auto !important; min-height: 28px !important; margin-top: 6px !important; }

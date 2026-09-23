@@ -34,7 +34,7 @@ suite('ChatListRenderer', () => {
 			formatBackboardWorkTimer(608000, false),
 			formatBackboardWorkTimer(608000, true),
 			formatBackboardWorkTimer(-100, true),
-		], ['Working for 0s', 'Working for 10m 8s', 'Worked', 'Worked']);
+		], ['Working for 0s', 'Working for 10m 8s', 'Worked for 10m 8s', 'Worked']);
 	});
 
 	test('worker wait chrome is suppressed without suppressing other tools', () => {
@@ -92,6 +92,43 @@ suite('ChatListRenderer', () => {
 			assert.strictEqual(stableSyncMutations.length, 0, 'An unchanged streaming update must not reparent worker rows');
 			assert.strictEqual(mainWindow.document.activeElement, items[1].node, 'Stable reconciliation must preserve focus inside the active worker row');
 			container.remove();
+		});
+
+		test('renders workers as the Codex inline sentence with openable names', () => {
+			const container = mainWindow.document.createElement('div');
+			mainWindow.document.body.appendChild(container);
+			const opened: string[] = [];
+			const worker = (label: string, status: string) => ({ node: mainWindow.document.createElement('div'), active: status === 'running', status, label, id: `call-${label}`, open: () => opened.push(label) });
+			try {
+				const items = [worker('Alpha', 'running'), worker('Beta', 'running'), worker('Gamma', 'queued'), worker('Delta', 'running')];
+				syncBackboardSubagentStrip(container, items, true);
+				const strip = container.querySelector<HTMLElement>(':scope > .chat-subagent-strip')!;
+				const sentence = () => strip.querySelector<HTMLElement>('[aria-live]')!.textContent;
+				const live = {
+					sentence: sentence(),
+					avatars: strip.querySelectorAll('img[data-agent-id]').length,
+					entering: strip.querySelectorAll('img[data-animate-entrance]').length,
+					rowsHidden: strip.querySelector<HTMLElement>(':scope > .chat-subagent-items')!.hidden,
+				};
+				strip.querySelector<HTMLElement>('[role="button"]')!.click();
+
+				syncBackboardSubagentStrip(container, items.map(item => ({ ...item, active: false, status: 'completed' })), true);
+				assert.deepStrictEqual({
+					live,
+					opened,
+					done: sentence(),
+					entering: strip.querySelectorAll('img[data-animate-entrance]').length,
+					two: (syncBackboardSubagentStrip(container, [worker('Alpha', 'failed'), worker('Beta', 'completed')], true), sentence()),
+				}, {
+					live: { sentence: 'Alpha, Beta and 2 more started working', avatars: 4, entering: 4, rowsHidden: true },
+					opened: ['Alpha'],
+					done: 'Alpha, Beta and 2 more finished',
+					entering: 0,
+					two: 'Alpha and Beta finished with errors',
+				});
+			} finally {
+				container.remove();
+			}
 		});
 
 		test('summarizes running, completed, and failed workers without internal details', () => {
@@ -209,7 +246,7 @@ suite('ChatListRenderer', () => {
 				shouldSplitBackboardThinkingBeforeEdit('externalEdit', true, true),
 				shouldSplitBackboardThinkingBeforeEdit('externalEdit', false, false),
 				shouldSplitBackboardThinkingBeforeEdit('externalEdit', true, false, true),
-			], [true, true, false, false, false], 'Only a newly mounted standalone Backboard edit should split the active Thought root');
+			], [false, false, false, false, false], 'Codex groups edits with the surrounding work, so no edit splits the active activity unit');
 		});
 
 		test('keeps final assistant text outside while folding trailing work and support', () => {
@@ -255,7 +292,7 @@ suite('ChatListRenderer', () => {
 			], [false, true, true, false, true]);
 		});
 
-		test('restores explicit outer-fold state and otherwise keeps completed activity visible', () => {
+		test('restores explicit outer-fold state and otherwise folds completed activity like Codex', () => {
 			assert.deepStrictEqual([
 				resolveBackboardTurnExpandedState(true, true),
 				resolveBackboardTurnExpandedState(true, false),
@@ -263,7 +300,7 @@ suite('ChatListRenderer', () => {
 				resolveBackboardTurnExpandedState(true, undefined),
 				resolveBackboardTurnExpandedState(false, false),
 				resolveBackboardTurnExpandedState(false, undefined),
-			], [true, false, true, true, false, true]);
+			], [true, false, false, false, false, true]);
 		});
 
 		test('keeps the current transcript stable when its live run completes', () => {
@@ -271,24 +308,24 @@ suite('ChatListRenderer', () => {
 				resolveBackboardTurnExpandedState(true, undefined),
 				resolveBackboardTurnExpandedState(true, undefined),
 				resolveBackboardTurnExpandedState(true, undefined),
-			], [true, true, true]);
+			], [false, false, false]);
 		});
 
-		test('keeps history visible while respecting an explicit collapse', () => {
+		test('folds finished history by default while respecting an explicit choice', () => {
 			assert.deepStrictEqual([
 				resolveBackboardTurnExpandedState(true, undefined),
 				resolveBackboardTurnExpandedState(true, false),
 				resolveBackboardTurnExpandedState(true, true),
-			], [true, false, true]);
+			], [false, false, true]);
 		});
 
-		test('keeps Backboard diff cards outside the nested Thought disclosure', () => {
+		test('lists Backboard edits as rows inside the activity group, like Codex', () => {
 			assert.deepStrictEqual([
 				shouldRenderBackboardEditStandalone('textEditGroup', true),
 				shouldRenderBackboardEditStandalone('externalEdit', true),
 				shouldRenderBackboardEditStandalone('toolInvocation', true),
 				shouldRenderBackboardEditStandalone('textEditGroup', false),
-			], [true, true, false, false]);
+			], [false, false, false, false]);
 		});
 
 		test('recognizes only explicitly batched Backboard external edits for mutation grouping', () => {

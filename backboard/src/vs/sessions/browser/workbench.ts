@@ -7,9 +7,9 @@ import '../../workbench/browser/style.js';
 import './media/style.css';
 import './media/chatMarkdown.css';
 import './media/backboardChatTheme.css';
-import { Disposable, DisposableMap, DisposableStore, IDisposable, toDisposable } from '../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../base/common/lifecycle.js';
 import { Emitter, Event, setGlobalLeakWarningThreshold } from '../../base/common/event.js';
-import { getActiveDocument, getActiveElement, getClientArea, getWindowId, getWindows, IDimension, isAncestorUsingFlowTo, isHTMLElement, size, Dimension, runWhenWindowIdle, scheduleAtNextAnimationFrame } from '../../base/browser/dom.js';
+import { getActiveDocument, getActiveElement, getClientArea, getWindowId, getWindow, getWindows, IDimension, isAncestorUsingFlowTo, isHTMLElement, size, Dimension, runWhenWindowIdle, scheduleAtNextAnimationFrame } from '../../base/browser/dom.js';
 import { DeferredPromise, RunOnceScheduler } from '../../base/common/async.js';
 import { isFullscreen, onDidChangeFullscreen, isChrome, isFirefox, isSafari } from '../../base/browser/browser.js';
 import { mark } from '../../base/common/performance.js';
@@ -200,6 +200,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	readonly onDidChangeNotificationsVisibility = this._onDidChangeNotificationsVisibility.event;
 
 	private readonly _onDidChangeAuxiliaryBarMaximized = this._register(new Emitter<void>());
+	private readonly _restoredLayoutFrame = this._register(new MutableDisposable());
 	readonly onDidChangeAuxiliaryBarMaximized = this._onDidChangeAuxiliaryBarMaximized.event;
 
 	private readonly _onDidChangeEditorMaximized = this._register(new Emitter<void>());
@@ -2343,6 +2344,10 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 			}
 			this._auxiliaryBarLastNonMaximizedVisibility = undefined;
 			this._savePartVisibility();
+			// Maximizing laid the hidden chat out at 0px, and its list keeps those
+			// measured row heights (an empty transcript) until something re-lays it
+			// out. Do that once the restored parts are visible again.
+			this._restoredLayoutFrame.value = scheduleAtNextAnimationFrame(getWindow(this.mainContainer), () => this.layout());
 		}
 
 		this._onDidChangeAuxiliaryBarMaximized.fire();

@@ -36,7 +36,7 @@ import { isClaudeLoggedIn } from '../shared/agentLoginProbes.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { IAgentHostGitService, META_DIFF_BASE_BRANCH } from '../agentHostGitService.js';
 import { BYOK_COMMANDS, BYOK_GENERATION_ARG, BYOK_KEY_ARG, BYOK_PROVIDER_ARG, BYOK_PROVIDERS, byokProviderDefinition, type ByokProviderId, isByokProviderId, isKeyBilledProvider, keyBilledProviderId, parseBillingRoute, routeProviderFamily, vendorOfProvider } from '../../common/byokProviders.js';
-import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_GENERATIVE_MEDIA_OFF, BACKBOARD_IMAGE_MODEL_CONFIG_KEY, BACKBOARD_MODE_PLAN, BACKBOARD_VIDEO_MODEL_CONFIG_KEY, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, type BridgeModel, backboardModelInfos, backboardMultitaskSystemContext, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
+import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_GENERATIVE_MEDIA_OFF, BACKBOARD_IMAGE_MODEL_CONFIG_KEY, BACKBOARD_MODE_PLAN, BACKBOARD_VIDEO_MODEL_CONFIG_KEY, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, type BridgeModel, backboardAccessSystemContext, backboardModelInfos, backboardMultitaskSystemContext, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
 
 /** cli-ts tool name excluded from the turn when Web Search is toggled off. */
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
@@ -1402,7 +1402,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 	sendMessage(sessionUri: URI, prompt: string, attachments?: readonly MessageAttachment[], turnId?: string): Promise<void> {
 		const session = this._session(sessionUri);
-		return this._queueSessionOperation(session, () => this._sendMessage(session, prompt, attachments, turnId));
+		const queuedAt = Date.now();
+		return this._queueSessionOperation(session, () => this._sendMessage(session, prompt, attachments, turnId, queuedAt));
 	}
 
 	async rewindSession(sessionUri: URI, request: AgentRewindRequest): Promise<IAgentRewindResult> {
@@ -1577,7 +1578,19 @@ export class CliTsAgent extends Disposable implements IAgent {
 		return queued;
 	}
 
-	private async _sendMessage(session: CliTsSession, prompt: string, attachments?: readonly MessageAttachment[], turnId?: string): Promise<void> {
+	private async _sendMessage(session: CliTsSession, prompt: string, attachments?: readonly MessageAttachment[], turnId?: string, queuedAt = Date.now()): Promise<void> {
+		// Send→submit stage timings, logged once with turn_start. The first
+		// send of a new chat crosses several independent waits (session queue,
+		// store writes, checkpoint baseline, serve startup) that no other log
+		// separates.
+		const stages: string[] = [];
+		let stageStart = queuedAt;
+		const mark = (stage: string) => {
+			const now = Date.now();
+			stages.push(`${stage}=${now - stageStart}ms`);
+			stageStart = now;
+		};
+		mark('queue');
 		if (session.disposed) {
 			throw new Error(`Cannot send to disposed Backboard session: ${session.sessionUri.toString()}`);
 		}
@@ -1585,6 +1598,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			throw new Error(`Cannot send to archived Backboard session: ${session.sessionUri.toString()}`);
 		}
 		await this._applyPendingModel(session);
+		mark('applyModel');
 		if (session.pendingProviderHandoff) {
 			this._prepareProviderHandoff(session, session.model?.id);
 		}
@@ -1607,7 +1621,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const prepared = prepareSubmitAttachments(prompt, attachments);
 		const storedConfig = this._configurationService.getSessionConfigValues(session.sessionUri.toString());
 		const settings = createBackboardTurnSettings(storedConfig, session.config, session.model);
-		const systemContext = backboardMultitaskSystemContext(settings.rawMode);
+		const systemContext = [
+			backboardMultitaskSystemContext(settings.rawMode),
+			backboardAccessSystemContext(settings.accessMode),
+		].filter(Boolean).join('\n\n') || undefined;
 		// Default maps to the R-CLI's `auto` tier (file edits and safe commands
 		// run unprompted; dangerous commands and outward-facing tools still
 		// ask), so only Full Access bypasses approvals entirely.
@@ -1637,6 +1654,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		// A forced quit during first-turn materialization must still leave a
 		// catalog entry that can be reopened and retried.
 		this._writeStore();
+		mark('writeStore');
 		// Fill the send→first-token gap with an instant status line so the turn
 		// feels responsive the moment the user hits send — well before the model
 		// streams its first token. It starts at "Preparing…" and is upgraded to
@@ -1672,8 +1690,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 			// starting a process or capturing the session baseline. The checkpoint
 			// baseline is immutable once recorded, so capturing the provisional source
 			// folder first would permanently break diffs for a later worktree choice.
+			mark('login');
 			await this._ensureRestoredWorktree(session);
 			await this._materialize(session, prompt, storedConfig);
+			mark('materialize');
 			if (session.disposed) {
 				throw new Error(localize('cliTsAgent.sessionDisposedDuringMaterialization', "The Backboard session was deleted before it finished starting."));
 			}
@@ -1682,6 +1702,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			}
 			await session.baselineCapture;
 			const rgDir = await this._resolveRgDir();
+			mark('rgDir');
 			// Whatever the route, the submit below waits for the runtime's startup
 			// handshake: an older runtime that would read its own key file, or one
 			// that has not applied the current key snapshot, never receives it.
@@ -1689,7 +1710,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			if (session.cancelBeforeSubmit) {
 				return;
 			}
-			this._logService.info(`[cli-ts] turn_start session=${session.sessionId} model=${settings.provider}/${settings.model} source=${settings.source} permission=${permission} cwd=${session.workingDirectory?.fsPath ?? '(missing)'}`);
+			this._logService.info(`[cli-ts] turn_start session=${session.sessionId} model=${settings.provider}/${settings.model} source=${settings.source} permission=${permission} cwd=${session.workingDirectory?.fsPath ?? '(missing)'} procRunning=${proc.isRunning} ${stages.join(' ')} total=${Date.now() - queuedAt}ms`);
 			const inheritedConversationContext = [
 				session.providerHandoffContext,
 				!session.threadId ? session.forkContext : undefined,
@@ -2865,6 +2886,13 @@ export class CliTsAgent extends Disposable implements IAgent {
 	private async _requestWorkerLifecycle(session: CliTsSession, op: 'archiveWorkers' | 'unarchiveWorkers' | 'deleteWorkers'): Promise<void> {
 		let proc = session.proc;
 		try {
+			if (!proc?.isRunning && !fs.existsSync(path.join(this._runtimeSessionsRoot(), session.sessionId, 'workers.json'))) {
+				// cli-ts writes workers.json on the first worker mutation, so without
+				// it every lifecycle op is a no-op. Skip the spawn: discarding or
+				// GC-ing an empty draft otherwise boots a full serve process (and its
+				// workspace scan) that competes with the user's next first send.
+				return;
+			}
 			if (!proc?.isRunning) {
 				// Archive/delete may be the first host operation after restart. The
 				// original coordinator worktree can already be absent, but the source

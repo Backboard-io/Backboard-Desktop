@@ -393,9 +393,10 @@ configurationRegistry.registerConfiguration({
 		},
 		[ChatConfiguration.IncrementalRenderingStyle]: {
 			type: 'string',
-			enum: ['none', 'fade', 'rise', 'blur', 'scale', 'slide', 'reveal'],
+			enum: ['none', 'words', 'fade', 'rise', 'blur', 'scale', 'slide', 'reveal'],
 			enumDescriptions: [
 				nls.localize('chat.experimental.incrementalRendering.animationStyle.none', "No animation. Content appears instantly."),
+				nls.localize('chat.experimental.incrementalRendering.animationStyle.words', "Text types in word by word at a smoothed pace, each word fading up out of a soft blur."),
 				nls.localize('chat.experimental.incrementalRendering.animationStyle.fade', "Simple opacity fade from 0 to 1."),
 				nls.localize('chat.experimental.incrementalRendering.animationStyle.rise', "Content fades in while rising upward."),
 				nls.localize('chat.experimental.incrementalRendering.animationStyle.blur', "Content fades in from a blurred state."),
@@ -404,7 +405,7 @@ configurationRegistry.registerConfiguration({
 				nls.localize('chat.experimental.incrementalRendering.animationStyle.reveal', "Content reveals top-to-bottom with a soft gradient edge."),
 			],
 			description: nls.localize('chat.experimental.incrementalRendering.animationStyle', "Controls the animation style for incremental rendering."),
-			default: 'blur',
+			default: 'words',
 			tags: ['experimental'],
 		},
 		[ChatConfiguration.IncrementalRenderingBuffering]: {

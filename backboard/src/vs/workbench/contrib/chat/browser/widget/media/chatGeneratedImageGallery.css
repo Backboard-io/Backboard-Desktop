@@ -1,0 +1,184 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Generated images as Codex's chat gallery: a 480px stage with 16px corners
+ * (270px tall for 16:9), a 56px thumbnail strip 8px to its right when a turn
+ * produced several images, and a glass "Canvas" action on hover. */
+.chat-generated-image-gallery {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	max-width: 100%;
+	margin: 12px 0;
+}
+
+.chat-generated-image-stage {
+	position: relative;
+	flex: 0 1 480px;
+	min-width: 0;
+	max-width: 480px;
+	overflow: hidden;
+	border-radius: 16px;
+}
+
+.chat-generated-image-track {
+	display: flex;
+	gap: 8px;
+	height: 100%;
+	transition: transform 150ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.chat-generated-image-preview {
+	flex-shrink: 0;
+	height: 100%;
+	padding: 0;
+	border: 0;
+	border-radius: 16px;
+	overflow: hidden;
+	line-height: 0;
+	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+	cursor: pointer;
+}
+
+.chat-generated-image-preview:focus-visible,
+.chat-generated-image-thumb:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+/* Beats chat.css's standalone generated-image card, which targets the same <img>. */
+.interactive-item-container .value .rendered-markdown .chat-generated-image-gallery img.chat-generated-image-img {
+	display: block;
+	width: auto;
+	max-width: none;
+	height: 100%;
+	max-height: none;
+	margin: 0;
+	border: 0;
+	border-radius: 0;
+	background: none;
+	object-fit: contain;
+}
+
+.chat-generated-image-actions {
+	position: absolute;
+	right: 8px;
+	bottom: 8px;
+	z-index: 1;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 150ms ease;
+}
+
+.chat-generated-image-stage:hover .chat-generated-image-actions,
+.chat-generated-image-stage:focus-within .chat-generated-image-actions {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.chat-generated-image-canvas {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	box-sizing: border-box;
+	height: 24px;
+	padding: 0 8px;
+	border: 1px solid transparent;
+	border-radius: 10px;
+	color: #ffffff;
+	background: rgba(0, 0, 0, 0.45);
+	box-shadow: 0 1px 2px -1px rgba(0, 0, 0, 0.08);
+	backdrop-filter: blur(12px);
+	font: inherit;
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+}
+
+.chat-generated-image-canvas:hover {
+	background: rgba(0, 0, 0, 0.6);
+}
+
+.chat-generated-image-canvas .codicon {
+	font-size: 16px;
+	color: inherit;
+}
+
+.chat-generated-image-strip {
+	display: flex;
+	flex-direction: column;
+	flex-shrink: 0;
+	gap: 8px;
+	max-height: var(--chat-generated-image-stage-height, 270px);
+	padding: 4px;
+	overflow-y: auto;
+}
+
+.chat-generated-image-thumb {
+	flex-shrink: 0;
+	box-sizing: border-box;
+	width: 56px;
+	height: 56px;
+	padding: 0;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	border-radius: 12.5px;
+	overflow: hidden;
+	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+	cursor: pointer;
+}
+
+.chat-generated-image-thumb[aria-pressed='true'] {
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 76%, transparent);
+}
+
+.interactive-item-container .value .rendered-markdown .chat-generated-image-strip img.chat-generated-image-img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+/* "Generating image…": a square card (max 400px, 16px corners) with a dot
+ * field whose brightness sweeps diagonally, like Codex's animated placeholder. */
+.chat-generated-image-placeholder {
+	position: relative;
+	box-sizing: border-box;
+	width: 100%;
+	max-width: 400px;
+	aspect-ratio: 1;
+	margin: 12px 0;
+	overflow: hidden;
+	border-radius: 16px;
+	color: color-mix(in srgb, var(--vscode-foreground) 70%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+}
+
+.chat-generated-image-placeholder-dots {
+	position: absolute;
+	inset: 0;
+	background-image: radial-gradient(circle, currentColor 1px, transparent 1.6px);
+	background-size: 14px 14px;
+	background-position: 7px 7px;
+	opacity: 0.35;
+	-webkit-mask-image: linear-gradient(115deg, rgba(0, 0, 0, 0.25) 30%, #000000 50%, rgba(0, 0, 0, 0.25) 70%);
+	mask-image: linear-gradient(115deg, rgba(0, 0, 0, 0.25) 30%, #000000 50%, rgba(0, 0, 0, 0.25) 70%);
+	-webkit-mask-size: 300% 300%;
+	mask-size: 300% 300%;
+	animation: chat-generated-image-dots 2.4s ease-in-out infinite;
+}
+
+@keyframes chat-generated-image-dots {
+	from {
+		-webkit-mask-position: 100% 100%;
+		mask-position: 100% 100%;
+	}
+	to {
+		-webkit-mask-position: 0% 0%;
+		mask-position: 0% 0%;
+	}
+}
+
+.monaco-workbench.monaco-reduce-motion .chat-generated-image-placeholder-dots {
+	animation: none;
+}

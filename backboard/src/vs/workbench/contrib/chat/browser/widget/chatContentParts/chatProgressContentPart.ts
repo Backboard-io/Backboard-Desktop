@@ -28,6 +28,7 @@ import { HoverStyle } from '../../../../../../base/browser/ui/hover/hover.js';
 import { ILanguageModelToolsService } from '../../../common/tools/languageModelToolsService.js';
 import { isEqual } from '../../../../../../base/common/resources.js';
 import { buildPhrasePool, defaultThinkingMessages, maybePickFunWorkingMessage } from './chatThinkingContentPart.js';
+import { applyCodexRoot, CodexCadencedShimmer, cxEl } from './codex/codexDom.js';
 
 function isBackboardCursorTranscript(container: HTMLElement): boolean {
 	return container.closest('.backboard-cursor-transcript') !== null
@@ -400,6 +401,8 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 	private readonly useCursorTranscriptPresentation: boolean;
 	/** Ticks the live working label and elapsed time once per second while the turn runs. */
 	private readonly workingTimer = this._register(new MutableDisposable<IDisposable>());
+	/** Codex presentation: the "Thinking" placeholder's cadenced shimmer. */
+	private codexShimmer: CodexCadencedShimmer | undefined;
 
 	constructor(
 		workingProgress: IChatWorkingProgress,
@@ -417,7 +420,7 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		this.useCursorTranscriptPresentation = isBackboardCursorTranscript(context.container);
 		this.useBackboardTimelinePresentation = context.container.closest('.backboard-clean-chat') !== null && !this.useCursorTranscriptPresentation;
 		this.label = this.useCursorTranscriptPresentation
-			? localize('chat.cursorPlanningNextMoves', "Planning next moves")
+			? localize('chat.codex.thinking', "Thinking")
 			: pickWorkingLabel(context.element.id, configurationService);
 
 		// Build the DOM
@@ -447,6 +450,18 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		append(messageContainer, this.labelElement);
 		append(messageContainer, this.statsElement);
 		append(this.domNode, messageContainer);
+
+		if (this.useCursorTranscriptPresentation && !isComplete) {
+			// Codex's "Thinking" placeholder (`SAi`): dim label in the cadenced shimmer, no spinner.
+			iconElement.remove();
+			messageContainer.hidden = true;
+			const placeholder = applyCodexRoot(cxEl('div', 'cx-thinking-placeholder min-w-0 text-size-chat leading-normal py-0'));
+			const line = cxEl('div', 'inline-flex max-w-full min-w-0 items-center overflow-hidden text-text/60 [&_*:not(button)]:!text-text/60');
+			this.codexShimmer = this._register(new CodexCadencedShimmer(localize('chat.codex.thinking', "Thinking"), 'min-w-0 flex-1 truncate select-none'));
+			line.append(cxEl('span', 'h-4 w-0 shrink-0'), this.codexShimmer.element);
+			placeholder.appendChild(line);
+			append(this.domNode, placeholder);
+		}
 
 		if (!isComplete && !this.useBackboardTimelinePresentation && !this.useCursorTranscriptPresentation) {
 			this.domNode.classList.add('shimmer-progress');
@@ -496,7 +511,7 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		const tick = () => {
 			const elapsedMs = Math.max(0, Date.now() - state.confirmationAdjustedTimestamp.get());
 			if (this.useCursorTranscriptPresentation) {
-				this.setWorkingLabel(localize('chat.cursorPlanningNextMoves', "Planning next moves"));
+				this.setWorkingLabel(localize('chat.codex.thinking', "Thinking"));
 				this.statsElement.textContent = '';
 				return;
 			}
@@ -519,6 +534,7 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 			return;
 		}
 		this.labelElement.textContent = label;
+		this.codexShimmer?.setText(label);
 		if (!getWindow(this.domNode).matchMedia('(prefers-reduced-motion: reduce)').matches) {
 			this.labelElement.animate?.(
 				[{ opacity: 0, transform: 'translateY(2px)' }, { opacity: 1, transform: 'none' }],
@@ -532,6 +548,7 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		this.workingTimer.clear();
 		this.explicitContent = content;
 		this.labelElement.textContent = renderAsPlaintext(content);
+		this.codexShimmer?.setText(renderAsPlaintext(content));
 		this.statsElement.textContent = '';
 	}
 

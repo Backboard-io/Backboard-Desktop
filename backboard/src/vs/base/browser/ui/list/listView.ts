@@ -1651,7 +1651,15 @@ export class ListView<T> implements IListView<T> {
 
 		if (item.row) {
 			item.row.domNode.style.height = '';
-			item.size = item.row.domNode.offsetHeight;
+			const measured = item.row.domNode.offsetHeight;
+			if (measured === 0 && item.row.domNode.getClientRects().length === 0) {
+				// The row sits in a display:none subtree (e.g. its host part is
+				// hidden), so 0 is not its height. Storing it would drop the item
+				// out of every render range, so it would never be re-measured.
+				item.row.domNode.style.height = `${size}px`;
+				return 0;
+			}
+			item.size = measured;
 			if (item.size === 0) {
 				if (!isAncestor(item.row.domNode, getWindow(item.row.domNode).document.body)) {
 					console.warn('Measuring item node that is not in DOM! Add ListView to the DOM before measuring row height!', new Error().stack);
@@ -1674,12 +1682,19 @@ export class ListView<T> implements IListView<T> {
 		}
 
 		renderer.renderElement(item.element, index, row.templateData);
-		item.size = row.domNode.offsetHeight;
+		const measured = row.domNode.offsetHeight;
+		const hidden = measured === 0 && row.domNode.getClientRects().length === 0;
 		renderer.disposeElement?.(item.element, index, row.templateData);
 
-		item.lastDynamicHeightWidth = this.renderWidth;
 		row.domNode.remove();
 		this.cache.release(row);
+
+		if (hidden) {
+			// Measured inside a display:none subtree; keep the estimate and retry later.
+			return 0;
+		}
+		item.size = measured;
+		item.lastDynamicHeightWidth = this.renderWidth;
 
 		return item.size - size;
 	}

@@ -47,6 +47,24 @@ export function isGenerateVideoApprovalCarousel(carousel: IChatQuestionCarousel)
 	return titles.has('Edit Video') && titles.has('Duration') && titles.has('Quality');
 }
 
+/**
+ * The prompt copy for a question. The editor panel prefers the long form, but
+ * agent-host questions split a one-line prompt into `title` and an empty
+ * `detailedMessage`, so blank candidates must fall through to the next one.
+ */
+function resolveQuestionText(question: IChatQuestion, preferDetailed: boolean): string | IMarkdownString {
+	const candidates = preferDetailed
+		? [question.detailedMessage, question.description, question.message, question.title]
+		: [question.message, question.title];
+	for (const candidate of candidates) {
+		const value = typeof candidate === 'string' ? candidate : candidate?.value;
+		if (candidate && value?.trim()) {
+			return candidate;
+		}
+	}
+	return question.title;
+}
+
 const PREVIOUS_QUESTION_ACTION_ID = 'workbench.action.chat.previousQuestion';
 const NEXT_QUESTION_ACTION_ID = 'workbench.action.chat.nextQuestion';
 export interface IChatQuestionCarouselOptions {
@@ -516,7 +534,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		this.domNode.focus();
 		const question = this.carousel.questions[this._currentIndex];
 		if (question) {
-			const questionText = (this._isEditorPanel ? question.detailedMessage ?? question.description : undefined) ?? question.message ?? question.title;
+			const questionText = resolveQuestionText(question, this._isEditorPanel);
 			const messageContent = this.getQuestionText(questionText);
 			const questionCount = this.carousel.questions.length;
 			const alertMessage = questionCount === 1
@@ -781,7 +799,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			return;
 		}
 
-		const questionText = (this._isEditorPanel ? question.detailedMessage ?? question.description : undefined) ?? question.message ?? question.title;
+		const questionText = resolveQuestionText(question, this._isEditorPanel);
 		const messageContent = this.getQuestionText(questionText);
 		const questionCount = this.carousel.questions.length;
 
@@ -873,8 +891,13 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 		const headerRow = dom.$('.chat-question-header-row');
 		const titleRow = dom.$('.chat-question-title-row');
 
+		// When the carousel message is the whole prompt that the question merely
+		// splits into title + detail (agent-host permission prompts), render it once
+		// as the title instead of showing the same text twice.
+		const messageIsWholePrompt = this._currentIndex === 0 && this.carouselMessageIsWholePrompt(question);
+
 		// Render carousel-level message if present (e.g. from MCP elicitation)
-		if (this.carousel.message && this._currentIndex === 0 && !this.isDuplicateCarouselMessage(question)) {
+		if (this.carousel.message && this._currentIndex === 0 && !messageIsWholePrompt && !this.isDuplicateCarouselMessage(question)) {
 			const messageMd = isMarkdownString(this.carousel.message) ? MarkdownString.lift(this.carousel.message) : new MarkdownString(this.carousel.message);
 			const carouselMessage = dom.$('.chat-question-carousel-message');
 			const renderedMessage = questionRenderStore.add(this._markdownRendererService.render(messageMd));
@@ -882,7 +905,7 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			headerRow.appendChild(carouselMessage);
 		}
 
-		const questionText = (this._isEditorPanel ? question.detailedMessage ?? question.description : undefined) ?? question.message ?? question.title;
+		const questionText = messageIsWholePrompt && this.carousel.message ? this.carousel.message : resolveQuestionText(question, this._isEditorPanel);
 		if (questionText) {
 			const title = dom.$('.chat-question-title');
 			const messageContent = this.getQuestionText(questionText);
@@ -1796,16 +1819,18 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			const summaryItem = dom.$('.chat-question-summary-item');
 
 			const questionRow = dom.$('div.chat-question-summary-label');
-			const questionText = (this._isEditorPanel ? question.detailedMessage ?? question.description : undefined) ?? question.message ?? question.title;
-			let labelText = typeof questionText === 'string' ? questionText : questionText.value;
-			labelText = labelText.replace(/[:\s]+$/, '');
-			questionRow.textContent = localize('chat.questionCarousel.summaryQuestion', 'Q: {0}', labelText);
+			const questionText = this.carousel.message && this.carousel.questions.length === 1 && this.carouselMessageIsWholePrompt(question)
+				? this.carousel.message
+				: resolveQuestionText(question, this._isEditorPanel);
+			const labelText = this.getQuestionText(questionText).replace(/\n{2,}/g, '\n').replace(/[:\s]+$/, '');
+			// The editor panel frames the pair in a card, so the Q/A prefixes are noise there.
+			questionRow.textContent = this._isEditorPanel ? labelText : localize('chat.questionCarousel.summaryQuestion', 'Q: {0}', labelText);
 			summaryItem.appendChild(questionRow);
 
 			if (answer !== undefined) {
 				const formattedAnswer = this.formatAnswerForSummary(question, answer);
 				const answerRow = dom.$('div.chat-question-summary-answer-title');
-				answerRow.textContent = localize('chat.questionCarousel.summaryAnswer', 'A: {0}', formattedAnswer);
+				answerRow.textContent = this._isEditorPanel ? formattedAnswer : localize('chat.questionCarousel.summaryAnswer', 'A: {0}', formattedAnswer);
 				summaryItem.appendChild(answerRow);
 			} else {
 				const unanswered = dom.$('div.chat-question-summary-unanswered');
@@ -1879,6 +1904,18 @@ export class ChatQuestionCarouselPart extends Disposable implements IChatContent
 			.filter((value): value is string | IMarkdownString => value !== undefined);
 
 		return questionCopy.some(value => normalize(value) === message);
+	}
+
+	private carouselMessageIsWholePrompt(question: IChatQuestion): boolean {
+		if (!this.carousel.message || !question.detailedMessage) {
+			return false;
+		}
+		const normalize = (value: string | IMarkdownString): string => this.getQuestionText(value)
+			.replace(/\s+/g, ' ')
+			.trim()
+			.toLocaleLowerCase();
+		const detail = normalize(question.detailedMessage);
+		return !!detail && normalize(this.carousel.message) === `${normalize(question.title)} ${detail}`;
 	}
 
 	/**

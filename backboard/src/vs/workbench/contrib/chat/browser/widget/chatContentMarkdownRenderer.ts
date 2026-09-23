@@ -7,7 +7,7 @@ import { $, reset } from '../../../../../base/browser/dom.js';
 import { IRenderedMarkdown, MarkdownRenderOptions } from '../../../../../base/browser/markdownRenderer.js';
 import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
-import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { DisposableStore, IDisposable } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IMarkdownRenderer, IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { ILanguageService } from '../../../../../editor/common/languages/language.js';
@@ -17,6 +17,8 @@ import { IOpenerService } from '../../../../../platform/opener/common/opener.js'
 import product from '../../../../../platform/product/common/product.js';
 import { FileAccess, Schemas } from '../../../../../base/common/network.js';
 import { AGENT_HOST_SCHEME } from '../../../../../platform/agentHost/common/agentHostUri.js';
+import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { OPEN_CANVAS_COMMAND_ID, renderGeneratedImageGalleries } from './chatGeneratedImageGallery.js';
 
 const BACKBOARD_GENERATED_IMAGE_HOST = 'backboard-prod.s3.ca-central-1.amazonaws.com';
 /**
@@ -162,6 +164,7 @@ export class ChatContentMarkdownRenderer implements IMarkdownRenderer {
 		@IConfigurationService configurationService: IConfigurationService,
 		@IHoverService private readonly hoverService: IHoverService,
 		@IMarkdownRendererService private readonly markdownRendererService: IMarkdownRendererService,
+		@ICommandService private readonly commandService: ICommandService,
 	) { }
 
 	render(markdown: IMarkdownString, options?: MarkdownRenderOptions, outElement?: HTMLElement): IRenderedMarkdown {
@@ -192,7 +195,12 @@ export class ChatContentMarkdownRenderer implements IMarkdownRenderer {
 				child.replaceWith($('p', undefined, child.textContent));
 			}
 		}
-		return this.attachCustomHover(this.upgradeGeneratedVideos(result));
+		const upgraded = this.upgradeGeneratedVideos(result);
+		const gallery = renderGeneratedImageGalleries(upgraded.element, isBackboardGeneratedImage, {
+			canOpenCanvas: !!CommandsRegistry.getCommand(OPEN_CANVAS_COMMAND_ID),
+			openCanvas: (imageUrl, view) => { void this.commandService.executeCommand(OPEN_CANVAS_COMMAND_ID, { imageUrl, view }); },
+		});
+		return this.attachCustomHover(upgraded, gallery);
 	}
 
 	/**
@@ -226,8 +234,9 @@ export class ChatContentMarkdownRenderer implements IMarkdownRenderer {
 		return result;
 	}
 
-	private attachCustomHover(result: IRenderedMarkdown): IRenderedMarkdown {
+	private attachCustomHover(result: IRenderedMarkdown, ...owned: IDisposable[]): IRenderedMarkdown {
 		const store = new DisposableStore();
+		owned.forEach(disposable => store.add(disposable));
 		// eslint-disable-next-line no-restricted-syntax
 		result.element.querySelectorAll('a').forEach((element) => {
 			if (element.title) {

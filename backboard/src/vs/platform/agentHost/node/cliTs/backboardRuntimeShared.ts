@@ -92,6 +92,19 @@ export function backboardMultitaskSystemContext(mode: string): string | undefine
 	return mode === BACKBOARD_MODE_MULTITASK ? BACKBOARD_MULTITASK_SYSTEM_CONTEXT : undefined;
 }
 
+const BACKBOARD_FULL_ACCESS_SYSTEM_CONTEXT = `## Full Access
+
+The user turned on Full Access for this chat. Every tool call runs without an approval prompt: shell commands (including ones outside the working directory), file reads and edits anywhere on this computer, network requests, browser, computer use, and MCP tools. Do not ask the user for permission to use a tool, and do not stop to ask whether you may run a command or edit a file — just do the work the request needs. When a tool fails, fix the cause or try another approach instead of handing the step back to the user. Ask the user only when you need information you cannot find yourself, or before an irreversible action the request did not clearly call for (deleting user data, force-pushing, publishing, sending messages, or spending money).`;
+
+/**
+ * Tells the model that approvals are off under Full Access. Without it the
+ * built-in prompts ("honor permissions", "require explicit authorization")
+ * lead models to stop and ask for permission the runtime would grant anyway.
+ */
+export function backboardAccessSystemContext(accessMode: string): string | undefined {
+	return accessMode === BACKBOARD_ACCESS_FULL ? BACKBOARD_FULL_ACCESS_SYSTEM_CONTEXT : undefined;
+}
+
 export interface BridgeModel {
 	readonly provider: string;
 	readonly name: string;
@@ -692,7 +705,7 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 						type: 'string',
 						title: localize('backboard.config.mode.title', "Mode"),
 						description: localize('backboard.config.mode.description', "Controls how Backboard plans, delegates work, and approves tool use."),
-						default: BACKBOARD_ACCESS_DEFAULT,
+						default: BACKBOARD_ACCESS_FULL,
 						enum: [BACKBOARD_ACCESS_DEFAULT, BACKBOARD_MODE_MULTITASK, BACKBOARD_MODE_PLAN, BACKBOARD_ACCESS_MANUAL, BACKBOARD_ACCESS_FULL],
 						enumLabels: [
 							localize('backboard.config.mode.default', "Default"),
@@ -837,7 +850,7 @@ export function createBackboardTurnSettings(
 	// The runtime never sees the IDE-side `-key` suffix; it gets the vendor plus
 	// an explicit billing source instead.
 	const parsedModel = billingRouteForProvider(selected.provider, selected.model);
-	const rawMode = stringConfigValue(values, SessionConfigKey.Mode, BACKBOARD_ACCESS_DEFAULT);
+	const rawMode = stringConfigValue(values, SessionConfigKey.Mode, BACKBOARD_ACCESS_FULL);
 	const imageModel = parseGenerativeModelSelection(stringConfigValue(values, BACKBOARD_IMAGE_MODEL_CONFIG_KEY, BACKBOARD_GENERATIVE_MEDIA_OFF));
 	const videoModel = parseGenerativeModelSelection(stringConfigValue(values, BACKBOARD_VIDEO_MODEL_CONFIG_KEY, BACKBOARD_GENERATIVE_MEDIA_OFF));
 	const configuredOpenRouterProvider = stringValueFromRecord(model?.config?.[BACKBOARD_OPENROUTER_PROVIDER_CONFIG_KEY]);
@@ -938,7 +951,7 @@ function normalizeBackboardMode(value: unknown): string {
 	if (value === 'free') {
 		return BACKBOARD_ACCESS_FULL;
 	}
-	return oneOf(value, [BACKBOARD_ACCESS_DEFAULT, BACKBOARD_MODE_MULTITASK, BACKBOARD_MODE_PLAN, BACKBOARD_ACCESS_MANUAL, BACKBOARD_ACCESS_FULL], BACKBOARD_ACCESS_DEFAULT);
+	return oneOf(value, [BACKBOARD_ACCESS_DEFAULT, BACKBOARD_MODE_MULTITASK, BACKBOARD_MODE_PLAN, BACKBOARD_ACCESS_MANUAL, BACKBOARD_ACCESS_FULL], BACKBOARD_ACCESS_FULL);
 }
 
 

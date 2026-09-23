@@ -308,7 +308,7 @@ describe("SubAgentRunner", () => {
 		});
 
 		expect(isolatedRoot).toBe("/repo.backboard-workers/session/worker-a");
-		expect(permissionMode).toBe("auto");
+		expect(permissionMode).toBe("bypass");
 		expect(client.messageRequests[0]?.system_prompt).toContain(
 			"isolated native Git worktree at /repo.backboard-workers/session/worker-a",
 		);

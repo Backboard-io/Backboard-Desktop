@@ -75,6 +75,8 @@ import { ChatCommandButtonContentPart } from './chatContentParts/chatCommandCont
 import { ChatConfirmationContentPart } from './chatContentParts/chatConfirmationContentPart.js';
 import { DiffEditorPool, EditorPool } from './chatContentParts/chatContentCodePools.js';
 import { IChatContentPart, IChatContentPartRenderContext, InlineTextModelCollection } from './chatContentParts/chatContentParts.js';
+import { animateCodexBody, applyCodexRoot, CodexMotion, codexIcon, collapseCodexBodyInstantly, cxEl } from './chatContentParts/codex/codexDom.js';
+import { renderCodexSubagentSentence } from './chatContentParts/codex/codexSubagents.js';
 import { ChatElicitationContentPart } from './chatContentParts/chatElicitationContentPart.js';
 import { ChatErrorConfirmationContentPart } from './chatContentParts/chatErrorConfirmationPart.js';
 import { ChatErrorContentPart } from './chatContentParts/chatErrorContentPart.js';
@@ -196,11 +198,11 @@ function isBackboardCursorTranscript(container: HTMLElement): boolean {
 }
 
 export function formatBackboardWorkTimer(elapsedMs: number, complete: boolean): string {
-	if (complete) {
-		return localize('chat.worked', "Worked");
-	}
 	const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
 	const duration = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+	if (complete) {
+		return seconds > 0 ? localize('chat.workedFor', "Worked for {0}", duration) : localize('chat.worked', "Worked");
+	}
 	return localize('chat.workingFor', "Working for {0}", duration);
 }
 
@@ -332,6 +334,10 @@ export interface IBackboardSubagentStripItem {
 	readonly status?: string;
 	readonly label?: string;
 	readonly needsAttention?: boolean;
+	/** Stable worker id; seeds the Codex avatar. */
+	readonly id?: string;
+	/** Opens the worker's own chat. */
+	readonly open?: () => void;
 }
 
 /** Builds the single visible lifecycle summary for a parallel worker group. */
@@ -384,7 +390,7 @@ export function getBackboardSubagentSummary(items: readonly Pick<IBackboardSubag
 }
 
 /** Keeps each worker visible and preserves its DOM across streaming updates. */
-export function syncBackboardSubagentStrip(container: HTMLElement, sourceItems: readonly IBackboardSubagentStripItem[]): void {
+export function syncBackboardSubagentStrip(container: HTMLElement, sourceItems: readonly IBackboardSubagentStripItem[], codex = false): void {
 	const seen = new Set<HTMLElement>();
 	const items = sourceItems.filter(item => {
 		if (seen.has(item.node)) {
@@ -428,7 +434,15 @@ export function syncBackboardSubagentStrip(container: HTMLElement, sourceItems: 
 		(node, before) => itemsContainer!.insertBefore(node, before ?? null),
 	);
 
-	itemsContainer.hidden = false;
+	// Codex shows workers as one inline sentence (`Alpha, Beta and 2 more started
+	// working`); names open the worker, so the native rows stay mounted but hidden.
+	strip.classList.toggle('cx-subagent-strip', codex);
+	itemsContainer.hidden = codex;
+	if (codex) {
+		renderCodexSubagentSentence(strip, items.map((item, index) => ({ id: item.id ?? String(index), name: item.label, status: item.status, active: item.active, open: item.open })));
+	} else {
+		strip.querySelector(':scope > .cx-subagent-sentence')?.remove();
+	}
 	for (const item of items) {
 		item.node.querySelector(':scope > .chat-used-context-label > .monaco-button')?.removeAttribute('aria-expanded');
 	}
@@ -442,12 +456,9 @@ export function resolveBackboardTurnExpandedState(
 	if (storedExpansion !== undefined) {
 		return storedExpansion;
 	}
-	if (!complete) {
-		return true;
-	}
-	// Completion must not make the transcript disappear or move the reader's
-	// place. Individual tools own their details; collapsing a turn is explicit.
-	return true;
+	// Codex: a live turn shows its work; every completed turn folds behind
+	// "Worked for …" so the final answer leads.
+	return !complete;
 }
 
 /** Worker rows (including child tool references to the same row) survive the work fold. */
@@ -456,8 +467,10 @@ export function isBackboardPersistentSubagentContent(content: IChatRendererConte
 }
 
 /** Backboard keeps edit cards legible beside, rather than inside, Thought. */
-export function shouldRenderBackboardEditStandalone(kind: IChatRendererContent['kind'], backboardTranscript: boolean): boolean {
-	return backboardTranscript && (kind === 'textEditGroup' || kind === 'externalEdit');
+export function shouldRenderBackboardEditStandalone(_kind: IChatRendererContent['kind'], _backboardTranscript: boolean): boolean {
+	// The Codex transcript lists edits as rows inside the turn's activity group
+	// ("Edited foo.ts +3 -6"), so they are never mounted as standalone cards.
+	return false;
 }
 
 export function isBackboardMutationBatchEdit(content: IChatRendererContent, backboardTranscript: boolean): boolean {
@@ -497,6 +510,12 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 	private readonly responseTemplateDataByRequestId = new Map<string, IChatListItemTemplate>();
 	private readonly _templates = new Set<IChatListItemTemplate>();
 	private readonly backboardTurnExpansionByResponseId = new Map<string, boolean>();
+	/**
+	 * Highest content index per response that has already been mounted. Parts
+	 * at or below it are re-creations (a row scrolled back into view, a part
+	 * re-rendered in place) and must not replay the entrance animation.
+	 */
+	private readonly _partEntranceWatermarkByResponseId = new Map<string, number>();
 	private readonly backboardTurnDurationTimers = new Map<string, IDisposable>();
 
 	/** Track pending question carousels by session resource so a new request can supersede them. */
@@ -544,6 +563,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 	private _elementBeingRendered: ChatTreeItem | undefined;
 	private _mostRecentVisibleResponseId: string | undefined;
 	private _currentTurnResponseId: string | undefined;
+	/** Rows render in Backboard's transcript, which uses the Codex presentation. */
+	private _codexTranscript = false;
 	private _latestTurnRequestId: string | undefined;
 	private _onDidChangeVisibility = this._register(new Emitter<boolean>());
 
@@ -757,6 +778,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		this.responseTemplateDataByRequestId.clear();
 		this.templateDataByRequestId.clear();
 		this.backboardTurnExpansionByResponseId.clear();
+		this._partEntranceWatermarkByResponseId.clear();
 		this._currentTurnResponseId = undefined;
 		this._latestTurnRequestId = undefined;
 		for (const timer of this.backboardTurnDurationTimers.values()) {
@@ -1160,6 +1182,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 	}
 
 	private renderChatTreeItem(element: ChatTreeItem, index: number, templateData: IChatListItemTemplate): void {
+		this._codexTranscript = isBackboardCursorTranscript(templateData.rowContainer);
 		if (templateData.currentElement && templateData.currentElement.id !== element.id) {
 			if (this.isLayoutTracingEnabled) {
 				this.traceLayout('renderChatTreeItem', `Rendering a different element into the template, index=${index}`);
@@ -2299,6 +2322,27 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		let collapsedPartsDisposed = 0;
 		let codeBlockStartIndex = 0;
 		let treeStartIndex = 0;
+		const streaming = !element.isComplete && !element.isCanceled;
+		const entranceWatermark = this._partEntranceWatermarkByResponseId.get(element.id) ?? -1;
+		let nextEntranceWatermark = entranceWatermark;
+		const playEntrance = (contentIndex: number, content: IChatRendererContent, previous: IChatContentPart | undefined, domNode: HTMLElement | undefined) => {
+			if (content.kind === 'working' || content.kind === 'references') {
+				return;
+			}
+			nextEntranceWatermark = Math.max(nextEntranceWatermark, contentIndex);
+			// Only genuinely new content animates: first mount at this index, or
+			// replacing the transient "working" placeholder that held its slot.
+			if (!streaming || !domNode || contentIndex <= entranceWatermark
+				|| (previous && !(previous instanceof ChatWorkingProgressContentPart))) {
+				return;
+			}
+			domNode.classList.add('chat-part-enter');
+			domNode.addEventListener('animationend', e => {
+				if (e.target === domNode) {
+					domNode.classList.remove('chat-part-enter');
+				}
+			}, { once: true });
+		};
 		partsToRender.forEach((partToRender, contentIndex) => {
 			// Accumulate counts from the part that ended up at the previous index
 			if (contentIndex > 0) {
@@ -2414,6 +2458,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				if (newPart) {
 					renderedParts[contentIndex] = newPart;
 					alreadyRenderedPart?.domNode?.remove();
+					playEntrance(contentIndex, partToRender, alreadyRenderedPart, newPart.domNode);
 				}
 				return;
 			}
@@ -2421,6 +2466,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			const newPart = this.renderChatContentPart(partToRender, templateData, context);
 			if (newPart) {
 				renderedParts[contentIndex] = newPart;
+				playEntrance(contentIndex, partToRender, alreadyRenderedPart, newPart.domNode);
 				// Maybe the part can't be rendered in this context, but this shouldn't really happen
 				try {
 					if (alreadyRenderedPart?.domNode) {
@@ -2450,6 +2496,12 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				skipped: collapsedPartsSkipped,
 				disposed: collapsedPartsDisposed,
 			});
+		}
+
+		if (streaming) {
+			this._partEntranceWatermarkByResponseId.set(element.id, nextEntranceWatermark);
+		} else {
+			this._partEntranceWatermarkByResponseId.delete(element.id);
 		}
 
 		// Delete previously rendered parts that are removed
@@ -2509,13 +2561,28 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		let body: HTMLElement;
 		if (!turn) {
 			turn = $('.chat-backboard-turn-work.chat-backboard-turn-work-expanded');
-			foldButton = $('button.chat-backboard-turn-fold', { type: 'button' }) as HTMLButtonElement;
-			foldLabel = $('span.chat-backboard-turn-fold-label');
-			const icon = $('span.codicon.codicon-history.chat-backboard-turn-fold-icon', { 'aria-hidden': 'true' });
-			const chevron = $('span.codicon.codicon-chevron-right.chat-backboard-turn-fold-chevron', { 'aria-hidden': 'true' });
-			foldButton.append(icon, foldLabel, chevron);
-			body = $('.chat-backboard-turn-work-body');
-			turn.append(foldButton, body);
+			if (this._codexTranscript) {
+				// Codex's fold header (`Bw`): muted "Worked for …" + 14px chevron over a hairline.
+				foldButton = applyCodexRoot(cxEl('button', 'chat-backboard-turn-fold cx-fold no-drag cursor-interaction items-center select-none focus:outline-hidden border gap-1 whitespace-nowrap flex rounded-md hover:text-default border-transparent border-0 p-0 inline-flex max-w-full flex-wrap text-size-chat text-secondary')) as HTMLButtonElement;
+				foldButton.type = 'button';
+				foldLabel = cxEl('span', 'chat-backboard-turn-fold-label text-text/60 tabular-nums');
+				const labelWrap = cxEl('span');
+				labelWrap.appendChild(foldLabel);
+				const chevron = codexIcon('foldChevron', 'chat-backboard-turn-fold-chevron icon-2xs text-text/40 transition-transform duration-basic');
+				foldButton.append(labelWrap, chevron);
+				const rule = applyCodexRoot(cxEl('div', 'cx-fold-rule pt-1 text-size-chat text-secondary'));
+				rule.appendChild(cxEl('div', 'w-full border-t border-default'));
+				body = $('.chat-backboard-turn-work-body');
+				turn.append(foldButton, rule, body);
+			} else {
+				foldButton = $('button.chat-backboard-turn-fold', { type: 'button' }) as HTMLButtonElement;
+				foldLabel = $('span.chat-backboard-turn-fold-label');
+				const icon = $('span.codicon.codicon-history.chat-backboard-turn-fold-icon', { 'aria-hidden': 'true' });
+				const chevron = $('span.codicon.codicon-chevron-right.chat-backboard-turn-fold-chevron', { 'aria-hidden': 'true' });
+				foldButton.append(icon, foldLabel, chevron);
+				body = $('.chat-backboard-turn-work-body');
+				turn.append(foldButton, body);
+			}
 			value.insertBefore(turn, value.firstElementChild);
 		} else {
 			foldButton = turn.querySelector<HTMLButtonElement>(':scope > .chat-backboard-turn-fold')!;
@@ -2591,11 +2658,11 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			const parent = part.domNode.closest('.chat-subagent-strip')?.parentElement ?? part.domNode.parentElement;
 			const host = parent && parent !== value ? parent : body;
 			const items = workerContainers.get(host) ?? [];
-			items.push({ node: part.domNode, active: part.getIsActive(), status: part.getWorkerStatusKind(), label: part.getSummaryLabel(), needsAttention: part.hasToolsWaitingForConfirmation });
+			items.push({ node: part.domNode, active: part.getIsActive(), status: part.getWorkerStatusKind(), label: part.getSummaryLabel(), needsAttention: part.hasToolsWaitingForConfirmation, id: part.subAgentInvocationId, open: () => part.open() });
 			workerContainers.set(host, items);
 		}
 		for (const [host, items] of workerContainers) {
-			syncBackboardSubagentStrip(host, items);
+			syncBackboardSubagentStrip(host, items, this._codexTranscript);
 		}
 
 
@@ -2660,8 +2727,25 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		if (!expanded) {
 			suspendCollapsedWork();
 		}
+		foldButton.querySelector('svg.chat-backboard-turn-fold-chevron')?.classList.toggle('rotate-90', expanded);
 		foldButton.onclick = () => {
 			const expanded = !turn!.classList.contains('chat-backboard-turn-work-expanded');
+			foldButton.querySelector('svg.chat-backboard-turn-fold-chevron')?.classList.toggle('rotate-90', expanded);
+			if (this._codexTranscript) {
+				// Codex fold motion: enter .22s [.33,1,.68,1] from -8px; exit .15s [.23,1,.32,1].
+				if (!expanded) {
+					this.backboardTurnExpansionByResponseId.set(element.id, false);
+					const exit = animateCodexBody(body, false, CodexMotion.foldExit, true);
+					dom.getWindow(body).setTimeout(() => { exit.dispose(); applyExpandedState(false); suspendCollapsedWork(); }, CodexMotion.foldExit.duration);
+					return;
+				}
+				this.backboardTurnExpansionByResponseId.set(element.id, true);
+				applyExpandedState(true);
+				this._onDidRequestRerender.fire(element);
+				collapseCodexBodyInstantly(body, false);
+				dom.scheduleAtNextAnimationFrame(dom.getWindow(body), () => animateCodexBody(body, true, CodexMotion.foldEnter, true));
+				return;
+			}
 			if (isChatPerfLoggingEnabled(this.logService)) {
 				logChatPerf(this.logService, expanded ? 'collapsed.hydrate' : 'collapsed.collapse', {
 					session: element.sessionResource.toString(),
@@ -2868,7 +2952,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		// Don't pin MCP tools + for CLI specficially, we parse tool name since CLI tools are "external" tools.
 		const isMcpTool = (part.kind === 'toolInvocation' || part.kind === 'toolInvocationSerialized') && isMcpToolInvocation(part);
 		if (isMcpTool) {
-			return false;
+			// Codex groups integration calls with the surrounding work ("Used … integration").
+			return this._codexTranscript;
 		}
 
 		// don't pin Mermaid tools since it has rendered output

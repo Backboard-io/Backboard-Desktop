@@ -222,7 +222,9 @@ export class ModalEditorPart {
 		disposables.add(toDisposable(() => resizableElement.dispose()));
 		resizableElement.domNode.classList.add('modal-editor-resizable');
 		const effectiveMinWidth = MODAL_MIN_WIDTH + (options?.sidebar ? MODAL_SIDEBAR_MIN_WIDTH : 0);
-		resizableElement.minSize = new Dimension(effectiveMinWidth, MODAL_MIN_HEIGHT);
+		// An embedded host owns its size; the floating dialog's minimum would make
+		// the editor lay out wider than a narrow host and clip its right edge.
+		resizableElement.minSize = isEmbedded ? new Dimension(0, 0) : new Dimension(effectiveMinWidth, MODAL_MIN_HEIGHT);
 		modalElement.appendChild(resizableElement.domNode);
 
 		const shadowElement = resizableElement.domNode.appendChild($('.modal-editor-shadow'));

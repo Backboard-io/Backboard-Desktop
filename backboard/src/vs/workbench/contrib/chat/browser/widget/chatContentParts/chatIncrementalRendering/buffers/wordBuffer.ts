@@ -29,7 +29,25 @@ const MIN_RATE_AFTER_COMPLETE = 80;
  */
 const DEFAULT_RATE = 8;
 
-const SHORT_RESPONSE_COMMIT_INTERVAL = 50;
+/**
+ * Upper bound on how long the unrevealed tail may take to drain once the
+ * stream has completed. The drain rate is raised to fit this window so the
+ * end of an answer keeps typing out instead of landing in one frame.
+ */
+const COMPLETION_DRAIN_MS = 450;
+
+/**
+ * Backlogs larger than this at completion are committed at once: typing out
+ * hundreds of words in a fraction of a second reads as noise, not motion.
+ */
+const MAX_COMPLETION_DRAIN_WORDS = 300;
+
+/**
+ * Commit cadence. The word-level text reveal staggers each commit's words
+ * across the gap to the next one, so short responses can commit at roughly
+ * display rate without per-token re-renders.
+ */
+const SHORT_RESPONSE_COMMIT_INTERVAL = 32;
 const MEDIUM_RESPONSE_COMMIT_INTERVAL = 150;
 const LONG_RESPONSE_COMMIT_INTERVAL = 400;
 
@@ -65,6 +83,7 @@ export class WordBuffer implements IIncrementalRenderingBuffer {
 	/** Estimated word production rate (words/sec). */
 	private _rate: number = DEFAULT_RATE;
 	private _isComplete: boolean = false;
+	private _completionDrainRate: number | undefined;
 	private readonly _wordCounter = new IncrementalWordCounter();
 
 	get needsNextFrame(): boolean {
@@ -84,6 +103,7 @@ export class WordBuffer implements IIncrementalRenderingBuffer {
 		this._needsNextFrame = false;
 		this._nextRenderDelay = 0;
 		this._isComplete = false;
+		this._completionDrainRate = undefined;
 	}
 
 	/**
@@ -113,11 +133,20 @@ export class WordBuffer implements IIncrementalRenderingBuffer {
 		this._wordCounter.update(markdown, !this._isComplete, this._isComplete);
 
 		if (this._isComplete) {
-			this._needsNextFrame = false;
-			this._nextRenderDelay = 0;
-			this._lastCommittedMarkdown = markdown;
-			this._revealedWordCount = this._wordCounter.getNWords(Number.MAX_SAFE_INTEGER).totalWordCount;
-			return markdown;
+			const totalWordCount = this._wordCounter.getNWords(Number.MAX_SAFE_INTEGER).totalWordCount;
+			const remainingWords = totalWordCount - this._revealedWordCount;
+			if (this._lastCommitTime === 0 || remainingWords > MAX_COMPLETION_DRAIN_WORDS) {
+				this._needsNextFrame = false;
+				this._nextRenderDelay = 0;
+				this._lastCommittedMarkdown = markdown;
+				this._revealedWordCount = totalWordCount;
+				return markdown;
+			}
+			// Drain the tail smoothly: fix the rate once from the backlog at
+			// completion so it finishes within COMPLETION_DRAIN_MS at a steady
+			// pace, rather than decaying as the remainder shrinks.
+			this._completionDrainRate ??= remainingWords / (COMPLETION_DRAIN_MS / 1000);
+			this._rate = Math.max(this._rate, this._completionDrainRate);
 		}
 
 		const now = Date.now();

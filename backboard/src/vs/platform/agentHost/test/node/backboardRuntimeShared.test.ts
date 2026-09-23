@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { BACKBOARD_ACCESS_DEFAULT, BACKBOARD_MODE_MULTITASK, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, backboardModelInfos, backboardMultitaskSystemContext, createBackboardTurnSettings, resolveBackboardSessionConfig } from '../../node/cliTs/backboardRuntimeShared.js';
+import { BACKBOARD_ACCESS_DEFAULT, BACKBOARD_ACCESS_FULL, BACKBOARD_MODE_MULTITASK, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, backboardAccessSystemContext, backboardModelInfos, backboardMultitaskSystemContext, createBackboardTurnSettings, resolveBackboardSessionConfig } from '../../node/cliTs/backboardRuntimeShared.js';
 
 suite('Backboard runtime configuration', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -334,5 +334,29 @@ suite('Backboard runtime configuration', () => {
 		assert.match(backboardMultitaskSystemContext(settings.rawMode) ?? '', /never create several workers for trivial checks/);
 		assert.match(backboardMultitaskSystemContext(settings.rawMode) ?? '', /short action-oriented purpose line/);
 		assert.strictEqual(backboardMultitaskSystemContext(BACKBOARD_ACCESS_DEFAULT), undefined);
+	});
+
+	test('new sessions default to Full Access and tell the model approvals are off', () => {
+		const resolved = resolveBackboardSessionConfig(undefined);
+		const settings = createBackboardTurnSettings(undefined, undefined, { id: 'openai/gpt-5.5' });
+		const approveForMe = createBackboardTurnSettings({ mode: BACKBOARD_ACCESS_DEFAULT }, undefined, { id: 'openai/gpt-5.5' });
+
+		assert.deepStrictEqual(
+			{
+				schemaDefault: resolved.schema.properties?.mode?.default,
+				value: resolved.values.mode,
+				accessMode: settings.accessMode,
+				explicitChoiceKept: approveForMe.accessMode,
+				approveForMeContext: backboardAccessSystemContext(approveForMe.accessMode),
+			},
+			{
+				schemaDefault: BACKBOARD_ACCESS_FULL,
+				value: BACKBOARD_ACCESS_FULL,
+				accessMode: BACKBOARD_ACCESS_FULL,
+				explicitChoiceKept: BACKBOARD_ACCESS_DEFAULT,
+				approveForMeContext: undefined,
+			},
+		);
+		assert.match(backboardAccessSystemContext(settings.accessMode) ?? '', /Do not ask the user for permission to use a tool/);
 	});
 });

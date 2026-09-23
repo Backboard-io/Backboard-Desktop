@@ -14,6 +14,7 @@ import { basename, dirname, extUriBiasedIgnorePathCase } from '../../../../base/
 import { IResourceNode, ResourceTree } from '../../../../base/common/resourceTree.js';
 import { URI } from '../../../../base/common/uri.js';
 import { FileKind } from '../../../../platform/files/common/files.js';
+import { localize } from '../../../../nls.js';
 import { ILabelService } from '../../../../platform/label/common/label.js';
 import { IResourceLabel, ResourceLabels } from '../../../../workbench/browser/labels.js';
 
@@ -21,11 +22,15 @@ export interface IReviewResource {
 	readonly key: string;
 	readonly sourceUri: URI;
 	readonly status: string;
+	/** Drives the row's status badge; resources without one render as modified. */
+	readonly kind?: ReviewResourceKind;
 	readonly additions?: number;
 	readonly deletions?: number;
 	/** Opens the resource in the review editor; resolves to false if nothing was shown. */
 	open(): Promise<boolean>;
 }
+
+export type ReviewResourceKind = 'added' | 'deleted' | 'modified';
 
 export type ReviewTreeElement = IReviewResource | IResourceNode<IReviewResource, void>;
 
@@ -106,6 +111,7 @@ interface IReviewTreeTemplate {
 	readonly stats: HTMLElement;
 	readonly additions: HTMLElement;
 	readonly deletions: HTMLElement;
+	readonly badge: HTMLElement;
 	readonly templateDisposables: DisposableStore;
 }
 
@@ -124,17 +130,25 @@ export class ReviewTreeRenderer implements ICompressibleTreeRenderer<ReviewTreeE
 		const stats = append(label.element, $('.sessions-right-workbench-review-scm-stats'));
 		const additions = append(stats, $('span.sessions-right-workbench-review-scm-additions'));
 		const deletions = append(stats, $('span.sessions-right-workbench-review-scm-deletions'));
-		return { label, stats, additions, deletions, templateDisposables };
+		const badge = append(label.element, $('span.sessions-right-workbench-review-scm-badge'));
+		badge.setAttribute('aria-hidden', 'true');
+		return { label, stats, additions, deletions, badge, templateDisposables };
 	}
 
 	renderElement(node: ITreeNode<ReviewTreeElement, void>, _index: number, templateData: IReviewTreeTemplate): void {
 		const element = node.element;
 		if (isReviewResource(element)) {
-			templateData.label.setResource({ resource: element.sourceUri, name: basename(element.sourceUri) }, { fileKind: FileKind.FILE });
+			const path = this.labelService.getUriLabel(element.sourceUri, { relative: true });
+			const title = element.additions !== undefined || element.deletions !== undefined
+				? localize('rightWorkbench.reviewFileTitleWithCounts', "{0} · {1} (+{2} -{3})", path, element.status, element.additions ?? 0, element.deletions ?? 0)
+				: localize('rightWorkbench.reviewFileTitle', "{0} · {1}", path, element.status);
+			templateData.label.setResource({ resource: element.sourceUri, name: basename(element.sourceUri) }, { fileKind: FileKind.FILE, title });
 			this.updateStats(templateData, element.additions, element.deletions);
+			this.updateBadge(templateData, element.kind ?? 'modified');
 		} else {
 			templateData.label.setResource({ resource: element.uri, name: element.name }, { fileKind: FileKind.FOLDER });
 			this.updateStats(templateData, undefined, undefined);
+			this.updateBadge(templateData, undefined);
 		}
 	}
 
@@ -147,6 +161,12 @@ export class ReviewTreeRenderer implements ICompressibleTreeRenderer<ReviewTreeE
 			separator: this.labelService.getSeparator(folder.uri.scheme, folder.uri.authority),
 		});
 		this.updateStats(templateData, undefined, undefined);
+		this.updateBadge(templateData, undefined);
+	}
+
+	private updateBadge(templateData: IReviewTreeTemplate, kind: ReviewResourceKind | undefined): void {
+		templateData.badge.classList.toggle('empty', !kind);
+		templateData.badge.dataset.kind = kind ?? '';
 	}
 
 	private updateStats(templateData: IReviewTreeTemplate, additions: number | undefined, deletions: number | undefined): void {

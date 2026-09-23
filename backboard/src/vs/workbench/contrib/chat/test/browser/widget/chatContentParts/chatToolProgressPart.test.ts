@@ -491,7 +491,7 @@ suite('ChatToolProgressSubPart', () => {
 		assert.strictEqual(part.domNode.querySelector('.chat-progress-elapsed'), null, 'Progress rows never show elapsed time');
 	});
 
-	test('keeps cursor transcript pending work at Planning next moves across rerenders', () => {
+	test('shows Codex\'s Thinking placeholder for pending transcript work across rerenders', () => {
 		const context = createRenderContext(false);
 		context.container.classList.add('backboard-clean-chat', 'backboard-cursor-transcript');
 		const createPendingState = () => ({
@@ -513,7 +513,7 @@ suite('ChatToolProgressSubPart', () => {
 			stats: part.domNode.querySelector('.chat-working-progress-step > span')?.textContent,
 			loading: !!part.domNode.querySelector('.codicon-loading.codicon-modifier-spin'),
 			compactIndicator: !!part.domNode.querySelector('.chat-cursor-working-indicator'),
-			indicatorHiddenFromScreenReaders: part.domNode.querySelector('.codicon-loading')?.getAttribute('aria-hidden'),
+			placeholder: part.domNode.querySelector('.cx-thinking-placeholder')?.textContent,
 			shimmer: part.domNode.classList.contains('shimmer-progress'),
 			role: part.domNode.getAttribute('role'),
 			live: part.domNode.getAttribute('aria-live'),
@@ -521,11 +521,11 @@ suite('ChatToolProgressSubPart', () => {
 			reused: part.hasSameContent({ kind: 'working', state: createPendingState() }, [], context.element),
 		}, {
 			cursorRow: true,
-			label: 'Planning next moves',
+			label: 'Thinking',
 			stats: '',
-			loading: true,
+			loading: false,
 			compactIndicator: false,
-			indicatorHiddenFromScreenReaders: 'true',
+			placeholder: 'ThinkingThinking',
 			shimmer: false,
 			role: 'status',
 			live: 'polite',

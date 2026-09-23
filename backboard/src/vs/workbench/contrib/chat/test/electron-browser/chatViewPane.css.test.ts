@@ -315,28 +315,25 @@ suite('ChatViewPane CSS', () => {
 		assert.match(adjacentDiffs, /margin-block-start:\s*var\(--bb-cursor-diff-gap\)/);
 	});
 
-	test('uses one reduced-motion-safe aggregate empty diff for spawned edits', () => {
+	test('shows a live edit batch as one spinner status row, never a skeleton diff card', () => {
 		const cursorWorkingStatus = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-row-status-working {');
 		const liveEditLabel = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live > .chat-thinking-group-header {');
-		const editShell = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live::after');
+		const liveEditSpinner = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live > .chat-thinking-group-header > .chat-thinking-icon {');
 		const hiddenBatchRows = ruleBody(chatCss, '.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live > .chat-thinking-group-body {');
 		assert.match(cursorWorkingStatus, /animation:\s*none/);
 		assert.match(liveEditLabel, /width:\s*fit-content/);
 		assert.match(liveEditLabel, /min-height:\s*24px/);
-		assert.match(liveEditLabel, /margin:\s*0 0 6px/);
+		assert.match(liveEditLabel, /gap:\s*8px/);
 		assert.match(liveEditLabel, /border:\s*0/);
 		assert.match(liveEditLabel, /background:\s*transparent/);
-		assert.match(editShell, /width:\s*100%/);
-		assert.match(editShell, /height:\s*112px/);
-		assert.match(editShell, /border:\s*1px solid var\(--bb-cursor-diff-border\)/);
-		assert.match(editShell, /border-radius:\s*8px/);
-		assert.match(editShell, /39px 29px \/ 1px 83px no-repeat/);
-		assert.match(editShell, /animation:\s*backboard-cursor-edit-shell-breathe 1\.8s ease-in-out infinite/);
+		assert.match(liveEditSpinner, /width:\s*16px/);
+		assert.match(liveEditSpinner, /animation:\s*codicon-spin/);
+		assert.doesNotMatch(chatCss, /chat-thinking-work-edit-live::after/, 'a pending write must not paint a translucent skeleton card');
 		assert.match(hiddenBatchRows, /display:\s*none\s*!important/);
 		assert.doesNotMatch(chatCss, /chat-thinking-plan-item[^,{]*::before[^}]*animation:/s);
 		assert.doesNotMatch(chatCss, /backboard-cursor-edit-batch-pulse/);
 		assert.doesNotMatch(chatCss, /chat-thinking-cursor-edit-pending::after/, 'pending edits must not each paint a diff skeleton');
-		assert.match(chatCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*chat-thinking-work-edit-live[^}]+animation:\s*none\s*!important/);
+		assert.match(chatCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*chat-thinking-work-edit-live > \.chat-thinking-group-header > \.chat-thinking-icon[^}]+animation:\s*none\s*!important/);
 		const coreToolCss = readFileSync(join(process.cwd(), 'src/vs/workbench/contrib/chat/browser/widget/chatContentParts/media/chatCoreToolProgressPart.css'), 'utf8');
 		const videoStage = ruleBody(coreToolCss, '.chat-core-tool-card-generating-stage {');
 		assert.match(videoStage, /height:\s*148px/);

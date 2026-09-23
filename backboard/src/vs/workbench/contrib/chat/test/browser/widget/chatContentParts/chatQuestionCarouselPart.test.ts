@@ -95,6 +95,37 @@ suite('ChatQuestionCarouselPart', () => {
 		assert.deepStrictEqual(submittedAnswers?.get('q1'), { selectedValue: 'style', freeformValue: undefined });
 	});
 
+	test('editor-panel agent-host prompts render their text once, live and answered', () => {
+		const host = document.createElement('div');
+		host.innerHTML = '<div class="part auxiliarybar"><div class="chat-input-container"></div></div>';
+		const container = host.querySelector<HTMLElement>('.chat-input-container')!;
+		mainWindow.document.body.appendChild(host);
+		store.add({ dispose: () => host.remove() });
+		const instantiationService = workbenchInstantiationService(undefined, store);
+		const options = [{ id: 'deny', label: 'No, deny', value: 'deny' }];
+		const render = (carousel: IChatQuestionCarousel) => {
+			const part = store.add(instantiationService.createInstance(ChatQuestionCarouselPart, carousel, { ...createMockContext(), container }, { onSubmit: () => { }, shouldAutoFocus: false }));
+			return {
+				title: part.domNode.querySelector('.chat-question-title')?.textContent?.trim(),
+				message: part.domNode.querySelector('.chat-question-carousel-message')?.textContent?.trim(),
+				summary: [...part.domNode.querySelectorAll('.chat-question-summary-item > div')].map(e => e.textContent),
+			};
+		};
+		// The agent-host handler splits a one-line prompt into a title and an empty detail.
+		const single = { id: 'q', type: 'singleSelect' as const, title: 'Allow Read: a.md?', detailedMessage: new MarkdownString(''), options };
+		const multi = { id: 'q', type: 'singleSelect' as const, title: 'Allow these 2 actions?', detailedMessage: new MarkdownString('1. Read: a.md\n2. Read: b.md'), options };
+		const multiMessage = new MarkdownString('Allow these 2 actions?\n1. Read: a.md\n2. Read: b.md');
+		assert.deepStrictEqual([
+			render({ ...createMockCarousel([single]), message: 'Allow Read: a.md?' }),
+			render({ ...createMockCarousel([multi]), message: multiMessage }),
+			render({ ...createMockCarousel([single]), isUsed: true, data: { q: { selectedValue: 'deny' } } }),
+		], [
+			{ title: 'Allow Read: a.md?', message: undefined, summary: [] },
+			{ title: 'Allow these 2 actions?\nRead: a.md\nRead: b.md', message: undefined, summary: [] },
+			{ title: undefined, message: undefined, summary: ['Allow Read: a.md?', 'No, deny'] },
+		]);
+	});
+
 	suite('Basic Rendering', () => {
 			test('renders an Edit Video approval card with quality and duration dropdowns', () => {
 			const carousel = createMockCarousel([

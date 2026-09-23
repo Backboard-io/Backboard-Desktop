@@ -86,8 +86,9 @@
 	align-items: center;
 	height: 100%;
 	min-width: 0;
-	/* Native dragging must stop at the toolbar bounds, including gaps between buttons. */
-	-webkit-app-region: no-drag;
+	/* Empty header space (padding, gaps, the band above and below the
+	 * buttons) moves the window; only the controls themselves opt out. */
+	-webkit-app-region: drag;
 }
 
 .agent-sessions-workbench .sessions-panel-header > .sessions-panel-header-left {
@@ -99,8 +100,6 @@
 .agent-sessions-workbench .sessions-panel-header > .sessions-panel-header-center {
 	justify-content: center;
 	flex: 1 1 0;
-	/* Keep the flexible space draggable; nested toolbars opt out below. */
-	-webkit-app-region: drag;
 }
 
 .agent-sessions-workbench .sessions-panel-header > .sessions-panel-header-right {
@@ -139,12 +138,18 @@
 	padding: 6px;
 }
 
-/* Interactive elements must not be part of the window drag region. */
+/* Toolbar wrappers span the full header height, so they stay draggable;
+ * the buttons inside them opt out below. */
 .agent-sessions-workbench .sessions-panel-header .panel-header-toolbar-container,
-.agent-sessions-workbench .sessions-panel-header .window-controls-container,
 .agent-sessions-workbench .sessions-panel-header .monaco-toolbar,
 .agent-sessions-workbench .sessions-panel-header .monaco-action-bar,
-.agent-sessions-workbench .sessions-panel-header .actions-container,
+.agent-sessions-workbench .sessions-panel-header .actions-container {
+	-webkit-app-region: drag;
+	pointer-events: auto;
+}
+
+/* Interactive elements must not be part of the window drag region. */
+.agent-sessions-workbench .sessions-panel-header .window-controls-container,
 .agent-sessions-workbench .sessions-panel-header .action-item,
 .agent-sessions-workbench .sessions-panel-header .action-label,
 .agent-sessions-workbench .sessions-panel-header .codicon,

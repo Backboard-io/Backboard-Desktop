@@ -365,6 +365,11 @@ export class ChatSubagentContentPart extends ChatCollapsibleContentPart implemen
 		}));
 	}
 
+	/** Opens this worker's own chat (Codex's inline sentence names are the entry point). */
+	public open(): void {
+		void this.openSubagentChat();
+	}
+
 	private async openSubagentChat(): Promise<void> {
 		if (this.isOpeningChat) {
 			return;

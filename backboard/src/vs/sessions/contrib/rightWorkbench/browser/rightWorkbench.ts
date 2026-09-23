@@ -16,6 +16,7 @@ export const enum RightWorkbenchCommandId {
 	OpenLauncherMode = 'workbench.action.sessions.rightWorkbench.openLauncherMode',
 	OpenEditor = 'workbench.action.sessions.rightWorkbench.openEditor',
 	OpenReview = 'workbench.action.sessions.rightWorkbench.openReview',
+	OpenCanvas = 'workbench.action.sessions.rightWorkbench.openCanvas',
 	OpenFiles = 'workbench.action.sessions.rightWorkbench.openFiles',
 	OpenBrowser = 'workbench.action.sessions.rightWorkbench.openBrowser',
 	OpenTerminal = 'workbench.action.sessions.rightWorkbench.openTerminal',
@@ -24,9 +25,9 @@ export const enum RightWorkbenchCommandId {
 	OpenMarketplace = 'workbench.action.sessions.rightWorkbench.openMarketplace',
 }
 
-export type RightWorkbenchMode = 'launcher' | 'editor' | 'review' | 'browser' | 'files' | 'terminal' | 'search' | 'extensions' | 'marketplace';
+export type RightWorkbenchMode = 'launcher' | 'editor' | 'review' | 'canvas' | 'browser' | 'files' | 'terminal' | 'search' | 'extensions' | 'marketplace';
 
-export const orderedTabModes: readonly RightWorkbenchMode[] = ['editor', 'files', 'search', 'review', 'extensions', 'marketplace', 'browser', 'terminal'];
+export const orderedTabModes: readonly RightWorkbenchMode[] = ['editor', 'files', 'search', 'review', 'canvas', 'extensions', 'marketplace', 'browser', 'terminal'];
 
 export interface IRightWorkbenchModeRequest {
 	readonly mode: RightWorkbenchMode;
@@ -35,6 +36,15 @@ export interface IRightWorkbenchModeRequest {
 	readonly editorSidebar?: boolean;
 	/** Start a fresh task in the embedded Editor-style chat surface. */
 	readonly newChat?: boolean;
+	/**
+	 * For `launcher` requests: only reveal the panel when a tab is already
+	 * active instead of switching it back to the launcher.
+	 */
+	readonly preserveActiveTab?: boolean;
+	/** For `canvas` requests: the image (its URL) to select, e.g. one clicked in chat. */
+	readonly canvasImage?: string;
+	/** For `canvas` requests: open the grid or the single focused image. */
+	readonly canvasView?: 'canvas' | 'focused';
 }
 
 export interface IRightWorkbenchModeEntry {

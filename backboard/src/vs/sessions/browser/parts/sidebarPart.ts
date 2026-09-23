@@ -69,6 +69,9 @@ export class SidebarPart extends AbstractPaneCompositePart {
 	readonly minimumHeight: number = 0;
 	readonly maximumHeight: number = Number.POSITIVE_INFINITY;
 	override get snap(): boolean { return true; }
+	// The default threshold is half the minimum width (155px), which reads as
+	// "can't close" because the rail sits frozen at its minimum for that long.
+	readonly snapThreshold: number = 60;
 
 	readonly priority: LayoutPriority = LayoutPriority.Low;
 

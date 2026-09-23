@@ -98,6 +98,14 @@ export interface IView {
 	readonly snap?: boolean;
 
 	/**
+	 * How far, in pixels, the user must drag past the view's minimum size
+	 * before it snaps. See {@link ISplitView.snapThreshold}.
+	 *
+	 * @defaultValue half of the view's minimum size
+	 */
+	readonly snapThreshold?: number;
+
+	/**
 	 * View instances are supposed to fire this event whenever any of the constraint
 	 * properties have changed:
 	 *
@@ -877,6 +885,10 @@ class LeafNode implements ISplitView<ILayoutContext>, IDisposable {
 
 	get snap(): boolean | undefined {
 		return this.view.snap;
+	}
+
+	get snapThreshold(): number | undefined {
+		return this.view.snapThreshold;
 	}
 
 	get minimumOrthogonalSize(): number {

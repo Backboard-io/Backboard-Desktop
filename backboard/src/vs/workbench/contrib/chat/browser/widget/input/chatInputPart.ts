@@ -3379,9 +3379,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		inputAndSideToolbar.after(locationFooter);
 		if (this.options.renderStyle !== 'compact') {
 			// Keep review/diff widgets in the measured input area, above the composer shell.
+			// Pending questions and approvals are bands inside the shell, above the editor,
+			// so the prompt and the input that answers it read as one surface.
 			const shell = dom.$('.backboard-composer-shell');
 			inputAndSideToolbar.before(shell);
-			shell.append(inputAndSideToolbar, locationFooter);
+			shell.append(elements.chatQuestionCarouselContainer, elements.chatToolConfirmationCarouselContainer, inputAndSideToolbar, locationFooter);
 		}
 		this.updateComposerLocation();
 		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => this.updateComposerLocation()));
@@ -4048,7 +4050,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const updateCarouselMaxHeightScheduler = this._register(new dom.AnimationFrameScheduler(this.container, () => this.updateToolConfirmationCarouselMaxHeight()));
 		const inputResizeObserver = this._register(new dom.DisposableResizeObserver('ChatInputPart.containerHeight', () => {
 			updateCarouselMaxHeightScheduler.schedule();
-			const newHeight = this.container.offsetHeight;
+			// Themes float the composer with vertical margins (the Simple window uses
+			// 12px/10px). offsetHeight excludes them, so the list would be sized that
+			// much too tall and its last rows would sit hidden behind the composer.
+			const style = dom.getComputedStyle(this.container);
+			const newHeight = this.container.offsetHeight + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
 			this.height.set(newHeight, undefined);
 		}));
 		this._register(inputResizeObserver.observe(this.container));

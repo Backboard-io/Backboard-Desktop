@@ -10,52 +10,43 @@
  * inset, 8px marker gap, 2px row padding, and 14/20px copy. Questions share
  * a single surface with the existing composer, which stays fully available. */
 .monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-composer .interactive-session .interactive-input-part {
-	/* Keep the actual editor and its toolbar intact inside one question surface. */
-	&:has(.chat-question-editor-panel:not(.chat-question-carousel-used), .chat-tool-confirmation-carousel) {
-		background: var(--bb-devin-card-surface, var(--vscode-editor-background));
-		border-radius: 14px;
-		padding: 6px !important;
-		gap: 0 !important;
-
-		.chat-question-editor-panel:not(.chat-question-carousel-used) {
-			margin: 0 0 6px;
-			padding: 0;
-			background: transparent;
-		}
-
-		.chat-tool-confirmation-carousel {
-			margin: 0 0 6px;
-			padding: 0;
-			background: transparent;
-		}
-
-		.interactive-input-and-side-toolbar {
-			margin: 0 !important;
-		}
-
-		.chat-input-container {
-			box-shadow: none !important;
-			margin: 0 !important;
-		}
+	/* Pending questions and approvals are bands inside the composer shell (the
+	 * outer surface that also wraps the editor), like Devin's composer bands:
+	 * no card of their own, 6px inset, and a hairline between band and input. */
+	.backboard-composer-shell > :is(.chat-question-carousel-widget-container, .chat-tool-confirmation-carousel-container):not(:empty) {
+		width: 100%;
+		min-width: 0;
+		margin: -4px 0 6px;
+		padding: 0 0 5px;
+		box-sizing: border-box;
+		border-bottom: 1px solid var(--bb-devin-card-border, color-mix(in srgb, var(--vscode-foreground) 7%, transparent));
 	}
 
-	.chat-input-container > .chat-question-carousel-widget-container:empty {
+	.backboard-composer-shell > :is(.chat-question-carousel-widget-container, .chat-tool-confirmation-carousel-container):empty {
 		display: none;
+	}
+
+	.backboard-composer-shell .chat-question-editor-panel:not(.chat-question-carousel-used) {
+		max-height: min(420px, calc(100vh - 260px));
+		margin: 0;
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		box-shadow: none;
+	}
+
+	.backboard-composer-shell .chat-tool-confirmation-carousel {
+		margin: 0;
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
 	}
 
 	.chat-question-carousel-widget-container {
 		width: 100%;
 		min-width: 0;
-	}
-
-	.chat-question-editor-panel:not(.chat-question-carousel-used) {
-		max-height: min(520px, calc(100vh - 220px));
-		margin: 0 0 8px;
-		padding: 6px;
-		border: 0;
-		border-radius: 14px;
-		background: var(--bb-devin-card-surface, var(--vscode-editor-background));
-		box-shadow: none;
 	}
 
 	.chat-question-editor-panel {
@@ -75,7 +66,7 @@
 
 		.chat-question-title {
 			margin: 6px 10px 6px 0;
-			font-size: 14px;
+			font-size: 13px;
 			font-weight: 400;
 			line-height: 20px;
 			white-space: normal;
@@ -84,6 +75,13 @@
 
 		.chat-question-title p {
 			margin: 0;
+		}
+
+		/* Multi-action permission prompts list each action under the question. */
+		.chat-question-title :is(ol, ul) {
+			margin: 4px 0 0;
+			padding-left: 18px;
+			color: var(--vscode-descriptionForeground);
 		}
 
 		.chat-question-header-actions {
@@ -105,7 +103,7 @@
 		.chat-question-description,
 		.chat-question-carousel-message {
 			padding: 0 8px 8px;
-			font-size: 14px;
+			font-size: 13px;
 			line-height: 20px;
 		}
 
@@ -138,7 +136,7 @@
 			display: flex;
 			flex-direction: column;
 			gap: 2px;
-			font-size: 14px;
+			font-size: 13px;
 			font-weight: 400;
 			line-height: 20px;
 			white-space: normal;
@@ -149,7 +147,14 @@
 			font: inherit;
 			color: var(--vscode-foreground) !important;
 			white-space: normal;
+			overflow-wrap: anywhere;
 			-webkit-line-clamp: unset;
+		}
+
+		.chat-question-list-label-desc {
+			color: var(--vscode-descriptionForeground) !important;
+			font-size: 12px;
+			line-height: 16px;
 		}
 
 		.chat-question-list-number {
@@ -1118,6 +1123,68 @@
 	visibility: hidden;
 }
 
+/* One icon column for every live activity row. Finished core-tool cards put a
+ * 16px icon at x=0 and the label at x=24; streaming tools (a bare "Read" or
+ * "Execute" while input or approval is pending), pending MCP rows, and the
+ * "Planning next moves" status must match, or their throbbers drift sideways.
+ * Upstream's thinking wrapper indents progress rows 6px and hides every
+ * loading codicon with !important, which left streaming rows as orphan text;
+ * these selectors outrank both. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value :is(.chat-cursor-progress-row, .chat-tool-progress-row, .chat-cursor-working-row).progress-container {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 24px;
+	margin: 0;
+	padding: 2px 0;
+	box-sizing: border-box;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value :is(.chat-cursor-progress-row, .chat-tool-progress-row, .chat-cursor-working-row).progress-container > .codicon {
+	flex: 0 0 16px;
+	width: 16px;
+	height: 16px;
+	margin: 0;
+	font-size: 14px;
+	line-height: 16px;
+	text-align: center;
+	transform-origin: 50% 50%;
+	color: var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground));
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value .chat-thinking-tool-wrapper .progress-container.chat-cursor-progress-row > .codicon.codicon-loading,
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value .chat-thinking-tool-wrapper .progress-container.chat-tool-progress-row > .codicon.codicon-loading {
+	display: inline-block !important;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value :is(.chat-cursor-progress-row, .chat-tool-progress-row, .chat-cursor-working-row).progress-container > .progress-step {
+	margin: 0;
+	min-width: 0;
+	line-height: 20px;
+}
+
+/* Finished generic tools (MCP calls without an I/O card) would otherwise leave
+ * an empty icon column next to their siblings; show the same tools glyph the
+ * MCP I/O rows use instead of the hidden success check. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value .chat-tool-progress-row.progress-container > .codicon.codicon-check {
+	display: inline-block !important;
+	visibility: visible;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value .chat-tool-progress-row.progress-container > .codicon.codicon-check::before {
+	content: '\eb6d';
+}
+
+/* A streaming tool is still pending: keep its label muted like other live rows. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value .chat-cursor-progress-row.progress-container > .progress-step {
+	color: var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground));
+	font-size: 13px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value .chat-cursor-progress-row.progress-container > .progress-step > p {
+	margin: 0;
+}
+
 .monaco-workbench .backboard-clean-chat .chat-terminal-snapshot-output {
 	overscroll-behavior: contain;
 }
@@ -1346,4 +1413,38 @@
 }
 .monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-input-part .chat-editing-session-container {
 	border-bottom: 0 !important;
+}
+
+/* Floating composer: with a conversation on screen the composer overlays the
+ * transcript instead of reserving a full-width band below it, so content is
+ * never sliced off along an invisible edge. ChatWidget sizes the list to the
+ * full height and pads its scroll end by the composer's height, keeping the
+ * last message above the composer (and the changed-files strip) at rest. */
+.monaco-workbench .backboard-composer .interactive-session.chat-composer-floating {
+	position: relative;
+}
+
+.monaco-workbench .backboard-composer .interactive-session.chat-composer-floating > .interactive-input-part {
+	position: absolute !important;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 3;
+}
+
+/* A standalone edit row that renders only its summary (a denied or failed
+ * write has no diff card) keeps the shared 16px icon column like every other
+ * activity row; the transcript otherwise hides work-row icons. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-edit-row > .chat-thinking-work-row-summary {
+	gap: 8px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-edit-row > .chat-thinking-work-row-summary > .chat-thinking-work-row-icon {
+	display: inline-flex !important;
+	flex: 0 0 16px;
+	width: 16px;
+	height: 16px;
+	align-items: center;
+	justify-content: center;
+	color: var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground));
 }

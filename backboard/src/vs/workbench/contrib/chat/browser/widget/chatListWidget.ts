@@ -1026,6 +1026,11 @@ export class ChatListWidget extends Disposable {
 			const offset = Math.max(this._lastItem.currentRenderedHeight ?? 0, 1e6);
 			if (this._tree.hasElement(this._lastItem)) {
 				this._tree.reveal(this._lastItem, offset);
+				if (this._bottomInset > 0) {
+					// reveal() aligns the row to the viewport bottom, which sits under a
+					// floating composer; include the reserved inset.
+					this._tree.scrollTop = this.maxScrollTop;
+				}
 			}
 		}
 	}
@@ -1205,6 +1210,22 @@ export class ChatListWidget extends Disposable {
 	/**
 	 * Layout the list.
 	 */
+	private _bottomInset = 0;
+
+	/**
+	 * Reserves scrollable space below the last row for a composer that floats
+	 * over the list, so the conversation can scroll clear of it.
+	 */
+	setBottomInset(inset: number): void {
+		inset = Math.max(0, Math.round(inset));
+		if (inset === this._bottomInset) {
+			return;
+		}
+		this._bottomInset = inset;
+		this._tree.updateOptions({ paddingBottom: inset });
+		this.updateLastItemMinHeight();
+	}
+
 	layout(height: number, width: number): void {
 		this.updateBackboardTranscriptHostClasses();
 		this._bodyDimension = new dom.Dimension(width ?? this._container.clientWidth, height);
@@ -1221,7 +1242,8 @@ export class ChatListWidget extends Disposable {
 			return;
 		}
 
-		const contentHeight = this._bodyDimension.height;
+		// Only the part of the viewport above a floating composer is usable.
+		const contentHeight = Math.max(0, this._bodyDimension.height - this._bottomInset);
 		if (this._renderStyle === 'compact' || this._renderStyle === 'minimal') {
 			this._container.style.removeProperty('--chat-current-response-min-height');
 			this._previousLastItemMinHeight = null;

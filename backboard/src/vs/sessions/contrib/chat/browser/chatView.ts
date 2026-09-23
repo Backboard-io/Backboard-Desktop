@@ -189,10 +189,20 @@ export class ChatView extends AbstractChatView {
 		const targetWindow = this.element.ownerDocument.defaultView;
 		if (targetWindow && typeof targetWindow.IntersectionObserver === 'function') {
 			const visibilityObserver = new targetWindow.IntersectionObserver(entries => {
-				const entry = entries.find(candidate => candidate.target === this.element);
+				// A batch can hold several entries for the element (a restore reports
+				// the transient zero-width frame, then the final one); only the latest
+				// reflects where the element is now.
+				const entry = entries.findLast(candidate => candidate.target === this.element);
 				if (entry) {
 					this._widget.setVisible(entry.isIntersecting && entry.intersectionRatio > 0);
 				}
+			}, {
+				// A leaf laid out at zero width (e.g. while the right panel restores
+				// from maximized) is "intersecting" at ratio 0. With only the default
+				// 0 threshold, growing back to full size crosses nothing, so the widget
+				// would stay hidden and show an empty chat. The second threshold makes
+				// the ratio leaving 0 fire.
+				threshold: [0, 0.0001],
 			});
 			visibilityObserver.observe(this.element);
 			this._register({ dispose: () => visibilityObserver.disconnect() });

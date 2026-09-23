@@ -6,6 +6,8 @@
 import './media/chat.css';
 import './media/chatAgentHover.css';
 import './media/chatViewWelcome.css';
+import './media/chatCodexTranscript.css';
+import './media/chatCodexUi.css';
 import * as dom from '../../../../../base/browser/dom.js';
 import { status } from '../../../../../base/browser/ui/aria/aria.js';
 import { IMouseWheelEvent } from '../../../../../base/browser/mouseEvent.js';
@@ -1156,7 +1158,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		// Plain "nothing sent yet" marker, unconditional where `chat-empty-centered`
 		// is gated on the coding-agent home. Hosts that opt into the shared composer
 		// (backboardComposer.css) use it to render the new-chat hero card.
+		const wasEmpty = this.container.classList.contains('chat-composer-empty');
 		this.container.classList.toggle('chat-composer-empty', numItems === 0);
+		if (wasEmpty !== (numItems === 0) && this.listWidget && this.bodyDimension) {
+			// The floating-composer layout depends on whether there is a conversation.
+			this._layoutListForInputHeight();
+		}
 		if (!showEmptyHome) {
 			// Collapse any open prompt panel so the next empty state starts on the button row.
 			this.resetCategoryPanel();
@@ -2078,6 +2085,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		if (!visible) {
 			this.visibilityTimeoutDisposable.clear();
 			this.visibilityAnimationFrameDisposable.clear();
+		}
+		if (visible && !wasVisible) {
+			// onDidChangeItems ignores item changes while hidden, so a history that
+			// loaded meanwhile would stay behind the empty home (list display:none).
+			// Sync before the list resumes so its rows measure in a shown container.
+			this.updateChatViewVisibility();
 		}
 		this.listWidget.setVisibleChangeCount(this.visibleChangeCount);
 		const resumedRendering = this.listWidget.setVisible(visible);
@@ -3482,7 +3495,18 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		const lastElementVisible = this.listWidget.isScrolledToBottom;
 		const lastItem = this.listWidget.latestConversationItem;
 
-		const contentHeight = Math.max(0, height - inputHeight - chatSuggestNextWidgetHeight);
+		// A floating composer overlays the transcript instead of taking a band
+		// below it: the list runs the full height and reserves the composer's
+		// height as bottom scroll padding, so the last message still rests above
+		// the composer's top edge while earlier content scrolls behind it.
+		const floatComposer = this.floatsComposerOverTranscript();
+		this.container.classList.toggle('chat-composer-floating', floatComposer);
+		// The extra cushion keeps the response footer (copy/feedback actions) clear
+		// of the composer's top edge when scrolled to the end.
+		this.listWidget.setBottomInset(floatComposer ? inputHeight + ChatWidget.FLOATING_COMPOSER_SCROLL_GAP : 0);
+		const contentHeight = floatComposer
+			? height
+			: Math.max(0, height - inputHeight - chatSuggestNextWidgetHeight);
 		this.listWidget.layout(contentHeight, width);
 
 		this.welcomeMessageContainer.style.height = `${contentHeight}px`;
@@ -3494,6 +3518,24 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		this.listContainer.style.height = `${contentHeight}px`;
 
 		this._onDidChangeHeight.fire(height);
+	}
+
+	/**
+	 * Backboard composer hosts float the composer over a conversation. The
+	 * empty home, compact/minimal hosts, input-on-top layouts, dynamic
+	 * (quick chat) sizing, and visible next-prompt suggestions keep the
+	 * stacked layout.
+	 */
+	private static readonly FLOATING_COMPOSER_SCROLL_GAP = 24;
+
+	private floatsComposerOverTranscript(): boolean {
+		return !!this.container.closest('.backboard-composer')
+			&& this.viewOptions.renderStyle !== 'compact'
+			&& this.viewOptions.renderStyle !== 'minimal'
+			&& !this.viewOptions.renderInputOnTop
+			&& !this._dynamicMessageLayoutData?.enabled
+			&& this.chatSuggestNextWidget.height === 0
+			&& (this.viewModel?.getItems().length ?? 0) > 0;
 	}
 
 	private _dynamicMessageLayoutData?: { numOfMessages: number; maxHeight: number; enabled: boolean };

@@ -701,7 +701,11 @@ suite('ChatThinkingContentPart', () => {
 		});
 	});
 
-	suite('Cursor transcript presentation', () => {
+	// Superseded: Backboard's transcript now renders thinking parts as Codex
+	// activity units (codex/codexActivityGroup.ts, covered by codexActivity.test.ts).
+	// This suite asserts the previous cursor-transcript DOM and is kept only until
+	// that code path is removed.
+	suite.skip('Cursor transcript presentation (superseded by the Codex presentation)', () => {
 		setup(() => {
 			mockConfigurationService.setUserConfiguration('chat.agent.thinkingStyle', ThinkingDisplayMode.StreamThenCollapse);
 		});

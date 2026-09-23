@@ -125,7 +125,10 @@ registerAction2(class extends Action2 {
 		const isVisible = !layoutService.isVisible(Parts.AUXILIARYBAR_PART);
 
 		if (isVisible) {
-			void commandService.executeCommand(RightWorkbenchCommandId.OpenLauncherMode);
+			// Reopen onto the tab the user left: forcing the launcher here
+			// would flash the restored surface (e.g. a native browser page)
+			// and then tear it down.
+			void commandService.executeCommand(RightWorkbenchCommandId.OpenLauncherMode, { preserveActiveTab: true });
 		} else {
 			layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
 		}

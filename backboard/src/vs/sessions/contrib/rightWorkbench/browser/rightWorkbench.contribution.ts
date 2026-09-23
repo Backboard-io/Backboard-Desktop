@@ -125,8 +125,8 @@ registerAction2(class OpenRightWorkbenchLauncherModeAction extends Action2 {
 		});
 	}
 
-	override async run(accessor: ServicesAccessor): Promise<void> {
-		await openRightWorkbenchMode(accessor, 'launcher');
+	override async run(accessor: ServicesAccessor, options?: { preserveActiveTab?: boolean }): Promise<void> {
+		await openRightWorkbenchMode(accessor, { mode: 'launcher', preserveActiveTab: options?.preserveActiveTab });
 	}
 });
 
@@ -156,6 +156,20 @@ registerAction2(class OpenRightWorkbenchReviewAction extends Action2 {
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		await openRightWorkbenchMode(accessor, 'review');
+	}
+});
+
+registerAction2(class OpenRightWorkbenchCanvasAction extends Action2 {
+	constructor() {
+		super({
+			id: RightWorkbenchCommandId.OpenCanvas,
+			title: localize2('rightWorkbench.openCanvas', "Open Canvas in Right Workbench"),
+			icon: Codicon.fileMedia,
+		});
+	}
+
+	override async run(accessor: ServicesAccessor, options?: { imageUrl?: string; view?: 'canvas' | 'focused' }): Promise<void> {
+		await openRightWorkbenchMode(accessor, { mode: 'canvas', canvasImage: options?.imageUrl, canvasView: options?.view });
 	}
 });
 

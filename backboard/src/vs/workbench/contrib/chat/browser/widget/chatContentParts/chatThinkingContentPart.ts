@@ -47,6 +47,7 @@ import { ChatThinkingExternalResourceWidget } from './chatThinkingExternalResour
 import { LocalChatSessionUri, chatSessionResourceToId } from '../../../common/model/chatUri.js';
 import { IEditSessionDiffStats } from '../../../common/editing/chatEditingService.js';
 import { IChatTextEditGroup } from '../../../common/model/chatModel.js';
+import { CodexActivityGroup } from './codex/codexActivityGroup.js';
 
 
 // Context key id mirrored from `vs/sessions/common/contextkeys` (`IsPhoneLayoutContext`).
@@ -832,6 +833,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private readonly useCursorPanelPresentation: boolean;
 	private readonly useEditorPanelPresentation: boolean;
 	private readonly useCursorTranscriptPresentation: boolean;
+	/** Codex presentation: this part renders as one Codex activity unit (all Backboard modes). */
+	private codexGroup: CodexActivityGroup | undefined;
+	private readonly codexRowIdsByPartId = new Map<string, string>();
 	private readonly _collapseAnimation = this._register(new MutableDisposable<DisposableStore>());
 	private readonly _elapsedTimer = this._register(new MutableDisposable<IDisposable>());
 	private readonly activityGroups: IToolActivityGroup[] = [];
@@ -1179,6 +1183,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 	// @TODO: @justschen Convert to template for each setting?
 	protected override initContent(): HTMLElement {
+		if (this.useCursorTranscriptPresentation) {
+			return this.initCodexContent();
+		}
 		this.wrapper = $('.chat-used-context-list.chat-thinking-collapsible');
 		if (!this.streamingCompleted) {
 			this.wrapper.classList.add('chat-thinking-streaming');
@@ -1294,6 +1301,25 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 
 		this.updateDropdownClickability();
+		return this.wrapper;
+	}
+
+	/**
+	 * Codex presentation: the part's body is a single Codex activity unit whose
+	 * header shows the live action (or the reasoning heading) while the turn runs
+	 * and the completed summary afterwards. Reasoning text itself is not shown.
+	 */
+	private initCodexContent(): HTMLElement {
+		this.domNode.classList.add('cx-thinking');
+		const group = this.codexGroup = this._register(new CodexActivityGroup());
+		this._register(group.onDidChangeHeight(() => this._onDidChangeHeight.fire()));
+		if (this.streamingCompleted || this.element.isComplete) {
+			group.setComplete();
+		} else {
+			group.setThinking(extractTitleFromThinkingContent(this.currentThinkingValue) ?? localize('chat.codex.thinking', "Thinking"));
+		}
+		this.wrapper = $('.chat-used-context-list.chat-thinking-collapsible.cx-thinking-list');
+		this.wrapper.appendChild(group.element);
 		return this.wrapper;
 	}
 
@@ -2958,6 +2984,13 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 
 		const raw = extractTextFromPart(content);
+		if (this.codexGroup) {
+			this.currentThinkingValue = raw;
+			if (this.isActive && !this.streamingCompleted && !this.element.isComplete) {
+				this.codexGroup.setThinking(extractTitleFromThinkingContent(raw) ?? localize('chat.codex.thinking', "Thinking"));
+			}
+			return;
+		}
 		const next = raw;
 		let cursorDisclosure: ICursorReasoningDisclosure | undefined;
 		if (this.useCursorTranscriptPresentation && this.textContainer && next.trim()) {
@@ -3035,6 +3068,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 	public markAsInactive(): void {
 		this.isActive = false;
+		this.codexGroup?.setComplete();
 		this.finishCurrentCursorReasoning();
 		this.updateCursorReasoningLabel(true);
 		this.collapseAllCursorReasoning();
@@ -3537,6 +3571,10 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			this._register(onDidChangeDiff(stats => {
 				this.diffStatsByPartId.set(toolInvocationId, stats);
 				this.updateAggregatedDiff();
+				const codexRowId = this.codexRowIdsByPartId.get(toolInvocationId);
+				if (codexRowId) {
+					this.codexGroup?.updateEditStats(codexRowId, stats.added, stats.removed);
+				}
 			}));
 		}
 
@@ -3560,7 +3598,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			&& (toolInvocationOrMarkdown.kind === 'toolInvocation' || toolInvocationOrMarkdown.kind === 'toolInvocationSerialized');
 		const isCursorTranscriptArtifact = this.useCursorTranscriptPresentation && toolInvocationOrMarkdown
 			&& (toolInvocationOrMarkdown.kind === 'markdownContent' || toolInvocationOrMarkdown.kind === 'externalEdit' || toolInvocationOrMarkdown.kind === 'textEditGroup');
-		if (this.isExpanded() || this.hasExpandedOnce || isCleanTimelineTool || isCursorTranscriptArtifact || (this.fixedScrollingMode && !this.streamingCompleted)) {
+		if (this.isExpanded() || this.hasExpandedOnce || isCleanTimelineTool || isCursorTranscriptArtifact || !!this.codexGroup || (this.fixedScrollingMode && !this.streamingCompleted)) {
 			const result = factory();
 			this.appendItemToDOM(result.domNode, toolInvocationId, toolInvocationOrMarkdown, originalParent);
 			if (result.disposable) {
@@ -3588,6 +3626,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 	}
 
 	public removeMaterializedItem(toolCallId: string): void {
+		this.codexGroup?.removeRowsFor(m => (m.kind === 'toolInvocation' || m.kind === 'toolInvocationSerialized') && m.toolCallId === toolCallId);
 		this.toolDisposables.deleteAndDispose(toolCallId);
 		this.ownedToolParts.delete(toolCallId);
 
@@ -4068,6 +4107,15 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		toolInvocationOrMarkdown?: ChatThinkingItemMetadata,
 		originalParent?: HTMLElement
 	): void {
+		if (this.codexGroup) {
+			if (toolInvocationOrMarkdown) {
+				const rowId = this.codexGroup.addRow(toolInvocationOrMarkdown, content);
+				if (rowId && toolInvocationId) {
+					this.codexRowIdsByPartId.set(toolInvocationId, rowId);
+				}
+			}
+			return;
+		}
 		if (!content.hasChildNodes() || content.textContent?.trim() === '') {
 			return;
 		}

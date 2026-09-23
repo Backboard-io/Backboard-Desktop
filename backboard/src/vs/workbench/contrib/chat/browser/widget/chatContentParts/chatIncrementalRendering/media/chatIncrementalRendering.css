@@ -94,20 +94,31 @@
 	}
 }
 
-/* ---- streaming soft focus (last block while a response streams) ---- */
+/* ---- word-level typing reveal ---- */
 
 /*
- * Unlike the entrance animations above, this class stays on the block that
- * is still being written to. The bottom edge of that block is the streaming
- * frontier, so a slight blur plus a bottom-edge fade makes new text emerge
- * into focus instead of snapping in word by word. The class is removed when
- * the response completes, leaving finished text crisp.
+ * Each freshly revealed word fades up out of a soft blur. The renderer sets a
+ * per-word animation-delay (negative for words already mid-fade when the DOM
+ * is rebuilt), and `both` keeps not-yet-due words hidden until their turn.
+ * Duration must match STREAM_WORD_FADE_MS in textReveal.ts.
  */
-.chat-smooth-streaming-tail {
-	filter: blur(0.4px);
-	-webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2em), rgba(0, 0, 0, 0.6));
-	mask-image: linear-gradient(to bottom, #000 calc(100% - 1.2em), rgba(0, 0, 0, 0.6));
-	transition: filter 240ms ease-out;
+.chat-stream-word {
+	animation: chatStreamWordIn 320ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+@keyframes chatStreamWordIn {
+	from { opacity: 0; filter: blur(3px); }
+	60%  { filter: blur(0); }
+	to   { opacity: 1; filter: blur(0); }
+}
+
+/* ---- response part entrance (tool rows, thinking, new text blocks) ---- */
+
+.chat-part-enter {
+	animation: chatPartEnter 280ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+@keyframes chatPartEnter {
+	from { opacity: 0; transform: translateY(4px); }
+	to   { opacity: 1; transform: none; }
 }
 
 /* ---- Respect prefers-reduced-motion ---- */
@@ -126,9 +137,15 @@
 		mask-image: none !important;
 	}
 
-	.chat-smooth-streaming-tail {
-		filter: none !important;
-		-webkit-mask-image: none !important;
-		mask-image: none !important;
+	.chat-stream-word,
+	.chat-part-enter {
+		animation: none !important;
 	}
+}
+
+.monaco-reduce-motion :is(.chat-stream-word, .chat-part-enter, [class*="chat-smooth-animate-"]) {
+	animation: none !important;
+	opacity: 1 !important;
+	transform: none !important;
+	filter: none !important;
 }

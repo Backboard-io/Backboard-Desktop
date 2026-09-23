@@ -1409,25 +1409,6 @@
 	padding-right: 0;
 }
 
-/* T3 streams the reply as a plain append — `ChatMarkdown` re-renders with the
- * new text and nothing else moves (no cursor, no reveal transition). VS Code
- * decorates each newly streamed block with a staggered fade/rise/blur/scale
- * entrance; neutralise all of those so Simple mode streams like T3. The
- * `animationend` cleanup listener never fires once the animation is gone, so
- * the class lingers on the element — the resets below make that harmless. */
-.agent-sessions-workbench .part.sessionspart :is(
-	.chat-smooth-animate-fade,
-	.chat-smooth-animate-rise,
-	.chat-smooth-animate-blur,
-	.chat-smooth-animate-scale,
-	.chat-smooth-animate-slide,
-	.chat-smooth-animate-reveal) {
-	animation: none;
-	opacity: 1;
-	transform: none;
-	filter: none;
-}
-
 /* Response meta (copy button, etc.) is hover-revealed in T3
  * (`opacity-0 … group-hover/assistant:opacity-100 focus-within:opacity-100`),
  * not a permanent row under the reply. The response details (model name,

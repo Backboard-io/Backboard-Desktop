@@ -8172,17 +8172,19 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	animation: none;
 }
 
-/* A live edit/write batch owns one label and one empty diff shell, regardless
- * of how many provider calls are mounted underneath it. Completed diffs become
- * available through the normal disclosure once the whole batch settles. */
+/* A live edit/write batch is one status row ("Updating 1 file") with a spinner
+ * in the shared icon column, regardless of how many provider calls are mounted
+ * underneath it. It used to paint a 112px skeleton diff card, which read as an
+ * empty translucent box over the wallpaper while a write waited for approval.
+ * Completed diffs appear through the normal disclosure once the batch settles. */
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live > .chat-thinking-group-header {
 	display: flex;
 	box-sizing: border-box;
 	width: fit-content;
 	min-height: 24px;
 	align-items: center;
-	gap: 0;
-	margin: 0 0 6px;
+	gap: 8px;
+	margin: 0;
 	padding: 0 !important;
 	border: 0;
 	border-radius: 0;
@@ -8198,9 +8200,25 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	color: var(--bb-cursor-transcript-muted);
 }
 
-.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live > .chat-thinking-group-header > .chat-thinking-icon,
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live > .chat-thinking-group-header > .chat-thinking-group-chevron {
 	display: none !important;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live > .chat-thinking-group-header > .chat-thinking-icon {
+	display: inline-block !important;
+	flex: 0 0 16px;
+	width: 16px;
+	height: 16px;
+	margin: 0;
+	font-size: 16px;
+	line-height: 16px;
+	color: var(--bb-cursor-transcript-muted);
+	transform-origin: 50% 50%;
+	animation: codicon-spin 1s linear infinite;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live > .chat-thinking-group-header > .chat-thinking-icon::before {
+	content: '\eb19';
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live > .chat-thinking-group-header > .chat-thinking-group-label {
@@ -8209,35 +8227,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	font-size: 13px;
 	font-weight: 400;
 	line-height: 20px;
-}
-
-.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live::after {
-	display: block;
-	box-sizing: border-box;
-	width: 100%;
-	height: 112px;
-	flex: 0 0 112px;
-	overflow: hidden;
-	border: 1px solid var(--bb-cursor-diff-border);
-	border-radius: 8px;
-	background:
-		linear-gradient(var(--bb-cursor-diff-border), var(--bb-cursor-diff-border)) 0 28px / 100% 1px no-repeat,
-		linear-gradient(var(--bb-cursor-diff-border), var(--bb-cursor-diff-border)) 39px 29px / 1px 83px no-repeat,
-		linear-gradient(color-mix(in srgb, var(--vscode-textLink-foreground) 52%, transparent), color-mix(in srgb, var(--vscode-textLink-foreground) 52%, transparent)) 11px 9px / 10px 10px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted) 26%, transparent), color-mix(in srgb, var(--bb-cursor-transcript-muted) 13%, transparent)) 29px 10px / 82px 8px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--vscode-chat-linesAddedForeground) 28%, transparent), transparent) 119px 10px / 24px 8px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--vscode-chat-linesRemovedForeground) 28%, transparent), transparent) 149px 10px / 24px 8px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted) 18%, transparent), transparent) 12px 39px / 18px 7px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted) 18%, transparent), transparent) 12px 59px / 18px 7px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted) 18%, transparent), transparent) 12px 79px / 18px 7px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted) 18%, transparent), transparent) 12px 99px / 18px 7px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted) 17%, transparent), transparent) 52px 39px / 68% 8px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted) 17%, transparent), transparent) 52px 59px / 51% 8px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted) 17%, transparent), transparent) 52px 79px / 73% 8px no-repeat,
-		linear-gradient(90deg, color-mix(in srgb, var(--bb-cursor-transcript-muted) 17%, transparent), transparent) 52px 99px / 44% 8px no-repeat,
-		var(--bb-cursor-diff-surface);
-	content: '';
-	animation: backboard-cursor-edit-shell-breathe 1.8s ease-in-out infinite;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live > .chat-thinking-group-body {
@@ -8253,11 +8242,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-mutation-batch > .chat-thinking-group-body > .chat-thinking-cursor-edit-row {
 	width: 100%;
 	margin: 0;
-}
-
-@keyframes backboard-cursor-edit-shell-breathe {
-	0%, 100% { opacity: 0.72; }
-	50% { opacity: 1; }
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group .chat-thinking-tool-wrapper.chat-thinking-work-row-native-expandable.chat-thinking-work-row-expanded > .chat-thinking-work-native-content {
@@ -8699,25 +8683,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
  * margin so the label and its answer read as one compact transcript artifact. */
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-backboard-turn-work-body > .chat-thinking-box:has(+ .chat-question-carousel-container.chat-question-carousel-used) {
 	margin-bottom: 0;
-}
-
-.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-question-carousel-container.chat-question-carousel-used {
-	max-height: none;
-	margin: 2px 0 6px;
-	border-color: var(--bb-cursor-transcript-border);
-	border-radius: 8px;
-	background: var(--vscode-editor-background);
-}
-
-.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-question-carousel-container.chat-question-carousel-used > .chat-question-carousel-summary {
-	gap: 4px;
-	padding: 8px 10px;
-}
-
-.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-question-carousel-container.chat-question-carousel-used .chat-question-summary-item {
-	gap: 0;
-	font-size: 13px;
-	line-height: 20px;
 }
 
 /* Inline edits are transcript artifacts, not generic work rows. */
@@ -9523,8 +9488,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .monaco-workbench.hc-light .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-request > .value > .rendered-markdown,
 .monaco-workbench.hc-black .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-terminal-row,
 .monaco-workbench.hc-light .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-terminal-row,
-.monaco-workbench.hc-black .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live::after,
-.monaco-workbench.hc-light .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live::after,
 :is(.monaco-workbench.hc-black .part.auxiliarybar .chat-viewpane, .monaco-workbench.agent-sessions-workbench.hc-black .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer) .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-edit-row.chat-thinking-cursor-edit-pending,
 :is(.monaco-workbench.hc-light .part.auxiliarybar .chat-viewpane, .monaco-workbench.agent-sessions-workbench.hc-light .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer) .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-edit-row.chat-thinking-cursor-edit-pending,
 :is(.monaco-workbench.hc-black .part.auxiliarybar .chat-viewpane, .monaco-workbench.agent-sessions-workbench.hc-black .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer) .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-edit-row > .chat-external-edit-card,
@@ -9549,7 +9512,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 		-webkit-text-fill-color: currentColor;
 	}
 
-	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live::after,
+	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-work-group.chat-thinking-work-edit-live > .chat-thinking-group-header > .chat-thinking-icon,
 	.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-core-tool-card-generateVideo.chat-core-tool-card-running :is(
 		.chat-core-tool-card-title-live,
 		.chat-core-tool-card-generating-rail,
@@ -10247,40 +10210,63 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	display: inline-flex;
 }
 
-/* An answered question becomes a small transcript note. The active question
- * above the composer keeps its dedicated input surface. */
+/* An answered question stays a framed transcript card: the prompt muted on
+ * top, the chosen answer beneath it. The active question lives in the
+ * composer shell and keeps its own input surface. */
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-question-carousel-container:has(> .chat-question-carousel-summary) {
 	max-height: none;
 	margin: 6px 0;
 	padding: 0;
-	border: 0;
-	border-radius: 0;
-	background: transparent;
+	border: 1px solid var(--bb-devin-card-border, var(--bb-cursor-transcript-border));
+	border-radius: 10px;
+	background: var(--bb-devin-card-surface, var(--vscode-editor-background));
 	box-shadow: none;
+	overflow: hidden;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-question-carousel-summary {
-	padding: 4px 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	padding: 0;
 	border: 0;
 	background: transparent;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-question-summary-item {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
 	margin: 0;
-	padding: 0;
+	padding: 8px 12px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-question-summary-item + .chat-question-summary-item {
+	border-top: 1px solid var(--bb-devin-card-border, var(--bb-cursor-transcript-border));
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-question-summary-label {
-	color: var(--bb-cursor-transcript-muted);
-	font-size: 13px;
+	color: var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground));
+	font-size: 12px;
 	font-weight: 400;
+	line-height: 16px;
+	white-space: pre-line;
+	overflow-wrap: anywhere;
 }
 
 .monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-question-summary-answer-title {
-	margin-top: 2px;
+	margin-top: 0;
+	color: var(--vscode-foreground);
 	font-size: 13px;
-	font-weight: 400;
-	line-height: 20px;
+	font-weight: 500;
+	line-height: 18px;
+	overflow-wrap: anywhere;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-question-summary-skipped {
+	padding: 8px 12px;
+	color: var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground));
+	font-size: 12px;
 }
 
 /* All plain activity rows use a 24px rhythm and a 14px leading disclosure.

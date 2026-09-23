@@ -74,8 +74,7 @@ export function isBackboardAccessModeSchema(property: string, schema: SessionCon
 		&& schema.type === 'string'
 		&& schema.enum?.includes('default') === true
 		&& schema.enum?.includes('manual') === true
-		&& schema.enum?.includes('fullAccess') === true
-		&& schema.default === 'default';
+		&& schema.enum?.includes('fullAccess') === true;
 }
 
 function getBackboardAccessItems(): readonly IBackboardAccessPickerItem[] {

@@ -13,6 +13,7 @@ import { workbenchInstantiationService } from '../../../../../../test/browser/wo
 import { BlockAnimation, ANIMATION_DURATION_MS } from '../../../../browser/widget/chatContentParts/chatIncrementalRendering/animations/blockAnimations.js';
 import { lastBlockBoundary, ParagraphBuffer } from '../../../../browser/widget/chatContentParts/chatIncrementalRendering/buffers/paragraphBuffer.js';
 import { WordBuffer } from '../../../../browser/widget/chatContentParts/chatIncrementalRendering/buffers/wordBuffer.js';
+import { StreamingTextReveal, STREAM_WORD_CLASS_NAME } from '../../../../browser/widget/chatContentParts/chatIncrementalRendering/animations/textReveal.js';
 import { IncrementalDOMMorpher } from '../../../../browser/widget/chatContentParts/chatIncrementalRendering/chatIncrementalRendering.js';
 import { ChatConfiguration } from '../../../../common/constants.js';
 
@@ -324,7 +325,7 @@ suite('IncrementalDOMMorpher', () => {
 		});
 
 		test('with animateInitial=true animates existing children', () => {
-			const domNode = mainWindow.document.createElement('div');
+			const domNode = mainWindow.document.createElement('p');
 			domNode.appendChild(mainWindow.document.createElement('p'));
 			domNode.appendChild(mainWindow.document.createElement('p'));
 			const morpher = createMorpher(domNode);
@@ -345,7 +346,7 @@ suite('IncrementalDOMMorpher', () => {
 
 		test('defaults to fade for invalid config value', () => {
 			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingStyle, 'invalid-style');
-			const domNode = mainWindow.document.createElement('div');
+			const domNode = mainWindow.document.createElement('p');
 			domNode.appendChild(mainWindow.document.createElement('p'));
 			const morpher = createMorpher(domNode);
 			morpher.seed('content', true);
@@ -356,7 +357,7 @@ suite('IncrementalDOMMorpher', () => {
 
 		test('uses configured animation style', () => {
 			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingStyle, 'rise');
-			const domNode = mainWindow.document.createElement('div');
+			const domNode = mainWindow.document.createElement('p');
 			domNode.appendChild(mainWindow.document.createElement('p'));
 			const morpher = createMorpher(domNode);
 			morpher.seed('content', true);
@@ -368,7 +369,7 @@ suite('IncrementalDOMMorpher', () => {
 		for (const style of ['fade', 'rise', 'blur', 'scale', 'slide'] as const) {
 			test(`applies ${style} animation class`, () => {
 				configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingStyle, style);
-				const domNode = mainWindow.document.createElement('div');
+				const domNode = mainWindow.document.createElement('p');
 				domNode.appendChild(mainWindow.document.createElement('p'));
 				const morpher = createMorpher(domNode);
 				morpher.seed('content', true);
@@ -383,47 +384,50 @@ suite('IncrementalDOMMorpher', () => {
 		}
 	});
 
-	suite('streaming soft focus', () => {
+	suite('word reveal', () => {
 
-		const softFocus = (domNode: HTMLElement) => Array.from(domNode.children)
-			.map(child => child.classList.contains('chat-smooth-streaming-tail'));
-
-		test('softens the last block while streaming and clears it on completion', async () => {
-			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'paragraph');
-			const domNode = mainWindow.document.createElement('div');
-			const morpher = createMorpher(domNode);
-			morpher.setRenderCallback(() => {
-				domNode.replaceChildren(
-					mainWindow.document.createElement('p'),
-					mainWindow.document.createElement('p'),
-				);
-			});
-			morpher.seed('');
-			morpher.tryMorph('first paragraph\n\nsecond paragraph');
-			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
-
-			assert.deepStrictEqual(softFocus(domNode), [false, true]);
-
-			morpher.updateStreamRate(100, true);
-			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
-
-			assert.deepStrictEqual(softFocus(domNode), [false, false], 'completed text must settle into focus');
+		setup(() => {
+			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingStyle, 'words');
 		});
 
-		test('does not soften a trailing code block', async () => {
-			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'paragraph');
+		test('fades in only the words a render appended', async () => {
+			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'off');
+			const domNode = mainWindow.document.createElement('div');
+			const morpher = createMorpher(domNode);
+			morpher.setRenderCallback(markdown => {
+				const paragraph = mainWindow.document.createElement('p');
+				paragraph.textContent = markdown;
+				domNode.replaceChildren(paragraph);
+			});
+			domNode.appendChild(mainWindow.document.createElement('p')).textContent = 'Already here';
+			morpher.seed('Already here', false);
+			morpher.tryMorph('Already here and new words');
+			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
+
+			assert.deepStrictEqual(
+				Array.from(domNode.querySelectorAll(`.${STREAM_WORD_CLASS_NAME}`), span => span.textContent),
+				[' and ', 'new ', 'words'],
+			);
+			assert.strictEqual(domNode.textContent, 'Already here and new words');
+		});
+
+		test('does not split text inside code blocks', async () => {
+			configService.setUserConfiguration(ChatConfiguration.IncrementalRenderingBuffering, 'off');
 			const domNode = mainWindow.document.createElement('div');
 			const morpher = createMorpher(domNode);
 			morpher.setRenderCallback(() => {
-				const codeBlock = mainWindow.document.createElement('div');
-				codeBlock.classList.add('interactive-result-code-block');
-				domNode.replaceChildren(mainWindow.document.createElement('p'), codeBlock);
+				const pre = mainWindow.document.createElement('pre');
+				pre.textContent = 'const a = 1;';
+				domNode.replaceChildren(pre);
 			});
 			morpher.seed('');
-			morpher.tryMorph('prose\n\n```\ncode\n```');
+			morpher.tryMorph('```\nconst a = 1;\n```');
 			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
 
-			assert.deepStrictEqual(softFocus(domNode), [false, false]);
+			assert.deepStrictEqual({
+				wordsInsideCode: domNode.querySelectorAll(`pre .${STREAM_WORD_CLASS_NAME}`).length,
+				code: domNode.querySelector('pre')?.textContent,
+			}, { wordsInsideCode: 0, code: 'const a = 1;' });
 		});
 	});
 
@@ -507,7 +511,7 @@ suite('IncrementalDOMMorpher', () => {
 			morpher.seed('streaming text', false);
 			morpher.tryMorph('streaming text finished');
 
-			morpher.updateStreamRate(100, true);
+			morpher.updateStreamRate(100, true, /* forceFinalRender */ true);
 			await new Promise(resolve => mainWindow.requestAnimationFrame(resolve));
 
 			for (const child of Array.from(domNode.children)) {
@@ -533,6 +537,94 @@ suite('IncrementalDOMMorpher', () => {
 
 			assert.deepStrictEqual(rendered, [], 'caught-up rich DOM should remain mounted at completion');
 		});
+	});
+});
+
+suite('StreamingTextReveal', () => {
+
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	function delays(domNode: HTMLElement): Array<[string | null, number]> {
+		return Array.from(domNode.querySelectorAll<HTMLElement>(`.${STREAM_WORD_CLASS_NAME}`), span => [span.textContent, parseInt(span.style.animationDelay, 10)]);
+	}
+
+	test('spreads a commit from where the previous one ends', () => {
+		const domNode = mainWindow.document.createElement('div');
+		const reveal = new StreamingTextReveal(domNode);
+		domNode.textContent = 'a';
+		reveal.markAllRevealed();
+
+		domNode.textContent = 'a bb';
+		reveal.onDidRender(1000);
+		domNode.textContent = 'a bb cc dd';
+		reveal.onDidRender(1100);
+
+		assert.deepStrictEqual(delays(domNode), [
+			[' bb ', -100],
+			['cc ', 17],
+			['dd', 67],
+		]);
+	});
+
+	test('continues mid-fade words after a DOM rebuild and drops settled ones', () => {
+		const domNode = mainWindow.document.createElement('div');
+		const reveal = new StreamingTextReveal(domNode);
+		reveal.markAllRevealed();
+
+		domNode.textContent = 'one';
+		reveal.onDidRender(1000);
+		domNode.textContent = 'one two';
+		reveal.onDidRender(1100);
+		domNode.textContent = 'one two three';
+		reveal.onDidRender(1400);
+
+		assert.deepStrictEqual(delays(domNode), [
+			[' two ', -300],
+			['three', 17],
+		]);
+		assert.strictEqual(domNode.textContent, 'one two three');
+	});
+
+	test('fades a code block in when the frontier reaches it', () => {
+		const domNode = mainWindow.document.createElement('div');
+		const reveal = new StreamingTextReveal(domNode);
+		reveal.markAllRevealed();
+
+		const intro = domNode.appendChild(mainWindow.document.createElement('p'));
+		intro.textContent = 'intro ';
+		const pre = domNode.appendChild(mainWindow.document.createElement('pre'));
+		pre.textContent = 'code';
+		reveal.onDidRender(1000);
+
+		assert.deepStrictEqual([pre.classList.contains(STREAM_WORD_CLASS_NAME), pre.style.animationDelay, pre.textContent], [true, '100ms', 'code']);
+	});
+
+	test('types bursty input at an even pace', () => {
+		const domNode = mainWindow.document.createElement('div');
+		const reveal = new StreamingTextReveal(domNode);
+		reveal.markAllRevealed();
+
+		// Commits every 32ms, but text arrives in 12-word bursts every 256ms.
+		const revealTimes = new Map<number, number>();
+		let words = 0;
+		for (let now = 1000; now <= 4000; now += 32) {
+			if ((now - 1000) % 256 === 0) {
+				words += 12;
+			}
+			domNode.textContent = Array.from({ length: words }, (_, index) => `w${index}`).join(' ');
+			reveal.onDidRender(now);
+			for (const span of domNode.querySelectorAll<HTMLElement>(`.${STREAM_WORD_CLASS_NAME}`)) {
+				const index = parseInt(span.textContent!.trim().slice(1), 10);
+				if (!revealTimes.has(index)) {
+					revealTimes.set(index, now + parseInt(span.style.animationDelay, 10));
+				}
+			}
+		}
+
+		// After the first second, consecutive words never wait long for each other.
+		const steady = [...revealTimes.entries()].filter(([, time]) => time > 2000).sort((a, b) => a[0] - b[0]).map(([, time]) => time);
+		const longestPause = Math.max(...steady.slice(1).map((time, index) => time - steady[index]));
+		assert.ok(longestPause <= 40, `longest pause between words was ${longestPause}ms`);
 	});
 });
 

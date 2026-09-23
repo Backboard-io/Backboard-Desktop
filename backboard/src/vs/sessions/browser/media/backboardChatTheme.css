@@ -370,16 +370,13 @@
 	padding: 6px 28px 10px !important;
 	background: transparent !important;
 
+	/* The composer shell is the shared surface; the bands only cap their height. */
 	.chat-question-carousel-widget-container,
 	.chat-tool-confirmation-carousel-container {
 		min-height: 0;
 		max-height: min(252px, calc(30vh + 12px));
 		overflow-y: auto;
 		overscroll-behavior-y: contain;
-		padding: 6px;
-		box-sizing: border-box;
-		border-radius: 14px 14px 0 0;
-		background: var(--bb-devin-card-surface);
 	}
 
 	.chat-question-editor-panel:not(.chat-question-carousel-used),
@@ -388,13 +385,5 @@
 		max-height: min(240px, 30vh);
 		overflow-y: auto;
 		margin-bottom: 0;
-	}
-
-	.interactive-input-and-side-toolbar {
-		flex-shrink: 0;
-		padding: 0 6px 6px;
-		box-sizing: border-box;
-		border-radius: 0 0 14px 14px;
-		background: var(--bb-devin-card-surface);
 	}
 }
