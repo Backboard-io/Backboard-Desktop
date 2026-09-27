@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
 import type { Stats } from "node:fs";
 import { lstat, mkdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
+import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
 import type { JSONValue } from "../core/agent/rlm/RLMTypes.ts";
 import type { SubAgentResult } from "../core/agent/SubAgentRunner.ts";
 import { measurePerformance } from "../core/performance/PerformanceTiming.ts";
@@ -174,13 +174,33 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		// Agent is the blocking compatibility view over the same durable engine.
 		if (!ctx.workerLifecycle) {
 			const handle = ctx.toolCallId ?? `worker-${randomUUID()}`;
-			await this.tasks.spawn({ handle, input, ctx, reportsWorkerStart: true, run: (workerInput, workerContext, started) => this.execute(workerInput, workerContext, async () => { await started(); await onStarted?.(); }) });
-			const [task] = await this.tasks.wait([handle], ctx.sessionId, new AbortController().signal);
+			await this.tasks.spawn({
+				handle,
+				input,
+				ctx,
+				reportsWorkerStart: true,
+				run: (workerInput, workerContext, started) =>
+					this.execute(workerInput, workerContext, async () => {
+						await started();
+						await onStarted?.();
+					}),
+			});
+			const [task] = await this.tasks.wait(
+				[handle],
+				ctx.sessionId,
+				new AbortController().signal,
+			);
 			// The execution retains ctx.signal. Joining drains its cancelled cleanup
 			// and any already-durable integration before returning the captured outcome.
-			if (!task?.result) throw new Error(task?.error ?? "Worker finished without a captured result.");
+			if (!task?.result)
+				throw new Error(
+					task?.error ?? "Worker finished without a captured result.",
+				);
 			const { data, forLLM, title, detail } = task.result;
-			return { ...ok(data, forLLM, title, detail), ...(task.execution ? { execution: task.execution } : {}) };
+			return {
+				...ok(data, forLLM, title, detail),
+				...(task.execution ? { execution: task.execution } : {}),
+			};
 		}
 		const subagentType = input.subagent_type ?? "worker";
 		const depth = (ctx.agentDepth ?? 0) + 1;
@@ -250,10 +270,18 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 		// rejects before the runner callback is entered (for example a dirty or
 		// non-Git coordinator). Claim the terminal edge up front so detached
 		// AgentSpawn tasks cannot remain visually active forever on that path.
-		const deferredParentEnd = this.deps.workspaceManager !== undefined || ctx.workerLifecycle !== undefined;
+		const deferredParentEnd =
+			this.deps.workspaceManager !== undefined ||
+			ctx.workerLifecycle !== undefined;
 		let parentEndEmitted = false;
 		const emitParentEnd = (status: string): void => {
-			if (ctx.workerLifecycle || !deferredParentEnd || parentEndEmitted || !ctx.toolCallId) return;
+			if (
+				ctx.workerLifecycle ||
+				!deferredParentEnd ||
+				parentEndEmitted ||
+				!ctx.toolCallId
+			)
+				return;
 			parentEndEmitted = true;
 			ctx.bus.emit({
 				type: "agent:child_end",
@@ -327,7 +355,10 @@ export class AgentTool extends Tool<AgentToolInput, AgentToolOutput> {
 						coordinatorCwd: ctx.cwd,
 						signal: ctx.signal,
 						onProgress: (record) => {
-							if (ctx.workerLifecycle) { ctx.workerLifecycle.onWorkspaceProgress(record); return; }
+							if (ctx.workerLifecycle) {
+								ctx.workerLifecycle.onWorkspaceProgress(record);
+								return;
+							}
 							if (!ctx.toolCallId) return;
 							const terminal = isTerminalWorkerRecord(record);
 							// Once cancelled, suppress noisy progress but preserve durable
@@ -522,9 +553,12 @@ function escapeRegExp(value: string): string {
 function agentTitle(status: string, rounds: number): string {
 	if (status === "conflict")
 		return `Conflict after ${rounds} ${pluralize(rounds, "round")}`;
+	if (status === "cancelled")
+		return `Cancelled after ${rounds} ${pluralize(rounds, "round")}`;
+	// A worker that could not finish hands its task back to the coordinator.
 	return status === "completed"
 		? `Completed in ${rounds} ${pluralize(rounds, "round")}`
-		: `Failed after ${rounds} ${pluralize(rounds, "round")}`;
+		: `Handed back after ${rounds} ${pluralize(rounds, "round")}`;
 }
 
 function workerReportForLLM(
@@ -546,6 +580,10 @@ function workerReportForLLM(
 	}
 	const report = workerReport(result, workspace);
 	if (authoritativeStatus === "completed") return report;
+	// The runner's handoff report already tells the coordinator to finish the
+	// task itself.
+	if (authoritativeStatus === "failed" && result.status === "failed")
+		return report;
 	return `Error: Agent worker ${authoritativeStatus} after ${result.toolRounds} rounds: ${report}`;
 }
 

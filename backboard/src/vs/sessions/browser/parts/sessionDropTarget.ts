@@ -12,28 +12,46 @@ import { IInstantiationService } from '../../../platform/instantiation/common/in
 import { LocalSelectionTransfer } from '../../../platform/dnd/browser/dnd.js';
 import { activeContrastBorder } from '../../../platform/theme/common/colorRegistry.js';
 import { IThemeService, Themable } from '../../../platform/theme/common/themeService.js';
-import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../workbench/common/theme.js';
 import { DraggedSessionIdentifier } from '../dnd.js';
 import { ISessionsManagementService } from '../../services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../services/sessions/browser/sessionsService.js';
+import { Direction } from '../../../base/browser/ui/grid/grid.js';
+import { localize } from '../../../nls.js';
 
-/** Side of a target view where a dragged session can be dropped. */
-type DropSide = 'left' | 'right';
+/** Edge of a target view where a dragged session can be dropped. */
+type DropSide = 'left' | 'right' | 'up' | 'down';
+
+/** Where a dropped session goes: next to the view of another session. */
+export interface ISessionPlacement {
+	readonly sessionId: string;
+	/** `undefined` for the new-session placeholder view. */
+	readonly targetSessionId: string | undefined;
+	readonly direction: Direction;
+}
 
 /**
  * Resolves an HTML element under the part's content area to the session view
- * it belongs to (if any). Returns the session id and the view's root element.
+ * it belongs to (if any). Returns the session id (`undefined` for the
+ * new-session placeholder view) and the view's root element.
  */
 export interface ISessionDropTargetDelegate {
-	findTargetView(child: HTMLElement): { readonly sessionId: string; readonly element: HTMLElement } | undefined;
+	findTargetView(child: HTMLElement): { readonly sessionId: string | undefined; readonly element: HTMLElement } | undefined;
+	/**
+	 * Tells the grid where the dropped session's cell goes. Set right before
+	 * the session is inserted into the visibility model and cleared right
+	 * after, so it only applies to the reconciliation the drop triggers.
+	 */
+	setPendingPlacement(placement: ISessionPlacement | undefined): void;
 }
 
 class SessionDropOverlay extends Themable {
 
 	private static readonly OVERLAY_ID = 'monaco-workbench-session-drop-overlay';
+	private static readonly INDICATOR_INSET = 6;
 
 	private _container: HTMLElement | undefined;
 	private _overlay: HTMLElement | undefined;
+	private _label: HTMLElement | undefined;
 
 	private _currentSide: DropSide | undefined;
 
@@ -45,8 +63,9 @@ class SessionDropOverlay extends Themable {
 	private readonly _sessionTransfer = LocalSelectionTransfer.getInstance<DraggedSessionIdentifier>();
 
 	constructor(
-		readonly targetSessionId: string,
+		readonly targetSessionId: string | undefined,
 		private readonly _targetElement: HTMLElement,
+		private readonly _delegate: ISessionDropTargetDelegate,
 		@IThemeService themeService: IThemeService,
 		@ISessionsManagementService private readonly _sessionsManagementService: ISessionsManagementService,
 		@ISessionsService private readonly _sessionsService: ISessionsService,
@@ -69,6 +88,8 @@ class SessionDropOverlay extends Themable {
 		}));
 
 		this._overlay = $('.session-drop-overlay-indicator');
+		this._label = $('span.session-drop-overlay-label');
+		this._overlay.appendChild(this._label);
 		container.appendChild(this._overlay);
 
 		this._registerListeners(container);
@@ -76,9 +97,9 @@ class SessionDropOverlay extends Themable {
 	}
 
 	override updateStyles(): void {
+		// Fill and border come from sessionDropTarget.css (accent-tinted so the
+		// target reads clearly over wallpapers); high contrast adds a dashed outline.
 		const overlay = assertReturnsDefined(this._overlay);
-
-		overlay.style.backgroundColor = this.getColor(EDITOR_DRAG_AND_DROP_BACKGROUND) || '';
 
 		const activeContrastBorderColor = this.getColor(activeContrastBorder);
 		overlay.style.outlineColor = activeContrastBorderColor || '';
@@ -95,7 +116,7 @@ class SessionDropOverlay extends Themable {
 					return;
 				}
 
-				this._positionOverlay(e.offsetX);
+				this._positionOverlay(e.offsetX, e.offsetY);
 
 				if (this._cleanupOverlayScheduler.isScheduled()) {
 					this._cleanupOverlayScheduler.cancel();
@@ -145,17 +166,37 @@ class SessionDropOverlay extends Themable {
 			return;
 		}
 
-		this._sessionsService.insertAt(session, this.targetSessionId, side);
+		// The visibility model is a flat list: above/below map to before/after,
+		// while the grid learns the actual direction through the placement.
+		const direction = side === 'left' ? Direction.Left : side === 'right' ? Direction.Right : side === 'up' ? Direction.Up : Direction.Down;
+		this._delegate.setPendingPlacement({ sessionId: session.sessionId, targetSessionId: this.targetSessionId, direction });
+		try {
+			this._sessionsService.insertAt(session, this.targetSessionId, side === 'left' || side === 'up' ? 'left' : 'right');
+		} finally {
+			this._delegate.setPendingPlacement(undefined);
+		}
 	}
 
-	private _positionOverlay(mousePosX: number): void {
-		const width = this._targetElement.clientWidth;
-		const side: DropSide = mousePosX < width / 2 ? 'left' : 'right';
+	private _positionOverlay(mousePosX: number, mousePosY: number): void {
+		// Split towards the nearest edge, so a view can be split side by side or
+		// stacked (and any mix of both, e.g. quadrants).
+		const x = mousePosX / Math.max(1, this._targetElement.clientWidth);
+		const y = mousePosY / Math.max(1, this._targetElement.clientHeight);
+		const distances: [DropSide, number][] = [['left', x], ['right', 1 - x], ['up', y], ['down', 1 - y]];
+		const side = distances.reduce((nearest, candidate) => candidate[1] < nearest[1] ? candidate : nearest)[0];
 
-		if (side === 'left') {
-			this._doPositionOverlay({ left: '0', width: '50%' });
-		} else {
-			this._doPositionOverlay({ left: '50%', width: '50%' });
+		switch (side) {
+			case 'left': this._doPositionOverlay({ top: '0%', left: '0%', width: '50%', height: '100%' }); break;
+			case 'right': this._doPositionOverlay({ top: '0%', left: '50%', width: '50%', height: '100%' }); break;
+			case 'up': this._doPositionOverlay({ top: '0%', left: '0%', width: '100%', height: '50%' }); break;
+			case 'down': this._doPositionOverlay({ top: '50%', left: '0%', width: '100%', height: '50%' }); break;
+		}
+		if (side !== this._currentSide) {
+			const label = assertReturnsDefined(this._label);
+			label.textContent = side === 'left' ? localize('sessionDrop.splitLeft', "Split Left")
+				: side === 'right' ? localize('sessionDrop.splitRight', "Split Right")
+					: side === 'up' ? localize('sessionDrop.splitUp', "Split Up")
+						: localize('sessionDrop.splitDown', "Split Down");
 		}
 
 		const overlay = assertReturnsDefined(this._overlay);
@@ -167,19 +208,22 @@ class SessionDropOverlay extends Themable {
 		this._currentSide = side;
 	}
 
-	private _doPositionOverlay(options: { left: string; width: string }): void {
+	private _doPositionOverlay(options: { top: string; left: string; width: string; height: string }): void {
 		const [container, overlay] = assertReturnsAllDefined(this._container, this._overlay);
+		// Inset the indicator so its rounded frame reads as a drop zone inside
+		// the pane rather than a flat tint across it.
+		const inset = SessionDropOverlay.INDICATOR_INSET;
 		container.style.height = '100%';
-		overlay.style.top = '0';
-		overlay.style.height = '100%';
-		overlay.style.left = options.left;
-		overlay.style.width = options.width;
+		overlay.style.top = `calc(${options.top} + ${inset}px)`;
+		overlay.style.height = `calc(${options.height} - ${2 * inset}px)`;
+		overlay.style.left = `calc(${options.left} + ${inset}px)`;
+		overlay.style.width = `calc(${options.width} - ${2 * inset}px)`;
 	}
 
 	private _hideOverlay(): void {
 		const overlay = assertReturnsDefined(this._overlay);
 
-		this._doPositionOverlay({ left: '0', width: '100%' });
+		this._doPositionOverlay({ top: '0%', left: '0%', width: '100%', height: '100%' });
 		overlay.style.opacity = '0';
 		overlay.classList.remove('overlay-move-transition');
 
@@ -203,8 +247,8 @@ class SessionDropOverlay extends Themable {
  * being hovered, and calls into {@link ISessionsManagementService} to insert
  * or move the dragged session next to the target.
  *
- * Currently supports only left/right insertion; up/down and "into" drops are
- * not supported.
+ * Drops split the hovered view towards its nearest edge (left, right, up or
+ * down); "into" drops are not supported.
  */
 export class SessionDropTarget extends Themable {
 
@@ -235,8 +279,23 @@ export class SessionDropTarget extends Themable {
 	private _registerListeners(): void {
 		this._register(addDisposableListener(this._container, EventType.DRAG_ENTER, e => this._onDragEnter(e)));
 		this._register(addDisposableListener(this._container, EventType.DRAG_LEAVE, () => this._onDragLeave()));
-		for (const target of [this._container, getWindow(this._container)]) {
+		const targetWindow = getWindow(this._container);
+		for (const target of [this._container, targetWindow]) {
 			this._register(addDisposableListener(target, EventType.DRAG_END, () => this._onDragEnd()));
+		}
+
+		// Pane headers stand in for the title bar and are window-drag regions,
+		// which swallow drag events (a drop there would never land). While a
+		// session is being dragged, turn them into ordinary drop targets. The
+		// drag sources set their payload in their own dragstart handlers, which
+		// run before this window-level (bubbling) listener.
+		this._register(addDisposableListener(targetWindow, EventType.DRAG_START, () => {
+			if (this._sessionTransfer.hasData(DraggedSessionIdentifier.prototype)) {
+				this._container.classList.add('session-drag-in-progress');
+			}
+		}));
+		for (const type of [EventType.DRAG_END, EventType.DROP]) {
+			this._register(addDisposableListener(targetWindow, type, () => this._container.classList.remove('session-drag-in-progress'), true));
 		}
 	}
 
@@ -276,6 +335,7 @@ export class SessionDropTarget extends Themable {
 			SessionDropOverlay,
 			targetView.sessionId,
 			targetView.element,
+			this._delegate,
 		);
 	}
 

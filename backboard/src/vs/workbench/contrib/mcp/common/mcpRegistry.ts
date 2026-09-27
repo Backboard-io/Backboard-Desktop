@@ -221,7 +221,7 @@ export class McpRegistry extends Disposable implements IMcpRegistry {
 		if (collection.scope === StorageScope.WORKSPACE && !this._workspaceTrustManagementService.isWorkspaceTrusted()) {
 			if (errorOnUserInteraction) {
 				throw new UserInteractionRequiredError('workspaceTrust');
-			} else if (!await this._workspaceTrustRequestService.requestWorkspaceTrust({ message: localize('runTrust', "This MCP server definition is defined in your workspace files.") })) {
+			} else if (!await this._workspaceTrustRequestService.requestWorkspaceTrust({ message: localize('runTrust', "This connector definition is defined in your workspace files.") })) {
 				return false;
 			}
 		}
@@ -330,11 +330,11 @@ export class McpRegistry extends Disposable implements IMcpRegistry {
 
 			const { result } = await this._dialogService.prompt(
 				{
-					message: localize('trustTitleWithOrigin', 'Trust and run MCP server {0}?', def.definition.label),
+					message: localize('trustTitleWithOrigin', 'Trust and run connector {0}?', def.definition.label),
 					custom: {
 						icon: Codicon.shield,
 						markdownDetails: [{
-							markdown: new MarkdownString(localize('mcp.trust.details', 'The MCP server {0} was updated. MCP servers may add context to your chat session and lead to unexpected behavior. Do you want to trust and run this server?', labelFor(def))),
+							markdown: new MarkdownString(localize('mcp.trust.details', 'The Connector {0} was updated. Connectors may add context to your chat session and lead to unexpected behavior. Do you want to trust and run this server?', labelFor(def))),
 							actionHandler: () => {
 								const editor = this._editorService.openEditor({ resource: originURI! }, AUX_WINDOW_GROUP);
 								return editor.then(Boolean);
@@ -354,11 +354,11 @@ export class McpRegistry extends Disposable implements IMcpRegistry {
 		const list = definitions.map(d => `- ${labelFor(d)}`).join('\n');
 		const { result } = await this._dialogService.prompt(
 			{
-				message: localize('trustTitleWithOriginMulti', 'Trust and run {0} MCP servers?', definitions.length),
+				message: localize('trustTitleWithOriginMulti', 'Trust and run {0} connectors?', definitions.length),
 				custom: {
 					icon: Codicon.shield,
 					markdownDetails: [{
-						markdown: new MarkdownString(localize('mcp.trust.detailsMulti', 'Several updated MCP servers were discovered:\n\n{0}\n\n MCP servers may add context to your chat session and lead to unexpected behavior. Do you want to trust and run these server?', list)),
+						markdown: new MarkdownString(localize('mcp.trust.detailsMulti', 'Several updated connectors were discovered:\n\n{0}\n\n connectors may add context to your chat session and lead to unexpected behavior. Do you want to trust and run these server?', list)),
 						actionHandler: (uri) => {
 							const editor = this._editorService.openEditor({ resource: URI.parse(uri) }, AUX_WINDOW_GROUP);
 							return editor.then(Boolean);

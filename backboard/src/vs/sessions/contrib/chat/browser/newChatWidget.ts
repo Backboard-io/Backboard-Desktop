@@ -5,6 +5,7 @@
 
 import './media/chatWidget.css';
 import * as dom from '../../../../base/browser/dom.js';
+import { syncRootPresenceClass } from '../../../../workbench/browser/part.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../base/common/codicons.js';
@@ -285,7 +286,7 @@ export class NewChatWidget extends Disposable {
 	/** Set once the composer has seeded (or confirmed) a default workspace so it never re-seeds after an explicit clear. See {@link _ensureComposerHasWorkspace}. */
 	private _defaultWorkspaceHandled = false;
 	/**
-	 * The user's `~/Desktop` folder (or `~` if Desktop does not exist),
+	 * The `~/Backboard` projects folder (see {@link _getProjectsFolder}),
 	 * resolved only after the workspace picker's recents have loaded so it can
 	 * never win a race against a real recent workspace. Last-resort seed for
 	 * {@link _ensureComposerHasWorkspace} so the composer always lands on a
@@ -553,6 +554,8 @@ export class NewChatWidget extends Disposable {
 	 */
 	private _applyBackgroundImage(resource: URI | undefined): void {
 		this._chatWidgetContent?.classList.toggle('has-custom-background', !!resource);
+		const targetWindow = dom.getWindow(this._chatWidgetContent);
+		targetWindow.requestAnimationFrame(() => syncRootPresenceClass(targetWindow, 'sessions-new-chat-custom-background', '.new-chat-widget-content.has-custom-background'));
 	}
 
 	private _renderHeaderBreadcrumb(container: HTMLElement): void {
@@ -598,15 +601,10 @@ export class NewChatWidget extends Disposable {
 	 * never fights the user explicitly clearing the workspace afterwards.
 	 */
 	private _ensureComposerHasWorkspace(): void {
-		// Resolve the Desktop fallback only once the picker's recents have
-		// loaded, so a real recent workspace always wins the seed below. Prefer
-		// ~/Desktop; fall back to ~ only when Desktop does not exist.
+		// Resolve the projects-folder fallback only once the picker's recents
+		// have loaded, so a real recent workspace always wins the seed below.
 		this._workspacePicker.whenInitialRecentsLoaded
-			.then(() => this.pathService.userHome({ preferLocal: true }))
-			.then(async home => {
-				const desktop = URI.joinPath(home, 'Desktop');
-				return (await this.fileService.exists(desktop)) ? desktop : home;
-			})
+			.then(() => this._getProjectsFolder())
 			.then(folder => {
 				if (!this._store.isDisposed) {
 					this._defaultFolderFallback.set(folder, undefined);
@@ -646,7 +644,7 @@ export class NewChatWidget extends Disposable {
 	 * Seeds the composer's workspace from the best available default when none
 	 * is selected yet, so the model and Backboard-options pickers render. Order
 	 * of preference: the most recent servable session's folder, then the
-	 * workspace picker's recents, then the user's Desktop. No-op once a
+	 * workspace picker's recents, then the `~/Backboard` projects folder. No-op once a
 	 * session/selection exists (marks {@link _defaultWorkspaceHandled} so it is
 	 * never re-seeded from under an explicit user clear). Reads current values
 	 * synchronously; the caller (the seeding autorun) owns the reactive reads.
@@ -670,7 +668,7 @@ export class NewChatWidget extends Disposable {
 		}
 
 		// Fresh profile with no recent sessions or folders anywhere: seed the
-		// user's Desktop so the composer always lands on a real folder (never
+		// projects folder so the composer always lands on a real folder (never
 		// the bare "workspace" placeholder) and its model and Backboard-options
 		// controls still render. The draft is created without the upfront trust
 		// prompt (nothing was user-initiated yet); {@link _sendFromSharedComposer}
@@ -1182,7 +1180,7 @@ export class NewChatWidget extends Disposable {
 			case 'selectFolder':
 				return this._pickWorkspaceFolderForFirstSend();
 			case 'createFolder':
-				return this._createDesktopWorkspaceFolder();
+				return this._createProjectFolder();
 			default:
 				return undefined;
 		}
@@ -1267,30 +1265,39 @@ export class NewChatWidget extends Disposable {
 		return result?.[0];
 	}
 
-	private async _createDesktopWorkspaceFolder(): Promise<URI | undefined> {
-		const folderName = await this._promptForDesktopWorkspaceFolderName();
+	/**
+	 * `~/Backboard`, created on demand: the default home for new projects.
+	 * Deliberately not `~/Desktop` or `~/Documents`: macOS guards those behind
+	 * a privacy prompt, and a folder Backboard picks for the user must never
+	 * raise one.
+	 */
+	private async _getProjectsFolder(): Promise<URI> {
+		const home = await this.pathService.userHome({ preferLocal: true });
+		const projects = URI.joinPath(home, 'Backboard');
+		if (!await this.fileService.exists(projects)) {
+			await this.fileService.createFolder(projects);
+		}
+		return projects;
+	}
+
+	private async _createProjectFolder(): Promise<URI | undefined> {
+		const folderName = await this._showFolderNameModal();
 		if (!folderName) {
 			return undefined;
 		}
 
 		try {
-			const home = await this.pathService.userHome({ preferLocal: true });
-			const desktop = URI.joinPath(home, 'Desktop');
-			const folderUri = await this._getAvailableDesktopWorkspaceFolder(desktop, folderName);
+			const folderUri = await this._getAvailableProjectFolder(await this._getProjectsFolder(), folderName);
 			await this.fileService.createFolder(folderUri);
 			return folderUri;
 		} catch (error) {
-			this.logService.error('[NewChatWidget] Failed to create Desktop workspace folder', error);
+			this.logService.error('[NewChatWidget] Failed to create project folder', error);
 			await this.dialogService.error(
-				localize('newChatCreateDesktopWorkspaceFailed', "Backboard could not create a new folder on Desktop."),
+				localize('newChatCreateProjectFolderFailed', "Backboard could not create a new project folder."),
 				localize('newChatCreateDesktopWorkspaceFailedDetail', "Choose a folder instead and try again.")
 			);
 			return undefined;
 		}
-	}
-
-	private async _promptForDesktopWorkspaceFolderName(): Promise<string | undefined> {
-		return this._showFolderNameModal();
 	}
 
 	private _showFolderNameModal(): Promise<string | undefined> {
@@ -1316,7 +1323,7 @@ export class NewChatWidget extends Disposable {
 			title.textContent = localize('newChatCreateFolderTitle', "Name this project folder");
 
 			const message = dom.append(modal, dom.$('p.new-chat-folder-modal-message'));
-			message.textContent = localize('newChatCreateFolderMessage', "Backboard will create this folder on your Desktop.");
+			message.textContent = localize('newChatCreateProjectFolderMessage', "Backboard will create this folder in the Backboard folder in your home folder.");
 
 			const field = dom.append(modal, dom.$('.new-chat-folder-modal-field'));
 			const label = dom.append(field, dom.$('label.new-chat-folder-modal-label')) as HTMLLabelElement;
@@ -1348,7 +1355,7 @@ export class NewChatWidget extends Disposable {
 				resolve(folderName);
 			};
 			const submit = () => {
-				const folderName = this._sanitizeDesktopWorkspaceFolderName(input.value);
+				const folderName = this._sanitizeProjectFolderName(input.value);
 				if (!folderName) {
 					error.textContent = localize('newChatCreateFolderInvalidName', "Enter a folder name.");
 					input.focus();
@@ -1383,18 +1390,18 @@ export class NewChatWidget extends Disposable {
 		});
 	}
 
-	private async _getAvailableDesktopWorkspaceFolder(desktop: URI, baseName: string): Promise<URI> {
+	private async _getAvailableProjectFolder(parent: URI, baseName: string): Promise<URI> {
 		for (let index = 1; index <= 100; index++) {
 			const name = index === 1 ? baseName : `${baseName} ${index}`;
-			const candidate = URI.joinPath(desktop, name);
+			const candidate = URI.joinPath(parent, name);
 			if (!await this.fileService.exists(candidate)) {
 				return candidate;
 			}
 		}
-		return URI.joinPath(desktop, `${baseName} ${Date.now()}`);
+		return URI.joinPath(parent, `${baseName} ${Date.now()}`);
 	}
 
-	private _sanitizeDesktopWorkspaceFolderName(name: string): string {
+	private _sanitizeProjectFolderName(name: string): string {
 		return name
 			.replace(/[<>:"/\\|?*\u0000-\u001F]+/g, ' ')
 			.replace(/\s+/g, ' ')

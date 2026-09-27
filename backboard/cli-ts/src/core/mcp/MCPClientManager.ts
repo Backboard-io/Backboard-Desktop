@@ -1,3 +1,4 @@
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { errorMessage } from "../../utils/errors.ts";
 import {
 	type McpConfig,
@@ -29,19 +30,50 @@ import type {
 	McpResourceDefinition,
 	McpResourceTemplateDefinition,
 	McpServerMutationResult,
+	McpServerOrigin,
 	McpServerRuntimeStatus,
 	McpToolDefinition,
 	McpToolRefreshResult,
 } from "./MCPTypes.ts";
+
+/** Provenance for one server in a `setServers` push. */
+export interface McpServerProvenance {
+	origin: McpServerOrigin;
+	/**
+	 * Files the server is persisted in; terminal-UI disable/remove write
+	 * these. Empty for servers owned by the IDE.
+	 */
+	configSources: McpConfigSource[];
+}
+
+export interface McpSetServersOptions {
+	/** Default config source for entries without `sources[name]`. */
+	configSource?: McpConfigSource;
+	/** Per-server origin and config files. */
+	sources?: Record<string, McpServerProvenance>;
+	/** Reconnect these servers even when their config is unchanged. */
+	forceNames?: readonly string[];
+	/**
+	 * Receives tool changes as they happen: first the tools of closed
+	 * servers, then each server's tools as soon as it connects, so fast
+	 * servers are usable while slow ones are still connecting. The returned
+	 * aggregate repeats the same changes; apply one or the other.
+	 */
+	onUpdate?: (update: McpToolRefreshResult) => void;
+}
 
 export class McpClientManager {
 	private readonly connections = new Map<string, McpConnection>();
 	private readonly registeredToolNames = new Set<string>();
 	private readonly serverConfigs = new Map<string, McpServerConfig>();
 	private readonly serverStatuses = new Map<string, McpServerRuntimeStatus>();
+	private readonly serverOrigins = new Map<string, McpServerOrigin>();
 	private readonly dirtyToolServers = new Set<string>();
 	private readonly primitives: McpPrimitiveManager;
 	private readonly connector: McpServerConnector;
+	private readonly statusListeners = new Set<() => void>();
+	private readonly lostToolListeners = new Set<(toolNames: string[]) => void>();
+	private closed = false;
 
 	constructor(
 		private readonly config: McpConfig,
@@ -61,26 +93,51 @@ export class McpClientManager {
 				this.primitives.markResourceListChanged(serverName),
 			onResourceUpdated: (serverName, uri) =>
 				this.primitives.markResourceUpdated(serverName, uri),
+			onConnectionClosed: (serverName, client) =>
+				this.handleConnectionClosed(serverName, client),
+			onConnectionError: (serverName, client, error) =>
+				this.handleConnectionError(serverName, client, error),
 		});
 		for (const server of config.servers) {
 			this.serverConfigs.set(server.name, server);
-			this.serverStatuses.set(server.name, {
-				name: server.name,
-				type: server.type,
-				configSources: [...server.configSources],
-				status: server.disabled ? "disabled" : "error",
-				message: server.disabled ? "Server is disabled." : "Not connected.",
-				toolNames: [],
-				capabilities: {},
-				promptNames: [],
-				resourceUris: [],
-				updatedResourceUris: [],
-				subscribedResourceUris: [],
-			});
+			this.serverStatuses.set(
+				server.name,
+				server.disabled
+					? statusOf(server, "disabled", "Server is disabled.")
+					: statusOf(server, "error", "Not connected."),
+			);
 		}
 	}
 
-	async initialize(signal: AbortSignal): Promise<McpInitializeResult> {
+	/**
+	 * Registers a listener for any change to the server set or a server's
+	 * status (connect, fail, auth, disable, remove, unexpected close). Fires
+	 * synchronously and often; callers should coalesce.
+	 */
+	onDidChangeStatus(listener: () => void): () => void {
+		this.statusListeners.add(listener);
+		return () => this.statusListeners.delete(listener);
+	}
+
+	/**
+	 * Registers a listener for tools whose server connection closed on its
+	 * own. The caller must unregister them from the tool registry.
+	 */
+	onDidLoseTools(listener: (toolNames: string[]) => void): () => void {
+		this.lostToolListeners.add(listener);
+		return () => this.lostToolListeners.delete(listener);
+	}
+
+	/**
+	 * Connects every enabled configured server in parallel. Servers report
+	 * `connecting` synchronously (before the first await), so a caller that
+	 * does not await can publish that state right away. `onUpdate` receives
+	 * each server's tools as soon as it connects.
+	 */
+	async initialize(
+		signal: AbortSignal,
+		options: { onUpdate?: (update: McpInitializeResult) => void } = {},
+	): Promise<McpInitializeResult> {
 		this.registeredToolNames.clear();
 		this.connections.clear();
 		this.dirtyToolServers.clear();
@@ -88,114 +145,170 @@ export class McpClientManager {
 		const activeServers = this.config.servers.filter(
 			(server) => !server.disabled,
 		);
-		const results = await Promise.all(
-			activeServers.map((server) =>
-				this.connector.connect(server, signal, { interactiveAuth: false }),
-			),
-		);
-		const warnings = [...this.config.warnings];
-		const tools: McpToolDefinition[] = [];
-		const seenToolNames = new Set<string>();
-
-		for (const result of results) {
-			warnings.push(...result.warnings);
-			this.applyConnectResult(result);
-			tools.push(
-				...this.withRegisteredNames(result.tools, seenToolNames, warnings),
-			);
+		for (const server of activeServers) {
+			this.setStatus(statusOf(server, "connecting", "Connecting…"));
 		}
+		const seenToolNames = new Set<string>();
+		const perServer = await Promise.all(
+			activeServers.map(async (server) => {
+				const result = await this.connector.connect(server, signal, {
+					interactiveAuth: false,
+				});
+				const warnings = [...result.warnings];
+				if (!(await this.acceptConnectResult(server, result))) {
+					return { tools: [], warnings };
+				}
+				const tools = this.withRegisteredNames(
+					result.tools,
+					seenToolNames,
+					warnings,
+				);
+				options.onUpdate?.({ tools, warnings });
+				return { tools, warnings };
+			}),
+		);
 
-		return { tools, warnings };
+		return {
+			tools: perServer.flatMap((result) => result.tools),
+			warnings: [
+				...this.config.warnings,
+				...perServer.flatMap((result) => result.warnings),
+			],
+		};
 	}
 
 	/**
 	 * Reconciles the live server set with `entries` (name → config). Servers
 	 * missing from `entries` are closed and forgotten; new or changed servers
-	 * are (re)connected. Used by the IDE, which owns MCP configuration for the
-	 * session and pushes the full set whenever it changes.
+	 * are (re)connected in parallel. Used by the IDE, which owns MCP
+	 * configuration for the session and pushes the full set whenever it
+	 * changes.
 	 *
 	 * Returns the tools to register and the tool names the caller must
-	 * unregister; unchanged servers keep their live connections.
+	 * unregister; unchanged servers keep their live connections (their
+	 * provenance is still updated).
 	 */
 	async setServers(
 		entries: Record<string, McpServerFileEntry & { disabled?: boolean }>,
 		signal: AbortSignal,
-		options: { configSource?: McpConfigSource; forceNames?: readonly string[] } = {},
+		options: McpSetServersOptions = {},
 	): Promise<McpToolRefreshResult> {
 		const warnings: string[] = [];
-		const removedToolNames: string[] = [];
-		const tools: McpToolDefinition[] = [];
+		const closeNames: string[] = [];
+		const dropNames: string[] = [];
+		const connectPlans: McpServerConfig[] = [];
+		const disabledPlans: McpServerConfig[] = [];
 
-		for (const name of [...this.serverConfigs.keys()]) {
-			if (Object.hasOwn(entries, name)) continue;
-			removedToolNames.push(...(await this.closeServerConnection(name)));
-			this.serverConfigs.delete(name);
-			this.serverStatuses.delete(name);
+		for (const name of this.serverConfigs.keys()) {
+			if (!Object.hasOwn(entries, name)) dropNames.push(name);
 		}
 
 		for (const [name, entry] of Object.entries(entries)) {
 			const existing = this.serverConfigs.get(name);
+			const provenance = options.sources?.[name];
 			const normalized = normalizeMcpServer(name, entry, {
 				timeoutMs: this.config.timeoutMs,
 				warnings,
-				configSources: [
+				configSources: provenance?.configSources ?? [
 					options.configSource ?? {
 						scope: "project",
 						path: mcpProjectConfigPath(this.cwd),
 					},
 				],
 			});
-			if (!normalized) continue;
+			if (!normalized) {
+				// An invalid entry replaces nothing: drop the old server.
+				if (existing) dropNames.push(name);
+				continue;
+			}
+			if (provenance) this.serverOrigins.set(name, provenance.origin);
+			else this.serverOrigins.delete(name);
 
 			// Unchanged servers keep their live connection. Comparing the
 			// normalized shape (not the raw entry) avoids reconnects when the
 			// IDE re-sends the same set on every sync. `forceNames` reconnects
 			// a single server on demand (the IDE's "connect" action).
-			if (existing && serverConfigEquals(existing, normalized) && !options.forceNames?.includes(name)) {
+			if (
+				existing &&
+				serverConfigEquals(existing, normalized) &&
+				!options.forceNames?.includes(name)
+			) {
+				existing.configSources = normalized.configSources;
+				const status = this.serverStatuses.get(name);
+				if (status) status.configSources = [...normalized.configSources];
 				continue;
 			}
-			if (existing) {
-				removedToolNames.push(...(await this.closeServerConnection(name)));
-			}
-			this.serverConfigs.set(name, normalized);
-			if (normalized.disabled) {
-				this.serverStatuses.set(name, {
-					name,
-					type: normalized.type,
-					configSources: [...normalized.configSources],
-					status: "disabled",
-					message: "Server is disabled.",
-					toolNames: [],
-					capabilities: {},
-					promptNames: [],
-					resourceUris: [],
-					updatedResourceUris: [],
-					subscribedResourceUris: [],
-				});
-				continue;
-			}
-
-			const result = await this.connector.connect(normalized, signal, {
-				interactiveAuth: false,
-			});
-			warnings.push(...result.warnings);
-			this.applyConnectResult(result);
-			tools.push(
-				...this.withRegisteredNames(
-					result.tools,
-					this.registeredToolNames,
-					warnings,
-				),
-			);
+			if (existing) closeNames.push(name);
+			if (normalized.disabled) disabledPlans.push(normalized);
+			else connectPlans.push(normalized);
 		}
 
-		return { tools, removedToolNames, warnings };
+		const removedToolNames = (
+			await Promise.all(
+				[...dropNames, ...closeNames].map((name) =>
+					this.closeServerConnection(name),
+				),
+			)
+		).flat();
+		for (const name of dropNames) {
+			this.serverConfigs.delete(name);
+			this.serverOrigins.delete(name);
+			this.deleteStatus(name);
+		}
+		if (removedToolNames.length > 0) {
+			options.onUpdate?.({ tools: [], removedToolNames, warnings: [] });
+		}
+
+		for (const server of disabledPlans) {
+			this.serverConfigs.set(server.name, server);
+			this.setStatus(statusOf(server, "disabled", "Server is disabled."));
+		}
+		for (const server of connectPlans) {
+			this.serverConfigs.set(server.name, server);
+			this.setStatus(statusOf(server, "connecting", "Connecting…"));
+		}
+
+		const perServer = await Promise.all(
+			connectPlans.map(async (server) => {
+				const result = await this.connector.connect(server, signal, {
+					interactiveAuth: false,
+				});
+				const serverWarnings = [...result.warnings];
+				if (!(await this.acceptConnectResult(server, result))) {
+					return { tools: [], warnings: serverWarnings };
+				}
+				const tools = this.withRegisteredNames(
+					result.tools,
+					this.registeredToolNames,
+					serverWarnings,
+				);
+				options.onUpdate?.({
+					tools,
+					removedToolNames: [],
+					warnings: serverWarnings,
+				});
+				return { tools, warnings: serverWarnings };
+			}),
+		);
+
+		return {
+			tools: perServer.flatMap((result) => result.tools),
+			removedToolNames,
+			warnings: [
+				...warnings,
+				...perServer.flatMap((result) => result.warnings),
+			],
+		};
 	}
 
 	async addServer(
 		name: string,
 		entry: McpServerFileEntry,
 		signal: AbortSignal,
+		options: {
+			configSources?: McpConfigSource[];
+			origin?: McpServerOrigin;
+		} = {},
 	): Promise<McpInitializeResult> {
 		if (this.connections.has(name)) {
 			return {
@@ -208,37 +321,30 @@ export class McpClientManager {
 		const server = normalizeMcpServer(name, entry, {
 			timeoutMs: this.config.timeoutMs,
 			warnings,
-			configSources: [
+			configSources: options.configSources ?? [
 				{ scope: "project", path: mcpProjectConfigPath(this.cwd) },
 			],
 		});
 		if (!server) return { tools: [], warnings };
 		this.serverConfigs.set(server.name, server);
+		if (options.origin) this.serverOrigins.set(server.name, options.origin);
+		else this.serverOrigins.delete(server.name);
 		if (server.disabled) {
-			this.serverStatuses.set(server.name, {
-				name: server.name,
-				type: server.type,
-				configSources: [...server.configSources],
-				status: "disabled",
-				message: "Server is disabled.",
-				toolNames: [],
-				capabilities: {},
-				promptNames: [],
-				resourceUris: [],
-				updatedResourceUris: [],
-				subscribedResourceUris: [],
-			});
+			this.setStatus(statusOf(server, "disabled", "Server is disabled."));
 			return {
 				tools: [],
 				warnings: [`Skipped MCP server '${name}': server is disabled.`],
 			};
 		}
 
+		this.setStatus(statusOf(server, "connecting", "Connecting…"));
 		const result = await this.connector.connect(server, signal, {
 			interactiveAuth: false,
 		});
 		warnings.push(...result.warnings);
-		this.applyConnectResult(result);
+		if (!(await this.acceptConnectResult(server, result))) {
+			return { tools: [], warnings };
+		}
 		return {
 			tools: this.withRegisteredNames(
 				result.tools,
@@ -249,6 +355,11 @@ export class McpClientManager {
 		};
 	}
 
+	/**
+	 * Reconnects `name` with interactive OAuth: opens the system browser and
+	 * waits for the loopback callback. The status reads `connecting` while
+	 * the sign-in is pending.
+	 */
 	async authenticateServer(
 		name: string,
 		signal: AbortSignal,
@@ -262,10 +373,15 @@ export class McpClientManager {
 		}
 		if (this.connections.has(name)) await this.closeServerConnection(name);
 
+		this.setStatus(
+			statusOf(server, "connecting", "Waiting for sign-in in the browser…"),
+		);
 		const result = await this.connector.connect(server, signal, {
 			interactiveAuth: true,
 		});
-		this.applyConnectResult(result);
+		if (!(await this.acceptConnectResult(server, result))) {
+			return { tools: [], warnings: result.warnings };
+		}
 		return {
 			tools: this.withRegisteredNames(
 				result.tools,
@@ -290,7 +406,7 @@ export class McpClientManager {
 		if (server) {
 			this.serverConfigs.set(name, { ...server, disabled: true });
 		}
-		this.serverStatuses.set(name, {
+		this.setStatus({
 			name,
 			type: (server ?? status)?.type ?? "stdio",
 			configSources: [...((server ?? status)?.configSources ?? [])],
@@ -316,7 +432,8 @@ export class McpClientManager {
 
 		const toolNames = await this.closeServerConnection(name);
 		this.serverConfigs.delete(name);
-		this.serverStatuses.delete(name);
+		this.serverOrigins.delete(name);
+		this.deleteStatus(name);
 		return { toolNames, warnings: [] };
 	}
 
@@ -453,6 +570,10 @@ export class McpClientManager {
 	listServerStatuses(): McpServerRuntimeStatus[] {
 		return [...this.serverStatuses.values()].map((status) => ({
 			...status,
+			source:
+				this.serverOrigins.get(status.name) ??
+				status.configSources.at(-1)?.scope ??
+				"project",
 			configSources: status.configSources.map((source) => ({ ...source })),
 			toolNames: [...status.toolNames],
 			capabilities: { ...(status.capabilities ?? {}) },
@@ -464,6 +585,7 @@ export class McpClientManager {
 	}
 
 	async close(): Promise<void> {
+		this.closed = true;
 		const connections = [...this.connections.values()];
 		this.connections.clear();
 		this.registeredToolNames.clear();
@@ -509,11 +631,73 @@ export class McpClientManager {
 		return existing.registeredName;
 	}
 
+	/**
+	 * Installs a connect result unless it went stale while connecting (the
+	 * server was replaced or removed, or the manager closed); a stale
+	 * connection is closed instead. Returns whether it was installed.
+	 */
+	private async acceptConnectResult(
+		server: McpServerConfig,
+		result: McpConnectResult,
+	): Promise<boolean> {
+		if (this.closed || this.serverConfigs.get(server.name) !== server) {
+			await result.connection?.transport.close().catch(() => undefined);
+			return false;
+		}
+		this.applyConnectResult(result);
+		return true;
+	}
+
 	private applyConnectResult(result: McpConnectResult): void {
-		this.serverStatuses.set(result.status.name, result.status);
 		if (result.connection) {
 			this.connections.set(result.connection.server.name, result.connection);
 		}
+		this.setStatus(result.status);
+	}
+
+	private setStatus(status: McpServerRuntimeStatus): void {
+		this.serverStatuses.set(status.name, status);
+		this.notifyStatus();
+	}
+
+	private deleteStatus(name: string): void {
+		if (this.serverStatuses.delete(name)) this.notifyStatus();
+	}
+
+	private notifyStatus(): void {
+		for (const listener of this.statusListeners) listener();
+	}
+
+	private handleConnectionClosed(name: string, client: Client): void {
+		const connection = this.connections.get(name);
+		if (!connection || connection.client !== client) return;
+		const toolNames = [...(this.serverStatuses.get(name)?.toolNames ?? [])];
+		for (const toolName of toolNames) this.registeredToolNames.delete(toolName);
+		this.connections.delete(name);
+		this.dirtyToolServers.delete(name);
+		this.primitives.clearServer(name);
+		void connection.transport.close().catch(() => undefined);
+		this.setStatus(
+			statusOf(
+				this.serverConfigs.get(name) ?? connection.server,
+				"error",
+				"Connection closed.",
+			),
+		);
+		if (toolNames.length === 0) return;
+		for (const listener of this.lostToolListeners) listener(toolNames);
+	}
+
+	private handleConnectionError(
+		name: string,
+		client: Client,
+		error: Error,
+	): void {
+		if (this.connections.get(name)?.client !== client) return;
+		const status = this.serverStatuses.get(name);
+		if (!status) return;
+		status.message = errorMessage(error);
+		this.notifyStatus();
 	}
 
 	private withRegisteredNames(
@@ -542,6 +726,7 @@ export class McpClientManager {
 				status.toolNames.push(registeredName);
 			}
 		}
+		if (registered.length > 0) this.notifyStatus();
 		return registered;
 	}
 }
@@ -555,9 +740,47 @@ function serverConfigEquals(a: McpServerConfig, b: McpServerConfig): boolean {
 	if (a.type !== b.type || a.disabled !== b.disabled) return false;
 	if (a.command !== b.command || a.url !== b.url) return false;
 	if (a.cwd !== b.cwd) return false;
-	return recordEquals(a.env, b.env)
-		&& recordEquals(a.headers, b.headers)
-		&& arrayEquals(a.args, b.args);
+	if (a.timeoutMs !== b.timeoutMs) return false;
+	if (a.trustToolAnnotations !== b.trustToolAnnotations) return false;
+	return (
+		recordEquals(a.env, b.env) &&
+		recordEquals(a.headers, b.headers) &&
+		arrayEquals(a.args, b.args) &&
+		optionalArrayEquals(a.enabledTools, b.enabledTools) &&
+		arrayEquals(a.disabledTools, b.disabledTools) &&
+		optionalArrayEquals(a.enabledPrompts, b.enabledPrompts) &&
+		arrayEquals(a.disabledPrompts, b.disabledPrompts) &&
+		optionalArrayEquals(a.enabledResources, b.enabledResources) &&
+		arrayEquals(a.disabledResources, b.disabledResources)
+	);
+}
+
+function optionalArrayEquals(
+	a: readonly string[] | undefined,
+	b: readonly string[] | undefined,
+): boolean {
+	if (a === undefined || b === undefined) return a === b;
+	return arrayEquals(a, b);
+}
+
+function statusOf(
+	server: Pick<McpServerConfig, "name" | "type" | "configSources">,
+	status: McpServerRuntimeStatus["status"],
+	message: string,
+): McpServerRuntimeStatus {
+	return {
+		name: server.name,
+		type: server.type,
+		configSources: server.configSources.map((source) => ({ ...source })),
+		status,
+		message,
+		toolNames: [],
+		capabilities: {},
+		promptNames: [],
+		resourceUris: [],
+		updatedResourceUris: [],
+		subscribedResourceUris: [],
+	};
 }
 
 function recordEquals(

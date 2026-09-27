@@ -302,3 +302,91 @@ export abstract class MultiWindowParts<T extends IMultiWindowPart, MementoType e
 		return this.getPartByDocument(getActiveDocument());
 	}
 }
+
+const GRID_PART_NAMES = ['sidebar', 'sessionspart', 'auxiliarybar', 'editor', 'panel', 'activitybar', 'statusbar', 'titlebar', 'banner'] as const;
+const GRID_PART_CLASS_PREFIX = 'part-host-';
+
+/**
+ * Marks the grid wrappers around parts with plain classes so stylesheets can
+ * target them without `:has()`:
+ *
+ * - `part-host-part`, `part-host-<name>`: the `.split-view-view` a part sits in
+ * - `part-host-contains-<name>`: every `.split-view-view` / `.monaco-split-view2`
+ *   around the part
+ * - `part-host-branch`, `part-host-branch-contains-<name>`: a `.split-view-view`
+ *   holding a nested branch that contains the part
+ *
+ * A `:has()` whose subject is a large container makes Chromium re-check that
+ * container — and restyle beneath it — whenever any element below changes a
+ * class that appears in any `:has()` argument, which made streaming chat
+ * restyle whole windows per token. Safe to call on every layout: classes are
+ * only touched when the grid structure actually changed.
+ */
+export function updateGridPartHostClasses(grid: HTMLElement): void {
+	const desired = new Map<HTMLElement, Set<string>>();
+	const add = (element: HTMLElement, className: string) => {
+		let classes = desired.get(element);
+		if (!classes) {
+			classes = new Set();
+			desired.set(element, classes);
+		}
+		classes.add(GRID_PART_CLASS_PREFIX + className);
+	};
+
+	// eslint-disable-next-line no-restricted-syntax
+	for (const part of grid.querySelectorAll<HTMLElement>('.split-view-view > .part')) {
+		const host = part.parentElement!;
+		const name = GRID_PART_NAMES.find(candidate => part.classList.contains(candidate));
+		add(host, 'part');
+		if (name) {
+			add(host, name);
+			add(host, `contains-${name}`);
+		}
+		for (let element = host.parentElement; element && element !== grid.parentElement; element = element.parentElement) {
+			if (!name) {
+				break;
+			}
+			if (element.classList.contains('split-view-view') || element.classList.contains('monaco-split-view2')) {
+				add(element, `contains-${name}`);
+			}
+			if (element.classList.contains('split-view-view') && element.firstElementChild?.classList.contains('monaco-grid-branch-node')) {
+				add(element, 'branch');
+				add(element, `branch-contains-${name}`);
+			}
+		}
+	}
+
+	// eslint-disable-next-line no-restricted-syntax
+	for (const element of grid.querySelectorAll<HTMLElement>('.split-view-view, .monaco-split-view2')) {
+		const want = desired.get(element);
+		for (const className of Array.from(element.classList)) {
+			if (className.startsWith(GRID_PART_CLASS_PREFIX) && !want?.has(className)) {
+				element.classList.remove(className);
+			}
+		}
+		for (const className of want ?? []) {
+			if (!element.classList.contains(className)) {
+				element.classList.add(className);
+			}
+		}
+	}
+}
+
+/**
+ * Sets `className` on the window's workbench root while an element matching
+ * `selector` exists in it — a class stylesheets can use instead of a root
+ * `:has(selector)`, which would make every `:has()`-relevant change anywhere
+ * in the window re-check the root (see {@link updateGridPartHostClasses}).
+ * Call it after any change that can add or remove a match.
+ */
+export function syncRootPresenceClass(targetWindow: Window, className: string, selector: string): void {
+	// eslint-disable-next-line no-restricted-syntax
+	const root = targetWindow.document.querySelector<HTMLElement>('.monaco-workbench');
+	if (root) {
+		// eslint-disable-next-line no-restricted-syntax
+		const present = !!root.querySelector(selector);
+		if (root.classList.contains(className) !== present) {
+			root.classList.toggle(className, present);
+		}
+	}
+}

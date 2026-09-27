@@ -411,28 +411,26 @@ export class ChatViewTitleControl extends Disposable {
 			this.tabOrder.push(currentSessionResourceKey);
 		}
 
-		// ‹ return affordance while a delegated (subagent) session owns the
-		// surface — the strip's leading chevron, like Devin's back button.
-		const parsedSubagent = currentSessionResource && parseSubagentSessionUri(currentSessionResource);
-		if (parsedSubagent) {
-			const parent = this.subagentReturnSessions.get(currentSessionResource!.toString()) ?? parsedSubagent.parentSession;
-			this.addBackButton(parent);
-		}
-
-
 		const visibleSessionKeys = this.tabOrder.slice(0, ChatViewTitleControl.MAX_HISTORY_TABS);
 		if (currentSessionResourceKey && !currentIsEmptyDraft && !visibleSessionKeys.includes(currentSessionResourceKey)) {
 			// The surface's own tab always renders — swap it in for the tail
 			// entry when the cap would scroll it out of the strip entirely.
 			visibleSessionKeys[visibleSessionKeys.length - 1] = currentSessionResourceKey;
 		}
-		for (const resourceKey of visibleSessionKeys) {
+		const renderable = visibleSessionKeys.filter(resourceKey => sessionsByResource.has(resourceKey) || this.openSessionTabs.has(resourceKey));
+		const { order, parentOf } = this.nestSubagentTabs(renderable, sessionsByResource);
+		for (let index = 0; index < order.length; index++) {
+			const resourceKey = order[index];
 			const session = sessionsByResource.get(resourceKey);
 			const tab = this.openSessionTabs.get(resourceKey);
-			if (!session && !tab) {
-				continue;
-			}
 			const isCurrent = resourceKey === currentSessionResourceKey;
+			const resource = session?.resource ?? tab?.resource;
+			const parsedSubagent = resource && parseSubagentSessionUri(resource);
+			if (isCurrent && parsedSubagent && !parentOf.has(resourceKey)) {
+				// The parent's tab is the way back; only when it has been closed
+				// does the child carry its own ‹ return affordance.
+				this.addBackButton(this.subagentReturnSessions.get(resourceKey) ?? parsedSubagent.parentSession);
+			}
 			this.addTab({
 				label: isCurrent ? currentTitle : (session?.label ?? tab?.label ?? ChatViewTitleControl.DEFAULT_TITLE),
 				active: isCurrent,
@@ -440,6 +438,8 @@ export class ChatViewTitleControl extends Disposable {
 				session,
 				sessionResource: session ? undefined : tab?.resource,
 				closable: true,
+				nested: parentOf.has(resourceKey),
+				hasNestedFollower: parentOf.has(order[index + 1]),
 			});
 		}
 
@@ -472,6 +472,56 @@ export class ChatViewTitleControl extends Disposable {
 		}
 	}
 
+	/**
+	 * Orders the strip so each subagent tab sits directly after the tab of the
+	 * session that delegated to it, and reports which tabs nest under a parent.
+	 * A subagent whose parent tab is not in the strip stays where it was.
+	 */
+	private nestSubagentTabs(resourceKeys: readonly string[], sessionsByResource: ReadonlyMap<string, IAgentSession>): { order: string[]; parentOf: Map<string, string> } {
+		const present = new Set(resourceKeys);
+		const parentOf = new Map<string, string>();
+		const childrenOf = new Map<string, string[]>();
+		for (const resourceKey of resourceKeys) {
+			const resource = sessionsByResource.get(resourceKey)?.resource ?? this.openSessionTabs.get(resourceKey)?.resource;
+			const parsed = resource && parseSubagentSessionUri(resource);
+			if (!parsed) {
+				continue;
+			}
+			const parentKey = [parsed.parentSession.toString(), this.subagentReturnSessions.get(resourceKey)?.toString()]
+				.find(candidate => candidate && candidate !== resourceKey && present.has(candidate));
+			if (parentKey) {
+				parentOf.set(resourceKey, parentKey);
+				childrenOf.set(parentKey, [...childrenOf.get(parentKey) ?? [], resourceKey]);
+			}
+		}
+
+		const order: string[] = [];
+		const visited = new Set<string>();
+		const visit = (resourceKey: string) => {
+			if (visited.has(resourceKey)) {
+				return;
+			}
+			visited.add(resourceKey);
+			order.push(resourceKey);
+			for (const child of childrenOf.get(resourceKey) ?? []) {
+				visit(child);
+			}
+		};
+		for (const resourceKey of resourceKeys) {
+			if (!parentOf.has(resourceKey)) {
+				visit(resourceKey);
+			}
+		}
+		// A parent cycle leaves keys unvisited; they still get a tab.
+		for (const resourceKey of resourceKeys) {
+			if (!visited.has(resourceKey)) {
+				parentOf.delete(resourceKey);
+				visit(resourceKey);
+			}
+		}
+		return { order, parentOf };
+	}
+
 	private addBackButton(parent: IChatModel['sessionResource']): void {
 		if (!this.tabsContainer) {
 			return;
@@ -491,7 +541,7 @@ export class ChatViewTitleControl extends Disposable {
 		}));
 	}
 
-	private addTab(options: { label: string; active: boolean; isCurrent?: boolean; isNew?: boolean; closable?: boolean; session?: IAgentSession; sessionResource?: IChatModel['sessionResource'] }): void {
+	private addTab(options: { label: string; active: boolean; isCurrent?: boolean; isNew?: boolean; closable?: boolean; session?: IAgentSession; sessionResource?: IChatModel['sessionResource']; nested?: boolean; hasNestedFollower?: boolean }): void {
 		if (!this.tabsContainer) {
 			return;
 		}
@@ -506,9 +556,14 @@ export class ChatViewTitleControl extends Disposable {
 			h('span.codicon.codicon-close.chat-view-title-tab-close@close', { role: 'button', title: localize('chat.closeSessionTab', "Close Tab"), ariaLabel: localize('chat.closeSessionTab', "Close Tab") }),
 		]);
 		// Not-yet-responded-to sessions show the Backboard mark; sessions with at
-		// least one response show a chat bubble.
-		tabElements.icon.classList.add(...ThemeIcon.asClassNameArray(isSubagent ? Codicon.gitBranch : options.isNew ? ThemeIcon.fromId('backboard-logo') : Codicon.comment));
+		// least one response show a chat bubble. A subagent's icon slot is drawn
+		// as a tree connector to the parent tab instead (CSS).
+		if (!isSubagent) {
+			tabElements.icon.classList.add(...ThemeIcon.asClassNameArray(options.isNew ? ThemeIcon.fromId('backboard-logo') : Codicon.comment));
+		}
 		tabElements.root.classList.toggle('chat-view-title-tab-subagent', isSubagent);
+		tabElements.root.classList.toggle('chat-view-title-tab-nested', !!options.nested);
+		tabElements.root.classList.toggle('chat-view-title-tab-has-nested', !!options.hasNestedFollower);
 		// A chat still working shows the spinner in its tab, so background work
 		// is visible without switching to it.
 		if (options.session && getAgentSessionListStatus(options.session) === 'running') {

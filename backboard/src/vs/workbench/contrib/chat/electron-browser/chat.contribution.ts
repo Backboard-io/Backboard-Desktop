@@ -53,7 +53,7 @@ import './backboardWorkspace/backboardWorkspace.contribution.js';
 import { BackboardModeSwitcherAction, BackboardModeSwitcherContribution, ToggleBackboardModeSwitcherTitleBarAction } from './backboardModeSwitcher/backboardModeSwitcherActions.js';
 import { shouldWarnForSessionShutdown } from './chatLifecycle.js';
 import { HoldToVoiceChatInChatViewAction, InlineVoiceChatAction, KeywordActivationContribution, QuickVoiceChatAction, ReadChatResponseAloud, StartVoiceChatAction, StopListeningAction, StopListeningAndSubmitAction, StopReadAloud, StopReadChatItemAloud, VoiceChatInChatViewAction } from './actions/voiceChatActions.js';
-import { OpenWorkspaceInAgentsWindowAction, OpenAgentsWindowAction, OpenOptimusWindowAction, OpenChatSessionInAgentsWindowAction, AgentsHandoffInputTipContribution } from './agentSessions/agentSessionsActions.js';
+import { OpenWorkspaceInAgentsWindowAction, OpenAgentsWindowAction, OpenOptimusWindowAction, OpenChatSessionInAgentsWindowAction, OpenImageInSimpleCanvasAction, AgentsHandoffInputTipContribution } from './agentSessions/agentSessionsActions.js';
 import { NativeBuiltinToolsContribution } from './builtInTools/tools.js';
 import { NativePluginGitCommandService } from './pluginGitCommandService.js';
 
@@ -243,6 +243,7 @@ registerAction2(ToggleBackboardModeSwitcherTitleBarAction);
 registerAction2(OpenAgentsWindowAction);
 registerAction2(OpenOptimusWindowAction);
 registerAction2(OpenChatSessionInAgentsWindowAction);
+registerAction2(OpenImageInSimpleCanvasAction);
 registerAction2(StartVoiceChatAction);
 
 registerAction2(VoiceChatInChatViewAction);

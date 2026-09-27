@@ -162,7 +162,7 @@ export class ChatMcpAppSubPart extends BaseChatToolInvocationSubPart {
 				container.style.display = 'none';
 
 				const progressMessage = dom.$('span');
-				progressMessage.textContent = localize('loadingMcpApp', 'Loading MCP App...');
+				progressMessage.textContent = localize('loadingMcpApp', 'Loading Connector App...');
 				const progressPart = this._instantiationService.createInstance(
 					ChatProgressSubPart,
 					progressMessage,
@@ -200,7 +200,7 @@ export class ChatMcpAppSubPart extends BaseChatToolInvocationSubPart {
 
 		// Create error message with markdown
 		const errorMessage = new MarkdownString();
-		errorMessage.appendText(localize('mcpAppError', 'Error loading MCP App: {0}', error.message || String(error)));
+		errorMessage.appendText(localize('mcpAppError', 'Error loading Connector App: {0}', error.message || String(error)));
 
 		// Use ChatErrorWidget for consistent error styling
 		const errorWidget = this._register(new ChatErrorWidget(ChatErrorLevel.Error, errorMessage, this._markdownRendererService));

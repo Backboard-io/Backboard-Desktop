@@ -73,6 +73,9 @@ export interface CreateLoopOptions {
 	resolveCapacityFallback?: CapacityFallbackResolver;
 	onModelSucceeded?: ModelSucceededHandler;
 	onThinkingDisabled?: ThinkingDisabledHandler;
+	onRunError?: (error: string) => void;
+	maxTurnAttempts?: number;
+	turnRetryBackoffMs?: number;
 }
 
 export interface ResolveAssistantOptions {
@@ -144,6 +147,9 @@ export class AgentLoopFactory {
 			resolveCapacityFallback: options.resolveCapacityFallback,
 			onModelSucceeded: options.onModelSucceeded,
 			onThinkingDisabled: options.onThinkingDisabled,
+			onRunError: options.onRunError,
+			maxTurnAttempts: options.maxTurnAttempts,
+			turnRetryBackoffMs: options.turnRetryBackoffMs,
 		});
 	}
 }

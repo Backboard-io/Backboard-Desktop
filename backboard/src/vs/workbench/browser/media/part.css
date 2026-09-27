@@ -105,7 +105,7 @@
  * the edge it is attached to. Keeping the movement on the outer part view avoids
  * animating editor groups and the split views inside individual panes.
  * ------------------------------------------------------------------------- */
-.monaco-workbench.parts-animating .monaco-grid-view .split-view-view:has(> .part) {
+.monaco-workbench.parts-animating .monaco-grid-view .split-view-view.part-host-part {
 	/* !important so this wins over per-window rules that already set a (narrower)
 	   transition on the same views — e.g. the sessions window's
 	   `:has(> .part.sidebar) { transition: opacity }`, whose selector is more
@@ -122,7 +122,7 @@
 /* The short directional travel keeps the panel attached to the edge it opens
  * from. Geometry remains the primary motion; this is only a soft content lead
  * that prevents a fully populated panel from appearing all at once. */
-.monaco-workbench.parts-animating .monaco-grid-view .split-view-view:has(> .part) > .part {
+.monaco-workbench.parts-animating .monaco-grid-view .split-view-view.part-host-part > .part {
 	transition:
 		transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
 		opacity 180ms cubic-bezier(0.33, 1, 0.68, 1) !important;
@@ -157,7 +157,7 @@
  * defeats the two "instant hide" paths that would otherwise cut the transition:
  * the split view's `:not(.visible) { display: none }` and the workbench's
  * `.nosidebar/.noauxiliarybar > .part { display: none }` rules. */
-.monaco-workbench.parts-animating .monaco-grid-view .split-view-view:not(.visible):has(> .part) {
+.monaco-workbench.parts-animating .monaco-grid-view .split-view-view:not(.visible).part-host-part {
 	display: block !important;
 }
 
@@ -174,7 +174,7 @@
  * it is clipped by the moving split-view edge. This avoids the "rush, then
  * crawl" feeling of the more expressive Simple-mode reveal and keeps terminal
  * text, trees, and editor chrome from ghosting as they close. */
-.monaco-workbench:not(.agent-sessions-workbench).parts-animating .monaco-grid-view .split-view-view:has(> .part) {
+.monaco-workbench:not(.agent-sessions-workbench).parts-animating .monaco-grid-view .split-view-view.part-host-part {
 	transition:
 		width 260ms cubic-bezier(0.4, 0, 0.2, 1),
 		height 260ms cubic-bezier(0.4, 0, 0.2, 1),
@@ -182,7 +182,7 @@
 		top 260ms cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
-.monaco-workbench:not(.agent-sessions-workbench).parts-animating .monaco-grid-view .split-view-view:has(> .part) > .part {
+.monaco-workbench:not(.agent-sessions-workbench).parts-animating .monaco-grid-view .split-view-view.part-host-part > .part {
 	transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1) !important;
 	opacity: 1 !important;
 	will-change: transform;
@@ -209,8 +209,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.monaco-workbench.parts-animating .monaco-grid-view .split-view-view:has(> .part),
-	.monaco-workbench.parts-animating .monaco-grid-view .split-view-view:has(> .part) > .part {
+	.monaco-workbench.parts-animating .monaco-grid-view .split-view-view.part-host-part,
+	.monaco-workbench.parts-animating .monaco-grid-view .split-view-view.part-host-part > .part {
 		transition: none !important;
 	}
 }

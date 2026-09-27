@@ -181,6 +181,7 @@ function runnerWith(client: BackboardClient, tools: Tool[]): SubAgentRunner {
 		getThinking: async () => undefined,
 		systemPrompt: "you are a sub-agent",
 		toolFactory: () => tools,
+		retryBackoffMs: 0,
 	});
 }
 
@@ -488,6 +489,85 @@ describe("SubAgentRunner", () => {
 		expect(childStatuses).toEqual(["failed"]);
 		expect(scratchPath).toBeString();
 		await expect(access(scratchPath as string)).rejects.toThrow();
+	});
+
+	it("retries a failed worker turn silently and resumes on the same thread", async () => {
+		class FlakyClient extends CompletingClient {
+			failuresLeft = 2;
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				if (this.failuresLeft > 0) {
+					this.failuresLeft--;
+					this.messageRequests.push(req);
+					yield { kind: "thread", threadId: "thr_flaky" };
+					throw new Error("upstream exploded");
+				}
+				yield* super.runMessage(req);
+			}
+		}
+		const client = new FlakyClient();
+		const parentBus = new EventBus();
+		const parentEvents: string[] = [];
+		parentBus.onAny((event) => {
+			parentEvents.push(
+				event.type === "agent:child_event"
+					? `child:${event.event.type}`
+					: event.type,
+			);
+		});
+
+		const result = await runnerWith(client, []).run({
+			prompt: "do the thing",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			parentBus,
+			parentToolCallId: "agent_flaky",
+		});
+
+		expect(result.status).toBe("completed");
+		expect(result.report).toBe("final report from sub-agent");
+		expect(client.messageRequests).toHaveLength(3);
+		expect(client.messageRequests[2]?.content).toContain(
+			"Request:\ndo the thing",
+		);
+		expect(parentEvents).not.toContain("child:run:error");
+		expect(parentEvents.at(-1)).toBe("agent:child_end");
+	});
+
+	it("hands the task back after five failed attempts without a run error", async () => {
+		class AlwaysFailingClient extends CompletingClient {
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.messageRequests.push(req);
+				yield { kind: "thread", threadId: "thr_down" };
+				throw new Error("upstream exploded");
+			}
+		}
+		const client = new AlwaysFailingClient();
+		const parentBus = new EventBus();
+		const childEventTypes: string[] = [];
+		parentBus.on("agent:child_event", (event) =>
+			childEventTypes.push(event.event.type),
+		);
+
+		const result = await runnerWith(client, []).run({
+			prompt: "do the thing",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			parentBus,
+			parentToolCallId: "agent_down",
+		});
+
+		expect(client.messageRequests).toHaveLength(5);
+		expect(result.status).toBe("failed");
+		expect(result.report).toContain(
+			"Complete the remaining work directly in this turn",
+		);
+		expect(childEventTypes).not.toContain("run:error");
 	});
 
 	it("runs worker turns without creating a Backboard assistant", async () => {

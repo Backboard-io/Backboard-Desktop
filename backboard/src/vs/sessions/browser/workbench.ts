@@ -9,7 +9,7 @@ import './media/chatMarkdown.css';
 import './media/backboardChatTheme.css';
 import { Disposable, DisposableMap, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../base/common/lifecycle.js';
 import { Emitter, Event, setGlobalLeakWarningThreshold } from '../../base/common/event.js';
-import { getActiveDocument, getActiveElement, getClientArea, getWindowId, getWindow, getWindows, IDimension, isAncestorUsingFlowTo, isHTMLElement, size, Dimension, runWhenWindowIdle, scheduleAtNextAnimationFrame } from '../../base/browser/dom.js';
+import { addDisposableListener, EventType, getActiveDocument, getActiveElement, getClientArea, getWindowId, getWindow, getWindows, IDimension, isAncestorUsingFlowTo, isHTMLElement, size, Dimension, runWhenWindowIdle, scheduleAtNextAnimationFrame } from '../../base/browser/dom.js';
 import { DeferredPromise, RunOnceScheduler } from '../../base/common/async.js';
 import { isFullscreen, onDidChangeFullscreen, isChrome, isFirefox, isSafari } from '../../base/browser/browser.js';
 import { mark } from '../../base/common/performance.js';
@@ -17,7 +17,7 @@ import { onUnexpectedError, setUnexpectedErrorHandler } from '../../base/common/
 import { isWindows, isLinux, isWeb, isNative, isMacintosh } from '../../base/common/platform.js';
 import { Parts, Position, PanelAlignment, IWorkbenchLayoutService, SINGLE_WINDOW_PARTS, MULTI_WINDOW_PARTS, IPartVisibilityChangeEvent, positionToString } from '../../workbench/services/layout/browser/layoutService.js';
 import { ILayoutOffsetInfo } from '../../platform/layout/browser/layoutService.js';
-import { Part } from '../../workbench/browser/part.js';
+import { Part, updateGridPartHostClasses } from '../../workbench/browser/part.js';
 import { Direction, ISerializableView, ISerializedGrid, ISerializedLeafNode, ISerializedNode, IViewSize, Orientation, SerializableGrid } from '../../base/browser/ui/grid/grid.js';
 import { IEditorGroupsService } from '../../workbench/services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../workbench/services/editor/common/editorService.js';
@@ -1181,6 +1181,18 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	}
 
 	private registerLayoutListeners(): void {
+		// Stylesheets read `sessions-sash-dragging` instead of a root
+		// `:has(.monaco-sash.active)`, which re-checked the root on every
+		// :has-relevant change anywhere in the window (see part.ts).
+		this._register(addDisposableListener(this.mainContainer, EventType.MOUSE_DOWN, e => {
+			if (isHTMLElement(e.target) && e.target.closest('.monaco-sash')) {
+				this.mainContainer.classList.add('sessions-sash-dragging');
+			}
+		}, true));
+		this._register(addDisposableListener(mainWindow, EventType.MOUSE_UP, () => {
+			this.mainContainer.classList.remove('sessions-sash-dragging');
+		}, true));
+
 		// Fullscreen changes
 		this._register(onDidChangeFullscreen(windowId => {
 			if (windowId === getWindowId(mainWindow)) {
@@ -1565,6 +1577,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 
 		// Layout the grid widget
 		this.workbenchGrid.layout(gridWidth, gridHeight);
+		updateGridPartHostClasses(this.workbenchGrid.element);
 		this.normalizeSimpleAuxiliaryBarWidth();
 		this.layoutMobileSidebar();
 

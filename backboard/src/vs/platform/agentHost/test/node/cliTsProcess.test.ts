@@ -55,7 +55,9 @@ async function withStubRuntime(options: IStubRuntimeOptions, fn: (ops: () => str
 		`	ack();`,
 		`});`,
 	].join('\n'));
-	fs.writeFileSync(stubLauncher, `#!/bin/sh\nexec "${process.execPath}" "${stubScript}" "$@"\n`, { mode: 0o755 });
+	// Under the Electron test runner `process.execPath` is the renderer helper; without
+	// ELECTRON_RUN_AS_NODE it boots as a full "Electron" app and raises a macOS Keychain prompt.
+	fs.writeFileSync(stubLauncher, `#!/bin/sh\nELECTRON_RUN_AS_NODE=1\nexport ELECTRON_RUN_AS_NODE\nexec "${process.execPath}" "${stubScript}" "$@"\n`, { mode: 0o755 });
 	const previous = new Map(STUB_ENV.map(name => [name, process.env[name]] as const));
 	process.env['BACKBOARD_CLI_TS_PATH'] = stubLauncher;
 	process.env['CLI_TS_STUB_LOG'] = logPath;

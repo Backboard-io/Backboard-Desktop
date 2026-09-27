@@ -1,3 +1,5 @@
+import type { ModelSource } from "../../providers/backboard/types.ts";
+
 /**
  * Tells the agent which built-in media tools this turn enables.
  *
@@ -10,11 +12,118 @@
 export interface GenerativeMediaSelection {
 	imageModel?: { provider: string; name: string };
 	videoModel?: { provider: string; name: string };
+	/**
+	 * Where the turn is billed. Backboard's media tools only run on
+	 * Backboard-billed turns; a key or subscription turn never reaches them.
+	 */
+	route?: { source: ModelSource; provider: string };
+	/** The working directory is a Backboard Canvas project (see {@link CANVAS_PROJECT_FILE}). */
+	canvasProject?: boolean;
+	/** The project's defaults for new media, from its board file. */
+	canvasSettings?: CanvasProjectSettings;
 }
+
+/** Defaults the Canvas window stores under `settings` in the board file. */
+export interface CanvasProjectSettings {
+	aspectRatio?: string;
+	duration?: number;
+	resolution?: string;
+	audio?: boolean;
+}
+
+/** Reads the `settings` of a Canvas board file; malformed files give none. */
+export function parseCanvasProjectSettings(
+	text: string,
+): CanvasProjectSettings | undefined {
+	let data: unknown;
+	try {
+		data = JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+	const raw =
+		typeof data === "object" && data !== null
+			? (data as { settings?: unknown }).settings
+			: undefined;
+	if (typeof raw !== "object" || raw === null) {
+		return undefined;
+	}
+	const value = raw as Record<string, unknown>;
+	const settings: CanvasProjectSettings = {
+		...(typeof value.aspectRatio === "string"
+			? { aspectRatio: value.aspectRatio }
+			: {}),
+		...(typeof value.duration === "number" && value.duration > 0
+			? { duration: value.duration }
+			: {}),
+		...(typeof value.resolution === "string"
+			? { resolution: value.resolution }
+			: {}),
+		...(typeof value.audio === "boolean" ? { audio: value.audio } : {}),
+	};
+	return Object.keys(settings).length ? settings : undefined;
+}
+
+/**
+ * Marks a folder as a Canvas project: the IDE's Canvas window keeps its board
+ * here. Mirrored as CANVAS_BOARD_FILE in the IDE
+ * (src/vs/sessions/contrib/canvasStudio/common/canvasBoard.ts).
+ */
+export const CANVAS_PROJECT_FILE = ".backboard/canvas.json";
 
 export function buildGenerativeMediaPrompt(
 	selection: GenerativeMediaSelection,
 ): string {
+	const media = buildMediaToolsPrompt(selection);
+	if (!selection.canvasProject) {
+		return media;
+	}
+	const defaults = describeCanvasSettings(selection.canvasSettings);
+	return `${media}\n\n${CANVAS_PROJECT_PROMPT}${defaults ? `\n- ${defaults}` : ""}`;
+}
+
+/** "Project defaults for new clips: 16:9, 8 seconds, 720p, native audio on." */
+function describeCanvasSettings(
+	settings: CanvasProjectSettings | undefined,
+): string | undefined {
+	if (!settings) {
+		return undefined;
+	}
+	const parts = [
+		settings.aspectRatio,
+		settings.duration ? `${settings.duration} seconds` : undefined,
+		settings.resolution,
+		settings.audio === undefined
+			? undefined
+			: settings.audio
+				? "native audio on"
+				: "no audio",
+	].filter((part): part is string => !!part);
+	return parts.length
+		? `Project defaults for new clips (chosen in the Canvas settings under the chat): ${parts.join(", ")}. Use them, and do not ask for a length, unless the user asks for something else.`
+		: undefined;
+}
+
+/**
+ * The Canvas window is a Runway-style studio: the user watches a board that
+ * places every generated or edited clip next to its source. The agent's job
+ * there is to make media, and to edit by describing only the change.
+ */
+const CANVAS_PROJECT_PROMPT = [
+	"## Canvas project",
+	"",
+	"In this folder you are the user's creative studio agent, not a coding assistant: introduce yourself and answer as a director and editor who makes images and videos. The folder is a Backboard Canvas project, and every image or video you generate, and every media file saved in it, appears on the user's board as you work, next to the media it came from.",
+	"- Make the media. When the user asks for a shot, an ad or an edit, generate it with the media tools instead of describing what you would do.",
+	'- Edits: when an image or video is attached and the user asks for a change ("replace the dog with a cat", "make it night"), generate from that attachment and write the prompt as "keep everything about the shot identical" plus only the change. Do not regenerate from scratch unless asked.',
+	"- Editing a video needs a video model that accepts video input (for example Runway Aleph or FLUX Video Edit); animating an image needs one that accepts a first frame. If the selected model cannot take the attachment, say which kind of model can instead of switching models.",
+	"- Longer pieces (ads, trailers, stories): propose a short shot list first, one line per shot with its length, then generate shot by shot and reuse earlier stills as references so characters and places stay consistent.",
+	"- Keep every output inside this project folder. Never edit or delete `.backboard/canvas.json`; the board arranges itself.",
+].join("\n");
+
+function buildMediaToolsPrompt(selection: GenerativeMediaSelection): string {
+	if (selection.route && selection.route.source !== "backboard") {
+		return buildOwnBillingMediaPrompt(selection.route);
+	}
 	const { imageModel, videoModel } = selection;
 	if (!imageModel && !videoModel) {
 		return [
@@ -45,10 +154,91 @@ export function buildGenerativeMediaPrompt(
 		videoModel
 			? "For video, you must call `generate_video` directly — do not search docs, MCP, or the web to check capability first; the tool is available right now. Never use execute, curl, FetchUrl, or POST /threads/messages to create a clip. Fill `prompt` and optional duration/resolution/native audio; Backboard supplies the selected model."
 			: "Ask for the media in natural language and let the thread model call the tool.",
+		...(videoModel ? ["", VIDEO_LENGTH_GUIDANCE, "", attachedMediaGuidance(videoModel.provider)] : []),
 		"",
 		"The selected model is fixed for the turn. Never substitute another media model. If the selected model cannot satisfy the request — an unsupported duration or input, for instance — say so and offer a supported alternative instead of switching models.",
 	].join("\n");
 }
+
+/**
+ * Media on a turn billed to the user's own key or plan. Backboard's tools
+ * would bill a second account, so they are off; a ChatGPT plan still carries
+ * OpenAI's hosted image tool (see CodexSubscriptionClient).
+ */
+function buildOwnBillingMediaPrompt(route: {
+	source: ModelSource;
+	provider: string;
+}): string {
+	const noShellMedia =
+		"Do not generate media with execute, curl, FetchUrl, or a provider SDK.";
+	if (route.provider === "openai-subscription") {
+		return [
+			"## Image and video generation",
+			"",
+			"This turn runs on the user's ChatGPT subscription, so Backboard's `generate_image` / `generate_video` tools are not available.",
+			"- Images: use your built-in image generation tool when the user asks for an image. It runs on the subscription; each image is shown to the user and saved in the project's `generated-images/` folder automatically.",
+			"- Videos: not available on this model. If the user asks for a clip, tell them video generation needs a Backboard model.",
+			"",
+			noShellMedia,
+		].join("\n");
+	}
+	const billing =
+		route.source === "byok"
+			? "the user's own API key"
+			: route.provider === "anthropic-subscription"
+				? "the user's Claude subscription"
+				: "the user's own subscription";
+	return [
+		"## Image and video generation",
+		"",
+		`Media generation is not available on this model: it runs on ${billing}, and Backboard's \`generate_image\` / \`generate_video\` tools only run on Backboard models. If the user asks for an image or a video, tell them to switch to a Backboard model.`,
+		"",
+		noShellMedia,
+	].join("\n");
+}
+
+/**
+ * Clip length is the one video setting users care about up front, and the
+ * hosted `generate_video` tool runs server-side where the client cannot
+ * interject. So the agent asks first (the composer shows `ask_user` as a
+ * question card) unless the user already said how long.
+ */
+// Mirrored as VIDEO_LENGTH_SECONDS in the IDE's Canvas composer
+// (src/vs/sessions/contrib/rightWorkbench/browser/rightWorkbenchCanvas.ts),
+// which cannot import cli-ts — change both together.
+export const VIDEO_LENGTH_OPTIONS = ["5s", "8s", "10s", "15s"] as const;
+
+/**
+ * How the video tool takes the user's attached media: uploaded with the
+ * message and offered to `generate_video` as document IDs. Without this the
+ * agent read a clip with Read (binary into context), guessed among IDs, and
+ * silently regenerated from scratch when an edit failed.
+ *
+ * OpenRouter (every video model the picker lists today) has no source-video
+ * field: the clip goes in as a video *reference* (`input_references` with a
+ * `video_url`). The prompt must describe a new video that follows that
+ * reference. Edit wording ("keep the same footage, change only …") makes
+ * Seedance 2.5 switch to its video-editing mode, which needs duration=-1 and
+ * aspect_ratio=adaptive; OpenRouter cannot send either, so the job fails
+ * (OpenRouterTeam/typescript-sdk#1096). Reference-guided wording succeeds.
+ */
+function attachedMediaGuidance(videoProvider: string): string {
+	const sourceClip = videoProvider === "openrouter"
+		? [
+			"pass that clip in the references (`input_reference_document_ids`), not `input_video_document_id` (this provider has no source-video field).",
+			"Write the prompt as a new video that follows the reference, never as an edit of it: describe the whole shot you want (subject, action, setting) with the user's change built in, and say it follows the reference video's camera motion, framing, movement and scene. For example, \"A soccer broadcast shot that follows the reference video's camera motion, framing, player movement and stadium; the teams are Canada in red and white and the USA in navy.\"",
+			"Never use edit wording such as \"edit the video\", \"keep the same footage\", \"change only\" or \"replace\": Seedance then switches to a video-editing mode this provider cannot run, and the job fails.",
+		].join(" ")
+		: "pass that clip as the source video (`input_video_document_id`) and describe only the change.";
+	return [
+		"Attached media: images and videos the user attaches are uploaded with their message and reach `generate_video` as document IDs, not file paths. Never open attached images or videos with Read or other file tools; they are binary.",
+		`- To edit, restyle, extend or continue an attached video ("change the jerseys", "make it night"), ${sourceClip} Use first/last-frame images only to animate a still.`,
+		"- The user's attachment is the file their message names. If several document IDs are offered and you cannot tell which one it is, prefer the one uploaded with this message and say which you used.",
+		"- If `generate_video` fails with a `hint`, follow it and retry once with the same inputs. Otherwise tell the user the tool's error and what you passed. Do not quietly switch to generating a new clip from scratch, or from a still of the clip; offer that as an option instead.",
+	].join("\n");
+}
+
+const VIDEO_LENGTH_GUIDANCE = `Video length: if the user has not said how long the clip should be (e.g. "10 seconds", "a 5s clip", "short"), call \`ask_user\` before \`generate_video\` with one question — header "Video length", question "How long should the video be?", options ${VIDEO_LENGTH_OPTIONS.map((option) => `"${option}"`).join(", ")} — then pass the chosen length as \`duration\` in seconds. If they already gave a length, use it (as \`duration\`) without asking. Always state the clip length in your reply once the video is ready.`;
 
 function formatSelection(selection: {
 	provider: string;

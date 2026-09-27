@@ -50,14 +50,16 @@
 
 import { SequencerByKey } from '../../../../../../base/common/async.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
-import { Disposable } from '../../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap } from '../../../../../../base/common/lifecycle.js';
 import { ResourceMap, ResourceSet } from '../../../../../../base/common/map.js';
 import { equals } from '../../../../../../base/common/objects.js';
+import { autorun } from '../../../../../../base/common/observable.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { IAgentHostService } from '../../../../../../platform/agentHost/common/agentService.js';
 import { KNOWN_AUTO_APPROVE_VALUES, SessionConfigKey } from '../../../../../../platform/agentHost/common/sessionConfigKeys.js';
 import { ActionType } from '../../../../../../platform/agentHost/common/state/protocol/actions.js';
 import type { ResolveSessionConfigResult } from '../../../../../../platform/agentHost/common/state/protocol/commands.js';
+import type { ClientPluginCustomization } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { InstantiationType, registerSingleton } from '../../../../../../platform/instantiation/common/extensions.js';
 import { createDecorator } from '../../../../../../platform/instantiation/common/instantiation.js';
@@ -65,6 +67,8 @@ import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
 import { ChatConfiguration } from '../../../common/constants.js';
 import { IChatService } from '../../../common/chatService/chatService.js';
+import { getChatSessionType } from '../../../common/model/chatUri.js';
+import { IAgentHostActiveClientService } from './agentHostActiveClientService.js';
 import { IAgentHostNewSessionFolderService } from './agentHostNewSessionFolderService.js';
 
 export const IAgentHostUntitledProvisionalSessionService =
@@ -172,6 +176,11 @@ export interface IAgentHostUntitledProvisionalSessionService {
 interface IEntry {
 	readonly backendSession: URI;
 	/**
+	 * Customizations this window last handed the provisional as its active
+	 * client (MCP servers included); `undefined` until they were resolved.
+	 */
+	activeClientCustomizations?: readonly ClientPluginCustomization[];
+	/**
 	 * Workbench-owned snapshot of session-config values for this provisional.
 	 * Seeded from {@link _getInitialConfig} at create time and mutated
 	 * synchronously by {@link applyConfigChange} so {@link tryRebind} can read
@@ -198,6 +207,7 @@ export class AgentHostUntitledProvisionalSessionService extends Disposable imple
 	declare readonly _serviceBrand: undefined;
 
 	private readonly _entries = new ResourceMap<IEntry>();
+	private readonly _customizationWatchers = this._register(new DisposableMap<string>());
 	private readonly _pending = new ResourceMap<Promise<URI | undefined>>();
 	private readonly _resolvedConfigs = new ResourceMap<ResolveSessionConfigResult>();
 	private readonly _resolvedConfigRequestSeq = new ResourceMap<number>();
@@ -217,6 +227,7 @@ export class AgentHostUntitledProvisionalSessionService extends Disposable imple
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IWorkbenchEnvironmentService private readonly _environmentService: IWorkbenchEnvironmentService,
 		@IAgentHostNewSessionFolderService private readonly _newSessionFolderService: IAgentHostNewSessionFolderService,
+		@IAgentHostActiveClientService private readonly _activeClientService: IAgentHostActiveClientService,
 	) {
 		super();
 
@@ -289,14 +300,17 @@ export class AgentHostUntitledProvisionalSessionService extends Disposable imple
 			}
 			const backendSession = this._toBackendUri(sessionResource, provider);
 			const initialConfig = this._getInitialConfig();
+			const activeClient = this._activeClientFor(sessionResource);
 			try {
 				const created = await this._agentHostService.createSession({
 					provider,
 					session: backendSession,
 					workingDirectory,
 					config: initialConfig,
+					activeClient,
 				});
-				this._entries.set(sessionResource, { backendSession: created, config: { ...(initialConfig ?? {}) }, workingDirectory });
+				this._entries.set(sessionResource, { backendSession: created, config: { ...(initialConfig ?? {}) }, workingDirectory, activeClientCustomizations: activeClient.customizations });
+				this._syncActiveClientCustomizations(getChatSessionType(sessionResource));
 				this._onDidChange.fire(sessionResource);
 				return created;
 			} catch (err) {
@@ -345,12 +359,14 @@ export class AgentHostUntitledProvisionalSessionService extends Disposable imple
 		const newBackendSession = this._toBackendUri(newSessionResource, provider);
 
 		let created: URI;
+		const reboundActiveClient = this._activeClientFor(newSessionResource);
 		try {
 			created = await this._agentHostService.createSession({
 				provider,
 				session: newBackendSession,
 				workingDirectory,
 				config,
+				activeClient: reboundActiveClient,
 			});
 		} catch (err) {
 			this._logService.warn(`[AgentHostProvisional] Failed to create rebound provisional: ${err instanceof Error ? err.message : String(err)}`);
@@ -360,7 +376,7 @@ export class AgentHostUntitledProvisionalSessionService extends Disposable imple
 		// Atomically swap entries: insert the new entry, drop the old one.
 		// Order matters — the old entry's `dispose` below must not race with
 		// the picker's `onDidChange` re-render reading the new entry.
-		this._entries.set(newSessionResource, { backendSession: created, config: { ...config }, workingDirectory, resolvedConfig: oldEntry.resolvedConfig });
+		this._entries.set(newSessionResource, { backendSession: created, config: { ...config }, workingDirectory, resolvedConfig: oldEntry.resolvedConfig, activeClientCustomizations: reboundActiveClient.customizations });
 		this._entries.delete(oldSessionResource);
 		this._resolvedConfigs.delete(oldSessionResource);
 		this._resolvedConfigRequestSeq.delete(oldSessionResource);
@@ -407,12 +423,14 @@ export class AgentHostUntitledProvisionalSessionService extends Disposable imple
 				this._logService.warn(`[AgentHostProvisional] Failed to dispose provisional before cwd change ${entry.backendSession.toString()}: ${err instanceof Error ? err.message : String(err)}`);
 			}
 			let created: URI;
+			const movedActiveClient = this._activeClientFor(sessionResource);
 			try {
 				created = await this._agentHostService.createSession({
 					provider,
 					session: entry.backendSession,
 					workingDirectory: newWorkingDirectory,
 					config,
+					activeClient: movedActiveClient,
 				});
 			} catch (err) {
 				this._logService.warn(`[AgentHostProvisional] Failed to recreate provisional at new cwd: ${err instanceof Error ? err.message : String(err)}`);
@@ -422,7 +440,7 @@ export class AgentHostUntitledProvisionalSessionService extends Disposable imple
 				this._onDidChange.fire(sessionResource);
 				return;
 			}
-			this._entries.set(sessionResource, { backendSession: created, config, workingDirectory: newWorkingDirectory, resolvedConfig: entry.resolvedConfig });
+			this._entries.set(sessionResource, { backendSession: created, config, workingDirectory: newWorkingDirectory, resolvedConfig: entry.resolvedConfig, activeClientCustomizations: movedActiveClient.customizations });
 			// Re-resolve config against the new cwd so chip schemas refresh.
 			try {
 				const resolved = await this._agentHostService.resolveSessionConfig({
@@ -477,6 +495,44 @@ export class AgentHostUntitledProvisionalSessionService extends Disposable imple
 	 * Convert the chat-input UI session URI (`agent-host-PROVIDER:/<id>`)
 	 * to the agent-host backend URI (`PROVIDER:/<id>`).
 	 */
+	/**
+	 * Claims the draft for this window, like a real session does at create:
+	 * the agent gets the window's client tools and customizations (MCP
+	 * servers included) while the user is still typing, so the composer can
+	 * list the chat's MCP servers before the first message is sent.
+	 */
+	private _activeClientFor(sessionResource: URI) {
+		return this._activeClientService.getActiveClient(getChatSessionType(sessionResource), this._agentHostService.clientId);
+	}
+
+	/**
+	 * Keeps every provisional of `sessionType` in step with this window's
+	 * customizations: a draft created before they resolved (e.g. right after
+	 * the window opened), or one open while the user installs or removes an
+	 * MCP server, gets the current set without waiting for its first message.
+	 */
+	private _syncActiveClientCustomizations(sessionType: string): void {
+		if (this._customizationWatchers.has(sessionType)) {
+			return;
+		}
+		this._customizationWatchers.set(sessionType, autorun(reader => {
+			const refs = this._activeClientService.getResolvedCustomizations(sessionType).read(reader);
+			if (!refs) {
+				return;
+			}
+			for (const [sessionResource, entry] of this._entries) {
+				if (getChatSessionType(sessionResource) !== sessionType || (entry.activeClientCustomizations && equals(entry.activeClientCustomizations, refs))) {
+					continue;
+				}
+				entry.activeClientCustomizations = refs;
+				this._agentHostService.dispatch(entry.backendSession.toString(), {
+					type: ActionType.SessionActiveClientChanged,
+					activeClient: { ...this._activeClientFor(sessionResource), customizations: [...refs] },
+				});
+			}
+		}));
+	}
+
 	private _toBackendUri(sessionResource: URI, provider: string): URI {
 		const rawId = sessionResource.path.replace(/^\//, '');
 		return URI.from({ scheme: provider, path: `/${rawId}` });

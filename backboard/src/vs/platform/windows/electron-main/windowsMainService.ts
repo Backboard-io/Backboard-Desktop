@@ -303,7 +303,7 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		this.handleChatRequest(openConfig, [window]);
 	}
 
-	async openAgentsWindow(openConfig: IOpenConfiguration, folderUri?: URI, sessionResource?: URI): Promise<ICodeWindow[]> {
+	async openAgentsWindow(openConfig: IOpenConfiguration, folderUri?: URI, sessionResource?: URI, canvasImageUrl?: string): Promise<ICodeWindow[]> {
 		this.logService.trace('windowsManager#openAgentsWindow');
 
 		// The agents window always opens the fixed agent-sessions workspace
@@ -326,9 +326,10 @@ export class WindowsMainService extends Disposable implements IWindowsMainServic
 		// Single IPC carrying the folder to pre-select and an optional existing-
 		// session resource to open. The handler in the agents window sequences
 		// them (folder → open session) so the session-open doesn't race the
-		// folder-resolve.
-		if ((folderUri || sessionResource) && windows.length > 0) {
-			windows[0].sendWhenReady('vscode:selectAgentsFolder', CancellationToken.None, folderUri?.toJSON(), sessionResource?.toJSON());
+		// folder-resolve. A canvas image (the Editor's "Canvas" button on a
+		// generated image) opens Simple's Canvas on it after the session.
+		if ((folderUri || sessionResource || canvasImageUrl) && windows.length > 0) {
+			windows[0].sendWhenReady('vscode:selectAgentsFolder', CancellationToken.None, folderUri?.toJSON(), sessionResource?.toJSON(), canvasImageUrl);
 		}
 
 		return windows;

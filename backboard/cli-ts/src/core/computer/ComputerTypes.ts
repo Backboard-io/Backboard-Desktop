@@ -82,6 +82,8 @@ export type JevTaskOutcome =
 	| "abstained"
 	| "needs_confirmation"
 	| "needs_input"
+	/** The user answered a mid-run question by stopping the task. */
+	| "declined"
 	| "stalled"
 	| "budget_exhausted"
 	| "failed";
@@ -92,23 +94,27 @@ export interface JevTaskStep {
 	operation: string;
 	/** The weaker of the operation and target confidences. */
 	confidence: number;
-	/** Jev's probability that the goal was already met on this screen. */
+	/** Jev's probability that the goal was already met; 0 from other brains. */
 	complete: number;
 	/** Observe plus decide, in milliseconds. */
 	decisionMs: number;
 	target?: string;
-	/** What the writer model composed: typed text, or the address opened. */
+	/** Typed text or the address opened; for DONE or BLOCKED, the brain's reason. */
 	text?: string;
+	/** Return was pressed straight after typing. */
+	submitted?: boolean;
 	/** Filled in by the next observation. */
 	screenChanged?: boolean;
 }
 
-/** Result of a Jev-driven task. Final browser evidence goes to the caller, never Jev. */
+/** Result of an agent-driven task. Final browser evidence goes to the caller, never the brain. */
 export interface JevTaskResult extends ComputerActionResult {
 	action: "task";
 	outcome: JevTaskOutcome;
 	/** `cua-driver`, or `native` when the driver binary was not found. */
 	surface: string;
+	/** The model that chose the steps, e.g. `openrouter/deepseek/deepseek-v4.1-flash` or `jev`. */
+	brain: string;
 	steps: JevTaskStep[];
 }
 

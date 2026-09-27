@@ -237,7 +237,7 @@ export const tocData: ITOCEntry<string> = {
 				},
 				{
 					id: 'chat/mcp',
-					label: localize('chatMcp', "MCP"),
+					label: localize('chatMcp', "Connectors"),
 					settings: ['mcp', 'chat.mcp.*', 'mcp.*']
 				},
 				{

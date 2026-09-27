@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 /* Keep window controls usable while the signed-out sidebar content is obscured. */
-.agent-sessions-workbench:has(.session-view.backboard-auth-gate-active) .part.sidebar > .content {
+.agent-sessions-workbench.backboard-session-auth-gated .part.sidebar > .content {
 	filter: blur(4px);
 	opacity: 0.48;
 	pointer-events: none;
@@ -164,7 +164,7 @@
 	via a `.visible` class; `transition-behavior: allow-discrete` defers
 	the discrete `display` change until the slide-out completes, and
 	`@starting-style` provides the offscreen origin for the slide-in. */
-.agent-sessions-workbench.phone-layout .split-view-view:has(> .part.sidebar) {
+.agent-sessions-workbench.phone-layout .split-view-view.part-host-sidebar {
 	position: absolute !important;
 	top: 0 !important;
 	left: 0 !important;
@@ -180,7 +180,7 @@
 
 /* Slide-in starting state (applies on each transition into .visible) */
 @starting-style {
-	.agent-sessions-workbench.phone-layout .split-view-view.visible:has(> .part.sidebar) {
+	.agent-sessions-workbench.phone-layout .split-view-view.visible.part-host-sidebar {
 		transform: translateX(-100%);
 	}
 }
@@ -188,7 +188,7 @@
 /* Slide-out target: when `.visible` is removed, splitview's own rule sets
 	`display: none`. With `allow-discrete` above, the transform animates first
 	and the discrete `display` swap happens at the end of the transition. */
-.agent-sessions-workbench.phone-layout .split-view-view:not(.visible):has(> .part.sidebar) {
+.agent-sessions-workbench.phone-layout .split-view-view:not(.visible).part-host-sidebar {
 	transform: translateX(-100%);
 }
 
@@ -199,7 +199,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.agent-sessions-workbench.phone-layout .split-view-view:has(> .part.sidebar) {
+	.agent-sessions-workbench.phone-layout .split-view-view.part-host-sidebar {
 		transition: none;
 	}
 }
@@ -208,4 +208,12 @@
 .agent-sessions-workbench.phone-layout .part.sidebar > .sidebar-footer .sidebar-action-button {
 	min-height: 44px;
 	padding: 8px 12px;
+}
+
+/* Full-window modals (Usage, Settings) keep the sidebar beside them: they start
+ * at its right edge (published by SidebarPart) instead of covering the window. */
+.monaco-workbench.agent-sessions-workbench .monaco-modal-editor-block.full-window {
+	left: var(--sessions-sidebar-inset, 0px);
+	right: 0;
+	width: auto;
 }

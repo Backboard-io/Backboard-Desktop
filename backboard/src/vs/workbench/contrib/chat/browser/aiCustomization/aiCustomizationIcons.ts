@@ -77,7 +77,7 @@ export const builtinIcon = registerIcon('ai-customization-builtin', Codicon.star
 /**
  * Icon for MCP servers.
  */
-export const mcpServerIcon = registerIcon('ai-customization-mcp-server', Codicon.server, localize('aiCustomizationMcpServerIcon', "Icon for MCP servers."));
+export const mcpServerIcon = registerIcon('ai-customization-mcp-server', Codicon.server, localize('aiCustomizationMcpServerIcon', "Icon for connectors."));
 
 /**
  * Returns the icon for a given storage type.

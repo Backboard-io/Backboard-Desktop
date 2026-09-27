@@ -394,7 +394,7 @@ export class AICustomizationManagementEditor extends EditorPane {
 			[AICustomizationManagementSection.Instructions]: { label: localize('instructions', "Instructions"), icon: instructionsIcon, description: localize('instructionsDesc', "Set always-on instructions that guide AI behavior across your workspace or user profile.") },
 			[AICustomizationManagementSection.Prompts]: { label: localize('prompts', "Prompts"), icon: promptIcon, description: localize('promptsDesc', "Reusable prompt templates that can be invoked as slash commands.") },
 			[AICustomizationManagementSection.Hooks]: { label: localize('hooks', "Hooks"), icon: hookIcon, description: localize('hooksDesc', "Configure automated actions triggered by events like saving files or running tasks.") },
-			[AICustomizationManagementSection.McpServers]: { label: localize('mcpServers', "MCP Servers"), icon: Codicon.server, description: localize('mcpServersDesc', "Connect external tool servers that extend AI capabilities with custom tools and data sources.") },
+			[AICustomizationManagementSection.McpServers]: { label: localize('mcpServers', "Connectors"), icon: Codicon.server, description: localize('mcpServersDesc', "Connect external tool servers that extend AI capabilities with custom tools and data sources.") },
 			[AICustomizationManagementSection.Plugins]: { label: localize('plugins', "Plugins"), icon: pluginIcon, description: localize('pluginsDesc', "Install and manage agent plugins that add additional tools, skills, and integrations.") },
 			[AICustomizationManagementSection.Models]: { label: localize('models', "Models"), icon: Codicon.vm, description: localize('modelsDesc', "Configure and manage language models available for use.") },
 		};
@@ -2303,8 +2303,8 @@ export class AICustomizationManagementEditor extends EditorPane {
 		// Back button rendered into the detail's leading slot
 		const backButton = DOM.append(this.embeddedMcpDetail.leadingSlot, $('button.editor-back-button'));
 		backButton.setAttribute('type', 'button');
-		backButton.setAttribute('aria-label', localize('backToMcpList', "Back to MCP servers"));
-		this.editorDisposables.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), backButton, localize('backToMcpListTooltip', "Back to MCP servers")));
+		backButton.setAttribute('aria-label', localize('backToMcpList', "Back to connectors"));
+		this.editorDisposables.add(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), backButton, localize('backToMcpListTooltip', "Back to connectors")));
 		const backIconEl = DOM.append(backButton, $(`.codicon.codicon-${Codicon.arrowLeft.id}`));
 		backIconEl.setAttribute('aria-hidden', 'true');
 		this.editorDisposables.add(DOM.addDisposableListener(backButton, 'click', () => {

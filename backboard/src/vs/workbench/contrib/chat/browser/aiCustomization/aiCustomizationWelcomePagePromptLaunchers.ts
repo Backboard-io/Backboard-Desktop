@@ -76,7 +76,7 @@ export class PromptLaunchersAICustomizationWelcomePage extends Disposable implem
 		},
 		{
 			id: AICustomizationManagementSection.McpServers,
-			label: localize('mcpServers', "MCP Servers"),
+			label: localize('mcpServers', "Connectors"),
 			icon: Codicon.server,
 			description: localize('mcpServersDesc', "Connect external tool servers that extend AI capabilities with custom tools and data sources."),
 		},

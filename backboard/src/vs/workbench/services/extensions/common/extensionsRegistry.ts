@@ -421,7 +421,7 @@ export const schema: IJSONSchema = {
 					},
 					{
 						label: 'onMcpCollection',
-						description: nls.localize('vscode.extension.activationEvents.onMcpCollection', 'An activation event emitted whenever a tool from the MCP server is requested.'),
+						description: nls.localize('vscode.extension.activationEvents.onMcpCollection', 'An activation event emitted whenever a tool from the connector is requested.'),
 						body: 'onMcpCollection:${2:collectionId}',
 					},
 					{

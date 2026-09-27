@@ -196,12 +196,38 @@ export namespace McpServerDefinition {
 			&& a.label === b.label
 			&& a.cacheNonce === b.cacheNonce
 			&& arraysEqual(a.roots, b.roots, (a, b) => a.toString() === b.toString())
-			&& objectsEqual(a.launch, b.launch)
-			&& objectsEqual(a.presentation, b.presentation)
-			&& objectsEqual(a.variableReplacement, b.variableReplacement)
+			&& equalsComparingUris(a.launch, b.launch)
+			&& equalsComparingUris(a.presentation, b.presentation)
+			&& equalsComparingUris(a.variableReplacement, b.variableReplacement)
 			&& objectsEqual(a.devMode, b.devMode)
 			&& a.sandboxEnabled === b.sandboxEnabled;
 
+	}
+
+	/**
+	 * Deep equality that compares URIs by value. `objectsEqual` walks a URI's
+	 * lazily cached string forms too, so a definition rebuilt from the same
+	 * config never matched one whose URI had been printed, and every discovery
+	 * sync republished the servers — an endless refresh loop.
+	 */
+	function equalsComparingUris(a: unknown, b: unknown): boolean {
+		if (a === b) {
+			return true;
+		}
+		if (URI.isUri(a) || URI.isUri(b)) {
+			return URI.isUri(a) && URI.isUri(b) && a.toString() === b.toString();
+		}
+		if (Array.isArray(a) || Array.isArray(b)) {
+			return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, index) => equalsComparingUris(item, b[index]));
+		}
+		if (!a || !b || typeof a !== 'object' || typeof b !== 'object') {
+			return false;
+		}
+		const aRecord = a as Record<string, unknown>;
+		const bRecord = b as Record<string, unknown>;
+		const aKeys = Object.keys(aRecord);
+		return aKeys.length === Object.keys(bRecord).length
+			&& aKeys.every(key => Object.hasOwn(bRecord, key) && equalsComparingUris(aRecord[key], bRecord[key]));
 	}
 }
 

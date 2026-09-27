@@ -41,6 +41,16 @@ describe("parseControlLine", () => {
 		expect(parseControlLine(JSON.stringify(control))).toEqual({ ok: true, control });
 		expect(parseControlLine(JSON.stringify({ op: "setMcpServers", requestId: "mcp-2", servers: ["nope"] }))).toMatchObject({ ok: false });
 		expect(parseControlLine(JSON.stringify({ op: "setMcpServers", requestId: "mcp-3" }))).toMatchObject({ ok: false });
+		const authoritative: ServeControl = { op: "setMcpServers", requestId: "mcp-4", servers: {}, authoritative: true };
+		expect(parseControlLine(JSON.stringify(authoritative))).toEqual({ ok: true, control: authoritative });
+		expect(parseControlLine(JSON.stringify({ op: "setMcpServers", requestId: "mcp-5", servers: {}, authoritative: "yes" }))).toMatchObject({ ok: false, error: "invalid setMcpServers op: missing authoritative" });
+	});
+
+	it("parses MCP authentication requests", () => {
+		const control: ServeControl = { op: "authenticateMcpServer", requestId: "auth-1", name: "linear" };
+		expect(parseControlLine(JSON.stringify(control))).toEqual({ ok: true, control });
+		expect(parseControlLine(JSON.stringify({ op: "authenticateMcpServer", requestId: "auth-2" }))).toMatchObject({ ok: false, requestId: "auth-2" });
+		expect(parseControlLine(JSON.stringify({ op: "authenticateMcpServer", name: "linear" }))).toMatchObject({ ok: false });
 	});
 
 	it("parses the public R-CLI submit settings", () => {

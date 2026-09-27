@@ -45,7 +45,7 @@ export class SimpleMcpPage extends Disposable {
 		}
 		const store = new DisposableStore();
 		this.page.value = store;
-		const surface = append(host, $('.simple-mcp-page', { 'aria-label': localize('simpleMcp.title', "MCPs"), role: 'region' }));
+		const surface = append(host, $('.simple-mcp-page', { 'aria-label': localize('simpleMcp.title', "Connectors"), role: 'region' }));
 		host.classList.add('simple-mcp-page-open');
 		store.add(toDisposable(() => {
 			surface.remove();
@@ -66,6 +66,10 @@ export class SimpleMcpPage extends Disposable {
 			}
 		}));
 		this.visibilityEmitter.fire(true);
+	}
+
+	get isVisible(): boolean {
+		return !!this.page.value;
 	}
 
 	hide(): void {

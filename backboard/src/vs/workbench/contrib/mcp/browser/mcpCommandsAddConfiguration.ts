@@ -150,8 +150,8 @@ export class McpAddConfigurationCommand {
 	private async getServerType(): Promise<AddConfigurationType | undefined> {
 		type TItem = { kind: AddConfigurationType | 'browse' | 'discovery' } & IQuickPickItem;
 		const items: QuickPickInput<TItem>[] = [
-			{ kind: AddConfigurationType.Stdio, label: localize('mcp.serverType.command', "Command (stdio)"), description: localize('mcp.serverType.command.description', "Run a local command that implements the MCP protocol") },
-			{ kind: AddConfigurationType.HTTP, label: localize('mcp.serverType.http', "HTTP (HTTP or Server-Sent Events)"), description: localize('mcp.serverType.http.description', "Connect to a remote HTTP server that implements the MCP protocol") }
+			{ kind: AddConfigurationType.Stdio, label: localize('mcp.serverType.command', "Command (stdio)"), description: localize('mcp.serverType.command.description', "Run a local command that implements the connector protocol") },
+			{ kind: AddConfigurationType.HTTP, label: localize('mcp.serverType.http', "HTTP (HTTP or Server-Sent Events)"), description: localize('mcp.serverType.http.description', "Connect to a remote HTTP server that implements the connector protocol") }
 		];
 
 		let aiSupported: boolean | undefined;
@@ -196,11 +196,11 @@ export class McpAddConfigurationCommand {
 
 		items.push({
 			kind: 'browse',
-			label: localize('mcp.servers.browse', "Browse MCP Servers..."),
+			label: localize('mcp.servers.browse', "Browse Connectors..."),
 		});
 
 		const result = await this._quickInputService.pick<TItem>(items, {
-			placeHolder: localize('mcp.serverType.placeholder', "Choose the type of MCP server to add"),
+			placeHolder: localize('mcp.serverType.placeholder', "Choose the type of connector to add"),
 		});
 
 		if (result?.kind === 'browse') {
@@ -244,7 +244,7 @@ export class McpAddConfigurationCommand {
 	private async getSSEConfig(): Promise<IMcpRemoteServerConfiguration | undefined> {
 		const url = await this._quickInputService.input({
 			title: localize('mcp.url.title', "Enter Server URL"),
-			placeHolder: localize('mcp.url.placeholder', "URL of the MCP server (e.g., http://localhost:3000)"),
+			placeHolder: localize('mcp.url.placeholder', "URL of the connector (e.g., http://localhost:3000)"),
 			ignoreFocusLost: true,
 		});
 
@@ -295,7 +295,7 @@ export class McpAddConfigurationCommand {
 		}
 
 		const targetPick = await this._quickInputService.pick(options, {
-			title: localize('mcp.target.title', "Add MCP Server"),
+			title: localize('mcp.target.title', "Add Connector"),
 			placeHolder: localize('mcp.target.placeholder', "Select the configuration target")
 		});
 
@@ -535,7 +535,7 @@ export class McpAddConfigurationCommand {
 
 	public async pickForUrlHandler(resource: URI, showIsPrimary = false): Promise<void> {
 		const name = decodeURIComponent(basename(resource)).replace(/\.json$/, '');
-		const placeHolder = localize('install.title', 'Install MCP server {0}', name);
+		const placeHolder = localize('install.title', 'Install Connector {0}', name);
 
 		const items: IQuickPickItem[] = [
 			{ id: 'install', label: localize('install.start', 'Install Server') },
@@ -563,7 +563,7 @@ export class McpAddConfigurationCommand {
 					this._editorService.closeEditors(getEditors());
 					this.showOnceDiscovered(name);
 				} catch (e) {
-					this._notificationService.error(localize('install.error', 'Error installing MCP server {0}: {1}', name, e.message));
+					this._notificationService.error(localize('install.error', 'Error installing connector {0}: {1}', name, e.message));
 					await this._editorService.openEditor({ resource });
 				}
 				break;
@@ -613,8 +613,8 @@ export class McpInstallFromManifestCommand {
 	async run(): Promise<void> {
 		// Step 1: Open file dialog to select the manifest file
 		const result = await this._fileDialogService.showOpenDialog({
-			title: localize('mcp.installFromManifest.title', "Select MCP Server Manifest"),
-			filters: [{ name: localize('mcp.installFromManifest.filter', "MCP Manifest"), extensions: ['json'] }],
+			title: localize('mcp.installFromManifest.title', "Select Connector Manifest"),
+			filters: [{ name: localize('mcp.installFromManifest.filter', "Connector Manifest"), extensions: ['json'] }],
 			canSelectFiles: true,
 			canSelectMany: false,
 			openLabel: mnemonicButtonLabel(localize({ key: 'mcp.installFromManifest.openLabel', comment: ['&& denotes a mnemonic'] }, "&&Install"))
@@ -688,9 +688,9 @@ export class McpInstallFromManifestCommand {
 		// Step 5: Install to user settings
 		try {
 			await this._mcpManagementService.install({ name, config, inputs });
-			this._notificationService.info(localize('mcp.installFromManifest.success', "MCP server '{0}' installed successfully", name));
+			this._notificationService.info(localize('mcp.installFromManifest.success', "Connector '{0}' installed successfully", name));
 		} catch (e) {
-			this._notificationService.error(localize('mcp.installFromManifest.installError', "Failed to install MCP server: {0}", e.message));
+			this._notificationService.error(localize('mcp.installFromManifest.installError', "Failed to install connector: {0}", e.message));
 		}
 	}
 }

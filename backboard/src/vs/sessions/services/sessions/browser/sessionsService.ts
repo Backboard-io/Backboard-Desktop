@@ -22,7 +22,7 @@ import { SessionsNavigation } from './sessionNavigation.js';
 import { SessionsRecencyHistory } from './sessionsRecencyHistory.js';
 import { VisibleSessions } from './visibleSessions.js';
 import { IContextKey, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
-import { ISessionsPartService } from './sessionsPartService.js';
+import { ISessionsPartService, SessionsGridLayout } from './sessionsPartService.js';
 import { ActiveSessionProviderIdContext, ActiveSessionTypeContext, IsActiveSessionArchivedContext, ActiveSessionWorkspaceIsVirtualContext, IsNewChatSessionContext } from '../../../common/contextkeys.js';
 import { chatResourceNavigationRegistry } from '../../chatView/browser/chatResourceNavigationRegistry.js';
 
@@ -38,6 +38,10 @@ const RESTORE_SESSION_WAIT_TIMEOUT = 30_000;
 
 /** Maximum number of recently opened sessions reported by {@link SessionsService.getRecentlyOpenedSessions}. */
 const MAX_RECENTLY_OPENED_SESSIONS = 10;
+
+/** The chat grid shown by {@link SessionsService.toggleSessionGrid}: 2 columns × 2 rows. */
+const SESSION_GRID_COLUMNS = 2;
+const SESSION_GRID_ROWS = 2;
 
 /**
  * Options for {@link ISessionsService.openNewSession}.
@@ -168,9 +172,10 @@ export interface ISessionsService {
 
 	/**
 	 * Insert (or move) a session into the grid positioned next to a target
-	 * session that is already visible.
+	 * session that is already visible. A `targetSessionId` of `undefined`
+	 * positions it next to the new-session placeholder slot.
 	 */
-	insertAt(session: ISession, targetSessionId: string, side: 'left' | 'right', activate?: boolean): void;
+	insertAt(session: ISession, targetSessionId: string | undefined, side: 'left' | 'right', activate?: boolean): void;
 
 	/**
 	 * Toggle a session's stickiness in the grid. The session keeps its grid
@@ -192,6 +197,13 @@ export interface ISessionsService {
 	 * new-session view. No-op when no session is currently visible.
 	 */
 	closeAllSessions(): void;
+
+	/**
+	 * Shows up to four chats in a 2×2 grid (the visible ones first, then the
+	 * most recently opened and updated), or, when several chats are already
+	 * visible, returns to the active chat alone.
+	 */
+	toggleSessionGrid(): void;
 
 	/** Make the given (already visible) session the active session. */
 	setActive(session: IActiveSession | undefined): void;
@@ -383,6 +395,13 @@ export class SessionsService extends Disposable implements ISessionsService {
 		// When a session view in the grid receives focus, promote that session
 		// to the active session.
 		this._register(this.sessionsPartService.onDidFocusSession(sessionId => {
+			if (sessionId === undefined) {
+				// The new-session placeholder of a split grid.
+				if (this.activeSession.get() !== undefined && this.visibleSessions.get().includes(undefined)) {
+					this.setActive(undefined);
+				}
+				return;
+			}
 			const session = this.visibleSessions.get().find(s => s?.sessionId === sessionId);
 			if (session) {
 				this.setActive(session);
@@ -705,7 +724,7 @@ export class SessionsService extends Disposable implements ISessionsService {
 		this._onDidToggleSessionStickiness.fire({ session, sticky });
 	}
 
-	insertAt(session: ISession, targetSessionId: string, side: 'left' | 'right', activate: boolean = true): void {
+	insertAt(session: ISession, targetSessionId: string | undefined, side: 'left' | 'right', activate: boolean = true): void {
 		this._visibility.insertAt(session, targetSessionId, side, activate);
 	}
 
@@ -755,6 +774,42 @@ export class SessionsService extends Disposable implements ISessionsService {
 		// clears the active session, which drives the grid back to the
 		// new-session view via the reconcile autorun.
 		this._visibility.removeMany(ids);
+	}
+
+	toggleSessionGrid(): void {
+		this._cancelRestore();
+		if (this.visibleSessions.get().length > 1) {
+			const active = this.activeSession.get();
+			this._visibility.restoreGrid([{ session: active, sticky: false }], active ? 0 : -1);
+			return;
+		}
+
+		const sessions: ISession[] = [];
+		const seen = new Set<string>();
+		const { recent, other } = this.getRecentlyOpenedSessions();
+		for (const session of [...this.visibleSessions.get(), ...recent, ...other]) {
+			if (sessions.length === SESSION_GRID_COLUMNS * SESSION_GRID_ROWS) {
+				break;
+			}
+			if (session && !seen.has(session.sessionId) && session.status.get() !== SessionStatus.Untitled && !session.isArchived.get()) {
+				seen.add(session.sessionId);
+				sessions.push(session);
+			}
+		}
+		if (sessions.length < 2) {
+			return;
+		}
+
+		// Row-major: the first half fills the top row, the rest the bottom row.
+		const columns = Math.ceil(sessions.length / SESSION_GRID_ROWS);
+		const cells: SessionsGridLayout[] = [];
+		for (let column = 0; column < columns; column++) {
+			const bottom = sessions[column + columns];
+			cells.push(bottom ? { split: 'v', cells: [sessions[column].sessionId, bottom.sessionId] } : sessions[column].sessionId);
+		}
+		this.sessionsPartService.setPendingLayout?.({ split: 'h', cells });
+		const activeId = this.activeSession.get()?.sessionId;
+		this._visibility.restoreGrid(sessions.map(session => ({ session, sticky: false })), Math.max(0, sessions.findIndex(session => session.sessionId === activeId)));
 	}
 
 	private _restoreInitialChat(session: ISession): IChat {
@@ -1080,11 +1135,36 @@ export class SessionsService extends Disposable implements ISessionsService {
 		if (this.sessionsPartService.getSessionView(activeSession?.sessionId)?.navigateBack()) {
 			return;
 		}
+		if (this.sessionsPartService.isSplit) {
+			await this._navigatePane(activeSession, 'back');
+			return;
+		}
 		await this._navigation.goBack();
 	}
 
 	async openNextSession(): Promise<void> {
+		if (this.sessionsPartService.isSplit) {
+			await this._navigatePane(this.activeSession.get(), 'forward');
+			return;
+		}
 		await this._navigation.goForward();
+	}
+
+	/**
+	 * In a split grid every cell has its own Back/Forward history: open the
+	 * active cell's previous/next session in place of its current one.
+	 */
+	private async _navigatePane(session: IActiveSession | undefined, direction: 'back' | 'forward'): Promise<void> {
+		const view = this.sessionsPartService.getSessionView(session?.sessionId);
+		const target = view?.beginPaneNavigation(direction);
+		if (!view || !target) {
+			return;
+		}
+		try {
+			await this.openSession(target);
+		} finally {
+			view.endPaneNavigation();
+		}
 	}
 }
 

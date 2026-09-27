@@ -6,6 +6,7 @@
 import './media/sessionsPolicyBlocked.css';
 import { Disposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { $, addDisposableGenericMouseDownListener, append, EventType, addDisposableListener, getWindow } from '../../../../base/browser/dom.js';
+import { syncRootPresenceClass } from '../../../../workbench/browser/part.js';
 import { localize } from '../../../../nls.js';
 import { Button } from '../../../../base/browser/ui/button/button.js';
 import { defaultButtonStyles } from '../../../../platform/theme/browser/defaultStyles.js';
@@ -49,7 +50,11 @@ export class SessionsPolicyBlockedOverlay extends Disposable {
 		this.overlay.setAttribute('aria-modal', 'true');
 		this.overlay.tabIndex = -1;
 		this.overlay.focus();
-		this._register(toDisposable(() => this.overlay.remove()));
+		syncRootPresenceClass(getWindow(container), 'sessions-policy-blocked', '.sessions-policy-blocked-overlay');
+		this._register(toDisposable(() => {
+			this.overlay.remove();
+			syncRootPresenceClass(getWindow(container), 'sessions-policy-blocked', '.sessions-policy-blocked-overlay');
+		}));
 
 		const card = append(this.overlay, $('.sessions-policy-blocked-card'));
 

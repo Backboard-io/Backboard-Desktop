@@ -1,0 +1,1281 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Canvas covers the whole Sessions window like Codex's image playground.
+ * It defines the right workbench's --rwb-* tokens itself because it lives
+ * outside the right panel, and derives every color from the theme. */
+.sessions-canvas-overlay {
+	--rwb-bg: var(--vscode-editor-background);
+	--rwb-foreground: var(--vscode-foreground, var(--vscode-editor-foreground));
+	--rwb-muted: var(--vscode-descriptionForeground, var(--rwb-foreground));
+	--rwb-border: color-mix(in srgb, var(--rwb-foreground) 10%, transparent);
+	--rwb-hover: color-mix(in srgb, var(--rwb-foreground) 8%, transparent);
+	position: absolute;
+	inset: 0;
+	/* Below modal editors (2540) so Usage and Settings always open on top of Canvas. */
+	z-index: 2530;
+	display: flex;
+	flex-direction: column;
+	color: var(--rwb-foreground);
+	background: var(--rwb-bg);
+	outline: none;
+	animation: sessions-canvas-overlay-in 140ms ease-out;
+	/* Canvas covers the window's title strip, a drag region; without this, clicks on its toolbars move the window instead. */
+	-webkit-app-region: no-drag;
+}
+
+@keyframes sessions-canvas-overlay-in {
+	from {
+		opacity: 0;
+		transform: scale(0.99);
+	}
+}
+
+.monaco-workbench.monaco-reduce-motion .sessions-canvas-overlay {
+	animation: none;
+}
+
+/* Beside the sidebar (which stays usable), Canvas starts at its edge. */
+.sessions-canvas-overlay.beside-sidebar {
+	border-left: 1px solid var(--rwb-border);
+}
+
+.sessions-canvas-overlay-body {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+}
+
+/* Over a wallpaper the playground is dark glass with bright text in every
+ * theme, matching the chat and right panel around it. */
+.monaco-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light) .sessions-canvas-overlay {
+	--rwb-foreground: #ffffff;
+	--rwb-muted: #e8ebef;
+	--rwb-bg: #151619;
+	background: rgba(14, 15, 18, 0.9);
+	backdrop-filter: blur(24px);
+	-webkit-backdrop-filter: blur(24px);
+}
+
+.monaco-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light) .sessions-canvas-overlay .sessions-right-workbench-canvas {
+	--rwb-canvas-surface: #151619;
+
+	.sessions-right-workbench-canvas-views,
+	.sessions-right-workbench-canvas-pill {
+		background: rgba(21, 22, 25, 0.72);
+	}
+}
+
+/* With no header, leave room for the macOS traffic lights when Canvas reaches the window's left edge. */
+.monaco-workbench.mac .sessions-canvas-overlay:not(.beside-sidebar) .sessions-canvas-overlay-body {
+	padding-top: 36px;
+}
+
+/* --- Asset view: clicking an item opens it like Runway's agent session —
+ * tabs over the item fitted large, a floating filmstrip at its side, the
+ * action row under it, and the item's chat (live) with its composer on the
+ * right. Measured from Runway: 56px tab bar with 32px pill tabs, 40px/12px
+ * action buttons, 48px/12px filmstrip tiles, a 380px chat with 16px user
+ * bubbles and a 20px composer card. --- */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused {
+	--cd-side: 380px;
+	--cd-bg: var(--rwb-bg);
+	--cd-raised: color-mix(in srgb, var(--rwb-foreground) 5%, var(--cd-bg));
+	--cd-surface: color-mix(in srgb, var(--rwb-foreground) 9%, var(--cd-bg));
+	--cd-border: color-mix(in srgb, var(--rwb-foreground) 15%, var(--cd-bg));
+	--cd-muted: color-mix(in srgb, var(--rwb-foreground) 64%, var(--cd-bg));
+	background: var(--cd-bg);
+}
+
+/* Runway's dark palette, used in dark themes and over a wallpaper. */
+.monaco-workbench:is(.vs-dark, .sessions-chat-custom-background:not(.hc-black):not(.hc-light)) .sessions-canvas-overlay .sessions-right-workbench-canvas.focused {
+	--cd-bg: #000000;
+	--cd-raised: #131416;
+	--cd-surface: #1b1e23;
+	--cd-border: #2c3037;
+	--cd-muted: #a1afc5;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused.expanded {
+	--cd-side: 0px;
+}
+
+/* The stage: the item fitted between the toolbar and the action row, the filmstrip in its right gutter. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas-featured {
+	position: absolute;
+	top: 56px;
+	left: 24px;
+	right: calc(var(--cd-side) + 24px);
+	bottom: 88px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-focused-stage {
+	position: absolute;
+	inset: 0 64px 0 0;
+	display: grid;
+	place-items: center;
+	height: auto;
+	padding: 0;
+	overflow: hidden;
+	outline: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused.expanded .sessions-right-workbench-canvas-focused-stage {
+	right: 0;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-featured-box {
+	position: relative;
+	flex-shrink: 0;
+	visibility: hidden;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-featured-box.fitted {
+	visibility: visible;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-featured-box > :is(img, video) {
+	display: block;
+	border-radius: 6px;
+	width: 100%;
+	height: 100%;
+	max-width: none;
+	max-height: none;
+	object-fit: contain;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-featured-name {
+	position: absolute;
+	top: 12px;
+	left: 12px;
+	max-width: 50%;
+	padding: 4px 8px;
+	overflow: hidden;
+	border-radius: 8px;
+	color: #ffffff;
+	background: rgba(0, 0, 0, 0.6);
+	font-size: 12px;
+	line-height: 16px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	pointer-events: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-featured-badges {
+	position: absolute;
+	top: 12px;
+	right: 12px;
+	display: flex;
+	gap: 6px;
+	opacity: 0;
+	transition: opacity 120ms ease-out;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-featured-box:is(:hover, :focus-within) .sessions-right-workbench-canvas-featured-badges {
+	opacity: 1;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-featured-badges .sessions-right-workbench-canvas-detail-icon {
+	width: 28px;
+	height: 28px;
+	border: 0;
+	border-radius: 8px;
+	color: #ffffff;
+	background: rgba(0, 0, 0, 0.6);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-featured-badges .sessions-right-workbench-canvas-detail-icon:hover {
+	background: rgba(0, 0, 0, 0.8);
+}
+
+/* Filmstrip: 48px tiles floating, centred, in the stage's right gutter. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-rail {
+	top: 56px;
+	bottom: 88px;
+	left: auto;
+	right: calc(var(--cd-side) + 24px);
+	justify-content: safe center;
+	gap: 8px;
+	width: 52px;
+	padding: 2px;
+	scrollbar-width: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused.expanded .sessions-right-workbench-canvas-rail {
+	display: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-rail-thumb {
+	width: 48px;
+	height: 48px;
+	border: 2px solid transparent;
+	border-radius: 12px;
+	background: var(--cd-surface);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-rail-thumb :is(img, video) {
+	border-radius: 10px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-rail-thumb[aria-pressed='true'] {
+	border-color: var(--rwb-foreground);
+	box-shadow: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-rail-thumb .sessions-right-workbench-canvas-video-badge {
+	display: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-rail-label {
+	padding: 4px 0 0;
+	font-size: 10px;
+	text-align: center;
+}
+
+/* Action row, centred under the item. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas-detail-actions {
+	position: absolute;
+	left: 24px;
+	right: calc(var(--cd-side) + 88px);
+	bottom: 24px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	height: 40px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused.expanded .sessions-right-workbench-canvas-detail-actions {
+	right: 24px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-detail-icon,
+.sessions-canvas-overlay .sessions-right-workbench-canvas-detail-button {
+	display: inline-flex;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	box-sizing: border-box;
+	height: 40px;
+	padding: 0;
+	border: 1px solid var(--cd-border);
+	border-radius: 12px;
+	color: var(--rwb-foreground);
+	background: var(--cd-raised);
+	font: inherit;
+	font-size: 14px;
+	font-weight: 600;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-detail-icon {
+	width: 40px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-detail-icon .codicon,
+.sessions-canvas-overlay .sessions-right-workbench-canvas-detail-button .codicon {
+	font-size: 16px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-detail-button {
+	padding: 0 14px 0 12px;
+}
+
+.sessions-canvas-overlay :is(.sessions-right-workbench-canvas-detail-icon, .sessions-right-workbench-canvas-detail-button):hover {
+	background: var(--cd-surface);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-detail-divider {
+	flex-shrink: 0;
+	width: 1px;
+	height: 18px;
+	margin: 0 4px;
+	background: var(--cd-surface);
+}
+
+.sessions-canvas-overlay :is(.sessions-right-workbench-canvas-detail-icon, .sessions-right-workbench-canvas-detail-button, .sessions-right-workbench-canvas-message-tile, .sessions-right-workbench-canvas-composer-slot):focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+}
+
+/* --- The chat: live thread above the composer --- */
+.sessions-canvas-overlay .sessions-right-workbench-canvas-side {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 3;
+	display: flex;
+	flex-direction: column;
+	box-sizing: border-box;
+	width: var(--cd-side);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-side[hidden] {
+	display: none;
+}
+
+/* Header: the chat's title, and its language model chip on the right. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas-thread-header {
+	display: flex;
+	flex-shrink: 0;
+	align-items: center;
+	gap: 8px;
+	box-sizing: border-box;
+	height: 56px;
+	padding: 12px 12px 0 24px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-thread-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	color: var(--cd-muted);
+	font-size: 13px;
+	font-weight: 500;
+	line-height: 20px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-thread {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	gap: 24px;
+	min-height: 0;
+	padding: 8px 0 16px;
+	overflow-y: auto;
+	scrollbar-width: thin;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-thread-empty {
+	margin: auto 24px;
+	color: var(--cd-muted);
+	font-size: 14px;
+	line-height: 22px;
+	text-align: center;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 0 24px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-attachments {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 8px;
+	align-self: flex-end;
+	max-width: 200px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-attachment {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	width: 96px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-attachment-thumb {
+	width: 96px;
+	height: 54px;
+	overflow: hidden;
+	border-radius: 8px;
+	background: var(--cd-border);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-attachment-thumb img {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-attachment-caption {
+	padding: 0 4px;
+	overflow: hidden;
+	color: var(--cd-muted);
+	font-size: 12px;
+	line-height: 16px;
+	text-align: center;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-user {
+	align-self: flex-end;
+	box-sizing: border-box;
+	max-width: 88%;
+	padding: 8px 14px;
+	border-radius: 16px;
+	background: var(--cd-surface);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-user-text {
+	display: -webkit-box;
+	overflow: hidden;
+	font-size: 14px;
+	line-height: 22px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 8;
+	user-select: text;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-user.open .sessions-right-workbench-canvas-message-user-text {
+	display: block;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-more {
+	padding: 4px 0 2px;
+	border: 0;
+	color: var(--cd-muted);
+	background: none;
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-more[hidden] {
+	display: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-answer {
+	font-size: 14px;
+	line-height: 22px;
+	overflow-wrap: anywhere;
+	user-select: text;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-answer :is(p, ul, ol, pre) {
+	margin: 0 0 10px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-answer > :last-child > :last-child {
+	margin-bottom: 0;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-answer :is(ul, ol) {
+	padding-left: 20px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-answer code {
+	padding: 1px 4px;
+	border-radius: 4px;
+	background: var(--cd-surface);
+	font-size: 12px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-answer a {
+	color: var(--vscode-textLink-foreground);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-media {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 6px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-media.single {
+	grid-template-columns: minmax(0, 240px);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-tile {
+	position: relative;
+	box-sizing: border-box;
+	height: 132px;
+	padding: 0;
+	overflow: hidden;
+	border: 2px solid transparent;
+	border-radius: 12px;
+	background: var(--cd-surface);
+	cursor: pointer;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-tile :is(img, video) {
+	display: block;
+	width: 100%;
+	height: 100%;
+	border-radius: 10px;
+	object-fit: cover;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-tile[aria-pressed='true'] {
+	border-color: var(--rwb-foreground);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-working {
+	color: var(--cd-muted);
+	font-size: 13px;
+	line-height: 20px;
+}
+
+/* The chat's generating card, sized to the thread column. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas-message-generating {
+	width: 100%;
+	max-width: 280px;
+}
+
+/* A question the agent waits on (e.g. video length): title + option pills. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas-question {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 12px;
+	border: 1px solid var(--rwb-border, color-mix(in srgb, var(--vscode-foreground) 12%, transparent));
+	border-radius: 12px;
+	font-size: 13px;
+	line-height: 18px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-question-title {
+	color: var(--rwb-foreground, var(--vscode-foreground));
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-question-options {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.sessions-canvas-overlay :is(.sessions-right-workbench-canvas-question-option, .sessions-right-workbench-canvas-question-skip) {
+	height: 28px;
+	padding: 0 12px;
+	border: 1px solid var(--rwb-border, color-mix(in srgb, var(--vscode-foreground) 14%, transparent));
+	border-radius: 999px;
+	background: transparent;
+	color: var(--rwb-foreground, var(--vscode-foreground));
+	font: inherit;
+	cursor: pointer;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-question-option:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-question-skip {
+	align-self: flex-start;
+	border-color: transparent;
+	color: var(--cd-muted);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-question-hint {
+	margin: 0;
+	color: var(--cd-muted);
+}
+
+/* --- Composer: Runway's card — reference slot, message, controls --- */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer {
+	position: relative;
+	inset: auto;
+	flex-shrink: 0;
+	gap: 0;
+	max-width: none;
+	margin: 0 12px 12px;
+	padding: 12px 12px 10px;
+	border: 1px solid var(--cd-border);
+	border-radius: 20px;
+	background: var(--cd-surface);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+	backdrop-filter: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-attachments {
+	display: flex;
+	gap: 6px;
+	margin-bottom: 10px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-attachments:empty {
+	display: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-slot {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: 96px;
+	height: 54px;
+	padding: 0;
+	overflow: hidden;
+	border: 1px solid var(--cd-border);
+	border-radius: 8px;
+	color: var(--cd-muted);
+	background: var(--cd-border);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-slot :is(img, video) {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-slot .sessions-right-workbench-canvas-video-badge {
+	display: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-slot.empty {
+	border-style: dashed;
+	background: transparent;
+	cursor: pointer;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-slot.empty:hover {
+	color: var(--rwb-foreground);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-slot-remove {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	color: #ffffff;
+	background: rgba(0, 0, 0, 0.6);
+	opacity: 0;
+	cursor: pointer;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-slot-remove .codicon {
+	font-size: 12px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-slot:is(:hover, :focus-within) .sessions-right-workbench-canvas-composer-slot-remove {
+	opacity: 1;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-input {
+	min-height: 22px;
+	font-size: 14px;
+	line-height: 22px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-input::placeholder {
+	color: var(--cd-muted);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-footer {
+	margin-top: 10px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-modes {
+	background: transparent;
+	padding: 0;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-modes[hidden],
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-model[hidden] {
+	display: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused :is(.sessions-right-workbench-canvas-composer-mode, .sessions-right-workbench-canvas-composer-model) {
+	height: 32px;
+	padding: 0 8px;
+	border-radius: 10px;
+	color: var(--cd-muted);
+	font-size: 13px;
+	font-weight: 500;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-mode[aria-pressed='true'] {
+	color: var(--rwb-foreground);
+	background: var(--cd-border);
+	box-shadow: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-model {
+	margin-left: auto;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-send {
+	width: 32px;
+	height: 32px;
+	border-radius: 10px;
+	color: var(--cd-bg);
+	background: var(--rwb-foreground);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-send:disabled {
+	color: var(--cd-muted);
+	background: var(--cd-border);
+	opacity: 1;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-model:not([hidden]) + .sessions-right-workbench-canvas-composer-send {
+	margin-left: 4px;
+}
+
+/* Narrow: the chat takes over; the item shows above it smaller. */
+@container (max-width: 900px) {
+	.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-rail {
+		display: none;
+	}
+
+	.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-focused-stage {
+		right: 0;
+	}
+
+	.sessions-canvas-overlay .sessions-right-workbench-canvas-detail-actions {
+		right: calc(var(--cd-side) + 24px);
+	}
+
+	.sessions-canvas-overlay .sessions-right-workbench-canvas-detail-button span {
+		display: none;
+	}
+
+	.sessions-canvas-overlay .sessions-right-workbench-canvas-detail-button {
+		width: 40px;
+		padding: 0;
+	}
+}
+
+/* --- Chat panel resize: a sash on its left edge, like Runway's --- */
+.sessions-canvas-overlay .sessions-right-workbench-canvas-side-sash {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: -3px;
+	z-index: 4;
+	width: 6px;
+	cursor: col-resize;
+	touch-action: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-side-sash::after {
+	content: '';
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 2px;
+	width: 2px;
+	background: transparent;
+	transition: background-color 120ms ease-out 200ms;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-side-sash:hover::after,
+.sessions-canvas-overlay .sessions-right-workbench-canvas.resizing-side .sessions-right-workbench-canvas-side-sash::after {
+	background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder));
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.resizing-side {
+	cursor: col-resize;
+	user-select: none;
+}
+
+/* --- Composer model button and menu (Runway's picker) --- */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-model {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	max-width: 260px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-model .label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-model .codicon {
+	flex-shrink: 0;
+	font-size: 12px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-model[aria-expanded='true'] {
+	color: var(--rwb-foreground);
+	background: var(--cd-border);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-menu {
+	position: absolute;
+	right: 8px;
+	bottom: calc(100% + 8px);
+	left: 8px;
+	z-index: 5;
+	display: flex;
+	flex-direction: column;
+	max-height: min(420px, 60vh);
+	overflow: hidden;
+	border: 1px solid var(--cd-border);
+	border-radius: 16px;
+	background: var(--cd-surface);
+	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-menu-title {
+	flex-shrink: 0;
+	padding: 12px 14px 6px;
+	color: var(--cd-muted);
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-menu-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 0 6px 6px;
+	overflow-y: auto;
+	scrollbar-width: thin;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-menu-status {
+	padding: 8px 8px 10px;
+	color: var(--cd-muted);
+	font-size: 13px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-option {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	padding: 8px 10px;
+	border: 0;
+	border-radius: 10px;
+	color: var(--rwb-foreground);
+	background: transparent;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-option:is(:hover, :focus-visible) {
+	background: var(--cd-border);
+	outline: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-option .name {
+	flex: 1;
+	min-width: 0;
+	font-size: 13px;
+	font-weight: 500;
+	line-height: 18px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-option .codicon {
+	flex-shrink: 0;
+	font-size: 14px;
+}
+
+/* The stage's video has its own controls and time; the grid's length chip would sit on the tab bar. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-length-chip {
+	display: none;
+}
+
+/* Compact model rows: one line per model. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-menu-title {
+	padding: 10px 12px 4px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-menu-list {
+	gap: 0;
+	padding: 0 4px 4px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-option {
+	height: 32px;
+	padding: 0 8px;
+	border-radius: 8px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-option .name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Video length chip: clock, Auto or the picked length, chevron — beside the model chip. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-length {
+	flex-shrink: 0;
+	margin-left: 0;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-length[hidden] {
+	display: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-length .codicon-clock {
+	font-size: 13px;
+}
+
+/* --- Composer cleanup: one row — "+", Image|Video segmented, then model (+ length) and send pinned right --- */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-footer {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+/* Only the model chip takes the free space; send sits right beside it. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-footer > .sessions-right-workbench-canvas-composer-send {
+	margin-left: 0;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-footer > .sessions-right-workbench-canvas-composer-model:not(.sessions-right-workbench-canvas-composer-length) {
+	margin-left: auto;
+}
+
+/* Image | Video: one segmented control on a quiet track. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-modes {
+	display: inline-flex;
+	gap: 2px;
+	padding: 2px;
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--rwb-foreground) 6%, transparent);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-mode {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 28px;
+	padding: 0 10px;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	cursor: pointer;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-mode .codicon {
+	font-size: 14px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-mode:not([aria-pressed='true']):hover {
+	color: var(--rwb-foreground);
+}
+
+/* Maker logos, as in the chat's model picker. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-model .combined-model-logo {
+	width: 14px;
+	height: 14px;
+	flex: 0 0 14px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-option .combined-model-logo {
+	width: 16px;
+	height: 16px;
+	flex: 0 0 16px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-model {
+	gap: 6px;
+	padding: 0 8px 0 10px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-composer-model:hover {
+	color: var(--rwb-foreground);
+	background: color-mix(in srgb, var(--rwb-foreground) 6%, transparent);
+}
+
+/* --- References: numbered composer slots (@image_1, @image_2, …), their rail badges, and @ suggestions --- */
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-attachments {
+	flex-wrap: wrap;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-slot:not(.empty) {
+	cursor: pointer;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-slot.shown {
+	border-color: var(--rwb-foreground);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-slot-name {
+	position: absolute;
+	left: 4px;
+	bottom: 4px;
+	padding: 1px 5px;
+	border-radius: 6px;
+	color: #ffffff;
+	background: rgba(0, 0, 0, 0.6);
+	font-size: 10px;
+	font-weight: 500;
+	line-height: 14px;
+	pointer-events: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-reference-badge {
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 3px;
+	box-sizing: border-box;
+	border-radius: 8px;
+	color: var(--cd-bg);
+	background: var(--rwb-foreground);
+	font-size: 10px;
+	font-weight: 600;
+	line-height: 1;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-mention-menu {
+	right: auto;
+	width: min(280px, calc(100% - 16px));
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-mention-menu .sessions-right-workbench-canvas-model-menu-list {
+	padding-top: 4px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-mention-option {
+	gap: 8px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-mention-option .name {
+	flex: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-mention-option[aria-selected='true'] {
+	background: var(--cd-border);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-mention-thumb {
+	flex-shrink: 0;
+	width: 32px;
+	height: 20px;
+	overflow: hidden;
+	border-radius: 4px;
+	background: var(--cd-border);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-mention-thumb :is(img, video) {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-mention-thumb .sessions-right-workbench-canvas-video-badge {
+	display: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-mention-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	color: var(--cd-muted);
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* --- Uploads: a drop hint over Canvas while files are dragged in, and the composer's "+" --- */
+.sessions-canvas-overlay .sessions-right-workbench-canvas-drop-hint {
+	position: absolute;
+	inset: 8px;
+	z-index: 10;
+	display: none;
+	align-items: center;
+	justify-content: center;
+	border: 2px dashed color-mix(in srgb, var(--rwb-foreground) 45%, transparent);
+	border-radius: 16px;
+	color: var(--rwb-foreground);
+	background: color-mix(in srgb, var(--rwb-bg) 70%, transparent);
+	font-size: 15px;
+	font-weight: 500;
+	pointer-events: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.drop-target .sessions-right-workbench-canvas-drop-hint {
+	display: flex;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-upload {
+	display: inline-flex;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border: 0;
+	border-radius: 10px;
+	color: var(--cd-muted, var(--rwb-muted));
+	background: transparent;
+	cursor: pointer;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-upload[hidden] {
+	display: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-upload:hover {
+	color: var(--rwb-foreground);
+	background: var(--cd-border, var(--rwb-hover));
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-composer-upload .codicon {
+	font-size: 16px;
+}
+
+/* --- One toolbar for grid and asset view: in the asset view it spans the stage, left of the chat --- */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-pill-anchor {
+	right: var(--cd-side);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-corner {
+	right: calc(var(--cd-side) + 12px);
+}
+
+/* Zoomed past fit, the stage scrolls. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-focused-stage.zoomed {
+	place-items: safe center;
+	overflow: auto;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-featured-box.commenting {
+	cursor: crosshair;
+}
+
+/* Multi-Select checks on filmstrip thumbs. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-rail-thumb .sessions-right-workbench-canvas-check {
+	top: 2px;
+	right: 2px;
+	width: 16px;
+	height: 16px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-rail-thumb .sessions-right-workbench-canvas-check .codicon {
+	font-size: 10px;
+}
+
+/* Dragging a thumb: the chat panel invites the drop, and highlights the composer when over it. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.dragging-item .sessions-right-workbench-canvas-composer {
+	outline: 2px dashed color-mix(in srgb, var(--rwb-foreground) 35%, transparent);
+	outline-offset: 2px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-side.drop-reference .sessions-right-workbench-canvas-composer {
+	outline-color: var(--rwb-foreground);
+	background: color-mix(in srgb, var(--rwb-foreground) 12%, var(--cd-surface));
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused :is(.sessions-right-workbench-canvas-rail-thumb, .sessions-right-workbench-canvas-message-tile)[draggable='true'] {
+	cursor: grab;
+}
+
+/* In the asset view Upload is an icon; beside a wide chat the pill drops its labels too. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-upload .value,
+.sessions-canvas-overlay .sessions-right-workbench-canvas.compact-toolbar .sessions-right-workbench-canvas-pill-button .label {
+	display: none;
+}
+
+/* The chat model chip in the thread header, and its menu dropping down from there. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas-chat-model {
+	display: inline-flex;
+	flex-shrink: 1;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	max-width: 60%;
+	height: 28px;
+	padding: 0 8px;
+	border: 1px solid var(--cd-border);
+	border-radius: 9px;
+	color: var(--cd-muted);
+	background: transparent;
+	font: inherit;
+	font-size: 12px;
+	font-weight: 500;
+	cursor: pointer;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-chat-model[hidden] {
+	display: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-chat-model:is(:hover, [aria-expanded='true']) {
+	color: var(--rwb-foreground);
+	background: var(--cd-surface);
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-chat-model .label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-chat-model .codicon {
+	flex-shrink: 0;
+	font-size: 12px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-chat-model .combined-model-logo {
+	flex-shrink: 0;
+	width: 14px;
+	height: 14px;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-model-menu.from-header {
+	top: 60px;
+	bottom: auto;
+	left: auto;
+	right: 12px;
+	width: min(320px, calc(100% - 24px));
+}
+
+/* An upload the app cannot preview (e.g. HEVC video): kept, shown as a labelled placeholder. */
+.sessions-canvas-overlay .no-preview {
+	position: relative;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-no-preview {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	border-radius: inherit;
+	color: color-mix(in srgb, var(--rwb-foreground) 60%, transparent);
+	background: color-mix(in srgb, var(--rwb-foreground) 8%, transparent);
+	font-size: 12px;
+	pointer-events: none;
+}
+
+.sessions-canvas-overlay .sessions-right-workbench-canvas-no-preview .codicon {
+	font-size: 20px;
+}
+
+.sessions-canvas-overlay .no-preview > :is(img, video) {
+	width: 100%;
+	height: 100%;
+}
+
+/* A narrow stage keeps the filter as its icon (the active filter shows in its
+ * tooltip), so the corner controls never run into the centered tools. */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.compact-toolbar .sessions-right-workbench-canvas-filter .value {
+	display: none;
+}
+
+/* If the centered tools would still touch the view switch or the corner
+ * controls, they step aside (visibility keeps them measurable for resizes). */
+.sessions-canvas-overlay .sessions-right-workbench-canvas.crowded-toolbar .sessions-right-workbench-canvas-pill-anchor {
+	visibility: hidden;
+}

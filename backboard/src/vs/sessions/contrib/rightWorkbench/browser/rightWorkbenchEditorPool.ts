@@ -8,7 +8,7 @@ import { Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { EditorInput } from '../../../../workbench/common/editor/editorInput.js';
 import { EditorPane } from '../../../../workbench/browser/parts/editor/editorPane.js';
-import { IEditorGroupsService, IModalEditorPart } from '../../../../workbench/services/editor/common/editorGroupsService.js';
+import { IEditorGroup, IEditorGroupsService, IModalEditorPart } from '../../../../workbench/services/editor/common/editorGroupsService.js';
 
 export type RightWorkbenchEditorKind = 'files' | 'review' | 'browser' | 'terminal';
 
@@ -62,6 +62,26 @@ export class RightWorkbenchEditorPool extends Disposable {
 			}).finally(() => { entry.pending = undefined; });
 		}
 		return entry.pending;
+	}
+
+	/** Whether `group` belongs to one of this pool's embedded editor parts. */
+	ownsGroup(group: IEditorGroup): boolean {
+		for (const entry of this.entries.values()) {
+			if (entry.part?.groups.includes(group)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Whether one of this pool's embedded editor groups has `input` open. */
+	containsEditor(input: EditorInput): boolean {
+		for (const entry of this.entries.values()) {
+			if (entry.part?.groups.some(group => group.contains(input))) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	setVisible(host: HTMLElement | undefined, visible: boolean): void {

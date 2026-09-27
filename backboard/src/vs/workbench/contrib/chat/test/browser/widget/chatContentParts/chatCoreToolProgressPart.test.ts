@@ -311,7 +311,7 @@ suite('ChatCoreToolProgressPart', () => {
 			{ toolKind: 'computer', title: 'Computer actions', summary: '1 action', detail: 'Click' },
 			{ toolKind: 'browser', title: 'Browser actions', summary: 'example.com/docs', detail: 'Navigate' },
 			{ toolKind: 'findSkill', title: 'Find a skill', summary: 'testing', detail: 'test-helper' },
-			{ toolKind: 'findMcp', title: 'Find an MCP server', summary: 'issues', detail: 'GitHub' },
+			{ toolKind: 'findMcp', title: 'Find a connector', summary: 'issues', detail: 'GitHub' },
 			{ toolKind: 'generateVideo', title: 'Generate Video', summary: 'A cat singing', detail: 'A cat singing' },
 		]);
 	});

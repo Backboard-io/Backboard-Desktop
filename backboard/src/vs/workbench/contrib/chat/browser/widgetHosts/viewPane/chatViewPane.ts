@@ -6,7 +6,9 @@
 import { renderBackboardAuthSetup } from '../../backboardAuthSetup.js';
 import './media/chatViewPane.css';
 import '../../widget/media/chatPanelCursorLook.css';
+import '../../widget/media/chatPanelSimpleLook.css';
 import { $, addDisposableListener, append, EventHelper, EventType, getWindow, scheduleAtNextAnimationFrame, setVisibility } from '../../../../../../base/browser/dom.js';
+import { syncRootPresenceClass } from '../../../../../browser/part.js';
 import { StandardMouseEvent } from '../../../../../../base/browser/mouseEvent.js';
 import { Orientation, Sash } from '../../../../../../base/browser/ui/sash/sash.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
@@ -937,6 +939,9 @@ referencesExpandedWhenEmptyResponse: false,
 	private updateBackboardChatAuthGate(): void {
 		const gated = this.isBackboardAuthRequired();
 		this.chatControlsContainer?.classList.toggle('backboard-auth-gate-active', gated);
+		if (this.chatControlsContainer) {
+			syncRootPresenceClass(getWindow(this.chatControlsContainer), 'backboard-chat-auth-gated', '.chat-viewpane .backboard-auth-gate-active');
+		}
 		if (this.chatAuthGateOverlay) {
 			setVisibility(gated, this.chatAuthGateOverlay);
 		}
@@ -1006,10 +1011,17 @@ referencesExpandedWhenEmptyResponse: false,
 			return; // already merged
 		}
 		compositeTitle.classList.add('has-chat-tabs');
+		// Mirrored on the part so its panel tokens need no
+		// `.part.auxiliarybar:has(> .composite.title.has-chat-tabs)`: a :has() on
+		// the chat's host re-cascaded the whole transcript on streaming updates.
+		part?.classList.add('part-has-chat-tabs');
 		// `has-chat-tabs` is also what tells the strip to drop the chat container's
 		// own switcher tab — the session tabs stand in for it. If this pane goes
 		// away, that tab has to come back or there is no way back to chat.
-		this._register(toDisposable(() => compositeTitle.classList.remove('has-chat-tabs')));
+		this._register(toDisposable(() => {
+			compositeTitle.classList.remove('has-chat-tabs');
+			part?.classList.remove('part-has-chat-tabs');
+		}));
 		const anchor = compositeTitle.querySelector('.title-actions');
 		compositeTitle.insertBefore(tabs, anchor ?? null);
 		// The + / history / ⋯ cluster moves to the end of the row (after the

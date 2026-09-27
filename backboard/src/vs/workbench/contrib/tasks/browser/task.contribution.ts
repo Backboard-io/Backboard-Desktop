@@ -568,9 +568,10 @@ configurationRegistry.registerConfiguration({
 		[TaskSettingId.NotifyWindowOnTaskCompletion]: {
 			type: 'integer',
 			markdownDescription: nls.localize('task.NotifyWindowOnTaskCompletion', 'Controls the minimum task runtime in milliseconds before showing an OS notification when the task finishes while the window is not in focus. Set to -1 to disable notifications. Set to 0 to always show notifications. This includes a window badge as well as notification toast.'),
-			default: 60000,
+			// Backboard: disabled by default everywhere. The first OS notification
+			// makes macOS ask for notification permission, an unrequested popup.
+			default: -1,
 			minimum: -1,
-			agentsWindow: { default: -1 },
 		},
 		[TaskSettingId.VerboseLogging]: {
 			type: 'boolean',

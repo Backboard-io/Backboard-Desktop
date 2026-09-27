@@ -279,7 +279,7 @@ export class InstallAction extends McpServerAction {
 
 		if (this.open) {
 			this.mcpWorkbenchService.open(this.mcpServer);
-			alert(localize('mcpServerInstallation', "Installing MCP Server {0} started. An editor is now open with more details on this MCP Server", this.mcpServer.label));
+			alert(localize('mcpServerInstallation', "Installing Connector {0} started. An editor is now open with more details on this connector", this.mcpServer.label));
 		}
 
 		type McpServerInstallClassification = {
@@ -340,7 +340,7 @@ export class InstallInWorkspaceAction extends McpServerAction {
 
 		if (this.open) {
 			this.mcpWorkbenchService.open(this.mcpServer, { preserveFocus: true });
-			alert(localize('mcpServerInstallation', "Installing MCP Server {0} started. An editor is now open with more details on this MCP Server", this.mcpServer.label));
+			alert(localize('mcpServerInstallation', "Installing Connector {0} started. An editor is now open with more details on this connector", this.mcpServer.label));
 		}
 
 		const target = await this.getConfigurationTarget();
@@ -384,7 +384,7 @@ export class InstallInWorkspaceAction extends McpServerAction {
 		}
 
 		const targetPick = await this.quickInputService.pick(options, {
-			title: localize('mcp.target.title', "Choose where to install the MCP server"),
+			title: localize('mcp.target.title', "Choose where to install the connector"),
 		});
 
 		return (targetPick as OptionQuickPickItem)?.target;
@@ -438,7 +438,7 @@ export class InstallInRemoteAction extends McpServerAction {
 
 		if (this.open) {
 			this.mcpWorkbenchService.open(this.mcpServer);
-			alert(localize('mcpServerInstallation', "Installing MCP Server {0} started. An editor is now open with more details on this MCP Server", this.mcpServer.label));
+			alert(localize('mcpServerInstallation', "Installing Connector {0} started. An editor is now open with more details on this connector", this.mcpServer.label));
 		}
 
 		type McpServerInstallClassification = {
@@ -519,7 +519,7 @@ export class EnableMcpServerGloballyAction extends McpServerAction {
 		@IMcpService private readonly mcpService: IMcpService,
 	) {
 		super(EnableMcpServerGloballyAction.ID, localize('enableGlobally', "Enable"), McpServerAction.LABEL_ACTION_CLASS);
-		this.tooltip = localize('enableGloballyTooltip', "Enable this MCP server");
+		this.tooltip = localize('enableGloballyTooltip', "Enable this connector");
 		this.update();
 	}
 
@@ -553,7 +553,7 @@ export class EnableMcpServerForWorkspaceAction extends McpServerAction {
 		@IWorkspaceContextService private readonly workspaceService: IWorkspaceContextService,
 	) {
 		super(EnableMcpServerForWorkspaceAction.ID, localize('enableForWorkspace', "Enable (Workspace)"), McpServerAction.LABEL_ACTION_CLASS);
-		this.tooltip = localize('enableForWorkspaceTooltip', "Enable this MCP server only in this workspace");
+		this.tooltip = localize('enableForWorkspaceTooltip', "Enable this connector only in this workspace");
 		this.update();
 	}
 
@@ -589,7 +589,7 @@ export class DisableMcpServerGloballyAction extends McpServerAction {
 		@IMcpService private readonly mcpService: IMcpService,
 	) {
 		super(DisableMcpServerGloballyAction.ID, localize('disableGlobally', "Disable"), McpServerAction.LABEL_ACTION_CLASS);
-		this.tooltip = localize('disableGloballyTooltip', "Disable this MCP server");
+		this.tooltip = localize('disableGloballyTooltip', "Disable this connector");
 		this.update();
 	}
 
@@ -623,7 +623,7 @@ export class DisableMcpServerForWorkspaceAction extends McpServerAction {
 		@IWorkspaceContextService private readonly workspaceService: IWorkspaceContextService,
 	) {
 		super(DisableMcpServerForWorkspaceAction.ID, localize('disableForWorkspace', "Disable (Workspace)"), McpServerAction.LABEL_ACTION_CLASS);
-		this.tooltip = localize('disableForWorkspaceTooltip', "Disable this MCP server only in this workspace");
+		this.tooltip = localize('disableForWorkspaceTooltip', "Disable this connector only in this workspace");
 		this.update();
 	}
 
@@ -1230,7 +1230,7 @@ export class ShowSamplingRequestsAction extends McpServerAction {
 		this.editorService.openEditor({
 			resource: undefined,
 			contents: this.samplingService.getLogText(server),
-			label: localize('mcp.samplingLog.title', 'MCP Sampling: {0}', server.definition.label),
+			label: localize('mcp.samplingLog.title', 'Connector Sampling: {0}', server.definition.label),
 		});
 	}
 

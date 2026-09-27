@@ -89,10 +89,22 @@ export interface CliTsMcpServerEntry {
 export interface CliTsMcpServerStatus {
 	readonly name: string;
 	readonly type?: string;
-	readonly status?: 'connected' | 'needs_authentication' | 'error' | 'disabled';
+	readonly status?: 'connecting' | 'connected' | 'needs_authentication' | 'error' | 'disabled';
 	readonly message?: string;
 	readonly toolNames?: readonly string[];
+	/**
+	 * Where the runtime got the server: pushed by the IDE, read from the user
+	 * or project `.backboard/mcp.json`, or added mid-chat by `find_mcp`.
+	 */
+	readonly source?: 'ide' | 'user' | 'project' | 'runtime';
 }
+
+/**
+ * Serve capability advertised by runtimes that write unsolicited `serve:mcp`
+ * snapshots (no `requestId`) whenever an MCP server's status changes, and
+ * that understand `setMcpServers.authoritative` and `authenticateMcpServer`.
+ */
+export const CLI_TS_MCP_STATUS_EVENTS_CAPABILITY = 'mcp-status-events';
 
 /** Payload of a `serve:mcp` response. */
 export interface CliTsMcpListPayload {
@@ -163,6 +175,19 @@ export type CliTsServeControl =
 		readonly servers: Readonly<Record<string, CliTsMcpServerEntry>>;
 		/** Server names to reconnect even when their configuration is unchanged. */
 		readonly force?: readonly string[];
+		/**
+		 * The IDE owns the user-level `~/.backboard/mcp.json` (it imports that
+		 * file), so the runtime stops layering it under the push: a server the
+		 * user disabled or removed in the IDE stays off. Project-file servers
+		 * and servers added mid-chat by `find_mcp` are still layered.
+		 */
+		readonly authoritative?: boolean;
+	}
+	| {
+		/** Runs the interactive OAuth sign-in for one MCP server (opens the system browser). */
+		readonly op: 'authenticateMcpServer';
+		readonly requestId: string;
+		readonly name: string;
 	}
 	| {
 		/**

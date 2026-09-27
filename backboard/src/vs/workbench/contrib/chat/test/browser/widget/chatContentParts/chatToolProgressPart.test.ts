@@ -521,8 +521,9 @@ suite('ChatToolProgressSubPart', () => {
 			reused: part.hasSameContent({ kind: 'working', state: createPendingState() }, [], context.element),
 		}, {
 			cursorRow: true,
-			label: 'Thinking',
-			stats: '',
+			// The legacy progress text is detached; the Codex placeholder is the only label.
+			label: undefined,
+			stats: undefined,
 			loading: false,
 			compactIndicator: false,
 			placeholder: 'ThinkingThinking',

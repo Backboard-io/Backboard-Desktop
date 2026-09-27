@@ -6,6 +6,7 @@
 import assert from 'assert';
 import { DeferredPromise, timeout } from '../../../../../../base/common/async.js';
 import { Event } from '../../../../../../base/common/event.js';
+import { constObservable } from '../../../../../../base/common/observable.js';
 import { DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { mock } from '../../../../../../base/test/common/mock.js';
@@ -22,6 +23,7 @@ import { IWorkbenchEnvironmentService } from '../../../../../services/environmen
 import { IChatService } from '../../../common/chatService/chatService.js';
 import { AgentHostUntitledProvisionalSessionService, IAgentHostUntitledProvisionalSessionService } from '../../../browser/agentSessions/agentHost/agentHostUntitledProvisionalSessionService.js';
 import { AgentHostNewSessionFolderService, IAgentHostNewSessionFolderService } from '../../../browser/agentSessions/agentHost/agentHostNewSessionFolderService.js';
+import { IAgentHostActiveClientService } from '../../../browser/agentSessions/agentHost/agentHostActiveClientService.js';
 
 // ---- Mocks -----------------------------------------------------------------
 
@@ -124,6 +126,7 @@ suite('AgentHostUntitledProvisionalSessionService', () => {
 		insta.stub(IWorkbenchEnvironmentService, { isSessionsWindow: false } as Partial<IWorkbenchEnvironmentService>);
 		folderService = ds.add(insta.createInstance(AgentHostNewSessionFolderService));
 		insta.stub(IAgentHostNewSessionFolderService, folderService);
+		insta.stub(IAgentHostActiveClientService, { getActiveClient: (_sessionType: string, clientId: string) => ({ clientId, tools: [] }), getResolvedCustomizations: () => constObservable(undefined) } as Partial<IAgentHostActiveClientService>);
 		provisional = ds.add(insta.createInstance(AgentHostUntitledProvisionalSessionService));
 		cleanup = ds.add(new DisposableStore());
 	});

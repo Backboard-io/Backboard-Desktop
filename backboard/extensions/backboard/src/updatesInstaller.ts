@@ -72,6 +72,30 @@ validate_app() {
   ${gatekeeperAssess}
 }
 
+signing_team() {
+  { /usr/bin/codesign -dv "$1" 2>&1 || true; } | /usr/bin/awk -F= '/^TeamIdentifier=/ { print $2; exit }'
+}
+
+# macOS keys users' privacy grants (folder access, Accessibility, Screen
+# Recording, Automation) on bundle id + signing team. An update signed by any
+# other team would silently re-raise every permission prompt, so refuse it.
+require_same_signing_team() {
+  local staged_app="$1"
+  local current_app="$2"
+  local current_team
+  local staged_team
+
+  current_team="$(signing_team "$current_app")"
+  if [[ -z "$current_team" || "$current_team" == "not set" ]]; then
+    return 0
+  fi
+  staged_team="$(signing_team "$staged_app")"
+  if [[ "$staged_team" != "$current_team" ]]; then
+    echo "Refusing update signed by team \${staged_team:-none}; the installed app is signed by $current_team"
+    return 1
+  fi
+}
+
 prepare_staged_app() {
   local source_app="$1"
   local staged_app="$2"
@@ -612,6 +636,7 @@ CALLER_OWNER_ID="$(/usr/bin/id -u)"
 CALLER_GROUP_ID="$(/usr/bin/id -g)"
 NEEDS_ELEVATION=0
 prepare_staged_app "$SOURCE_APP" "$STAGED_APP" "$BUNDLE_IDENTIFIER" "$VERSION"
+require_same_signing_team "$STAGED_APP" "$APP_PATH"
 if [[ ! -w "$APP_PARENT" ]]; then
   NEEDS_ELEVATION=1
 fi

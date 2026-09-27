@@ -139,7 +139,7 @@ export class McpDevModeDebugging implements IMcpDevModeDebugging {
 		switch (definition.devMode.debug.type) {
 			case 'node': {
 				if (!/node[0-9]*$/.test(launch.command)) {
-					throw new Error(localize('mcp.debug.nodeBinReq', 'MCP server must be launched with the "node" executable to enable debugging, but was launched with "{0}"', launch.command));
+					throw new Error(localize('mcp.debug.nodeBinReq', 'Connector must be launched with the "node" executable to enable debugging, but was launched with "{0}"', launch.command));
 				}
 
 				// We intentionally assert types as the DA has additional properties beyong IConfig
@@ -158,7 +158,7 @@ export class McpDevModeDebugging implements IMcpDevModeDebugging {
 			}
 			case 'debugpy': {
 				if (!/python[0-9.]*$/.test(launch.command)) {
-					throw new Error(localize('mcp.debug.pythonBinReq', 'MCP server must be launched with the "python" executable to enable debugging, but was launched with "{0}"', launch.command));
+					throw new Error(localize('mcp.debug.pythonBinReq', 'Connector must be launched with the "python" executable to enable debugging, but was launched with "{0}"', launch.command));
 				}
 
 				let command: string | undefined;

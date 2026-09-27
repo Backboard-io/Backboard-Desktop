@@ -1,13 +1,23 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { canonicalAppName } from "../../utils/appNames.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import { ImageContent } from "../image/ImageContent.ts";
 import type { CanvasDrawing } from "./CanvasDrawing.ts";
-import { CuaDriverClient } from "./CuaDriverClient.ts";
+import { CUA_SESSION, CuaDriverClient } from "./CuaDriverClient.ts";
+import {
+	SCREENSHOT_MAX_DIMENSION,
+	type ScreenshotPaths,
+	screenImage,
+	showAgentCursor,
+} from "./CuaDriverSurface.ts";
 import {
 	type JevElement,
 	type JevKey,
 	type JevObservation,
 	type JevSurface,
+	type ScreenImage,
 	visibleText,
 } from "./JevUseLoop.ts";
 
@@ -35,6 +45,53 @@ interface DriverWindow {
 	bounds?: { width: number; height: number };
 }
 
+/**
+ * One driver-owned profile per browser, kept on disk across tasks: a site the
+ * user signs in to once stays signed in, and their everyday browser profile is
+ * never read. `backboard` for "Browser", `backboard-brave-browser` for Brave.
+ */
+export function agentProfileName(appName: string): string {
+	if (/^browser$/i.test(appName.trim())) return "backboard";
+	const slug = canonicalAppName(appName)
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-|-$/g, "");
+	return `backboard-${slug}`.slice(0, 64);
+}
+/**
+ * Stopping the driver ends its browser abruptly, so the next launch of the
+ * persistent profile opened with Chrome's "Restore pages?" bubble. The bubble
+ * is its own native window: clicks on the screenshot fell through to the page,
+ * and a live run spent five steps on it. Marking the last exit clean before
+ * launch prevents it. Only the driver-owned profile is touched.
+ */
+export function markProfileExitedCleanly(
+	profileName: string,
+	root = process.env.CUA_DRIVER_BROWSER_PROFILE_ROOT ??
+		join(
+			homedir(),
+			"Library",
+			"Application Support",
+			"CuaDriver",
+			"BrowserProfiles",
+		),
+): void {
+	const file = join(root, profileName, "Default", "Preferences");
+	try {
+		const prefs = JSON.parse(readFileSync(file, "utf8")) as {
+			profile?: Record<string, unknown>;
+		};
+		prefs.profile = {
+			...prefs.profile,
+			exit_type: "Normal",
+			exited_cleanly: true,
+		};
+		writeFileSync(file, JSON.stringify(prefs));
+	} catch {
+		// A profile that has never run has no preferences yet.
+	}
+}
+
 const BIND_ATTEMPTS = 40;
 const BIND_WAIT_MS = 400;
 const SCROLL_PX = 600;
@@ -58,15 +115,15 @@ const CONTROL_ROLES =
  * controls first, and says which actions each one takes; clicks and typing go
  * to those refs over the DevTools protocol.
  *
- * The browser is a separate, driver-owned instance of the requested browser with an empty profile. It
- * shares nothing with the user's own browser, and the driver closes it when
- * this surface is disposed.
+ * The browser is a separate, driver-owned instance of the requested browser
+ * with Backboard's own persistent profile. It shares nothing with the user's
+ * everyday profile, and the driver closes it when this surface is disposed.
  */
 export class CuaBrowserSurface implements JevSurface {
 	readonly kind = "cua-browser-dom";
 	private readonly driver: Pick<CuaDriverClient, "call" | "tryCall" | "close">;
 	/** A label repeated on every call so the driver keeps one browser session. */
-	private readonly session = `backboard-${Date.now().toString(36)}`;
+	private readonly session = CUA_SESSION;
 	private target: {
 		pid: number;
 		window_id: number;
@@ -83,6 +140,7 @@ export class CuaBrowserSurface implements JevSurface {
 		binaryPath: string,
 		readonly appName = "Browser",
 		driver?: Pick<CuaDriverClient, "call" | "tryCall" | "close">,
+		private readonly screenshots?: ScreenshotPaths,
 	) {
 		this.driver = driver ?? new CuaDriverClient(binaryPath);
 	}
@@ -105,6 +163,7 @@ export class CuaBrowserSurface implements JevSurface {
 			(ref) =>
 				ref.actions?.includes("scroll") && ref.visibility === "in_viewport",
 		)?.ref;
+		const screenshot = await this.screenshot(target, signal);
 		return {
 			appName: this.appName,
 			windowTitle: [snapshot.page?.title, snapshot.page?.url]
@@ -112,7 +171,52 @@ export class CuaBrowserSurface implements JevSurface {
 				.join(" - "),
 			elements: this.lastElements,
 			text: visibleText(outlineText(snapshot.outline ?? "")),
+			...(screenshot ? { screenshot } : {}),
 		};
+	}
+
+	/** The window as the user sees it, for a brain that reads screenshots. */
+	private async screenshot(
+		target: { pid: number; window_id: number },
+		signal: AbortSignal,
+	): Promise<ScreenImage | undefined> {
+		const path = await this.screenshots?.();
+		if (!path) return undefined;
+		const captured = await this.driver.tryCall<{
+			screenshot_width?: number;
+			screenshot_height?: number;
+		}>(
+			"get_window_state",
+			{
+				pid: target.pid,
+				window_id: target.window_id,
+				include_accessibility_tree: false,
+				screenshot_out_file: path,
+				max_dimension: SCREENSHOT_MAX_DIMENSION,
+			},
+			signal,
+		);
+		// A page is still operable from its DOM when the capture fails.
+		return captured.ok ? screenImage(path, captured.data) : undefined;
+	}
+
+	/**
+	 * A point of the window screenshot, for what the DOM snapshot does not offer.
+	 * It is a native click posted to the browser: the page's trusted click route
+	 * refuses background windows on macOS.
+	 */
+	async pressAt(
+		x: number,
+		y: number,
+		_screenshot: ScreenImage,
+		signal: AbortSignal,
+	): Promise<void> {
+		const target = await this.bind(signal);
+		await this.driver.call(
+			"click",
+			{ pid: target.pid, window_id: target.window_id, x, y },
+			signal,
+		);
 	}
 
 	/** Frames can disappear while an ad or navigation loads. Retrying a read
@@ -328,12 +432,14 @@ export class CuaBrowserSurface implements JevSurface {
 			if (!Number.isInteger(requestedPid) || requestedPid <= 0)
 				throw new Error(`Could not launch ${this.appName}.`);
 		}
+		const profile = agentProfileName(this.appName);
+		markProfileExitedCleanly(profile);
 		const prepared = await this.driver.call<{ prepared_pid?: number }>(
 			"browser_prepare",
 			{
 				allow_launch: true,
 				...(requestedPid ? { pid: requestedPid } : {}),
-				profile: { mode: "isolated_new" },
+				profile: { mode: "isolated_named", name: profile },
 				session: this.session,
 			},
 			signal,
@@ -373,6 +479,7 @@ export class CuaBrowserSurface implements JevSurface {
 						target_id: bound.data.target_id,
 						tab_id: tab.tab_id,
 					};
+					await showAgentCursor(this.driver, signal);
 					return this.target;
 				}
 			}

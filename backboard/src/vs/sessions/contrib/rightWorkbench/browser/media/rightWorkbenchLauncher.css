@@ -3,15 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-.agent-sessions-workbench .part.auxiliarybar {
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) {
 	height: 100% !important;
 	min-height: 0 !important;
 	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
 	border-left: none !important;
 }
 
-.agent-sessions-workbench .part.auxiliarybar > .title,
-.agent-sessions-workbench .part.auxiliarybar > .composite.title {
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) > .title,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) > .composite.title {
 	display: none !important;
 	height: 0 !important;
 	min-height: 0 !important;
@@ -19,17 +19,17 @@
 	border: 0 !important;
 }
 
-.agent-sessions-workbench .part.auxiliarybar > .content {
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) > .content {
 	height: 100% !important;
 	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))) !important;
 	background-color: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))) !important;
 }
 
-.agent-sessions-workbench .part.auxiliarybar .pane-header {
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .pane-header {
 	display: none !important;
 }
 
-.agent-sessions-workbench .part.auxiliarybar .pane-body {
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .pane-body {
 	height: 100% !important;
 	padding: 0 !important;
 }
@@ -2249,22 +2249,22 @@
 	border-color: var(--vscode-tree-indentGuidesStroke, var(--rwb-border)) !important;
 }
 
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host > .pane,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host > .pane > .pane-body,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host .files-empty-view-body,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host .files-empty-welcome,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host .welcome-view,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host .welcome-view-content,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host .monaco-list,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host .monaco-list-rows,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host .monaco-tree,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host .monaco-tree-rows,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host .monaco-scrollable-element {
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host > .pane,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host > .pane > .pane-body,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .files-empty-view-body,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .files-empty-welcome,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .welcome-view,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .welcome-view-content,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .monaco-list,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .monaco-list-rows,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .monaco-tree,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .monaco-tree-rows,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .monaco-scrollable-element {
 	background: transparent !important;
 	background-color: transparent !important;
 }
 
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-explorer-host .monaco-tree-type-filter {
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .monaco-tree-type-filter {
 	position: absolute !important;
 	width: 1px !important;
 	height: 1px !important;
@@ -2275,24 +2275,24 @@
 	pointer-events: none !important;
 }
 
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-shell,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-body,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-editor,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-editor-body,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-file-tree,
-.agent-sessions-workbench .part.auxiliarybar .sessions-right-workbench-embedded-editor-host {
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-body,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-editor,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-editor-body,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-tree,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-embedded-editor-host {
 	background: var(--rwb-bg) !important;
 	background-color: var(--rwb-bg) !important;
 }
 
-.agent-sessions-workbench .part.auxiliarybar .pane-composite-part,
-.agent-sessions-workbench .part.auxiliarybar .composite,
-.agent-sessions-workbench .part.auxiliarybar .composite > .content,
-.agent-sessions-workbench .part.auxiliarybar .pane-body,
-.agent-sessions-workbench .part.auxiliarybar .monaco-scrollable-element,
-.agent-sessions-workbench .part.auxiliarybar .monaco-split-view2,
-.agent-sessions-workbench .part.auxiliarybar .split-view-container,
-.agent-sessions-workbench .part.auxiliarybar .split-view-view {
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .pane-composite-part,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .composite,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .composite > .content,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .pane-body,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .monaco-scrollable-element,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .monaco-split-view2,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .split-view-container,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .split-view-view {
 	background: var(--rwb-bg) !important;
 	background-color: var(--rwb-bg) !important;
 }

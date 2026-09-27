@@ -14,8 +14,16 @@ import type { ModelSource } from "../providers/backboard/types.ts";
  */
 export const HOST_MANAGED_BYOK_CAPABILITY = "host-managed-byok-v2";
 
+/**
+ * The runtime writes unsolicited `serve:mcp` records (no `requestId`) with the
+ * full server snapshot whenever the MCP server set or a status changes, and
+ * accepts `setMcpServers.authoritative` and `authenticateMcpServer`.
+ */
+export const MCP_STATUS_EVENTS_CAPABILITY = "mcp-status-events";
+
 export const SERVE_CAPABILITIES: readonly string[] = [
 	HOST_MANAGED_BYOK_CAPABILITY,
+	MCP_STATUS_EVENTS_CAPABILITY,
 ];
 
 /** One provider key in a host credential snapshot. */
@@ -99,14 +107,37 @@ export type ServeControl =
 			/**
 			 * Replaces the session's MCP server set with the IDE-configured
 			 * servers (name → `.backboard/mcp.json` entry). Servers missing from
-			 * the payload are disconnected; unchanged servers keep running.
-			 * `force` reconnects the named servers even when unchanged.
+			 * the resulting set are disconnected; unchanged servers keep
+			 * running; changed ones reconnect in parallel. `force` reconnects
+			 * the named servers even when unchanged.
+			 *
+			 * The push is layered over other sources. With `authoritative`, the
+			 * IDE owns `~/.backboard/mcp.json`, so that file is NOT layered;
+			 * the project `.backboard/mcp.json` and servers find_mcp added in
+			 * this process still are, unless the push has the same name.
+			 * Without it, both files are layered (standalone behavior).
+			 *
+			 * Queued behind in-flight MCP work (initial connect, earlier
+			 * pushes). Replies with `serve:mcp` (this `requestId`) and also
+			 * emits an unsolicited `serve:mcp`.
 			 */
 			op: "setMcpServers";
 			requestId?: string;
 			servers: Record<string, McpServerFileEntry & { disabled?: boolean }>;
 			force?: string[];
-		}
+			authoritative?: boolean;
+	  }
+	| {
+			/**
+			 * Runs interactive OAuth for one HTTP server: opens the system
+			 * browser and waits for the loopback callback, then re-registers
+			 * the server's tools. Replies `serve:mcp` (this `requestId`) with
+			 * the full snapshot, or `serve:error` when sign-in fails.
+			 */
+			op: "authenticateMcpServer";
+			requestId: string;
+			name: string;
+	  }
 	| { op: "setModel"; requestId?: string; model: string; source?: ModelSource }
 	| {
 			/**
@@ -156,6 +187,8 @@ export type ServeRecordType =
 	| "serve:warm"
 	| "serve:ack"
 	| "serve:error";
+
+export type { ServeMcpPayload } from "./serveMcp.ts";
 
 /** A control response interleaved with R-CLI client events on stdout. */
 export interface ServeRecord {

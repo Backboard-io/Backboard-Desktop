@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/modalEditorPart.css';
-import { $, addDisposableListener, append, Dimension, EventHelper, EventType, hide, IDimension, isHTMLElement, setVisibility, show } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, Dimension, EventHelper, EventType, getWindow, hide, IDimension, isHTMLElement, setVisibility, show } from '../../../../base/browser/dom.js';
 import { GlobalPointerMoveMonitor } from '../../../../base/browser/globalPointerMoveMonitor.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
 import { ActionBar, prepareActions } from '../../../../base/browser/ui/actionbar/actionbar.js';
@@ -698,7 +698,8 @@ export class ModalEditorPart {
 				width = containerDimension.width;
 				height = availableHeight;
 			} else if (fullWindow) {
-				width = containerDimension.width;
+				// The host window may inset the block (e.g. the Agents window keeps its sidebar beside it).
+				width = modalElement.clientWidth || containerDimension.width;
 				height = containerDimension.height;
 			} else if (editorPart.maximized) {
 				const verticalPadding = Math.max(titleBarOffset /* keep away from title bar to prevent clipping issues with WCO */, MODAL_MAXIMIZED_PADDING);
@@ -748,6 +749,14 @@ export class ModalEditorPart {
 			layout(true);
 		};
 		disposables.add(Event.runAndSubscribe(this.layoutService.onDidLayoutMainContainer, layoutModal));
+		// A full-window block can change width without the window resizing (its inset moves).
+		const blockResizeObserver = new (getWindow(modalElement).ResizeObserver)(() => {
+			if (fullWindow) {
+				layoutModal();
+			}
+		});
+		blockResizeObserver.observe(modalElement);
+		disposables.add(toDisposable(() => blockResizeObserver.disconnect()));
 		disposables.add(editorPart.onDidChangeMaximized(() => layoutModal()));
 		disposables.add(editorPart.onDidRequestLayout(() => layoutModal()));
 

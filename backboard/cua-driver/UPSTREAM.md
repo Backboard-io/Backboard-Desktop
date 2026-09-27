@@ -66,10 +66,15 @@ The remaining integration lives outside this directory:
   persistent `cua-driver mcp --direct --embedded` stdio connection.
   `--embedded` attributes macOS Accessibility to Backboard Studio, so users
   see no second permission prompt.
-- `cli-ts/src/core/computer/JevUseLoop.ts` is the decide-act-observe loop. It
-  follows the shape of upstream's `examples/jev-use` recipe but reaches
-  TypeSafe Jev through Backboard (`system_one` on `/threads/messages`) instead
-  of the TypeSafe SDK, so no separate TypeSafe key is needed.
+- `cli-ts/src/core/computer/JevUseLoop.ts` is the decide-act-observe loop.
+  Its brain is pluggable. The default, `ModelBrain.ts`, is a fast tool-calling
+  chat model (`openrouter/deepseek/deepseek-v4.1-flash` through Backboard),
+  following upstream's `examples/agent-sdks` agents. It picks one tool per step
+  over the filtered controls and writes its own text.
+  `BACKBOARD_COMPUTER_USE_MODEL` selects another `provider/model`, or `jev`.
+  `jev` selects `JevBrain.ts`, which follows upstream's `examples/jev-use`
+  recipe but reaches TypeSafe Jev through Backboard (`system_one` on
+  `/threads/messages`), so no separate TypeSafe key is needed.
 - `scripts/build-cua-driver.sh` builds the binary into
   `extensions/backboard/bin/`, which is gitignored like the cli-ts binary.
 

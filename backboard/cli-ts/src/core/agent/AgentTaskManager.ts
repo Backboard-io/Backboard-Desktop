@@ -84,49 +84,75 @@ export class AgentTaskManager {
 		}
 	}
 
-/** Register the whole batch before releasing any new worker execution. */
-	async spawnBatch(tasks: readonly SpawnAgentTask[]): Promise<AgentTaskRecord[]> {
-		if (!tasks.length || tasks.length > 4) throw new Error("A worker batch must contain between one and four assignments.");
-		if (new Set(tasks.map(task => task.handle)).size !== tasks.length) throw new Error("Duplicate worker handle in batch.");
+	/** Register the whole batch before releasing any new worker execution. */
+	async spawnBatch(
+		tasks: readonly SpawnAgentTask[],
+	): Promise<AgentTaskRecord[]> {
+		if (!tasks.length || tasks.length > 4)
+			throw new Error(
+				"A worker batch must contain between one and four assignments.",
+			);
+		if (new Set(tasks.map((task) => task.handle)).size !== tasks.length)
+			throw new Error("Duplicate worker handle in batch.");
 		await this.initialize();
 		for (const task of tasks) {
 			throwIfAborted(task.ctx.signal);
 			const existing = this.records.get(task.handle);
-			if (existing && !matchesTask(existing, task, taskIdentity(task))) throw new Error(`Agent task handle is already in use: ${task.handle}`);
+			if (existing && !matchesTask(existing, task, taskIdentity(task)))
+				throw new Error(`Agent task handle is already in use: ${task.handle}`);
 			const pending = this.registrations.get(task.handle);
-			if (pending && pending.identity !== taskIdentity(task)) throw new Error(`Agent task handle is already in use: ${task.handle}`);
+			if (pending && pending.identity !== taskIdentity(task))
+				throw new Error(`Agent task handle is already in use: ${task.handle}`);
 		}
-		const newHandles = tasks.filter(task => !this.records.has(task.handle) && !this.registrations.has(task.handle)).map(task => task.handle);
+		const newHandles = tasks
+			.filter(
+				(task) =>
+					!this.records.has(task.handle) &&
+					!this.registrations.has(task.handle),
+			)
+			.map((task) => task.handle);
 		let release!: () => void;
 		let reject!: (error: Error) => void;
-		const gate = new Promise<void>((resolve, fail) => { release = resolve; reject = fail; });
+		const gate = new Promise<void>((resolve, fail) => {
+			release = resolve;
+			reject = fail;
+		});
 		void gate.catch(() => undefined);
-		const registered = await Promise.allSettled(tasks.map(task => this.spawn({
-			...task,
-			reportsWorkerStart: true,
-			run: async (input, ctx, onStarted) => {
-				await gate;
-				throwIfAborted(ctx.signal);
-				if (!task.reportsWorkerStart) await onStarted();
-				return task.run(input, ctx, onStarted);
-			},
-		})));
-		const failure = registered.find(result => result.status === "rejected");
-		if (failure || tasks.some(task => task.ctx.signal.aborted)) {
+		const registered = await Promise.allSettled(
+			tasks.map((task) =>
+				this.spawn({
+					...task,
+					reportsWorkerStart: true,
+					run: async (input, ctx, onStarted) => {
+						await gate;
+						throwIfAborted(ctx.signal);
+						if (!task.reportsWorkerStart) await onStarted();
+						return task.run(input, ctx, onStarted);
+					},
+				}),
+			),
+		);
+		const failure = registered.find((result) => result.status === "rejected");
+		if (failure || tasks.some((task) => task.ctx.signal.aborted)) {
 			for (const handle of newHandles) this.controllers.get(handle)?.abort();
 			reject(new AbortError());
 			if (failure?.status === "rejected") throw failure.reason;
 			throw new AbortError();
 		}
 		release();
-		return registered.map(result => (result as PromiseFulfilledResult<AgentTaskRecord>).value);
+		return registered.map(
+			(result) => (result as PromiseFulfilledResult<AgentTaskRecord>).value,
+		);
 	}
 
-	async cancel(handles: readonly string[], sessionId: string): Promise<AgentTaskRecord[]> {
+	async cancel(
+		handles: readonly string[],
+		sessionId: string,
+	): Promise<AgentTaskRecord[]> {
 		await this.initialize();
 		this.validateHandles(handles, sessionId);
 		for (const handle of handles) this.controllers.get(handle)?.abort();
-		return handles.map(handle => cloneRecord(this.requireRecord(handle)));
+		return handles.map((handle) => cloneRecord(this.requireRecord(handle)));
 	}
 
 	private async register(
@@ -153,9 +179,18 @@ export class AgentTaskManager {
 			inputFingerprint: identity,
 			status: "queued",
 			executionStatus: "queued",
-			integrationStatus: task.input.read_only === true || task.input.subagent_type === "rlm" ? "not_required" : "pending",
-			capabilities: { readOnly: task.input.read_only === true || task.input.subagent_type === "rlm", permissionMode: task.ctx.permissions?.mode },
-			...(task.parentBatchToolCallId ? { parentBatchToolCallId: task.parentBatchToolCallId } : {}),
+			integrationStatus:
+				task.input.read_only === true || task.input.subagent_type === "rlm"
+					? "not_required"
+					: "pending",
+			capabilities: {
+				readOnly:
+					task.input.read_only === true || task.input.subagent_type === "rlm",
+				permissionMode: task.ctx.permissions?.mode,
+			},
+			...(task.parentBatchToolCallId
+				? { parentBatchToolCallId: task.parentBatchToolCallId }
+				: {}),
 			createdAt: this.now().toISOString(),
 		};
 		const controller = new AbortController();
@@ -182,7 +217,11 @@ export class AgentTaskManager {
 				try {
 					await this.persist(cancelled);
 					this.publish(task, this.requireRecord(task.handle));
-					task.ctx.bus.emit({ type: "agent:child_end", agentToolCallId: task.handle, status: "cancelled" });
+					task.ctx.bus.emit({
+						type: "agent:child_end",
+						agentToolCallId: task.handle,
+						status: "cancelled",
+					});
 				} catch (error) {
 					this.records.set(task.handle, {
 						...cancelled,
@@ -276,12 +315,20 @@ export class AgentTaskManager {
 		let started = false;
 		const update = (change: Partial<AgentTaskRecord>): Promise<void> => {
 			if (finished) return progressTail;
-			progressTail = progressTail.catch(() => undefined).then(async () => {
-				const current = this.requireRecord(task.handle);
-				if (change.workspace && current.workspace?.revision !== undefined && (change.workspace.revision === undefined || change.workspace.revision <= current.workspace.revision)) return;
-				await this.persist({ ...current, ...change });
-				this.publish(task, this.requireRecord(task.handle));
-			});
+			progressTail = progressTail
+				.catch(() => undefined)
+				.then(async () => {
+					const current = this.requireRecord(task.handle);
+					if (
+						change.workspace &&
+						current.workspace?.revision !== undefined &&
+						(change.workspace.revision === undefined ||
+							change.workspace.revision <= current.workspace.revision)
+					)
+						return;
+					await this.persist({ ...current, ...change });
+					this.publish(task, this.requireRecord(task.handle));
+				});
 			void progressTail.catch(() => undefined);
 			return progressTail;
 		};
@@ -289,12 +336,19 @@ export class AgentTaskManager {
 			if (finished || started) return progressTail;
 			throwIfAborted(signal);
 			started = true;
-			return update({ status: "running", executionStatus: "running", startedAt: this.now().toISOString() });
+			return update({
+				status: "running",
+				executionStatus: "running",
+				startedAt: this.now().toISOString(),
+			});
 		};
 		const onWorkspaceProgress = (worker: WorkerWorkspaceRecord): void => {
 			update({
 				workspace: structuredClone(workerProgress(worker)),
-				executionStatus: worker.executionStatus === "creating" ? "preparing" : worker.executionStatus,
+				executionStatus:
+					worker.executionStatus === "creating"
+						? "preparing"
+						: worker.executionStatus,
 				integrationStatus: worker.integrationStatus,
 			});
 		};
@@ -327,8 +381,12 @@ export class AgentTaskManager {
 			terminal = {
 				...current,
 				status: outcome.status,
-				executionStatus: current.workspace ? current.executionStatus : outcome.status,
-				integrationStatus: current.workspace ? current.integrationStatus : "not_required",
+				executionStatus: current.workspace
+					? current.executionStatus
+					: outcome.status,
+				integrationStatus: current.workspace
+					? current.integrationStatus
+					: "not_required",
 				finishedAt,
 				result: bundle,
 				...(result.execution ? { execution: result.execution } : {}),
@@ -357,7 +415,16 @@ export class AgentTaskManager {
 		try {
 			await this.persist(terminal);
 			this.publish(task, this.requireRecord(task.handle));
-			task.ctx.bus.emit({ type: "agent:child_end", agentToolCallId: task.handle, status: terminal.status === "completed" ? "completed" : terminal.status === "cancelled" ? "cancelled" : "failed" });
+			task.ctx.bus.emit({
+				type: "agent:child_end",
+				agentToolCallId: task.handle,
+				status:
+					terminal.status === "completed"
+						? "completed"
+						: terminal.status === "cancelled"
+							? "cancelled"
+							: "failed",
+			});
 		} catch (error) {
 			// Preserve captured results and integration authority in memory. A
 			// persistence fault is reported separately and must never rerun writes.
@@ -367,7 +434,11 @@ export class AgentTaskManager {
 				persistenceError: errorMessage(error),
 			});
 			this.publish(task, this.requireRecord(task.handle));
-			task.ctx.bus.emit({ type: "agent:child_end", agentToolCallId: task.handle, status: "failed" });
+			task.ctx.bus.emit({
+				type: "agent:child_end",
+				agentToolCallId: task.handle,
+				status: "failed",
+			});
 			throw error;
 		}
 	}
@@ -395,14 +466,34 @@ export class AgentTaskManager {
 				recovered = this.recoverInterrupted(record);
 			}
 			const workspace = this.findWorker(recovered);
-			const needsProjection = recovered.revision === undefined || recovered.executionStatus === undefined || recovered.integrationStatus === undefined || recovered !== record || (workspace && (workspace.revision ?? 0) > (recovered.workspace?.revision ?? 0));
+			const needsProjection =
+				recovered.revision === undefined ||
+				recovered.executionStatus === undefined ||
+				recovered.integrationStatus === undefined ||
+				recovered !== record ||
+				(workspace &&
+					(workspace.revision ?? 0) > (recovered.workspace?.revision ?? 0));
 			if (needsProjection) {
-				recovered = { ...recovered,
+				recovered = {
+					...recovered,
 					revision: (record.revision ?? 0) + 1,
-					executionStatus: workspace && recovered.status !== "interrupted" ? (workspace.executionStatus === "creating" ? "preparing" : workspace.executionStatus) : recovered.status,
-					integrationStatus: workspace?.integrationStatus ?? (recovered.readOnly || recovered.result?.data.mode === "rlm" ? "not_required" : recovered.status === "completed" ? "integrated" : "skipped"),
+					executionStatus:
+						workspace && recovered.status !== "interrupted"
+							? workspace.executionStatus === "creating"
+								? "preparing"
+								: workspace.executionStatus
+							: recovered.status,
+					integrationStatus:
+						workspace?.integrationStatus ??
+						(recovered.readOnly || recovered.result?.data.mode === "rlm"
+							? "not_required"
+							: recovered.status === "completed"
+								? "integrated"
+								: "skipped"),
 					...(workspace ? { workspace: workerProgress(workspace) } : {}),
-					capabilities: recovered.capabilities ?? { readOnly: recovered.readOnly },
+					capabilities: recovered.capabilities ?? {
+						readOnly: recovered.readOnly,
+					},
 				};
 			}
 			if (recovered !== record) changed = true;
@@ -444,14 +535,30 @@ export class AgentTaskManager {
 	}
 
 	private async persist(record: AgentTaskRecord): Promise<void> {
-		const revised = { ...record, revision: (this.records.get(record.handle)?.revision ?? record.revision ?? 0) + 1 };
+		const revised = {
+			...record,
+			revision:
+				(this.records.get(record.handle)?.revision ?? record.revision ?? 0) + 1,
+		};
 		await this.options.store?.upsert(revised);
 		this.records.set(record.handle, revised);
 	}
 
 	private publish(task: SpawnAgentTask, record: AgentTaskRecord): void {
-		const { result: _result, inputFingerprint: _identity, execution: _execution, ...worker } = cloneRecord(record);
-		task.ctx.bus.emit({ type: "agent:worker_update", agentToolCallId: record.handle, ...(record.parentBatchToolCallId ? { parentBatchToolCallId: record.parentBatchToolCallId } : {}), worker });
+		const {
+			result: _result,
+			inputFingerprint: _identity,
+			execution: _execution,
+			...worker
+		} = cloneRecord(record);
+		task.ctx.bus.emit({
+			type: "agent:worker_update",
+			agentToolCallId: record.handle,
+			...(record.parentBatchToolCallId
+				? { parentBatchToolCallId: record.parentBatchToolCallId }
+				: {}),
+			worker,
+		});
 	}
 
 	private validateHandles(handles: readonly string[], sessionId: string): void {
@@ -641,7 +748,9 @@ function taskIdentity(task: SpawnAgentTask): string {
 		sessionId: task.ctx.sessionId,
 		turnId: task.ctx.turnId ?? null,
 		cwd: resolve(task.ctx.cwd),
-		...(task.parentBatchToolCallId ? { parentBatchToolCallId: task.parentBatchToolCallId } : {}),
+		...(task.parentBatchToolCallId
+			? { parentBatchToolCallId: task.parentBatchToolCallId }
+			: {}),
 		input: {
 			...input,
 			subagent_type: task.input.subagent_type ?? "worker",

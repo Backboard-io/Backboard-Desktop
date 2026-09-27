@@ -201,9 +201,80 @@ export function formatBackboardWorkTimer(elapsedMs: number, complete: boolean): 
 	const seconds = Math.max(0, Math.floor(elapsedMs / 1000));
 	const duration = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 	if (complete) {
-		return seconds > 0 ? localize('chat.workedFor', "Worked for {0}", duration) : localize('chat.worked', "Worked");
+		// A finished turn's fold reads the same whatever it took (user preference).
+		return localize('chat.finishedWorking', "Finished Working");
 	}
 	return localize('chat.workingFor', "Working for {0}", duration);
+}
+
+/** A running fold ticker and the label it drives. */
+export interface IBackboardTurnTicker extends IDisposable {
+	readonly label: HTMLElement;
+}
+
+/**
+ * Keeps `label` current once a second until `render` reports the turn
+ * complete. A ticker already driving `label` is kept, one driving a label that
+ * was re-created is replaced, and no label stops it. `render` must derive its
+ * text from the clock rather than count ticks, so a throttled background
+ * window catches up on its next tick.
+ */
+export function syncBackboardTurnTicker(tickers: Map<string, IBackboardTurnTicker>, id: string, label: HTMLElement | null, render: (label: HTMLElement) => boolean): void {
+	// Only the ticker in the map is ever running: a replaced one is disposed first.
+	const stop = () => {
+		tickers.get(id)?.dispose();
+		tickers.delete(id);
+	};
+	if (!label || render(label)) {
+		stop();
+		return;
+	}
+	if (tickers.get(id)?.label === label) {
+		return;
+	}
+	stop();
+	const targetWindow = dom.getWindow(label);
+	const handle = targetWindow.setInterval(() => {
+		if (render(label)) {
+			stop();
+		}
+	}, 1000);
+	tickers.set(id, { label, dispose: () => targetWindow.clearInterval(handle) });
+}
+
+/** The timestamps a turn's fold header reads its duration from. */
+export interface IBackboardTurnClock {
+	/** When the request started (the response model's creation time). */
+	readonly startedAt: number;
+	/** When the turn completed or was cancelled. */
+	readonly completedAt: number | undefined;
+	/** Persisted generation time (excludes approval waits); what history shows. */
+	readonly elapsedMs: number | undefined;
+	/** `startedAt` shifted by approval waits, for history without `elapsedMs`. */
+	readonly confirmationAdjustedStartedAt: number;
+	/** The turn ran while this window watched it, so its end uses the live clock. */
+	readonly watchedLive: boolean;
+}
+
+/**
+ * The duration the fold header shows. A running turn counts wall-clock time
+ * since the request started and never pauses — waiting on an approval, a
+ * question or a stale pending prompt is still part of the turn. A turn that
+ * finished while it was watched ends on that same clock, so "Worked for" never
+ * reads less than the last "Working for". Turns restored from history keep
+ * their persisted generation time.
+ */
+export function getBackboardTurnElapsedMs(clock: IBackboardTurnClock, complete: boolean, now: number): number {
+	if (!complete) {
+		return Math.max(0, now - clock.startedAt);
+	}
+	if (clock.watchedLive && clock.completedAt !== undefined) {
+		return Math.max(0, clock.completedAt - clock.startedAt);
+	}
+	if (clock.elapsedMs !== undefined) {
+		return Math.max(0, clock.elapsedMs);
+	}
+	return clock.completedAt !== undefined ? Math.max(0, clock.completedAt - clock.confirmationAdjustedStartedAt) : 0;
 }
 
 export function isBackboardWorkerWait(content: IChatRendererContent): boolean {
@@ -516,7 +587,10 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 	 * re-rendered in place) and must not replay the entrance animation.
 	 */
 	private readonly _partEntranceWatermarkByResponseId = new Map<string, number>();
-	private readonly backboardTurnDurationTimers = new Map<string, IDisposable>();
+	/** Live fold tickers by response id, with the label each one currently drives. */
+	private readonly backboardTurnDurationTimers = new Map<string, IBackboardTurnTicker>();
+	/** Responses this renderer rendered while still running: their final time uses the live clock. */
+	private readonly backboardTurnsSeenLive = new Set<string>();
 
 	/** Track pending question carousels by session resource so a new request can supersede them. */
 	private readonly pendingQuestionCarousels = new ResourceMap<Set<ChatQuestionCarouselPart>>();
@@ -785,6 +859,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			timer.dispose();
 		}
 		this.backboardTurnDurationTimers.clear();
+		this.backboardTurnsSeenLive.clear();
 
 		// Fire the viewModel update first so template listeners can dispose
 		// their rendered content parts and release pool items back. Only then
@@ -1425,6 +1500,11 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			}
 		}
 		templateData.renderedPartsMounted = true;
+		if (isResponseVM(element)) {
+			// disposeElement stopped the fold ticker; a pass with nothing new to
+			// diff never re-syncs the timeline, so rebind it here.
+			this.syncBackboardTurnDurationTimer(element, templateData);
+		}
 	}
 
 	private renderPendingDivider(element: IChatPendingDividerViewModel, templateData: IChatListItemTemplate): void {
@@ -2518,6 +2598,45 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 	}
 
 	/**
+	 * Drives the fold header's "Working for 12s" from whichever label is
+	 * mounted for `element` right now, and settles it to "Worked for 12s".
+	 *
+	 * Runs after every render of a response, not only when the timeline syncs:
+	 * the list disposes and re-renders a row on each model change, and a pass
+	 * whose content diff is empty (a tool's output streaming, a usage update, a
+	 * hidden list) never reaches {@link syncBackboardBackboardTurnTimeline}, so a
+	 * ticker restarted only there stayed disposed and the label froze until the
+	 * next content change. A ticker already driving the mounted label is kept.
+	 * Each tick reads the wall clock, so a throttled background window catches
+	 * up on its next tick instead of drifting.
+	 */
+	private syncBackboardTurnDurationTimer(element: IChatResponseViewModel, templateData: IChatListItemTemplate): void {
+		const label = templateData.value.querySelector<HTMLElement>(':scope > .chat-backboard-turn-work > .chat-backboard-turn-fold .chat-backboard-turn-fold-label');
+		syncBackboardTurnTicker(this.backboardTurnDurationTimers, element.id, label, target => {
+			const complete = element.isComplete || element.isCanceled;
+			const text = formatBackboardWorkTimer(this.getBackboardTurnElapsedMs(element, complete), complete);
+			if (target.textContent !== text) {
+				target.textContent = text;
+			}
+			return complete;
+		});
+	}
+
+	private getBackboardTurnElapsedMs(element: IChatResponseViewModel, complete: boolean): number {
+		if (!complete) {
+			this.backboardTurnsSeenLive.add(element.id);
+		}
+		const model = element.model;
+		return getBackboardTurnElapsedMs({
+			startedAt: model.timestamp,
+			completedAt: model.completedAt,
+			elapsedMs: model.elapsedMs,
+			confirmationAdjustedStartedAt: element.confirmationAdjustedTimestamp.get(),
+			watchedLive: !model.isStale || this.backboardTurnsSeenLive.has(element.id),
+		}, complete, Date.now());
+	}
+
+	/**
 	 * Backboard's provider emits commentary, reasoning, and tool calls as several
 	 * native chat parts inside one response. T3 presents those parts as one turn:
 	 * the work log stays expanded after completion, with an optional Activity
@@ -2557,7 +2676,6 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		}
 
 		let foldButton: HTMLButtonElement;
-		let foldLabel: HTMLElement;
 		let body: HTMLElement;
 		if (!turn) {
 			turn = $('.chat-backboard-turn-work.chat-backboard-turn-work-expanded');
@@ -2565,7 +2683,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				// Codex's fold header (`Bw`): muted "Worked for …" + 14px chevron over a hairline.
 				foldButton = applyCodexRoot(cxEl('button', 'chat-backboard-turn-fold cx-fold no-drag cursor-interaction items-center select-none focus:outline-hidden border gap-1 whitespace-nowrap flex rounded-md hover:text-default border-transparent border-0 p-0 inline-flex max-w-full flex-wrap text-size-chat text-secondary')) as HTMLButtonElement;
 				foldButton.type = 'button';
-				foldLabel = cxEl('span', 'chat-backboard-turn-fold-label text-text/60 tabular-nums');
+				const foldLabel = cxEl('span', 'chat-backboard-turn-fold-label text-text/60 tabular-nums');
 				const labelWrap = cxEl('span');
 				labelWrap.appendChild(foldLabel);
 				const chevron = codexIcon('foldChevron', 'chat-backboard-turn-fold-chevron icon-2xs text-text/40 transition-transform duration-basic');
@@ -2576,7 +2694,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				turn.append(foldButton, rule, body);
 			} else {
 				foldButton = $('button.chat-backboard-turn-fold', { type: 'button' }) as HTMLButtonElement;
-				foldLabel = $('span.chat-backboard-turn-fold-label');
+				const foldLabel = $('span.chat-backboard-turn-fold-label');
 				const icon = $('span.codicon.codicon-history.chat-backboard-turn-fold-icon', { 'aria-hidden': 'true' });
 				const chevron = $('span.codicon.codicon-chevron-right.chat-backboard-turn-fold-chevron', { 'aria-hidden': 'true' });
 				foldButton.append(icon, foldLabel, chevron);
@@ -2586,7 +2704,6 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			value.insertBefore(turn, value.firstElementChild);
 		} else {
 			foldButton = turn.querySelector<HTMLButtonElement>(':scope > .chat-backboard-turn-fold')!;
-			foldLabel = foldButton.querySelector<HTMLElement>('.chat-backboard-turn-fold-label')!;
 			body = turn.querySelector<HTMLElement>(':scope > .chat-backboard-turn-work-body')!;
 		}
 
@@ -2675,20 +2792,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			storedExpansion,
 		);
 
-		this.backboardTurnDurationTimers.get(element.id)?.dispose();
-		this.backboardTurnDurationTimers.delete(element.id);
-		const updateTimer = () => {
-			const elapsed = complete
-				? element.model.elapsedMs ?? Math.max(0, (element.model.completedAt ?? element.confirmationAdjustedTimestamp.get()) - element.confirmationAdjustedTimestamp.get())
-				: Math.max(0, Date.now() - element.confirmationAdjustedTimestamp.get());
-			foldLabel.textContent = formatBackboardWorkTimer(elapsed, complete);
-		};
-		updateTimer();
-		if (!complete) {
-			const window = dom.getWindow(turn);
-			const timer = window.setInterval(updateTimer, 1000);
-			this.backboardTurnDurationTimers.set(element.id, toDisposable(() => window.clearInterval(timer)));
-		}
+		this.syncBackboardTurnDurationTimer(element, templateData);
 
 		const applyExpandedState = (expanded: boolean) => {
 			turn!.classList.toggle('chat-backboard-turn-work-expanded', expanded);
@@ -3342,6 +3446,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			timer.dispose();
 		}
 		this.backboardTurnDurationTimers.clear();
+		this.backboardTurnsSeenLive.clear();
 		this.backboardTurnExpansionByResponseId.clear();
 		this.pendingQuestionCarousels.clear();
 		this.templateDataByRequestId.clear();
@@ -3540,6 +3645,8 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 						lazilyCreatedPart.hasSameContent(other, followingContent, element) :
 						toolInvocation.kind === other.kind);
 				}
+				// A hidden tool adds no row, but it still ends the reasoning before it.
+				lastThinking?.finishReasoningSection();
 			} else {
 				this.finalizeCurrentThinkingPart(context, templateData);
 			}

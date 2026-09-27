@@ -30,22 +30,22 @@
 
 /* Simple keeps its typography and geometry while consuming the same color
  * tokens as the other workbenches. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) {
 	font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
 	color: var(--codex-text-primary);
 }
 
 /* Both chat composers consume the same geometry tokens and shell rules. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)),
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused),
 .monaco-workbench.agent-sessions-workbench .optimus-chat-view {
 	--bb-simple-sent-composer-min-height: 58px;
 	--bb-simple-sent-composer-editor-min-height: 22px;
 	--bb-simple-sent-composer-padding: 6px 12px 10px;
 	--bb-simple-sent-composer-gap: 2px;
-	--bb-simple-sent-composer-radius: 16px;
+	--bb-simple-sent-composer-radius: var(--bb-composer-radius, 18px);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) :is(
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(
 	.part.sessionspart,
 	.part.sessionspart > .title,
 	.part.sessionspart > .content,
@@ -58,22 +58,22 @@
 	color: var(--codex-text-primary);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-panel-header {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-panel-header {
 	color: var(--codex-text-secondary);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-panel-header .action-label {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-panel-header .action-label {
 	border-radius: 8px !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-panel-header .action-label:hover {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-panel-header .action-label:hover {
 	background: var(--codex-hover) !important;
 	color: var(--codex-text-primary) !important;
 }
 
 /* Product/mode switch: the current ChatGPT desktop app treats this as the
  * primary piece of window chrome, not as a compact editor toolbar label. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-trigger {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-trigger {
 	gap: 5px;
 	padding: 0 8px;
 	border-radius: 8px;
@@ -83,7 +83,7 @@
 	letter-spacing: 0;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-trigger:hover {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .open-in-vscode-titlebar-widget > .open-in-vscode-titlebar-widget-trigger:hover {
 	background: var(--codex-hover) !important;
 }
 
@@ -141,8 +141,8 @@
  * which macOS can briefly back with an opaque flash. The wrapper may still
  * animate its SplitView geometry — that produces the smooth opening motion
  * without moving the glass surface onto a compositor layer. */
-.monaco-workbench.agent-sessions-workbench.parts-animating:not(:has(.monaco-sash.active)).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar),
-.monaco-workbench.agent-sessions-workbench.parts-animating:not(:has(.monaco-sash.active)).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar) {
+.monaco-workbench.agent-sessions-workbench.parts-animating:not(.sessions-sash-dragging).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar,
+.monaco-workbench.agent-sessions-workbench.parts-animating:not(.sessions-sash-dragging).shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view.part-host-branch-contains-sidebar {
 	transition:
 		width 280ms cubic-bezier(0.22, 1, 0.36, 1),
 		height 280ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -159,8 +159,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar),
-	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar) {
+	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar,
+	.monaco-workbench.agent-sessions-workbench.shell-gradient-background.mac:not(.web):not(.hc-black):not(.hc-light):not(.phone-layout) .monaco-grid-view .split-view-view.part-host-branch-contains-sidebar {
 		transition: none !important;
 	}
 }
@@ -1099,7 +1099,7 @@
  * contribution — not off a rendered canvas — so a new selection always lands
  * even while session views are being rebound; the transparency rules below
  * still require the new-task canvas itself before anything shows through. */
-.monaco-workbench.agent-sessions-workbench.shell-gradient-background.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light)::after {
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light)::after {
 	content: '';
 	position: absolute;
 	inset: 0;
@@ -1116,15 +1116,15 @@
 /* The grid wrappers normally paint solid region colors. Make only the wrappers
  * over the active background transparent so the shared underlay can reach the
  * draft and the full-width top panel. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .monaco-grid-view .split-view-view:has(> .part.sessionspart),
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .monaco-grid-view .split-view-view:has(> .part.sidebar),
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar),
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .monaco-grid-view .split-view-view.part-host-sessionspart,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .monaco-grid-view .split-view-view.part-host-sidebar,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .monaco-grid-view .split-view-view.part-host-branch-contains-sidebar,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .monaco-grid-view .split-view-view.part-host-auxiliarybar,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .monaco-grid-view .split-view-view.part-host-branch-contains-auxiliarybar {
 	background: transparent !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.sidebar {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.sidebar {
 	background:
 		linear-gradient(
 			to bottom,
@@ -1138,7 +1138,7 @@
 /* The sidebar owns its title controls and should read as one solid panel, not
  * as an empty transparent notch in the shared top strip. The image continues
  * beneath the center and right headers only. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.sidebar::before {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.sidebar::before {
 	content: '';
 	position: absolute;
 	inset: 0 0 auto;
@@ -1149,20 +1149,23 @@
 }
 
 /* Reveal the part-level image through the new-task view only. Existing chat
- * slots keep their normal opaque canvas if they are visible beside the draft. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart:has(.new-chat-widget-content.has-custom-background),
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) > .content,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) .session-view:has(.new-chat-widget-content.has-custom-background),
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) .session-view:has(.new-chat-widget-content.has-custom-background) .session-view-content,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) .sessions-chat-widget:not(.new-chat-in-session),
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) .new-chat-widget-container,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) .new-chat-widget-content.has-custom-background {
+ * slots keep their normal opaque canvas if they are visible beside the draft.
+ * `.basepanel` lifts these to the specificity of the opaque canvas rule near
+ * the top of this file (its :is() counts its most specific argument), so
+ * source order lets this reveal win. */
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart.basepanel:is(.sessions-new-chat-custom-background *),
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart.basepanel:is(.sessions-new-chat-custom-background *) > .content,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart.basepanel:is(.sessions-new-chat-custom-background *) .session-view:is(.sessions-new-chat-custom-background *),
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart.basepanel:is(.sessions-new-chat-custom-background *) .session-view:is(.sessions-new-chat-custom-background *) .session-view-content,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart.basepanel:is(.sessions-new-chat-custom-background *) .sessions-chat-widget:not(.new-chat-in-session),
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart.basepanel:is(.sessions-new-chat-custom-background *) .new-chat-widget-container,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart.basepanel:is(.sessions-new-chat-custom-background *) .new-chat-widget-content.has-custom-background {
 	background: transparent !important;
 }
 
 /* Leave the center header completely unpainted so it joins the transparent
  * right launcher. The left header remains part of the solid sidebar. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) > .sessions-panel-header.sessions-part-header {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart:is(.sessions-new-chat-custom-background *) > .sessions-panel-header.sessions-part-header {
 	background: transparent !important;
 	-webkit-backdrop-filter: none;
 	backdrop-filter: none;
@@ -1172,18 +1175,18 @@
  * canvas. Actual Browser, Terminal, Files, and Diff surfaces keep their normal
  * opaque backgrounds after they open, and the launcher cards remain raised
  * readable controls above the image. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar > .content,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar > .content .pane-body,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .pane-composite-part,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .composite,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .composite > .content,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .pane,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .monaco-scrollable-element,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .monaco-split-view2,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .split-view-container,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .split-view-view,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.new-chat-widget-content.has-custom-background) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-mode-launcher {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.auxiliarybar,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.auxiliarybar > .content,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.auxiliarybar > .content .pane-body,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.auxiliarybar .pane-composite-part,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.auxiliarybar .composite,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.auxiliarybar .composite > .content,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.auxiliarybar .pane,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.auxiliarybar .monaco-scrollable-element,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.auxiliarybar .monaco-split-view2,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.auxiliarybar .split-view-container,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background .part.auxiliarybar .split-view-view,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-new-chat-custom-background :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-mode-launcher {
 	background: transparent !important;
 	background-color: transparent !important;
 }
@@ -1194,12 +1197,12 @@
 	content: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-header {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-header {
 	/* The header's empty space moves the window like the rest of the top row. */
 	-webkit-app-region: drag;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-header > .sessions-right-workbench-tabs {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-header > .sessions-right-workbench-tabs {
 	/* A scrolling tab strip must remain interactive across its whole bounds —
 	 * native drag hit regions can go stale when tabs scroll — so it only takes
 	 * its content width and the space after it belongs to the header. */
@@ -1207,34 +1210,34 @@
 	-webkit-app-region: no-drag;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-header > .sessions-right-workbench-tabs + * {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-header > .sessions-right-workbench-tabs + * {
 	/* Keeps + (or, in the launcher, the frame controls) pinned right. */
 	margin-left: auto;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-header :is(button, input, .sessions-right-workbench-tab, .sessions-right-workbench-tab-add, .sessions-right-workbench-icon-button) {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-header :is(button, input, .sessions-right-workbench-tab, .sessions-right-workbench-tab-add, .sessions-right-workbench-icon-button) {
 	-webkit-app-region: no-drag;
 }
 
 /* The shared interactive-session wrapper normally blends into the solid
  * canvas. Let the image show through that wrapper while the actual input card
  * keeps its lifted opaque surface from the composer rules below. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart .new-chat-widget-content.has-custom-background .new-chat-composer-stack > .interactive-session {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart .new-chat-widget-content.has-custom-background .new-chat-composer-stack > .interactive-session {
 	background: transparent !important;
 }
 
 /* Preserve the strict solid surfaces expected by high-contrast themes. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):is(.hc-black, .hc-light) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):is(.hc-black, .hc-light) .part.sessionspart:is(.sessions-new-chat-custom-background *) {
 	background: var(--codex-canvas) !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):is(.hc-black, .hc-light) .part.sessionspart:has(.new-chat-widget-content.has-custom-background) > .sessions-panel-header.sessions-part-header {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):is(.hc-black, .hc-light) .part.sessionspart:is(.sessions-new-chat-custom-background *) > .sessions-panel-header.sessions-part-header {
 	background: var(--codex-canvas) !important;
 	-webkit-backdrop-filter: none;
 	backdrop-filter: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-panel-header .new-chat-header-breadcrumb {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-panel-header .new-chat-header-breadcrumb {
 	display: inline-flex;
 	align-items: center;
 	min-width: 0;
@@ -1244,7 +1247,7 @@
 	white-space: nowrap;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-header-breadcrumb-workspace {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-header-breadcrumb-workspace {
 	display: inline-flex;
 	align-items: center;
 	min-width: 0;
@@ -1259,45 +1262,45 @@
 	cursor: pointer;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-header-breadcrumb-workspace:hover,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-header-breadcrumb-workspace:focus-visible {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-header-breadcrumb-workspace:hover,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-header-breadcrumb-workspace:focus-visible {
 	color: var(--codex-text-primary);
 	background: var(--vscode-toolbar-hoverBackground);
 	outline: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-header-breadcrumb-workspace:focus-visible {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-header-breadcrumb-workspace:focus-visible {
 	box-shadow: 0 0 0 1px var(--vscode-focusBorder);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-header-breadcrumb-workspace .codicon {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-header-breadcrumb-workspace .codicon {
 	flex: 0 0 auto;
 	font-size: 14px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-header-breadcrumb-label {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-header-breadcrumb-label {
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) :is(.new-chat-header-breadcrumb-separator, .new-chat-header-breadcrumb-draft) {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.new-chat-header-breadcrumb-separator, .new-chat-header-breadcrumb-draft) {
 	color: color-mix(in srgb, var(--codex-text-primary) 55%, transparent);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-middle-section {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-middle-section {
 	/* T3's draft headline sits exactly 2rem above the composer. */
 	padding-bottom: 32px;
 	transform: translateY(-14px);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-middle-title {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-middle-title {
 	font-size: clamp(20px, 3.4cqw, 30px);
 	font-weight: 400;
 	letter-spacing: -0.025em;
 	line-height: 1.2;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-composer-stack {
 	width: calc(100% - 64px);
 	/* The input below is capped at the same reading width. Keep its positioning
 	 * context capped too so the mascot remains perched on the card when the
@@ -1307,17 +1310,17 @@
 	transform: translateY(-24px);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack > .interactive-session,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-composer-stack > .interactive-session,
 .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session {
 	margin-top: 0;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack > .interactive-session .interactive-input-part,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-composer-stack > .interactive-session .interactive-input-part,
 .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session .interactive-input-part {
 	padding: 0;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
 .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session .interactive-input-part .chat-input-container {
 	height: auto;
 	min-height: var(--bb-simple-sent-composer-min-height);
@@ -1333,10 +1336,10 @@
 		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack > .interactive-session .chat-editor-container,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack > .interactive-session .interactive-input-editor,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack > .interactive-session .interactive-input-editor .monaco-editor,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack > .interactive-session .interactive-input-editor .overflow-guard,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-composer-stack > .interactive-session .chat-editor-container,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-composer-stack > .interactive-session .interactive-input-editor,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-composer-stack > .interactive-session .interactive-input-editor .monaco-editor,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-composer-stack > .interactive-session .interactive-input-editor .overflow-guard,
 .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session .chat-editor-container,
 .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session .interactive-input-editor,
 .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session .interactive-input-editor .monaco-editor,
@@ -1344,8 +1347,8 @@
 	min-height: var(--bb-simple-sent-composer-editor-min-height);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin,
 .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
 .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .margin {
 	background: var(--codex-composer) !important;
@@ -1354,7 +1357,7 @@
 /* backboardChatTheme.css imports this parity layer before its legacy dark-theme rules.
  * Carry the full host chain here so the Codex composer surface still wins the
  * cascade without relying on source order. */
-html body .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part :is(
+html body .monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart .new-chat-composer-stack > .interactive-session .interactive-input-part :is(
 	.chat-editor-container,
 	.interactive-input-editor,
 	.monaco-editor,
@@ -1382,7 +1385,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	background-color: var(--codex-composer) !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack > .interactive-session .chat-input-container.focused,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-composer-stack > .interactive-session .chat-input-container.focused,
 .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session .chat-input-container.focused {
 	border-color: color-mix(in srgb, var(--codex-text-primary) 24%, transparent) !important;
 	box-shadow:
@@ -1391,14 +1394,14 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)).vs-dark .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused).vs-dark .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
 .monaco-workbench.agent-sessions-workbench.vs-dark .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session .interactive-input-part .chat-input-container {
 	box-shadow:
 		0 14px 30px -14px color-mix(in srgb, #000 50%, transparent),
 		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)).vs-dark .new-chat-composer-stack > .interactive-session .chat-input-container.focused,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused).vs-dark .new-chat-composer-stack > .interactive-session .chat-input-container.focused,
 .monaco-workbench.agent-sessions-workbench.vs-dark .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session .chat-input-container.focused {
 	box-shadow:
 		0 0 0 2px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent),
@@ -1406,8 +1409,8 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):is(.hc-black, .hc-light) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):is(.hc-black, .hc-light) .new-chat-composer-stack > .interactive-session .chat-input-container.focused,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):is(.hc-black, .hc-light) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):is(.hc-black, .hc-light) .new-chat-composer-stack > .interactive-session .chat-input-container.focused,
 .monaco-workbench.agent-sessions-workbench:is(.hc-black, .hc-light) .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session .interactive-input-part .chat-input-container,
 .monaco-workbench.agent-sessions-workbench:is(.hc-black, .hc-light) .optimus-chat-view.backboard-clean-chat.backboard-composer .optimus-chat-editor-host > .interactive-session .chat-input-container.focused {
 	border-color: var(--vscode-contrastBorder) !important;
@@ -1417,13 +1420,13 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 /* The category chips are retired here. Scope to the whole window, not just the
  * new-chat stack: an opened session with no rendered turns (failed or still
  * loading) is also `chat-empty-centered` and would otherwise show them. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .chat-empty-below-composer {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .chat-empty-below-composer {
 	display: none !important;
 }
 
 /* ---- Active chat -------------------------------------------------------- */
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart {
 	--backboard-background: var(--codex-canvas);
 	--backboard-foreground: var(--codex-text-primary);
 	--backboard-muted: var(--codex-hover);
@@ -1433,7 +1436,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	--backboard-secondary: var(--codex-hover);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart :is(
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart :is(
 	.interactive-session,
 	.interactive-session .interactive-list,
 	.interactive-session .interactive-list .monaco-list,
@@ -1445,34 +1448,38 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 /* The active transcript keeps its canvas, but the dock beneath it should not
  * paint a second full-width rectangle behind the narrower composer card. Let
  * the Sessions part show through around the composer instead. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer > .interactive-session {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer > .interactive-session {
 	background: transparent !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart .interactive-session .interactive-item-container,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart .interactive-session > .chat-suggest-next-widget {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart .interactive-session .interactive-item-container,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart .interactive-session > .chat-suggest-next-widget {
 	width: 100%;
-	max-width: 950px;
+	/* 760px text column + 2 × 16px padding: the transcript's edges line up with
+	 * the composer box at every width (it is calc(100% - 32px), capped at 760px
+	 * in @layer backboard-simple-composer). */
+	max-width: 792px;
 	margin-right: auto;
 	margin-left: auto;
-	padding-right: 28px;
-	padding-left: 28px;
+	padding-right: 16px;
+	padding-left: 16px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart .interactive-session .interactive-item-container .value .rendered-markdown {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart .interactive-session .interactive-item-container .value .rendered-markdown {
 	font-size: 14px;
 	line-height: 1.55;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
-	margin-bottom: 10px;
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
+	/* The checkpoint/fork row sits 4px under the bubble and spaces it from the reply. */
+	margin-bottom: 0;
 	padding: 10px 14px;
 	border-radius: 12px;
 	background: var(--codex-hover) !important;
 	font-size: 14px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart .interactive-session > .interactive-input-part {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart .interactive-session > .interactive-input-part {
 	width: 100%;
 	max-width: 950px;
 	margin-right: auto;
@@ -1480,7 +1487,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	padding: 6px 28px 10px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart .interactive-session > .interactive-input-part .chat-input-container {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart .interactive-session > .interactive-input-part .chat-input-container {
 	padding: var(--bb-simple-sent-composer-padding);
 	border: 1px solid var(--codex-border-strong) !important;
 	border-radius: var(--bb-simple-sent-composer-radius);
@@ -1488,27 +1495,27 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	box-shadow: 0 1px 2px var(--vscode-widget-shadow);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.sessionspart .interactive-session > .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.sessionspart .interactive-session > .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
 	background: var(--codex-composer) !important;
 }
 
 /* Footer controls stay quiet and monochrome until interaction, matching the
  * new-task card and the current Codex task composer. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
 	border-radius: 8px !important;
 	color: var(--codex-text-secondary);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label:not(.model-picker-split):hover,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label.codicon-mic:hover {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label:not(.model-picker-split):hover,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label.codicon-mic:hover {
 	background: var(--codex-hover);
 	color: var(--codex-text-primary);
 }
 
 /* ---- Right workbench ---------------------------------------------------- */
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.auxiliarybar {
 	--codex-canvas: var(--sessions-main-region-background);
 	border: 0 !important;
 	border-left: 1px solid var(--codex-border) !important;
@@ -1516,18 +1523,18 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	background: var(--codex-canvas) !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar > .content,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .pane-body {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.auxiliarybar > .content,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .part.auxiliarybar .pane-body {
 	background: var(--codex-canvas) !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-shell {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-shell {
 	background: var(--codex-canvas);
 	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	font-size: 12px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-header {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-header {
 	height: 52px;
 	min-height: 52px;
 	padding: 0 12px 0 8px;
@@ -1535,11 +1542,11 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	background: var(--codex-canvas);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-tabs {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-tabs {
 	gap: 4px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-tab {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-tab {
 	flex: 0 0 auto;
 	min-width: 0;
 	max-width: 144px;
@@ -1553,30 +1560,30 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	line-height: 1;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-tab.active {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-tab.active {
 	background: var(--codex-selected);
 	font-weight: 400;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-tab-label {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-tab-label {
 	flex: 1;
 	max-width: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-tab.active .sessions-right-workbench-tab-close {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-tab.active .sessions-right-workbench-tab-close {
 	visibility: visible;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-tab > .codicon {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-tab > .codicon {
 	font-size: 12px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-tab-close {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-tab-close {
 	margin-left: auto;
 	flex-shrink: 0;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) :is(
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(
 	.sessions-right-workbench-tab-add,
 	.sessions-right-workbench-icon-button) {
 	width: 24px;
@@ -1584,7 +1591,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	border-radius: 6px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-frame-controls {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-frame-controls {
 	gap: 4px;
 	padding-left: 8px;
 	background: var(--codex-canvas);
@@ -1594,25 +1601,25 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
  * of square cards. The descriptions remain available to assistive technology
  * through each button's accessible text, but the visual picker stays as quiet
  * and scannable as the reference. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-launcher-center {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-launcher-center {
 	flex-direction: column;
 	padding: 52px 9% 40px;
 	outline: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-launcher-title,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-launcher-description {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-launcher-title,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-launcher-description {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-launcher-rows {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-launcher-rows {
 	display: flex;
 	flex-direction: column;
 	gap: 4px;
 	width: min(100%, 536px);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-launcher-row {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-launcher-row {
 	display: grid;
 	grid-template-columns: 18px minmax(0, 1fr) auto;
 	align-items: center;
@@ -1627,23 +1634,23 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	transition: background-color 120ms ease;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-launcher-row:hover,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-launcher-row:focus-visible {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-launcher-row:hover,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-launcher-row:focus-visible {
 	background: var(--codex-hover);
 	box-shadow: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-launcher-row > .codicon {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-launcher-row > .codicon {
 	font-size: 15px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-launcher-label {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-launcher-label {
 	font-size: 14px;
 	font-weight: 400;
 	line-height: 19px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-launcher-card-description {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-launcher-card-description {
 	position: absolute;
 	width: 1px;
 	height: 1px;
@@ -1656,7 +1663,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	border: 0;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-launcher-shortcut {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-launcher-shortcut {
 	position: static;
 	min-width: 22px;
 	height: 18px;
@@ -1667,24 +1674,24 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	font-size: 10px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-body,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-review,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-files,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-terminal {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-body,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-review,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-files,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-terminal {
 	background: var(--codex-canvas);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-browser-chrome {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-browser-chrome {
 	min-height: 40px;
 	border-bottom-color: var(--codex-border);
 	background: var(--codex-canvas);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-browser-content {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-browser-content {
 	height: calc(100% - 40px);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-browser-nav {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-browser-nav {
 	grid-template-columns: 28px 28px 28px minmax(120px, 770px) 28px;
 	justify-content: center;
 	gap: 4px;
@@ -1692,13 +1699,13 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	padding: 0 8px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-file-filter {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-file-filter {
 	border: 1px solid var(--codex-border);
 	border-radius: 8px;
 	background: var(--codex-selected);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-mode-browser .sessions-right-workbench-browser-url {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-mode-browser .sessions-right-workbench-browser-url {
 	height: 28px;
 	padding: 0 10px;
 	box-sizing: border-box;
@@ -1709,25 +1716,25 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	font-size: 12px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-mode-browser .sessions-right-workbench-browser-url:hover {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-mode-browser .sessions-right-workbench-browser-url:hover {
 	background: var(--codex-hover);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-mode-browser .sessions-right-workbench-browser-url:focus,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-file-filter:focus-within {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-mode-browser .sessions-right-workbench-browser-url:focus,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-file-filter:focus-within {
 	border-color: var(--codex-border-strong);
 	background: var(--codex-canvas);
 	box-shadow: none !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) :is(
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(
 	.sessions-right-workbench-browser-empty,
 	.sessions-right-workbench-file-empty,
 	.sessions-right-workbench-review-empty) {
 	padding: 32px 16px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) :is(
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(
 	.sessions-right-workbench-browser-empty,
 	.sessions-right-workbench-file-empty,
 	.sessions-right-workbench-review-empty) > .codicon {
@@ -1739,7 +1746,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	font-size: 32px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) :is(
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(
 	.sessions-right-workbench-browser-empty,
 	.sessions-right-workbench-file-empty,
 	.sessions-right-workbench-review-empty) h2 {
@@ -1748,7 +1755,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	line-height: 24px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) :is(
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(
 	.sessions-right-workbench-browser-empty,
 	.sessions-right-workbench-file-empty,
 	.sessions-right-workbench-review-empty) p {
@@ -1761,24 +1768,24 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 /* Review is a focused diff plus a compact changed-files rail. Its tree is
  * rooted at the files' common ancestor in reviewTree.ts, so this rail shows
  * useful project-relative structure instead of /Users/... path scaffolding. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-review-workspace {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-review-workspace {
 	grid-template-columns: minmax(0, 1fr) minmax(196px, 36%);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-review-rail::before {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-review-rail::before {
 	inset: 0 auto 0 0;
 	opacity: 1;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-review-scm-rail {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-review-scm-rail {
 	padding: 10px 8px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-review-scm-header {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-review-scm-header {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-review-scm-count {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-review-scm-count {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -1792,98 +1799,98 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	font-size: 11px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-review-scm-list {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-review-scm-list {
 	margin-top: 4px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-file-tree,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-review-scm-rail {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-file-tree,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-review-scm-rail {
 	padding: 8px;
 }
 
 /* Keep the file tree in its rail before and after a file is selected. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-mode-files:not(.sessions-right-workbench-has-file) .sessions-right-workbench-files {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-mode-files:not(.sessions-right-workbench-has-file) .sessions-right-workbench-files {
 	grid-template-columns: minmax(0, 1fr) clamp(160px, 32%, 280px);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-mode-files:not(.sessions-right-workbench-has-file) .sessions-right-workbench-file-editor {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-mode-files:not(.sessions-right-workbench-has-file) .sessions-right-workbench-file-editor {
 	display: flex;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-mode-files.sessions-right-workbench-has-file .sessions-right-workbench-files {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-mode-files.sessions-right-workbench-has-file .sessions-right-workbench-files {
 	grid-template-columns: minmax(0, 1fr) minmax(196px, 36%);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-mode-files.sessions-right-workbench-files-tree-hidden .sessions-right-workbench-files {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-mode-files.sessions-right-workbench-files-tree-hidden .sessions-right-workbench-files {
 	grid-template-columns: minmax(0, 1fr) 0;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-file-tree {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-file-tree {
 	padding: 8px 8px 0;
 	border-left: 1px solid var(--codex-border);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-file-filter {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-file-filter {
 	height: 28px;
 	font-size: 14px;
 	line-height: 18px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-file-filter input {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-file-filter input {
 	font-size: 14px;
 	line-height: 18px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-mode-files:not(.sessions-right-workbench-has-file) .sessions-right-workbench-file-tree {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-mode-files:not(.sessions-right-workbench-has-file) .sessions-right-workbench-file-tree {
 	border-left: 0;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-file-explorer-host {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-file-explorer-host {
 	margin-top: 1px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-file-explorer-host .monaco-list-row {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-file-explorer-host .monaco-list-row {
 	border-radius: 7px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host {
 	inset: 0 0 12px 16px !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-mode-terminal .terminal-wrapper {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-mode-terminal .terminal-wrapper {
 	font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
 	font-size: 12px;
 	line-height: 1.2;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-file-explorer-host .monaco-list-row,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-review-rail .monaco-list-row {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-file-explorer-host .monaco-list-row,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-review-rail .monaco-list-row {
 	border-radius: 6px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-file-explorer-host .monaco-list-row.selected,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-file-explorer-host .monaco-list-row.focused,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-review-rail .monaco-list-row.selected,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-right-workbench-review-rail .monaco-list-row.focused {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-file-explorer-host .monaco-list-row.selected,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-file-explorer-host .monaco-list-row.focused,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-review-rail .monaco-list-row.selected,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-right-workbench-review-rail .monaco-list-row.focused {
 	outline: none !important;
 	background: var(--codex-selected) !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .changes-view-body {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .changes-view-body {
 	padding: 8px;
 	background: var(--codex-canvas);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .changes-view-body .chat-editing-session-actions .monaco-button {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .changes-view-body .chat-editing-session-actions .monaco-button {
 	border-radius: 8px;
 }
 
 @container (max-width: 620px) {
-	.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-composer-stack {
+	.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-composer-stack {
 		width: calc(100% - 32px);
 	}
 
-	.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .new-chat-middle-section {
+	.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .new-chat-middle-section {
 		padding-bottom: 26px;
 	}
 }
@@ -1891,13 +1898,13 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 /* ---- Open sessions keep the custom background ---------------------------- */
 
 /* Soften the selected image beneath open sessions as well as drafts. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) > .monaco-grid-view {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open > .monaco-grid-view {
 	position: relative;
 	z-index: 1;
 	background: transparent !important;
 }
 
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat)::after {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open::after {
 	content: '';
 	position: absolute;
 	inset: 0;
@@ -1911,22 +1918,22 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	background-size: cover !important;
 }
 
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .monaco-grid-view .split-view-view:has(> .part.sessionspart),
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .monaco-grid-view .split-view-view:has(> .part.sidebar),
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar),
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar),
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-session,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list .monaco-list {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .monaco-grid-view .split-view-view.part-host-sessionspart,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .monaco-grid-view .split-view-view.part-host-sidebar,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .monaco-grid-view .split-view-view.part-host-branch-contains-sidebar,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .monaco-grid-view .split-view-view.part-host-auxiliarybar,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .monaco-grid-view .split-view-view.part-host-branch-contains-auxiliarybar,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .chat-view-chat,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .chat-view-chat .interactive-session,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .chat-view-chat .interactive-list,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .chat-view-chat .interactive-list .monaco-list {
 	background: transparent !important;
 }
 
 /* The sidebar stays a solid panel below its 48px title strip, exactly as on
  * the new-task canvas. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sidebar {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sidebar {
 	background:
 		linear-gradient(
 			to bottom,
@@ -1940,7 +1947,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 /* The transparent strip in the sidebar gradient is only there to keep the
  * shared layout geometry aligned. Paint its own opaque cap so the chat image
  * never shows through the sidebar's controls. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sidebar::before {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sidebar::before {
 	content: '';
 	position: absolute;
 	inset: 0 0 auto;
@@ -1954,13 +1961,13 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
  * clear while a session shows the custom background: the part, its content
  * wrapper, the session view, the chat widget shell and the panel header. The
  * composer keeps its own lifted surface. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart > .content,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .session-view,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .session-view-content,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .sessions-chat-widget,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat > .interactive-session,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list .monaco-list-rows,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list .monaco-scrollable-element {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart > .content,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .session-view,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .session-view-content,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .sessions-chat-widget,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .chat-view-chat > .interactive-session,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .chat-view-chat .interactive-list .monaco-list-rows,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .chat-view-chat .interactive-list .monaco-scrollable-element {
 	background: transparent !important;
 	background-color: transparent !important;
 }
@@ -1968,7 +1975,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 /* The image is an underlay only. Give the live chat its own stacking context
  * so a view swap cannot leave the transcript or composer behind the canvas.
  * The shared window underlay supplies the tint, so adjacent panels match exactly. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .chat-view-chat {
 	position: relative;
 	z-index: 1;
 	isolation: isolate;
@@ -1978,7 +1985,7 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 /* The active chat header shares the canvas with the transcript. Its contents
  * remain available, but the row itself does not add a separate visual surface
  * over the selected image. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart > .sessions-panel-header.sessions-part-header {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart > .sessions-panel-header.sessions-part-header {
 	background: transparent !important;
 	-webkit-backdrop-filter: none;
 	backdrop-filter: none;
@@ -1988,85 +1995,93 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
  * paints the session canvas. Clear that inner layer as well; otherwise it
  * leaves the opaque rectangle shown in the header even when its host is
  * transparent. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .sessions-header-session-title-slot .chat-composite-bar.session-header-bar {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .sessions-header-session-title-slot .chat-composite-bar.session-header-bar {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+/* The chat tab strip (a session with more than one chat) sits on the same
+ * canvas as the header: without this it paints --session-view-background as
+ * an opaque dark band across the chat, over any wallpaper. */
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) .chat-composite-bar.session-chat-tabs-bar {
 	background: transparent !important;
 	background-color: transparent !important;
 }
 
 /* Keep the workspace breadcrumb on the same surface as the session title. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .sessions-header-session-title-slot .chat-composite-bar-meta-workspace {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .sessions-header-session-title-slot .chat-composite-bar-meta-workspace {
 	background: transparent !important;
 	border-color: transparent !important;
 	color: color-mix(in srgb, var(--codex-text-primary) 76%, transparent) !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .sessions-header-session-title-slot .chat-composite-bar-meta-row::after {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .sessions-header-session-title-slot .chat-composite-bar-meta-row::after {
 	color: color-mix(in srgb, var(--codex-text-primary) 48%, transparent);
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .sessions-header-session-title-slot .chat-composite-bar-session-title-text {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .sessions-header-session-title-slot .chat-composite-bar-session-title-text {
 	color: var(--codex-text-primary) !important;
 }
 
 /* The desktop task header uses a folder icon and one title. Keep the project
  * details in the icon's existing hover instead of a second label and slash. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-panel-header.sessions-part-header > .sessions-panel-header-left {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-panel-header.sessions-part-header > .sessions-panel-header-left {
 	padding-left: 14px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-header-session-title-slot .chat-composite-bar-title-row {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-header-session-title-slot .chat-composite-bar-title-row {
 	gap: 12px;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-header-session-title-slot .chat-composite-bar-meta-row {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-header-session-title-slot .chat-composite-bar-meta-row {
 	flex: 0 0 auto;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-header-session-title-slot .chat-composite-bar-meta-workspace {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-header-session-title-slot .chat-composite-bar-meta-workspace {
 	padding: 0;
 	border: 0;
 	border-radius: 0;
 	background: transparent;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-header-session-title-slot .chat-composite-bar-meta-workspace-label,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-header-session-title-slot .chat-composite-bar-meta-row::after {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-header-session-title-slot .chat-composite-bar-meta-workspace-label,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-header-session-title-slot .chat-composite-bar-meta-row::after {
 	display: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-header-session-title-slot .chat-composite-bar-session-title,
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .sessions-header-session-title-slot .chat-composite-bar-session-title-text {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-header-session-title-slot .chat-composite-bar-session-title,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .sessions-header-session-title-slot .chat-composite-bar-session-title-text {
 	font-weight: 400;
 }
 
 /* Keep the simple-mode header flat when the transcript is scrolled. */
-.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list .monaco-scrollable-element > .shadow.top {
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .chat-view-chat .interactive-list .monaco-scrollable-element > .shadow.top {
 	background: transparent !important;
 	box-shadow: none !important;
 }
 
 /* Transcript rows and panel wrappers reveal the shared window image. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list .monaco-list-row,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.sessionspart .chat-view-chat .interactive-list .interactive-item-container,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar > .content,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar > .content .pane-body,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .pane-composite-part,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .composite,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .composite > .content,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .pane,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .monaco-scrollable-element,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .monaco-split-view2,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .split-view-container,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .split-view-view,
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)):not(.hc-black):not(.hc-light):has(.part.sessionspart .chat-view-chat) .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-mode-launcher {
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .chat-view-chat .interactive-list .monaco-list-row,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.sessionspart .chat-view-chat .interactive-list .interactive-item-container,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.auxiliarybar,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.auxiliarybar > .content,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.auxiliarybar > .content .pane-body,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.auxiliarybar .pane-composite-part,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.auxiliarybar .composite,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.auxiliarybar .composite > .content,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.auxiliarybar .pane,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.auxiliarybar .monaco-scrollable-element,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.auxiliarybar .monaco-split-view2,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.auxiliarybar .split-view-container,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.auxiliarybar .split-view-view,
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light).sessions-chat-view-open .part.auxiliarybar .sessions-right-workbench-shell.sessions-right-workbench-mode-launcher {
 	background: transparent !important;
 	background-color: transparent !important;
 }
 
 /* Open panels reveal the same window underlay as chat. Keeping every grid
  * wrapper transparent avoids a second crop when the panel opens or expands. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .monaco-grid-view .split-view-view:has(.part.auxiliarybar),
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .monaco-grid-view .split-view-view.part-host-contains-auxiliarybar,
 .monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar,
 .monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) .part.auxiliarybar > .content {
 	background: transparent !important;
@@ -2082,17 +2097,17 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 }
 
 /* Keep both panel branches above the shared canvas. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(.part.sidebar):not(:has(.part.sessionspart)),
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(.part.auxiliarybar):not(:has(.part.sessionspart)) {
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .monaco-grid-view .split-view-view.part-host-contains-sidebar:not(.part-host-contains-sessionspart),
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .monaco-grid-view .split-view-view.part-host-contains-auxiliarybar:not(.part-host-contains-sessionspart) {
 	z-index: 2;
 	overflow: visible;
 }
 
 /* Do not paint a second border or shadow on the grid wrapper. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar)::after {
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar::after {
 	display: block;
 	border: 0;
-	border-radius: 12px;
+	border-radius: 0;
 	box-shadow: none;
 }
 
@@ -2101,6 +2116,13 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	width: min(calc(100% - 24px), 520px);
 	margin: 0 auto -1px;
 	z-index: 1;
+}
+
+/* chatDevinPresentation.css tucks the strip 18px under the shell to hide the
+ * 18px bottom padding chat.css gives it. This theme drops that padding (below),
+ * so the same overlap would bury the "N files changed" row under the composer. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.sessionspart .interactive-session .interactive-input-part .chat-editing-session:not(:empty) {
+	margin: 0 auto -1px !important;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window) .interactive-session .chat-editing-session .chat-editing-session-container {
@@ -2147,23 +2169,23 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 
 /* Let the canvas show through the right panel's rounded corners. The leaf
  * wrapper paints the shadow outside the panel's clipped content. */
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .monaco-grid-view .split-view-view.part-host-auxiliarybar,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .monaco-grid-view .split-view-view.part-host-branch-contains-auxiliarybar {
 	background: transparent !important;
 	box-shadow: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .monaco-grid-view .split-view-view.part-host-auxiliarybar {
 	border-radius: 12px !important;
 	overflow: visible;
 	box-shadow: -6px 0 18px -6px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):is(.hc-black, .hc-light) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):is(.hc-black, .hc-light) .monaco-grid-view .split-view-view.part-host-auxiliarybar {
 	box-shadow: none;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar)::after {
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .monaco-grid-view .split-view-view.part-host-auxiliarybar::after {
 	border: 0;
 	border-radius: 12px;
 	box-shadow: none;
@@ -2263,8 +2285,8 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	 * dark text would be the only dark text left in the transcript. */
 	.part.sessionspart .interactive-response > .value > .rendered-markdown :not(pre):not(.monaco-editor) > code,
 	.part.sessionspart .interactive-response .chat-backboard-turn-work-body > .rendered-markdown :not(pre):not(.monaco-editor) > code {
-		border-color: color-mix(in srgb, var(--wallpaper-foreground) 34%, transparent) !important;
-		background: color-mix(in srgb, var(--wallpaper-foreground) 16%, transparent) !important;
+		border-color: color-mix(in srgb, var(--wallpaper-foreground) 10%, transparent) !important;
+		background: color-mix(in srgb, var(--wallpaper-foreground) 10%, transparent) !important;
 		color: var(--wallpaper-foreground) !important;
 		text-shadow: 0 1px 3px #00000080;
 	}
@@ -2306,15 +2328,17 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	display: block;
 }
 
-/* Simple sidebar: clip the header and footer to the same rounded outline.
- * Its grid wrapper must not fill the corner cutouts with an opaque square. */
+/* Simple sidebar: flush with the window edges, so it is square. The window
+ * itself rounds the outer corners; rounding the panel too left wallpaper
+ * wedges inside them and beside full-page surfaces (MCPs, Canvas) that sit
+ * flush against its inner edge. */
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .part.sidebar {
-	border-radius: 14px !important;
+	border-radius: 0 !important;
 	overflow: hidden !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar) {
-	border-radius: 14px !important;
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar {
+	border-radius: 0 !important;
 	background: transparent !important;
 }
 
@@ -2333,7 +2357,7 @@ html body .monaco-workbench.agent-sessions-workbench .part.sessionspart :is(.new
 		min-height: 86px !important;
 		padding: 8px !important;
 		gap: 0 !important;
-		border-radius: 12px !important;
+		border-radius: var(--bb-composer-radius, 18px) !important;
 		background: var(--bb-composer-surface) !important;
 		box-shadow: none !important;
 	}
@@ -2359,20 +2383,16 @@ html body .monaco-workbench.agent-sessions-workbench .part.sessionspart :is(.new
 			background: var(--bb-composer-surface) !important;
 			min-height: 86px !important;
 			padding: 8px !important;
-			border-radius: 12px !important;
+			border-radius: var(--bb-composer-radius, 18px) !important;
 			border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent) !important;
 			box-shadow: none !important;
 		}
-		/* Scoped to the input box: pending questions share the composer shell and
-		 * their scroll containers must stay on the shell surface. */
+		/* Scoped to the input box: pending questions pop out above it and their
+		 * scroll containers keep the pop-out card's own surface. */
 		.chat-input-container :is(.chat-editor-container, .interactive-input-editor, .monaco-editor, .monaco-editor-background, .overflow-guard, .monaco-scrollable-element, .lines-content, .view-lines, .margin) {
 			background-color: var(--bb-composer-surface) !important;
 		}
 		.chat-input-toolbars { height: auto !important; min-height: 28px !important; margin-top: 6px !important; }
-		.backboard-composer-location { min-height: 40px !important; }
 	}
 }
 
-.monaco-workbench.agent-sessions-workbench :is(.part.sessionspart, .optimus-chat-view) .backboard-composer-shell {
-	background: var(--vscode-editorWidget-background, #202124);
-}

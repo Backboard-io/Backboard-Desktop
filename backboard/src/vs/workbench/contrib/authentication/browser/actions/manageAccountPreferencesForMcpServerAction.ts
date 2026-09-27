@@ -19,7 +19,7 @@ export class ManageAccountPreferencesForMcpServerAction extends Action2 {
 	constructor() {
 		super({
 			id: '_manageAccountPreferencesForMcpServer',
-			title: localize2('manageAccountPreferenceForMcpServer', "Manage MCP Server Account Preferences"),
+			title: localize2('manageAccountPreferenceForMcpServer', "Manage Connector Account Preferences"),
 			category: localize2('accounts', "Accounts"),
 			f1: false
 		});
@@ -68,7 +68,7 @@ class ManageAccountPreferenceForMcpServerActionImpl {
 			const mcpServerQuery = this._authenticationQueryService.mcpServer(mcpServerId);
 			const providersWithAccess = await mcpServerQuery.getProvidersWithAccess();
 			if (!providersWithAccess.length) {
-				await this._dialogService.info(localize('noAccountUsage', "This MCP server has not used any accounts yet."));
+				await this._dialogService.info(localize('noAccountUsage', "This connector has not used any accounts yet."));
 				return;
 			}
 			providerId = providersWithAccess[0]; // Default to the first provider
@@ -80,7 +80,7 @@ class ManageAccountPreferenceForMcpServerActionImpl {
 					})),
 					{
 						placeHolder: localize('selectProvider', "Select an authentication provider to manage account preferences for"),
-						title: localize('pickAProviderTitle', "Manage MCP Server Account Preferences")
+						title: localize('pickAProviderTitle', "Manage Connector Account Preferences")
 					}
 				);
 				if (!result) {
@@ -157,7 +157,7 @@ class ManageAccountPreferenceForMcpServerActionImpl {
 	}
 
 	private _handleNoAccounts(picker: IQuickPick<IQuickPickItem, { useSeparators: true }>): IDisposable {
-		picker.validationMessage = localize('noAccounts', "No accounts are currently used by this MCP server.");
+		picker.validationMessage = localize('noAccounts', "No accounts are currently used by this connector.");
 		picker.buttons = [this._quickInputService.backButton];
 		picker.show();
 		return Event.filter(picker.onDidTriggerButton, (e) => e === this._quickInputService.backButton)(() => this.run());

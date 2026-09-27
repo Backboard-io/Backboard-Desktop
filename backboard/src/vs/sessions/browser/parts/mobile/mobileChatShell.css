@@ -178,8 +178,8 @@
 	the chat (see sidebarPart.css). The :has() conditions scope strictly
 	to grid wrappers so splitviews used inside individual parts' content
 	(e.g. a sidebar's view list) are not affected. */
-.agent-sessions-workbench.phone-layout .split-view-view:has(> .part),
-.agent-sessions-workbench.phone-layout .split-view-view:has(> .monaco-grid-branch-node) {
+.agent-sessions-workbench.phone-layout .split-view-view.part-host-part,
+.agent-sessions-workbench.phone-layout .split-view-view.part-host-branch {
 	position: absolute !important;
 	top: 0 !important;
 	left: 0 !important;

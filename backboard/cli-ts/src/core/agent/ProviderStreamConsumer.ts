@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
 	isRetryableStreamServerError,
 	streamRetryDelayMs,
@@ -245,8 +246,11 @@ export class ProviderStreamConsumer {
 						break;
 					case "assistant_delta":
 						if (event.text) {
-							if (this.generativeMediaEnabled) bufferedText += event.text;
-							else assistant.appendDelta(event.text);
+							// Kept even while streaming: a hosted image tool that is always
+							// on (a ChatGPT subscription) still appends its images at the end.
+							bufferedText += event.text;
+							if (!this.generativeMediaEnabled)
+								assistant.appendDelta(event.text);
 						}
 						break;
 					case "reasoning_delta":
@@ -295,8 +299,9 @@ export class ProviderStreamConsumer {
 					case "media": {
 						const media = mediaFromPayload(event.payload);
 						if (media) {
-							await this.addGeneratedMedia(media, generatedMedia);
-							this.emitMediaToolCall(media);
+							if (await this.addGeneratedMedia(media, generatedMedia)) {
+								this.emitMediaToolCall(media);
+							}
 						} else {
 							this.bus.emit({
 								type: "system:warning",
@@ -322,7 +327,7 @@ export class ProviderStreamConsumer {
 						}));
 						assistant.finalize(
 							calls,
-							this.generativeMediaEnabled
+							this.generativeMediaEnabled || generatedMedia.length > 0
 								? normalizeImageResponse(bufferedText, generatedMedia)
 								: undefined,
 						);
@@ -336,13 +341,14 @@ export class ProviderStreamConsumer {
 							// Some providers omit the media event and return the generated
 							// Backboard URL only in final_content. Persist that response too.
 							for (const media of mediaFromResponseText(finalText)) {
-								await this.addGeneratedMedia(media, generatedMedia);
-								this.emitMediaToolCall(media);
+								if (await this.addGeneratedMedia(media, generatedMedia)) {
+									this.emitMediaToolCall(media);
+								}
 							}
 						}
 						assistant.finalize(
 							[],
-							this.generativeMediaEnabled
+							this.generativeMediaEnabled || generatedMedia.length > 0
 								? normalizeImageResponse(finalText, generatedMedia)
 								: event.finalText,
 						);
@@ -462,23 +468,44 @@ export class ProviderStreamConsumer {
 		});
 	}
 
+	/** Records one generated file; false when it cannot be shown at all. */
 	private async addGeneratedMedia(
 		media: GeneratedMedia,
 		generatedMedia: GeneratedMedia[],
-	): Promise<void> {
-		if (generatedMedia.some((item) => item.url === media.url)) return;
-		const persisted = await this.persistGeneratedMedia(
-			media.url,
-			this.mediaDirectoryFor(media),
-		);
+	): Promise<boolean> {
+		if (generatedMedia.some((item) => item.url === media.url)) return true;
+		const directory = this.mediaDirectoryFor(media);
+		const persisted = await this.persistGeneratedMedia(media.url, directory);
 		media.savedPath = persisted?.path;
 		media.contentHash = persisted?.contentHash;
+		if (media.url.startsWith("data:")) {
+			// Inline bytes (a subscription's hosted image tool) would put megabytes
+			// of base64 into the transcript; point at the saved copy instead. The
+			// IDE resolves a project-relative path against the session folder,
+			// which is also how Canvas finds the file.
+			if (!media.savedPath) {
+				if (!directory) {
+					this.bus.emit({
+						type: "system:warning",
+						message:
+							"A generated image could not be shown: this run has no folder to save it in.",
+					});
+				}
+				return false;
+			}
+			const relative = projectRelativeGeneratedPath(media.savedPath);
+			media.url =
+				relative === media.savedPath
+					? pathToFileURL(media.savedPath).href
+					: relative;
+		}
 		if (
 			!media.contentHash ||
 			!generatedMedia.some((item) => item.contentHash === media.contentHash)
 		) {
 			generatedMedia.push(media);
 		}
+		return true;
 	}
 
 	/** Generated videos land in their own project folder so images stay separate. */
@@ -494,19 +521,11 @@ export class ProviderStreamConsumer {
 	): Promise<PersistedGeneratedMedia | undefined> {
 		if (!directory) return undefined;
 		try {
-			const response = await (this.options.fetch ?? fetch)(url);
-			if (!response.ok) {
-				throw new Error(`download returned HTTP ${response.status}`);
-			}
-			const bytes = new Uint8Array(await response.arrayBuffer());
+			const { bytes, contentType } = await this.readGeneratedMedia(url);
 			if (bytes.byteLength === 0) throw new Error("download was empty");
 			await mkdir(directory, { recursive: true });
 			const contentHash = createHash("sha256").update(bytes).digest("hex");
-			const filename = generatedMediaFilename(
-				contentHash,
-				url,
-				response.headers.get("content-type"),
-			);
+			const filename = generatedMediaFilename(contentHash, url, contentType);
 			const path = join(directory, filename);
 			await writeFile(path, bytes);
 			return { path, contentHash };
@@ -517,6 +536,27 @@ export class ProviderStreamConsumer {
 			});
 			return undefined;
 		}
+	}
+
+	/** Downloads a hosted file, or decodes one sent inline as a base64 data URL. */
+	private async readGeneratedMedia(
+		url: string,
+	): Promise<{ bytes: Uint8Array; contentType: string | null }> {
+		const inline = /^data:(?<type>[^;,]+);base64,(?<data>.*)$/s.exec(url);
+		if (inline?.groups) {
+			return {
+				bytes: new Uint8Array(Buffer.from(inline.groups.data ?? "", "base64")),
+				contentType: inline.groups.type ?? null,
+			};
+		}
+		const response = await (this.options.fetch ?? fetch)(url);
+		if (!response.ok) {
+			throw new Error(`download returned HTTP ${response.status}`);
+		}
+		return {
+			bytes: new Uint8Array(await response.arrayBuffer()),
+			contentType: response.headers.get("content-type"),
+		};
 	}
 }
 

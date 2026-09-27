@@ -814,6 +814,98 @@ describe("CodexSubscriptionClient", () => {
 		);
 	});
 
+	it("generates images with the hosted tool and replays a note instead of the bytes", async () => {
+		const requestBodies: Record<string, unknown>[] = [];
+		const result = Buffer.from("png-bytes").toString("base64");
+		const imageCall = {
+			type: "image_generation_call",
+			id: "ig_1",
+			status: "completed",
+			output_format: "png",
+			revised_prompt: "A yellow star",
+			result,
+		};
+		const fetchImpl = (async (
+			_input: Parameters<typeof fetch>[0],
+			init?: Parameters<typeof fetch>[1],
+		) => {
+			requestBodies.push(JSON.parse(String(init?.body)));
+			if (requestBodies.length > 1) {
+				return eventStream([{ type: "response.completed", response: {} }]);
+			}
+			return eventStream([
+				{
+					type: "response.output_item.added",
+					item: {
+						type: "image_generation_call",
+						id: "ig_1",
+						status: "in_progress",
+					},
+				},
+				{ type: "response.output_item.done", item: imageCall },
+				{ type: "response.output_text.delta", delta: "Here it is." },
+				{
+					type: "response.completed",
+					response: {
+						output: [
+							imageCall,
+							{
+								type: "message",
+								role: "assistant",
+								content: [{ type: "output_text", text: "Here it is." }],
+							},
+						],
+					},
+				},
+			]);
+		}) as typeof fetch;
+		const client = new CodexSubscriptionClient({ authFile, fetchImpl });
+
+		const events: ProviderEvent[] = [];
+		for await (const event of client.runMessage({
+			content: "draw a star",
+			model_name: "gpt-test",
+		})) {
+			events.push(event);
+		}
+		const thread = events.find((event) => event.kind === "thread");
+		await client.sendMessage({
+			thread_id: thread?.kind === "thread" ? thread.threadId : "",
+			content: "what colour was it?",
+			model_name: "gpt-test",
+		});
+
+		expect(
+			events.filter(
+				(event) => event.kind === "tool_started" || event.kind === "media",
+			),
+		).toEqual([
+			{ kind: "tool_started", id: "ig_1", name: "generate_image" },
+			{
+				kind: "media",
+				payload: {
+					url: `data:image/png;base64,${result}`,
+					media_type: "image",
+					prompt: "A yellow star",
+				},
+			},
+		]);
+		expect(requestBodies[0]?.tools).toEqual([
+			{ type: "image_generation", output_format: "png" },
+		]);
+		expect(JSON.stringify(requestBodies[1]?.input)).not.toContain(result);
+		expect(requestBodies[1]?.input).toContainEqual({
+			type: "message",
+			role: "assistant",
+			content: [
+				{
+					type: "output_text",
+					text: "[Generated image: A yellow star. It was shown to the user and saved in the project's generated-images/ folder.]",
+				},
+			],
+		});
+	});
+
 	it("routes image tool results as multimodal function output", async () => {
 		const requestBodies: Record<string, unknown>[] = [];
 		let responseCount = 0;

@@ -47,7 +47,7 @@ import { ChatThinkingExternalResourceWidget } from './chatThinkingExternalResour
 import { LocalChatSessionUri, chatSessionResourceToId } from '../../../common/model/chatUri.js';
 import { IEditSessionDiffStats } from '../../../common/editing/chatEditingService.js';
 import { IChatTextEditGroup } from '../../../common/model/chatModel.js';
-import { CodexActivityGroup } from './codex/codexActivityGroup.js';
+import { CodexActivitySequence } from './codex/codexActivitySequence.js';
 
 
 // Context key id mirrored from `vs/sessions/common/contextkeys` (`IsPhoneLayoutContext`).
@@ -834,7 +834,9 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	private readonly useEditorPanelPresentation: boolean;
 	private readonly useCursorTranscriptPresentation: boolean;
 	/** Codex presentation: this part renders as one Codex activity unit (all Backboard modes). */
-	private codexGroup: CodexActivityGroup | undefined;
+	private codexSequence: CodexActivitySequence | undefined;
+	/** Codex: key of the reasoning section `updateThinking` currently streams into. */
+	private codexReasoningKey = 0;
 	private readonly codexRowIdsByPartId = new Map<string, string>();
 	private readonly _collapseAnimation = this._register(new MutableDisposable<DisposableStore>());
 	private readonly _elapsedTimer = this._register(new MutableDisposable<IDisposable>());
@@ -1305,22 +1307,36 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 	}
 
 	/**
-	 * Codex presentation: the part's body is a single Codex activity unit whose
-	 * header shows the live action (or the reasoning heading) while the turn runs
-	 * and the completed summary afterwards. Reasoning text itself is not shown.
+	 * Codex presentation: the part's body is a sequence of Codex units — tool
+	 * runs as activity groups and each reasoning section as Codex's reasoning
+	 * item (`Thinking` streaming open, then `Thought for 12s`).
 	 */
 	private initCodexContent(): HTMLElement {
 		this.domNode.classList.add('cx-thinking');
-		const group = this.codexGroup = this._register(new CodexActivityGroup());
-		this._register(group.onDidChangeHeight(() => this._onDidChangeHeight.fire()));
-		if (this.streamingCompleted || this.element.isComplete) {
-			group.setComplete();
+		const sequence = this.codexSequence = this._register(new CodexActivitySequence((markdown, target) => this.renderCodexReasoningMarkdown(markdown, target)));
+		this._register(sequence.onDidChangeHeight(() => this._onDidChangeHeight.fire()));
+		const live = !this.streamingCompleted && !this.element.isComplete;
+		sequence.setReasoning(String(this.codexReasoningKey), this.currentThinkingValue, live);
+		if (live) {
+			sequence.setThinking(extractTitleFromThinkingContent(this.currentThinkingValue) ?? localize('chat.codex.thinking', "Thinking"));
 		} else {
-			group.setThinking(extractTitleFromThinkingContent(this.currentThinkingValue) ?? localize('chat.codex.thinking', "Thinking"));
+			sequence.setComplete();
 		}
 		this.wrapper = $('.chat-used-context-list.chat-thinking-collapsible.cx-thinking-list');
-		this.wrapper.appendChild(group.element);
+		this.wrapper.appendChild(sequence.element);
 		return this.wrapper;
+	}
+
+	private renderCodexReasoningMarkdown(markdown: string, target: HTMLElement | undefined): IRenderedMarkdown {
+		return this.chatContentMarkdownRenderer.render(new MarkdownString(markdown), {
+			fillInIncompleteTokens: true,
+			asyncRenderCallback: () => {
+				if (!this._store.isDisposed) {
+					this._onDidChangeHeight.fire();
+				}
+			},
+			codeBlockRendererSync: ChatThinkingContentPart._codeBlockRendererSync,
+		}, target);
 	}
 
 	private handleScroll(scrollTop: number): void {
@@ -1805,6 +1821,13 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 			return;
 		}
 		if (!this.isExpanded()) {
+			return;
+		}
+		if (this.codexSequence) {
+			// The Codex unit stays mounted (its reasoning items fold themselves),
+			// so the legacy max-height/opacity collapse would only fade the whole
+			// unit out and snap it back 400ms later.
+			this.setExpanded(false);
 			return;
 		}
 		const wrapper = this.wrapper;
@@ -2984,10 +3007,12 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		}
 
 		const raw = extractTextFromPart(content);
-		if (this.codexGroup) {
+		if (this.codexSequence) {
 			this.currentThinkingValue = raw;
-			if (this.isActive && !this.streamingCompleted && !this.element.isComplete) {
-				this.codexGroup.setThinking(extractTitleFromThinkingContent(raw) ?? localize('chat.codex.thinking', "Thinking"));
+			const live = this.isActive && !this.streamingCompleted && !this.element.isComplete;
+			this.codexSequence.setReasoning(String(this.codexReasoningKey), raw, live);
+			if (live) {
+				this.codexSequence.setThinking(extractTitleFromThinkingContent(raw) ?? localize('chat.codex.thinking', "Thinking"));
 			}
 			return;
 		}
@@ -3045,6 +3070,15 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 		return this.isActive;
 	}
 
+	/**
+	 * Codex presentation: the next response part started without adding a row
+	 * here (a hidden tool), so the streaming reasoning section is over — it
+	 * settles to `Thought for Ns` and folds closed. The part stays active.
+	 */
+	public finishReasoningSection(): void {
+		this.codexSequence?.finishReasoning();
+	}
+
 	public get isFixedScrollingMode(): boolean {
 		return this.fixedScrollingMode;
 	}
@@ -3068,7 +3102,7 @@ export class ChatThinkingContentPart extends ChatCollapsibleContentPart implemen
 
 	public markAsInactive(): void {
 		this.isActive = false;
-		this.codexGroup?.setComplete();
+		this.codexSequence?.setComplete();
 		this.finishCurrentCursorReasoning();
 		this.updateCursorReasoningLabel(true);
 		this.collapseAllCursorReasoning();
@@ -3573,7 +3607,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 				this.updateAggregatedDiff();
 				const codexRowId = this.codexRowIdsByPartId.get(toolInvocationId);
 				if (codexRowId) {
-					this.codexGroup?.updateEditStats(codexRowId, stats.added, stats.removed);
+					this.codexSequence?.updateEditStats(codexRowId, stats.added, stats.removed);
 				}
 			}));
 		}
@@ -3598,7 +3632,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 			&& (toolInvocationOrMarkdown.kind === 'toolInvocation' || toolInvocationOrMarkdown.kind === 'toolInvocationSerialized');
 		const isCursorTranscriptArtifact = this.useCursorTranscriptPresentation && toolInvocationOrMarkdown
 			&& (toolInvocationOrMarkdown.kind === 'markdownContent' || toolInvocationOrMarkdown.kind === 'externalEdit' || toolInvocationOrMarkdown.kind === 'textEditGroup');
-		if (this.isExpanded() || this.hasExpandedOnce || isCleanTimelineTool || isCursorTranscriptArtifact || !!this.codexGroup || (this.fixedScrollingMode && !this.streamingCompleted)) {
+		if (this.isExpanded() || this.hasExpandedOnce || isCleanTimelineTool || isCursorTranscriptArtifact || !!this.codexSequence || (this.fixedScrollingMode && !this.streamingCompleted)) {
 			const result = factory();
 			this.appendItemToDOM(result.domNode, toolInvocationId, toolInvocationOrMarkdown, originalParent);
 			if (result.disposable) {
@@ -3626,7 +3660,7 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 	}
 
 	public removeMaterializedItem(toolCallId: string): void {
-		this.codexGroup?.removeRowsFor(m => (m.kind === 'toolInvocation' || m.kind === 'toolInvocationSerialized') && m.toolCallId === toolCallId);
+		this.codexSequence?.removeRowsFor(m => (m.kind === 'toolInvocation' || m.kind === 'toolInvocationSerialized') && m.toolCallId === toolCallId);
 		this.toolDisposables.deleteAndDispose(toolCallId);
 		this.ownedToolParts.delete(toolCallId);
 
@@ -4107,9 +4141,9 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		toolInvocationOrMarkdown?: ChatThinkingItemMetadata,
 		originalParent?: HTMLElement
 	): void {
-		if (this.codexGroup) {
+		if (this.codexSequence) {
 			if (toolInvocationOrMarkdown) {
-				const rowId = this.codexGroup.addRow(toolInvocationOrMarkdown, content);
+				const rowId = this.codexSequence.addRow(toolInvocationOrMarkdown, content);
 				if (rowId && toolInvocationId) {
 					this.codexRowIdsByPartId.set(toolInvocationId, rowId);
 				}
@@ -4291,6 +4325,16 @@ ${this.hookCount > 0 ? `EXAMPLES WITH BLOCKED CONTENT (from hooks):
 		}
 		this.appendedItemCount++;
 		this.allThinkingParts.push(content);
+		if (this.codexSequence) {
+			// Each reasoning section after a tool run is its own Codex reasoning item.
+			this.codexSequence.finishReasoning();
+			this.codexReasoningKey++;
+			this.content = content;
+			this.id = content.id;
+			this.currentThinkingValue = '';
+			this.updateThinking(content);
+			return;
+		}
 		this.finishCurrentCursorReasoning();
 		// A new reasoning section breaks the current activity group so later
 		// tools don't get appended above this text.

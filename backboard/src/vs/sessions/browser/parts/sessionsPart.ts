@@ -6,23 +6,23 @@
 import './media/sessionsPart.css';
 import { IContextKey, IContextKeyService } from '../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
-import { IStorageService } from '../../../platform/storage/common/storage.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../platform/storage/common/storage.js';
 import { IThemeService } from '../../../platform/theme/common/themeService.js';
 import { agentsPanelBackground, agentsPanelBorder, agentsPanelForeground } from '../../common/theme.js';
 import { IWorkbenchLayoutService, Parts } from '../../../workbench/services/layout/browser/layoutService.js';
 import { assertReturnsDefined } from '../../../base/common/types.js';
-import { LayoutPriority } from '../../../base/browser/ui/splitview/splitview.js';
-import { Direction, SerializableGrid, Sizing } from '../../../base/browser/ui/grid/grid.js';
+import { LayoutPriority, Orientation } from '../../../base/browser/ui/splitview/splitview.js';
+import { Direction, GridNode, isGridBranchNode, SerializableGrid, Sizing } from '../../../base/browser/ui/grid/grid.js';
 import { Part } from '../../../workbench/browser/part.js';
 import { ActiveSessionsContext, CanGoBackFromSubagentContext, MultipleSessionsVisibleContext, SessionsFocusContext } from '../../common/contextkeys.js';
 import { $, addDisposableGenericMouseDownListener, addDisposableListener, EventType, isAncestor, trackFocus } from '../../../base/browser/dom.js';
 import { IActiveSession } from '../../services/sessions/common/sessionsManagement.js';
-import { SessionView } from './sessionView.js';
+import { ISessionSidePanel, SessionView } from './sessionView.js';
 import { DisposableStore, IDisposable } from '../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Color } from '../../../base/common/color.js';
 import { contrastBorder } from '../../../platform/theme/common/colorRegistry.js';
-import { SessionDropTarget, ISessionDropTargetDelegate } from './sessionDropTarget.js';
+import { SessionDropTarget, ISessionDropTargetDelegate, ISessionPlacement } from './sessionDropTarget.js';
 import { ProgressBar } from '../../../base/browser/ui/progressbar/progressbar.js';
 import { defaultProgressBarStyles } from '../../../platform/theme/browser/defaultStyles.js';
 import { IProgressIndicator } from '../../../platform/progress/common/progress.js';
@@ -31,6 +31,7 @@ import { observableValue } from '../../../base/common/observable.js';
 import { IWorkbenchAssignmentService } from '../../../workbench/services/assignment/common/assignmentService.js';
 import { Menus } from '../menus.js';
 import { SessionsPanelHeader } from './panelHeader.js';
+import { ISessionsGridChangeEvent, SessionsGridLayout } from '../../services/sessions/browser/sessionsPartService.js';
 
 /**
  * ExP treatment that, when enabled, moves the session type ("harness") picker
@@ -41,14 +42,28 @@ import { SessionsPanelHeader } from './panelHeader.js';
  */
 const HARNESS_PICKER_IN_CONTROLS_TREATMENT = 'agentSessionsHarnessPickerInControls';
 
+interface ISessionsPartMemento {
+	/** Shape of the last split grid; only the structure is kept (cells restore at equal sizes). */
+	gridLayout?: SessionsGridLayout;
+}
+
+/** How to build a grid shape: the session keeping the anchor cell, then each other cell relative to a placed one. */
+interface IGridLayoutPlan {
+	readonly first: string;
+	readonly steps: readonly { readonly sessionId: string; readonly reference: string; readonly direction: Direction }[];
+}
+
 interface IGridSlot {
 	readonly view: SessionView;
 	readonly disposables: DisposableStore;
 	/** Session currently bound to this slot, or `undefined` for the new-session placeholder. */
 	boundSessionId: string | undefined;
+	/** This cell's own right panel while the grid is split. */
+	sidePanel?: { readonly panel: ISessionSidePanel; visible: boolean };
 }
 
-export class SessionsPart extends Part {
+
+export class SessionsPart extends Part<ISessionsPartMemento> {
 
 	override readonly minimumWidth: number = 300;
 	override readonly maximumWidth: number = Number.POSITIVE_INFINITY;
@@ -83,18 +98,32 @@ export class SessionsPart extends Part {
 	private _progressIndicator: IProgressIndicator | undefined;
 
 	/**
-	 * Session views mounted in the grid, in display order (left-to-right). Slots
-	 * are reused across reconciliations: only the slot count changes with the
-	 * number of visible sessions; each slot is rebound to its session by position
-	 * via {@link SessionView.openSession}. There is always at least one slot — a
-	 * new-session placeholder (`boundSessionId === undefined`) when no sessions
-	 * are visible.
+	 * Session views mounted in the grid, in visible-list order (their cells may
+	 * sit anywhere in the nested grid). A slot follows its session across
+	 * reconciliations, see {@link updateVisibleSessions}. There is always at
+	 * least one slot — a new-session placeholder (`boundSessionId ===
+	 * undefined`) when no sessions are visible.
 	 */
 	private readonly _slots: IGridSlot[] = [];
 
-	private readonly _onDidFocusSession = this._register(new Emitter<string>());
-	/** Fired when a session view in the grid receives keyboard focus. */
-	readonly onDidFocusSession: Event<string> = this._onDidFocusSession.event;
+	private readonly _onDidFocusSession = this._register(new Emitter<string | undefined>());
+	/**
+	 * Fired when a session view in the grid receives keyboard focus. Fires with
+	 * `undefined` for the new-session placeholder, but only while the grid is
+	 * split (a lone placeholder is already the active slot).
+	 */
+	readonly onDidFocusSession: Event<string | undefined> = this._onDidFocusSession.event;
+
+	private readonly _onDidUpdateGrid = this._register(new Emitter<ISessionsGridChangeEvent>());
+	/** Fired at the end of a reconciliation that leaves, enters or changes a split grid. */
+	readonly onDidUpdateGrid: Event<ISessionsGridChangeEvent> = this._onDidUpdateGrid.event;
+
+	private _isSplit = false;
+	private _pendingPlacement: ISessionPlacement | undefined;
+	private _pendingLayout: SessionsGridLayout | undefined;
+	/** Shared header sections, remembered so split mode can borrow their contents. */
+	private _sharedHeaderLeft: HTMLElement | undefined;
+	private _sharedHeaderRight: HTMLElement | undefined;
 
 	protected _lastLayout: { readonly width: number; readonly height: number; readonly top: number; readonly left: number } | undefined;
 
@@ -102,6 +131,7 @@ export class SessionsPart extends Part {
 	private readonly _sessionsFocusKey: IContextKey<boolean>;
 	private readonly _canGoBackFromSubagentKey: IContextKey<boolean>;
 	private _activeSessionId: string | undefined;
+	private _lastVisible: readonly (IActiveSession | undefined)[] = [];
 
 	/**
 	 * Whether the session type ("harness") picker should be rendered below the
@@ -213,6 +243,8 @@ export class SessionsPart extends Part {
 		// as the session toolbar above so the controls keep their position once a
 		// chat is sent. Only one of the two is ever populated at a time.
 		this._headerNewSessionToolbarSlot = this._panelHeader.createRightSlot('sessions-header-new-session-toolbar-slot');
+		this._sharedHeaderLeft = this._headerTypePickerSlot.parentElement ?? undefined;
+		this._sharedHeaderRight = this._headerNewSessionToolbarSlot.parentElement ?? undefined;
 
 		// `createContentArea()` seeds the grid with an empty slot before the
 		// sessions service has necessarily emitted its first reconciliation. Bind
@@ -263,17 +295,17 @@ export class SessionsPart extends Part {
 		// Drop target for receiving sessions dragged from the sessions list.
 		const dropDelegate: ISessionDropTargetDelegate = {
 			findTargetView: (child: HTMLElement) => this._findTargetView(child),
+			setPendingPlacement: placement => this.setPendingPlacement(placement),
 		};
 		this._register(this.instantiationService.createInstance(SessionDropTarget, contentArea, dropDelegate));
 
 		return contentArea;
 	}
 
-	private _findTargetView(child: HTMLElement): { readonly sessionId: string; readonly element: HTMLElement } | undefined {
+	private _findTargetView(child: HTMLElement): { readonly sessionId: string | undefined; readonly element: HTMLElement } | undefined {
+		// The new-session placeholder is a valid target too: dropping a chat onto
+		// a blank "New thread" splits it next to the placeholder.
 		for (const slot of this._slots) {
-			if (slot.boundSessionId === undefined) {
-				continue;
-			}
 			if (isAncestor(child, slot.view.element)) {
 				return { sessionId: slot.boundSessionId, element: slot.view.element };
 			}
@@ -282,40 +314,124 @@ export class SessionsPart extends Part {
 	}
 
 	/**
-	 * Reconcile the grid with the desired set of visible sessions. Reuses the
-	 * existing {@link SessionView} slots, growing or shrinking the pool only when
-	 * the number of visible sessions changes, and rebinds each slot to its
-	 * session by position via {@link SessionView.openSession}.
+	 * Reconcile the grid with the desired set of visible sessions. Each grid
+	 * cell ({@link SessionView} slot) follows its session: sessions that stay
+	 * visible keep their cell wherever it sits in the (possibly nested) grid,
+	 * a session replacing another in place (same position in the visible list)
+	 * takes over the freed cell, and new sessions get a new cell next to the
+	 * drop target ({@link setPendingPlacement}) or next to their neighbour in
+	 * list order. Cells nobody needs anymore are removed.
 	 */
 	updateVisibleSessions(visible: readonly (IActiveSession | undefined)[], active: IActiveSession | undefined): void {
-		if (!this._gridWidget) {
+		const gridWidget = this._gridWidget;
+		if (!gridWidget) {
 			return;
 		}
 
+		// Grid mutations below lay each view out several times; let every view
+		// lay its chat out once, at the end.
+		const suspended = new Set(this._slots.map(slot => slot.view));
+		for (const view of suspended) {
+			view.suspendLayout();
+		}
+		try {
+			this._doUpdateVisibleSessions(gridWidget, visible, active, view => {
+				if (!suspended.has(view)) {
+					suspended.add(view);
+					view.suspendLayout();
+				}
+			});
+		} finally {
+			for (const view of suspended) {
+				if (this._slots.some(slot => slot.view === view)) {
+					view.resumeLayout();
+				}
+			}
+		}
+	}
+
+	private _doUpdateVisibleSessions(gridWidget: SerializableGrid<SessionView>, visible: readonly (IActiveSession | undefined)[], active: IActiveSession | undefined, onDidCreateView: (view: SessionView) => void): void {
+		const previousIds = this._slots.map(slot => slot.boundSessionId);
 		// Always keep at least one slot (a placeholder when no sessions are visible).
-		const desiredCount = Math.max(visible.length, 1);
+		const desired: readonly (IActiveSession | undefined)[] = visible.length ? visible : [undefined];
+		const desiredIds = desired.map(session => session?.sessionId);
+		const placement = this._pendingPlacement;
+		this._pendingPlacement = undefined;
+		const isPlaced = (id: string | undefined) => !!placement && placement.sessionId === id;
 
-		// Grow the pool by appending new slots to the right.
-		while (this._slots.length < desiredCount) {
+		const assigned: (IGridSlot | undefined)[] = desiredIds.map(id => this._slots.find(slot => slot.boundSessionId === id));
+		const freeSlots = this._slots.filter(slot => !desiredIds.includes(slot.boundSessionId));
+		// An explicit layout (e.g. the chat grid) or, when a restore lays these
+		// sessions out from a single cell, their persisted shape.
+		const pendingLayout = this._pendingLayout;
+		this._pendingLayout = undefined;
+		const layout = placement || desiredIds.length < 2 ? undefined : pendingLayout ?? (this._slots.length === 1 ? this.getMemento(StorageScope.WORKSPACE, StorageTarget.MACHINE).gridLayout : undefined);
+		const layoutPlan = layout ? SessionsPart._planLayout(layout, desiredIds) : undefined;
+		if (layoutPlan) {
+			this._rebuildGrid(gridWidget, layoutPlan, desiredIds, assigned, onDidCreateView);
+			freeSlots.length = 0;
+		}
+		const takeFreeSlot = (predicate: (slot: IGridSlot) => boolean) => {
+			const index = freeSlots.findIndex(predicate);
+			return index >= 0 ? freeSlots.splice(index, 1)[0] : undefined;
+		};
+		// A session opened in place of another (same list position) keeps its
+		// cell, and with it the cell's size, side panel and navigation history.
+		for (let i = 0; i < desiredIds.length; i++) {
+			if (!assigned[i] && !isPlaced(desiredIds[i])) {
+				assigned[i] = takeFreeSlot(slot => slot.boundSessionId === previousIds[i]);
+			}
+		}
+		for (let i = 0; i < desiredIds.length; i++) {
+			if (!assigned[i] && !isPlaced(desiredIds[i])) {
+				assigned[i] = takeFreeSlot(() => true);
+			}
+		}
+		// New cells: next to the drop target in the dropped direction, else to
+		// the right of the previous session in list order (left of the next).
+		for (let i = 0; i < desiredIds.length; i++) {
+			if (assigned[i]) {
+				continue;
+			}
 			const slot = this._createSlot();
-			const reference = this._slots[this._slots.length - 1].view;
-			this._gridWidget.addView(slot.view, Sizing.Distribute, reference, Direction.Right);
-			this._slots.push(slot);
+			onDidCreateView(slot.view);
+			const target = placement && isPlaced(desiredIds[i]) ? assigned[desiredIds.indexOf(placement.targetSessionId)] : undefined;
+			const previous = assigned.slice(0, i).reverse().find(candidate => !!candidate);
+			const next = assigned.slice(i + 1).find(candidate => !!candidate);
+			if (target && placement) {
+				gridWidget.addView(slot.view, Sizing.Distribute, target.view, placement.direction);
+			} else if (previous) {
+				gridWidget.addView(slot.view, Sizing.Distribute, previous.view, Direction.Right);
+			} else if (next) {
+				gridWidget.addView(slot.view, Sizing.Distribute, next.view, Direction.Left);
+			} else {
+				gridWidget.addView(slot.view, Sizing.Distribute, (freeSlots[0] ?? this._slots[0]).view, Direction.Right);
+			}
+			assigned[i] = slot;
 		}
-
-		// Shrink the pool by removing trailing slots (always leaves at least one).
-		while (this._slots.length > desiredCount) {
-			const slot = this._slots.pop()!;
-			this._gridWidget.removeView(slot.view, Sizing.Distribute);
-			slot.disposables.dispose();
+		// A session already on screen that was dropped next to another one moves
+		// its cell there.
+		if (placement) {
+			const moving = assigned[desiredIds.indexOf(placement.sessionId)];
+			const target = assigned[desiredIds.indexOf(placement.targetSessionId)];
+			if (moving && target && moving !== target && previousIds.includes(placement.sessionId)) {
+				gridWidget.moveView(moving.view, Sizing.Distribute, target.view, placement.direction);
+			}
 		}
+		// Remove unused cells last so the grid never runs out of views.
+		for (const slot of freeSlots) {
+			gridWidget.removeView(slot.view, Sizing.Distribute);
+			this._disposeSlot(slot);
+		}
+		this._slots.splice(0, this._slots.length, ...assigned.filter((slot): slot is IGridSlot => !!slot));
 
-		// Rebind each slot to its session by position (or to undefined placeholder).
+		this._lastVisible = desired;
+
+		// Rebind each slot to its session (or to the undefined placeholder).
 		for (let i = 0; i < this._slots.length; i++) {
 			const slot = this._slots[i];
-			const session = visible[i];
-			slot.boundSessionId = session?.sessionId;
-			slot.view.openSession(session, this._newSessionViewOptions());
+			slot.boundSessionId = desiredIds[i];
+			slot.view.openSession(desired[i], this._newSessionViewOptions());
 		}
 
 		// Mark the active session's element for styling/focus indication.
@@ -330,16 +446,21 @@ export class SessionsPart extends Part {
 		// Relocate the header (title/workspace + action toolbar) into the shared
 		// window header row for the single visible session, so it sits inline with
 		// the mode dropdown and scales with the session region. With more than one
-		// session visible (a grid) there is only one shared header slot, so each
-		// view keeps its own in-view header instead.
-		const relocateSlot = this._slots.length === 1 && this._slots[0].boundSessionId !== undefined ? this._slots[0] : undefined;
+		// session visible the shared row is hidden and every view shows its own
+		// header row instead, so the headers split along with the grid.
+		const isSplit = this._slots.length > 1;
+		const relocateSlot = !isSplit && this._slots[0].boundSessionId !== undefined ? this._slots[0] : undefined;
 		for (const slot of this._slots) {
 			if (slot === relocateSlot && this._headerSessionTitleSlot && this._headerSessionToolbarSlot) {
 				slot.view.mountHeaderIntoPanel(this._headerSessionTitleSlot, this._headerSessionToolbarSlot);
+			} else if (isSplit) {
+				slot.view.mountHeaderIntoSplitHeader();
 			} else {
 				slot.view.restoreHeaderToView();
 			}
+			slot.view.setSplitHeaderVisible(isSplit);
 		}
+		this._updateSplitHeaderChrome(isSplit);
 		if (!relocateSlot) {
 			// A New thread view owns the new-chat header slots, not the relocated
 			// session header slots. Clear any previous session title/toolbar that
@@ -351,15 +472,284 @@ export class SessionsPart extends Part {
 		// Exit the grid's maximized state when the active session lands in a
 		// different slot than the maximized one. Opening a session into the
 		// currently-maximized slot preserves the maximized state.
-		if (this._gridWidget.hasMaximizedView()) {
-			const maximizedSlot = this._slots.find(s => this._gridWidget!.isViewMaximized(s.view));
+		if (gridWidget.hasMaximizedView()) {
+			const maximizedSlot = this._slots.find(s => gridWidget.isViewMaximized(s.view));
 			if (maximizedSlot && maximizedSlot.boundSessionId !== activeId) {
-				this._gridWidget.exitMaximizedView();
+				gridWidget.exitMaximizedView();
 			}
 		}
 
 		this._updateContextKeys(visible);
 		this._updateSubagentNavigationContext();
+
+		const wasSplit = this._isSplit;
+		this._isSplit = isSplit;
+		const collapsingSidePanel = wasSplit && !isSplit ? this._getVisibleSidePanel(this._slots[0]) : undefined;
+		this._syncSidePanels();
+		if (wasSplit !== isSplit && this._lastLayout) {
+			// The shared header row was shown or hidden: give its height back to
+			// (or take it from) the grid.
+			const { width, height, top, left } = this._lastLayout;
+			this.layout(width, height, top, left);
+		}
+		if (isSplit) {
+			this._storeGridLayout();
+		}
+		if (wasSplit || isSplit) {
+			this._onDidUpdateGrid.fire({
+				wasSplit,
+				isSplit,
+				addedSessionIds: desiredIds.filter(id => !previousIds.includes(id)),
+				collapsingSidePanel,
+			});
+		}
+		if (!isSplit) {
+			// Side panels only exist while split. The listener above had its chance
+			// to carry the collapsing cell's panel state over to the auxiliary bar.
+			for (const slot of this._slots) {
+				this._disposeSidePanel(slot);
+			}
+		}
+	}
+
+	/**
+	 * Remembers the split grid's shape so a restore of the same sessions can
+	 * rebuild it (see {@link _planLayout}). The empty placeholder and
+	 * unsent drafts are left out, as restore never brings them back.
+	 */
+	private _storeGridLayout(): void {
+		const gridWidget = this._gridWidget;
+		if (!gridWidget) {
+			return;
+		}
+		const toCell = (node: GridNode<SessionView>, orientation: Orientation): SessionsGridLayout | undefined => {
+			if (!isGridBranchNode(node)) {
+				const index = this._slots.findIndex(slot => slot.view === node.view);
+				return this._lastVisible[index]?.isCreated.get() ? this._slots[index].boundSessionId : undefined;
+			}
+			const childOrientation = orientation === Orientation.HORIZONTAL ? Orientation.VERTICAL : Orientation.HORIZONTAL;
+			const cells = node.children.map(child => toCell(child, childOrientation)).filter((cell): cell is SessionsGridLayout => cell !== undefined);
+			return cells.length > 1 ? { split: orientation === Orientation.HORIZONTAL ? 'h' : 'v', cells } : cells[0];
+		};
+		const layout = toCell(gridWidget.getViews(), gridWidget.orientation);
+		if (typeof layout === 'object') {
+			this.getMemento(StorageScope.WORKSPACE, StorageTarget.MACHINE).gridLayout = layout;
+		}
+	}
+
+	/**
+	 * Arranges the next reconciliation's grid in `layout` when it shows exactly
+	 * the sessions the layout names (see {@link _planLayout}).
+	 */
+	setPendingLayout(layout: SessionsGridLayout): void {
+		this._pendingLayout = layout;
+	}
+
+	/**
+	 * Rebuilds the grid in the plan's shape. Cells of sessions that stay are
+	 * detached and re-added in their new place (keeping their chat, side panel
+	 * and history); the anchor cell never leaves, so the grid is never empty.
+	 * Cells nobody needs anymore are disposed.
+	 */
+	private _rebuildGrid(gridWidget: SerializableGrid<SessionView>, plan: IGridLayoutPlan, desiredIds: readonly (string | undefined)[], assigned: (IGridSlot | undefined)[], onDidCreateView: (view: SessionView) => void): void {
+		const kept = new Map<string | undefined, IGridSlot>();
+		desiredIds.forEach((id, index) => {
+			const slot = assigned[index];
+			if (slot) {
+				kept.set(id, slot);
+			}
+		});
+		const anchor = kept.get(plan.first) ?? this._slots.find(slot => ![...kept.values()].includes(slot)) ?? this._slots[0];
+		for (const [id, slot] of kept) {
+			if (slot === anchor && id !== plan.first) {
+				kept.delete(id); // the anchor was borrowed from another session; it gets a new cell
+			}
+		}
+		for (const slot of this._slots) {
+			if (slot !== anchor) {
+				gridWidget.removeView(slot.view, Sizing.Distribute);
+			}
+		}
+		assigned.fill(undefined);
+		assigned[desiredIds.indexOf(plan.first)] = anchor;
+		for (const step of plan.steps) {
+			let slot = kept.get(step.sessionId);
+			if (!slot || slot === anchor) {
+				slot = this._createSlot();
+				onDidCreateView(slot.view);
+			}
+			gridWidget.addView(slot.view, Sizing.Distribute, assigned[desiredIds.indexOf(step.reference)]!.view, step.direction);
+			assigned[desiredIds.indexOf(step.sessionId)] = slot;
+		}
+		for (const slot of this._slots) {
+			if (!assigned.includes(slot)) {
+				this._disposeSlot(slot); // already detached above
+			}
+		}
+	}
+
+	/**
+	 * Returns how to build `layout` for exactly `desiredIds` (the layout is
+	 * pruned to them first), or `undefined` when it does not cover them all:
+	 * the session that keeps the anchor cell, then each other session's cell
+	 * relative to an already placed one. Siblings are placed before descending
+	 * into them, so every step either extends its parent split or splits a
+	 * lone cell.
+	 */
+	private static _planLayout(layout: SessionsGridLayout, desiredIds: readonly (string | undefined)[]): IGridLayoutPlan | undefined {
+		if (desiredIds.length < 2 || desiredIds.some(id => id === undefined)) {
+			return undefined;
+		}
+		const keep = new Set(desiredIds as readonly string[]);
+		const prune = (cell: SessionsGridLayout): SessionsGridLayout | undefined => {
+			if (typeof cell === 'string') {
+				return keep.has(cell) ? cell : undefined;
+			}
+			const cells = cell.cells.map(prune).filter((child): child is SessionsGridLayout => child !== undefined);
+			return cells.length > 1 ? { split: cell.split, cells } : cells[0];
+		};
+		const plan = (cell: SessionsGridLayout): { first: string; steps: { sessionId: string; reference: string; direction: Direction }[]; leaves: string[] } => {
+			if (typeof cell === 'string') {
+				return { first: cell, steps: [], leaves: [cell] };
+			}
+			const children = cell.cells.map(plan);
+			const direction = cell.split === 'h' ? Direction.Right : Direction.Down;
+			const steps = children.slice(1).map((child, index) => ({ sessionId: child.first, reference: children[index].first, direction }));
+			return { first: children[0].first, steps: [...steps, ...children.flatMap(child => child.steps)], leaves: children.flatMap(child => child.leaves) };
+		};
+		const pruned = prune(layout);
+		const result = pruned ? plan(pruned) : undefined;
+		return result && result.leaves.length === keep.size ? result : undefined;
+	}
+
+	/**
+	 * Where the next reconciliation places `sessionId`: next to the cell
+	 * showing `targetSessionId`, in `direction`. Consumed by the next
+	 * {@link updateVisibleSessions} call only (the drop target sets it right
+	 * before inserting the session and clears it right after).
+	 */
+	setPendingPlacement(placement: ISessionPlacement | undefined): void {
+		this._pendingPlacement = placement;
+	}
+
+	/**
+	 * While split, the window's shared header row is hidden and its contents
+	 * borrowed by the cell headers: the window chrome (traffic-light spacer,
+	 * sidebar fallback) moves into the top-left cell, and the new-chat
+	 * breadcrumb/toolbar into the placeholder cell. Everything moves back when
+	 * the grid collapses to a single session.
+	 */
+	private _updateSplitHeaderChrome(isSplit: boolean): void {
+		const sharedHeader = this._panelHeader?.element;
+		const sharedLeft = this._sharedHeaderLeft;
+		const sharedRight = this._sharedHeaderRight;
+		const typePickerSlot = this._headerTypePickerSlot;
+		const newSessionToolbarSlot = this._headerNewSessionToolbarSlot;
+		const gridWidget = this._gridWidget;
+		if (!sharedHeader || !sharedLeft || !sharedRight || !typePickerSlot || !newSessionToolbarSlot || !gridWidget) {
+			return;
+		}
+
+		// The cell showing the new-chat view: the empty slot, or a draft that
+		// has not been sent yet (both render into the shared new-chat slots).
+		const placeholderIndex = isSplit ? this._lastVisible.findIndex(session => !session || !session.isCreated.get()) : -1;
+		const placeholder = placeholderIndex >= 0 ? this._slots[placeholderIndex] : undefined;
+		if (placeholder) {
+			const slots = placeholder.view.splitHeaderSlots;
+			slots.leading.appendChild(typePickerSlot);
+			slots.trailing.appendChild(newSessionToolbarSlot);
+		} else {
+			// Both were created last in their sections, so appending restores order.
+			sharedLeft.appendChild(typePickerSlot);
+			sharedRight.appendChild(newSessionToolbarSlot);
+		}
+
+		// Only cells along the window's top edge replace the title bar: they
+		// move the window, and the top-left one hosts the window chrome.
+		for (const slot of this._slots) {
+			slot.view.element.classList.toggle('is-grid-top', !isSplit || gridWidget.getNeighborViews(slot.view, Direction.Up).length === 0);
+		}
+		if (isSplit) {
+			const topLeft = this._slots.find(slot => gridWidget.getNeighborViews(slot.view, Direction.Up).length === 0 && gridWidget.getNeighborViews(slot.view, Direction.Left).length === 0) ?? this._slots[0];
+			topLeft.view.splitHeaderSlots.chrome.appendChild(sharedLeft);
+			sharedHeader.style.display = 'none';
+		} else {
+			if (sharedLeft.parentElement !== sharedHeader) {
+				sharedHeader.insertBefore(sharedLeft, sharedHeader.querySelector(':scope > .sessions-panel-header-center'));
+			}
+			sharedHeader.style.display = '';
+		}
+		this.element.classList.toggle('sessions-grid-split', isSplit);
+		// Split panes render the composer tip on one line (sessionView.css).
+		this.element.classList.toggle('chat-input-single-line-placeholder', isSplit);
+	}
+
+	/** Attaches every cell's visible side panel to it (split grid only). */
+	private _syncSidePanels(): void {
+		this._slots.forEach((slot, index) => {
+			slot.sidePanel?.panel.setSession(this._lastVisible[index]);
+			slot.view.setSidePanel(this._isSplit ? this._getVisibleSidePanel(slot) : undefined);
+		});
+	}
+
+	private _getVisibleSidePanel(slot: IGridSlot | undefined): ISessionSidePanel | undefined {
+		return slot?.sidePanel?.visible ? slot.sidePanel.panel : undefined;
+	}
+
+	private _disposeSidePanel(slot: IGridSlot): void {
+		if (slot.sidePanel) {
+			if (slot.view.sidePanel === slot.sidePanel.panel) {
+				slot.view.setSidePanel(undefined);
+			}
+			slot.sidePanel.panel.dispose();
+			slot.sidePanel = undefined;
+		}
+	}
+
+	private _disposeSlot(slot: IGridSlot): void {
+		this._disposeSidePanel(slot);
+		slot.disposables.dispose();
+	}
+
+	/** Whether more than one session is visible side by side. */
+	get isSplit(): boolean {
+		return this._isSplit;
+	}
+
+	getSidePanel(sessionId: string | undefined): ISessionSidePanel | undefined {
+		return this._slots.find(slot => slot.boundSessionId === sessionId)?.sidePanel?.panel;
+	}
+
+	/**
+	 * Makes `panel` the side panel of the cell showing `sessionId` and shows
+	 * it. The part owns the panel from now on and disposes it when its cell
+	 * goes away or the grid collapses. No-op (the panel is disposed) when the
+	 * grid is not split or no cell shows the session.
+	 */
+	setSidePanel(sessionId: string | undefined, panel: ISessionSidePanel): void {
+		const slot = this._isSplit ? this._slots.find(candidate => candidate.boundSessionId === sessionId) : undefined;
+		if (!slot) {
+			panel.dispose();
+			return;
+		}
+		if (slot.sidePanel?.panel !== panel) {
+			this._disposeSidePanel(slot);
+		}
+		slot.sidePanel = { panel, visible: true };
+		this._syncSidePanels();
+	}
+
+	setSidePanelVisible(panel: ISessionSidePanel, visible: boolean): void {
+		const entry = this._slots.find(slot => slot.sidePanel?.panel === panel)?.sidePanel;
+		if (!entry || entry.visible === visible) {
+			return;
+		}
+		entry.visible = visible;
+		this._syncSidePanels();
+	}
+
+	isSidePanelVisible(panel: ISessionSidePanel): boolean {
+		return this._slots.some(slot => slot.sidePanel?.panel === panel && slot.sidePanel.visible);
 	}
 
 	private _updateContextKeys(visible: readonly (IActiveSession | undefined)[]): void {
@@ -484,10 +874,11 @@ export class SessionsPart extends Part {
 		// Promote a visible session to the active session when its view receives
 		// focus or is clicked. Pointer-down covers clicks on non-focusable chrome
 		// (e.g. the new chat widget's workspace picker area) where focus would
-		// not otherwise move into the view. The placeholder slot (no bound
-		// session) has nothing to activate.
+		// not otherwise move into the view. A lone placeholder slot (no bound
+		// session) is already active; in a split grid it is promoted too, so its
+		// own header actions (e.g. the right panel toggle) target it.
 		const fireFocus = () => {
-			if (slot.boundSessionId !== undefined) {
+			if (slot.boundSessionId !== undefined || this._isSplit) {
 				this._onDidFocusSession.fire(slot.boundSessionId);
 			}
 		};
@@ -544,7 +935,7 @@ export class SessionsPart extends Part {
 
 	override dispose(): void {
 		for (const slot of this._slots) {
-			slot.disposables.dispose();
+			this._disposeSlot(slot);
 		}
 		this._slots.length = 0;
 		super.dispose();

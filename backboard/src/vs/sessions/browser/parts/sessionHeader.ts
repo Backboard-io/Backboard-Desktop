@@ -529,6 +529,37 @@ export class SessionHeader extends Disposable {
 }
 
 /**
+ * The Back/Forward arrows of one grid cell while the sessions grid is split,
+ * rendering {@link Menus.TitleBarSessionNavigation} in the cell's own header
+ * row. Clicking first activates the cell's session, so the actions navigate
+ * that cell's own history (see `SessionsService.openPreviousSession`).
+ */
+export class SessionViewNavigationToolbar extends Disposable {
+
+	readonly element: HTMLElement;
+	private _session: IActiveSession | undefined;
+
+	constructor(
+		@ISessionsService sessionsService: ISessionsService,
+		@IInstantiationService instantiationService: IInstantiationService,
+	) {
+		super();
+
+		this.element = $('.panel-header-toolbar-container.sessions-header-navigation.session-view-pane-navigation');
+		const actionRunner = this._register(new SessionActivatingActionRunner(() => this._session, sessionsService));
+		this._register(instantiationService.createInstance(MenuWorkbenchToolBar, this.element, Menus.TitleBarSessionNavigation, {
+			hiddenItemStrategy: HiddenItemStrategy.NoHide,
+			actionRunner,
+			toolbarOptions: { primaryGroup: () => true },
+		}));
+	}
+
+	setSession(session: IActiveSession | undefined): void {
+		this._session = session;
+	}
+}
+
+/**
  * A lightweight toolbar that renders only the {@link Menus.SessionBarToolbar} menu
  * using the same `.chat-composite-bar-toolbar` styling. Unlike the full
  * {@link SessionHeader}, this toolbar is absolutely positioned at the top-right of

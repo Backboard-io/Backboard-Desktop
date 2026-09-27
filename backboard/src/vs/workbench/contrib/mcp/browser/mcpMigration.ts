@@ -96,12 +96,12 @@ export class McpConfigMigrationContribution extends Disposable implements IWorkb
 
 	private showMcpConfigErrorNotification(isRemote: boolean): void {
 		const message = isRemote
-			? localize('mcp.migration.remoteConfigFound', 'MCP servers should no longer be configured in remote user settings. Use the dedicated MCP configuration instead.')
-			: localize('mcp.migration.userConfigFound', 'MCP servers should no longer be configured in user settings. Use the dedicated MCP configuration instead.');
+			? localize('mcp.migration.remoteConfigFound', 'Connectors should no longer be configured in remote user settings. Use the dedicated connector configuration instead.')
+			: localize('mcp.migration.userConfigFound', 'Connectors should no longer be configured in user settings. Use the dedicated connector configuration instead.');
 
 		const openConfigLabel = isRemote
-			? localize('mcp.migration.openRemoteConfig', 'Open Remote User MCP Configuration')
-			: localize('mcp.migration.openUserConfig', 'Open User MCP Configuration');
+			? localize('mcp.migration.openRemoteConfig', 'Open Remote User Connector Configuration')
+			: localize('mcp.migration.openUserConfig', 'Open User Connector Configuration');
 
 		const commandId = isRemote ? McpCommandIds.OpenRemoteUserMcp : McpCommandIds.OpenUserMcp;
 

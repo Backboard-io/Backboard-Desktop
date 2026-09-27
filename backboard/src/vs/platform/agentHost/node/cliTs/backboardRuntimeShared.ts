@@ -64,13 +64,16 @@ export const BACKBOARD_IMAGE_MODEL_CONFIG_KEY = 'imageModel';
 const BACKBOARD_VIDEO_GENERATION_CONFIG_KEY = 'videoGeneration';
 /** Selected video model as `provider/name`; `off` disables video generation. */
 export const BACKBOARD_VIDEO_MODEL_CONFIG_KEY = 'videoModel';
-/** Composer value that turns image or video generation off. */
-export const BACKBOARD_GENERATIVE_MEDIA_OFF = 'off';
 /**
- * Built-in image model used when image generation is on without an explicit
- * pick. Mirrors the CLI harness default in RunMessageRequestBuilder.
+ * Legacy composer value that used to turn image or video generation off.
+ * Media is now always available on Backboard-billed models, so it resolves to
+ * the default model instead.
  */
-const DEFAULT_IMAGE_MODEL_SELECTION = 'google/gemini-3.1-flash-image';
+export const BACKBOARD_GENERATIVE_MEDIA_OFF = 'off';
+/** Image model used unless the user picks another one: OpenAI's newest image model. */
+const DEFAULT_IMAGE_MODEL_SELECTION = 'openrouter/openai/gpt-5.4-image-2';
+/** Video model used unless the user picks another one: ByteDance Seedance 2.5. */
+const DEFAULT_VIDEO_MODEL_SELECTION = 'openrouter/bytedance/seedance-2.5';
 export const BACKBOARD_OPENROUTER_PROVIDER_CONFIG_KEY = 'openRouterProvider';
 export const BACKBOARD_MODE_PLAN = 'plan';
 export const BACKBOARD_MODE_MULTITASK = 'multitask';
@@ -94,7 +97,7 @@ export function backboardMultitaskSystemContext(mode: string): string | undefine
 
 const BACKBOARD_FULL_ACCESS_SYSTEM_CONTEXT = `## Full Access
 
-The user turned on Full Access for this chat. Every tool call runs without an approval prompt: shell commands (including ones outside the working directory), file reads and edits anywhere on this computer, network requests, browser, computer use, and MCP tools. Do not ask the user for permission to use a tool, and do not stop to ask whether you may run a command or edit a file — just do the work the request needs. When a tool fails, fix the cause or try another approach instead of handing the step back to the user. Ask the user only when you need information you cannot find yourself, or before an irreversible action the request did not clearly call for (deleting user data, force-pushing, publishing, sending messages, or spending money).`;
+The user turned on Full Access for this chat. Every tool call runs without an approval prompt: shell commands (including ones outside the working directory), file reads and edits anywhere on this computer, network requests, browser, computer use, and connector (MCP) tools. Do not ask the user for permission to use a tool, and do not stop to ask whether you may run a command or edit a file — just do the work the request needs. When a tool fails, fix the cause or try another approach instead of handing the step back to the user. Ask the user only when you need information you cannot find yourself, or before an irreversible action the request did not clearly call for (deleting user data, force-pushing, publishing, sending messages, or spending money).`;
 
 /**
  * Tells the model that approvals are off under Full Access. Without it the
@@ -715,7 +718,7 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 							localize('backboard.config.mode.free', "Full Access"),
 						],
 						enumDescriptions: [
-							localize('backboard.config.mode.default.description', "File edits and safe commands run without asking; risky commands and external capabilities (computer, browser, MCP writes) still ask."),
+							localize('backboard.config.mode.default.description', "File edits and safe commands run without asking; risky commands and external capabilities (computer, browser, connector writes) still ask."),
 							localize('backboard.config.mode.multitask.description', "Coordinate independent worker agents concurrently with exclusive file ownership, then integrate and verify their changes."),
 							localize('backboard.config.mode.plan.description', "Read-only planning: file edits and shell commands are hidden from the agent, and remaining tool calls ask for approval."),
 							localize('backboard.config.mode.manual.description', "Ask before each tool call."),
@@ -766,7 +769,7 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 					[BACKBOARD_COMPUTER_USE_CONFIG_KEY]: {
 						type: 'boolean',
 						title: localize('backboard.config.computerUse.title', "Computer Use"),
-						description: localize('backboard.config.computerUse.description', "Lets Backboard operate desktop apps. Jev presses labelled controls in the background without screenshots; screenshots, mouse, and keyboard are the fallback."),
+						description: localize('backboard.config.computerUse.description', "Lets Backboard operate desktop apps. A fast vision model watches each app window, acts on it in the background, and shows an on-screen agent cursor; screenshots, mouse, and keyboard are the fallback."),
 						default: false,
 						sessionMutable: true,
 					},
@@ -788,16 +791,10 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 						type: 'string',
 						title: localize('backboard.config.imageModel.title', "Image"),
 						description: localize('backboard.config.imageModel.description', "Generate images with the selected Backboard image model."),
-						default: BACKBOARD_GENERATIVE_MEDIA_OFF,
-						enum: [BACKBOARD_GENERATIVE_MEDIA_OFF, DEFAULT_IMAGE_MODEL_SELECTION],
-						enumLabels: [
-							localize('backboard.config.generativeMedia.off', "Off"),
-							'Gemini 3.1 Flash Image',
-						],
-						enumDescriptions: [
-							localize('backboard.config.imageModel.off.description', "Do not generate images."),
-							localize('backboard.config.imageModel.default.description', "Google's Gemini 3.1 Flash Image."),
-						],
+						default: DEFAULT_IMAGE_MODEL_SELECTION,
+						enum: [DEFAULT_IMAGE_MODEL_SELECTION],
+						enumLabels: ['GPT-5.4 Image 2'],
+						enumDescriptions: [localize('backboard.config.imageModel.default.description', "OpenAI's GPT-5.4 Image 2.")],
 						// The live catalog is too large to enumerate; the enum above is the seed.
 						enumDynamic: true,
 						sessionMutable: true,
@@ -806,12 +803,11 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 						type: 'string',
 						title: localize('backboard.config.videoModel.title', "Video"),
 						description: localize('backboard.config.videoModel.description', "Generate videos with the selected Backboard video model."),
-						default: BACKBOARD_GENERATIVE_MEDIA_OFF,
-						// Video generation has no universal default model, so live
-						// completions supply every selectable model.
-						enum: [BACKBOARD_GENERATIVE_MEDIA_OFF],
-						enumLabels: [localize('backboard.config.generativeMedia.off', "Off")],
-						enumDescriptions: [localize('backboard.config.videoModel.off.description', "Do not generate videos.")],
+						default: DEFAULT_VIDEO_MODEL_SELECTION,
+						// Live completions supply every other selectable model.
+						enum: [DEFAULT_VIDEO_MODEL_SELECTION],
+						enumLabels: ['Seedance 2.5'],
+						enumDescriptions: [localize('backboard.config.videoModel.default.description', "ByteDance's Seedance 2.5.")],
 						enumDynamic: true,
 						sessionMutable: true,
 					},
@@ -851,8 +847,12 @@ export function createBackboardTurnSettings(
 	// an explicit billing source instead.
 	const parsedModel = billingRouteForProvider(selected.provider, selected.model);
 	const rawMode = stringConfigValue(values, SessionConfigKey.Mode, BACKBOARD_ACCESS_FULL);
-	const imageModel = parseGenerativeModelSelection(stringConfigValue(values, BACKBOARD_IMAGE_MODEL_CONFIG_KEY, BACKBOARD_GENERATIVE_MEDIA_OFF));
-	const videoModel = parseGenerativeModelSelection(stringConfigValue(values, BACKBOARD_VIDEO_MODEL_CONFIG_KEY, BACKBOARD_GENERATIVE_MEDIA_OFF));
+	// Backboard's hosted media only runs on Backboard-billed turns. The composer
+	// hides the pickers for key and subscription models, but a selection made
+	// on a Backboard model stays in the session config and must not follow it.
+	const backboardMedia = parsedModel.source === 'backboard';
+	const imageModel = backboardMedia ? parseGenerativeModelSelection(stringConfigValue(values, BACKBOARD_IMAGE_MODEL_CONFIG_KEY, DEFAULT_IMAGE_MODEL_SELECTION)) : undefined;
+	const videoModel = backboardMedia ? parseGenerativeModelSelection(stringConfigValue(values, BACKBOARD_VIDEO_MODEL_CONFIG_KEY, DEFAULT_VIDEO_MODEL_SELECTION)) : undefined;
 	const configuredOpenRouterProvider = stringValueFromRecord(model?.config?.[BACKBOARD_OPENROUTER_PROVIDER_CONFIG_KEY]);
 	const configuredModelIntensity = stringValueFromRecord(model?.config?.[BACKBOARD_INTENSITY_CONFIG_KEY]);
 	const intensity = configuredModelIntensity
@@ -891,25 +891,17 @@ export function createBackboardTurnSettings(
 	};
 }
 
-function normalizeImageModelSelection(value: unknown, legacyEnabled: unknown): string {
+// Image and video generation are always available on Backboard-billed models:
+// a missing selection, the retired "off" value, or a retired boolean toggle all
+// resolve to the default model, so nothing has to be switched on first.
+function normalizeImageModelSelection(value: unknown, _legacyEnabled: unknown): string {
 	const selected = stringValueFromRecord(value);
-	if (selected && selected.toLowerCase() !== BACKBOARD_GENERATIVE_MEDIA_OFF) {
-		return selected;
-	}
-	// Sessions saved while Images was a boolean toggle keep the capability on
-	// with the built-in default model instead of silently turning it off.
-	return booleanOf(legacyEnabled, false) ? DEFAULT_IMAGE_MODEL_SELECTION : BACKBOARD_GENERATIVE_MEDIA_OFF;
+	return selected && selected.toLowerCase() !== BACKBOARD_GENERATIVE_MEDIA_OFF ? selected : DEFAULT_IMAGE_MODEL_SELECTION;
 }
 
-function normalizeVideoModelSelection(value: unknown, legacyEnabled: unknown): string {
+function normalizeVideoModelSelection(value: unknown, _legacyEnabled: unknown): string {
 	const selected = stringValueFromRecord(value);
-	if (selected && selected.toLowerCase() !== BACKBOARD_GENERATIVE_MEDIA_OFF) {
-		return selected;
-	}
-	// Video generation has no universal default model, so a retired boolean
-	// toggle cannot be migrated into an enabled model selection.
-	void legacyEnabled;
-	return BACKBOARD_GENERATIVE_MEDIA_OFF;
+	return selected && selected.toLowerCase() !== BACKBOARD_GENERATIVE_MEDIA_OFF ? selected : DEFAULT_VIDEO_MODEL_SELECTION;
 }
 
 /** Splits a `provider/name` selection; provider names never contain a slash. */

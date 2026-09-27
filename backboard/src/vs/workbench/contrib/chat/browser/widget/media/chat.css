@@ -1278,6 +1278,9 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	/* Sit above the composer: when the input editor stays on top it takes the
+	 * drop itself and pastes the file's path instead of attaching the file. */
+	z-index: 100;
 }
 
 .chat-dnd-overlay .attach-context-overlay-text {
@@ -1852,8 +1855,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 .interactive-input-part:has(.chat-editing-session > .chat-editing-session-container) .chat-input-container,
 .interactive-input-part:has(.chat-todo-list-widget-container > .chat-todo-list-widget.has-todos) .chat-input-container,
-.interactive-input-part:has(.chat-artifacts-widget-container > .chat-artifacts-widget:not([style*="display: none"])) .chat-input-container,
-.interactive-input-part:has(.chat-input-widgets-container > .chat-status-widget:not([style*="display: none"])) .chat-input-container,
+.interactive-input-part:has(.chat-artifacts-widget-container > .chat-artifacts-widget:not(.is-hidden)) .chat-input-container,
 .interactive-input-part:has(.chat-getting-started-tip-container > .chat-tip-widget) .chat-input-container {
 	/* Remove top border radius when editing session, todo list, or status widget is present */
 	border-top-left-radius: 0;
@@ -1885,7 +1887,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .interactive-session .interactive-input-part > .chat-todo-list-widget-container:has(.chat-todo-list-widget.has-todos) + .chat-artifacts-widget-container .chat-artifacts-widget,
 .interactive-session .interactive-input-part > .chat-todo-list-widget-container:has(.chat-todo-list-widget.has-todos) + .chat-editing-session .chat-editing-session-container,
 .interactive-session .interactive-input-part > .chat-todo-list-widget-container:has(.chat-todo-list-widget.has-todos) + .chat-artifacts-widget-container + .chat-editing-session .chat-editing-session-container,
-.interactive-session .interactive-input-part > .chat-artifacts-widget-container:has(.chat-artifacts-widget:not([style*="display: none"])) + .chat-editing-session .chat-editing-session-container {
+.interactive-session .interactive-input-part > .chat-artifacts-widget-container:has(.chat-artifacts-widget:not(.is-hidden)) + .chat-editing-session .chat-editing-session-container {
 	border-top-left-radius: 0;
 	border-top-right-radius: 0;
 }
@@ -4864,10 +4866,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	min-width: 0;
 }
 
-.monaco-workbench .backboard-composer .interactive-session .chat-edit-input-container .backboard-composer-location {
-	display: none;
-}
-
 .chat-row-disabled-overlay,
 .interactive-item-container .chat-edit-input-container .chat-editing-session,
 .chat-input-overlay {
@@ -5600,7 +5598,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 
 /* Reserve prompt room only after usage data makes the dial visible. Its host
  * remains in the shell while hidden, but no invisible geometry affects text. */
-.monaco-workbench .backboard-composer .interactive-session .interactive-input-part .chat-input-container:has(> .chat-context-usage-container > .chat-context-usage-widget:not([style*="display: none"])) > .chat-editor-container {
+.monaco-workbench .backboard-composer .interactive-session .interactive-input-part .chat-input-container:has(> .chat-context-usage-container > .chat-context-usage-widget:not(.is-hidden)) > .chat-editor-container {
 	padding-right: 40px;
 }
 
@@ -11128,12 +11126,6 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-}
-
-@container chat-input-part (max-width: 420px) {
-	.monaco-workbench :is(.backboard-composer, .new-chat-composer-stack) .combined-model-provider-trigger-thinking {
-		display: none;
-	}
 }
 
 @container chat-input-part (max-width: 380px) {

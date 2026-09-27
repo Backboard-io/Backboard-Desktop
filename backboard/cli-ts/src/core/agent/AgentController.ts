@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "../../config/Config.ts";
 import type { ModelRef } from "../../config/defaults.ts";
@@ -5,13 +6,21 @@ import { qSessionDir } from "../../config/paths.ts";
 import { fingerprint, PROMPT_VERSION } from "../../config/runtimeIdentity.ts";
 import { createRuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
 import { toPromptProfileId } from "../../prompts/profiles/ids.ts";
-import { buildGenerativeMediaPrompt } from "../../prompts/system/generativeMedia.ts";
+import {
+	buildGenerativeMediaPrompt,
+	CANVAS_PROJECT_FILE,
+	type CanvasProjectSettings,
+	parseCanvasProjectSettings,
+} from "../../prompts/system/generativeMedia.ts";
 import { getSystemPrompt } from "../../prompts/system/index.tsx";
 import { TODO_NOT_CALLED_REMINDER } from "../../prompts/todoReminders.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
 import { BackboardError } from "../../providers/backboard/errors.ts";
 import { normalizeSelectableModels } from "../../providers/backboard/modelCatalog.ts";
-import type { ModelRoute } from "../../providers/backboard/types.ts";
+import type {
+	ModelRoute,
+	ModelSource,
+} from "../../providers/backboard/types.ts";
 import { errorMessage } from "../../utils/errors.ts";
 import { shortId } from "../../utils/id.ts";
 import type { EventBus } from "../bus/EventBus.ts";
@@ -58,9 +67,12 @@ import type { AgentTaskManager } from "./AgentTaskManager.ts";
 import { AgentTraceContext } from "./AgentTraceStore.ts";
 import { AssistantSessionBinding } from "./AssistantSessionBinding.ts";
 import { capacityFallbackCandidates, modelKey } from "./RuntimeRecovery.ts";
+import { TURN_MAX_ATTEMPTS } from "./TurnRetry.ts";
 import { Turn } from "./Turn.ts";
 
 export interface AgentControllerDeps {
+	/** Base backoff between silent retries of a failed turn; tests pass 0. */
+	turnRetryBackoffMs?: number;
 	config: Config;
 	bus: EventBus;
 	session: Session;
@@ -395,6 +407,8 @@ export class AgentController {
 			// MCP servers - none may stall the others. The only ordering that
 			// matters is that syncDynamicTools completes before
 			// visibleSchemas() below, which the single Promise.all preserves.
+			// (In serve mode syncDynamicTools also waits, capped, for
+			// in-flight MCP connects so their tools make this snapshot.)
 			// An existing thread already knows its assistant, so skip the
 			// resolution round-trip entirely.
 			const [, skillPromptContext, assistantId, thinkingResolver] =
@@ -423,6 +437,16 @@ export class AgentController {
 				promptProfile,
 			);
 			const enabledTools = tools.map((tool) => tool.function.name);
+			// Backboard's hosted media tools only run on Backboard-billed turns. A
+			// key or subscription turn never reaches them, so it must not promise
+			// them, send their fields, or hold its answer back for them.
+			const mediaRoute = {
+				source: billingSource(
+					route.source ?? this.deps.client.sourceFor?.(route),
+				),
+				provider: route.provider,
+			};
+			const backboardMedia = mediaRoute.source === "backboard";
 			const todoWriteAvailable = enabledTools.some(
 				(name) => canonicalToolName(name) === "todo_write",
 			);
@@ -437,8 +461,14 @@ export class AgentController {
 					computerUseEnabled: config.isComputerUseEnabled,
 					browserUseEnabled: config.isBrowserUseEnabled,
 					mediaGenerationPrompt: buildGenerativeMediaPrompt({
-						imageModel: config.selectedImageModel,
-						videoModel: config.selectedVideoModel,
+						...(backboardMedia
+							? {
+									imageModel: config.selectedImageModel,
+									videoModel: config.selectedVideoModel,
+								}
+							: {}),
+						route: mediaRoute,
+						...readCanvasProject(config.cwd),
 					}),
 					clientToolsEnabled: this.deps.registry
 						.list()
@@ -498,10 +528,10 @@ export class AgentController {
 				memoryProfile: config.memoryProfile,
 				workspaceId:
 					config.memory === "off" ? undefined : config.getWorkspaceId(),
-				imageGeneration: config.isImageGenerationEnabled,
-				imageModel: config.selectedImageModel,
-				videoGeneration: config.isVideoGenerationEnabled,
-				videoModel: config.selectedVideoModel,
+				imageGeneration: backboardMedia && config.isImageGenerationEnabled,
+				imageModel: backboardMedia ? config.selectedImageModel : undefined,
+				videoGeneration: backboardMedia && config.isVideoGenerationEnabled,
+				videoModel: backboardMedia ? config.selectedVideoModel : undefined,
 				openRouterProvider: config.selectedOpenRouterProvider,
 				generatedMediaDir: join(config.cwd, "generated-images"),
 				generatedVideoDir: join(config.cwd, "generated-videos"),
@@ -520,6 +550,8 @@ export class AgentController {
 				displayContent: options.displayContent ?? text,
 				durableSession: this.deps.getDurableSession?.(),
 				resolveCapacityFallback,
+				maxTurnAttempts: TURN_MAX_ATTEMPTS,
+				turnRetryBackoffMs: this.deps.turnRetryBackoffMs,
 				onModelSucceeded: async (model) => {
 					try {
 						if (
@@ -895,4 +927,31 @@ function formatSubmitError(err: unknown): string {
 		return `${err.message}: ${JSON.stringify(err.body)}`;
 	}
 	return errorMessage(err);
+}
+
+/** A client's route name as a billing source; unknown names are Backboard's. */
+function billingSource(source: string | undefined): ModelSource {
+	return source === "byok" || source === "subscription" ? source : "backboard";
+}
+
+/** Whether `cwd` is a Canvas project, and the media defaults its board file holds. */
+function readCanvasProject(cwd: string): {
+	canvasProject: boolean;
+	canvasSettings?: CanvasProjectSettings;
+} {
+	const file = join(cwd, CANVAS_PROJECT_FILE);
+	if (!existsSync(file)) {
+		return { canvasProject: false };
+	}
+	try {
+		const canvasSettings = parseCanvasProjectSettings(
+			readFileSync(file, "utf8"),
+		);
+		return {
+			canvasProject: true,
+			...(canvasSettings ? { canvasSettings } : {}),
+		};
+	} catch {
+		return { canvasProject: true };
+	}
 }

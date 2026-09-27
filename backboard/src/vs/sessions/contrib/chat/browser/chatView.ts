@@ -28,6 +28,7 @@ import { NewChatInSessionWidget } from './newChatInSessionWidget.js';
 import { AGENT_SESSIONS_SCOPED_INPUT_HISTORY_SETTING } from './sessionsChatHistory.js';
 import { activeSessionViewBackground, activeSessionViewForeground, agentsPanelBackground, inactiveSessionViewBackground, inactiveSessionViewForeground } from '../../../common/theme.js';
 import { isEqual } from '../../../../base/common/resources.js';
+import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
 
 /**
  * A session view that hosts a {@link NewChatWidget} — the "new session" UI
@@ -164,6 +165,9 @@ export class ChatView extends AbstractChatView {
 				// picker, no duplicate mode/folder controls, and the same two-line
 				// resting editor height.
 				isSessionsWindow: true,
+				// Show a changed file's diff in the right panel's Review when it is one
+				// of the chat's changes; the strip falls back to a modal diff otherwise.
+				openChangedFile: async resource => !!await commandService.executeCommand<boolean>(RightWorkbenchCommandId.OpenReview, { resource }),
 				sessionTypePickerDelegate: createBackboardSessionTypePickerDelegate(
 					() => this._widget?.viewModel?.model.sessionResource,
 					commandService,

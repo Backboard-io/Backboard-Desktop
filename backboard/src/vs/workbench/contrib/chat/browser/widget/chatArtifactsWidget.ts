@@ -119,7 +119,7 @@ export class ChatArtifactsWidget extends Disposable {
 	) {
 		super();
 		this.domNode = dom.$('.chat-artifacts-widget');
-		this.domNode.style.display = 'none';
+		this.setVisible(false);
 
 		this._register(autorun(reader => {
 			const artifacts = this._currentArtifacts.read(reader);
@@ -127,7 +127,7 @@ export class ChatArtifactsWidget extends Disposable {
 			dom.clearNode(this.domNode);
 
 			if (!artifacts) {
-				this.domNode.style.display = 'none';
+				this.setVisible(false);
 				return;
 			}
 
@@ -193,10 +193,10 @@ export class ChatArtifactsWidget extends Disposable {
 			store.add(autorun(reader => {
 				const data = this._treeData.read(reader);
 				if (!data) {
-					this.domNode.style.display = 'none';
+					this.setVisible(false);
 					return;
 				}
-				this.domNode.style.display = '';
+				this.setVisible(true);
 
 				titleElement.textContent = data.totalCount === 1
 					? localize('chat.artifacts.one', "1 Artifact")
@@ -207,6 +207,16 @@ export class ChatArtifactsWidget extends Disposable {
 				tree.setChildren(null, data.treeElements);
 			}));
 		}));
+	}
+
+	/**
+	 * `is-hidden` mirrors the inline display so CSS can react with a class:
+	 * a `:has([style…])` selector makes every inline style write in the window
+	 * re-check `:has()`, which restyled the whole page per streamed token.
+	 */
+	private setVisible(visible: boolean): void {
+		this.domNode.style.display = visible ? '' : 'none';
+		this.domNode.classList.toggle('is-hidden', !visible);
 	}
 
 	setSessionResource(sessionResource: URI | undefined): void {

@@ -270,9 +270,11 @@
 	flex-shrink: 0;
 }
 
-/* Items with detail — show detail as subtext below the title */
+/* Items with detail — show detail as subtext below the title. Keyed on a
+ * class: a `[style]` test inside :has() makes every inline style write in the
+ * window re-check :has(), which restyled whole panels per streamed token. */
 .action-widget .monaco-list .monaco-list-row.action {
-	&:has(.detail:not([style*="display: none"])) {
+	&:has(.detail:not(.is-hidden)) {
 		flex-wrap: wrap;
 		align-content: center;
 		padding-right: 6px;

@@ -44,7 +44,7 @@ class AuthenticationDataRenderer extends Disposable implements IExtensionFeature
 		const headers = [
 			localize('authenticationlabel', "Label"),
 			localize('authenticationid', "ID"),
-			localize('authenticationMcpAuthorizationServers', "MCP Authorization Servers")
+			localize('authenticationMcpAuthorizationServers', "Connector Authorization Servers")
 		];
 
 		const rows: IRowData[][] = authentication

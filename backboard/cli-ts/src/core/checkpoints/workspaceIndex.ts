@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import type { Dirent } from "node:fs";
 import { lstat, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, parse, resolve } from "node:path";
 import { errorMessage } from "../../utils/errors.ts";
 import { ensureDir, renameOver } from "../../utils/fs.ts";
 import { shortId } from "../../utils/id.ts";
@@ -124,6 +125,7 @@ export class WorkspaceIndex {
 		private readonly cachePath?: string,
 	) {
 		this.root = resolve(root);
+		this.disabledReason = unindexableRootReason(this.root);
 	}
 
 	/** Non-null once the index shut itself off; refresh() is then a no-op. */
@@ -374,6 +376,18 @@ export class WorkspaceIndex {
 			...(storeBlobs || alreadyStored ? { stored: true } : {}),
 		};
 	}
+}
+
+/**
+ * A home directory or filesystem root is never a workspace worth indexing:
+ * walking it reads every folder macOS guards behind a privacy prompt
+ * (Desktop, Documents, Downloads, iCloud Drive, other apps' containers) and
+ * hashes far more than any shell command could change.
+ */
+function unindexableRootReason(root: string): string | null {
+	if (root === parse(root).root) return "workspace is the filesystem root";
+	if (root === resolve(homedir())) return "workspace is the home directory";
+	return null;
 }
 
 /**

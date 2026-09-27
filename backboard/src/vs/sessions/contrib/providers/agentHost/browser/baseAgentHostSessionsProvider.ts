@@ -39,7 +39,7 @@ import { IChatSendRequestOptions, IChatService } from '../../../../../workbench/
 import { IChatSessionFileChange, IChatSessionFileChange2, IChatSessionsService } from '../../../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, ChatPermissionLevel } from '../../../../../workbench/contrib/chat/common/constants.js';
 import { ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../../../../workbench/contrib/chat/common/languageModels.js';
-import { buildMutableConfigSchema, IAgentHostMcpServer, IAgentHostSessionsProvider, resolvedConfigsEqual } from '../../../../common/agentHostSessionsProvider.js';
+import { buildMutableConfigSchema, IAgentHostMcpServer, IAgentHostSessionsProvider, mcpServerStatusDetail, resolvedConfigsEqual } from '../../../../common/agentHostSessionsProvider.js';
 import { agentHostSessionWorkspaceKey } from '../../../../common/agentHostSessionWorkspace.js';
 import { isSessionConfigComplete } from '../../../../common/sessionConfig.js';
 import { IChat, IGitHubInfo, ISession, ISessionAgentRef, ISessionChangeset, ISessionChangesSummary, ISessionType, ISessionWorkspace, ISessionWorkspaceBrowseAction, sessionFileChangesEqual, SessionStatus, toSessionId } from '../../../../services/sessions/common/session.js';
@@ -2013,16 +2013,25 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	}
 
 	getMcpServers(sessionId: string): readonly IAgentHostMcpServer[] {
+		// A running session's state is only cached while a subscription is
+		// alive; keep one so the composer's server list stays populated (the
+		// list refreshes through `onDidChangeCustomizations` once it lands).
+		if (!this._getNewSession(sessionId)) {
+			this._keepSessionStateAlive(sessionId);
+		}
 		const sessionState = this._lastSessionStates.get(sessionId);
 		if (!sessionState) {
 			return [];
 		}
 		const rawId = this._rawIdFromChatId(sessionId);
-		const cached = rawId ? this._sessionCache.get(rawId) : undefined;
-		if (!cached || !rawId) {
+		// A draft is not in the session cache yet, but it is already eagerly
+		// created with this window's MCP servers; list them before the first
+		// message so the composer shows what the chat can use.
+		const agentProvider = rawId ? (this._sessionCache.get(rawId) ?? this._getNewSession(sessionId))?.agentProvider : undefined;
+		if (!agentProvider || !rawId) {
 			return [];
 		}
-		const sessionUri = AgentSession.uri(cached.agentProvider, rawId);
+		const sessionUri = AgentSession.uri(agentProvider, rawId);
 		const logOutputChannelId = this.getLogOutputChannelId();
 		return (sessionState.customizations ?? [])
 			.flatMap(c => c.type === CustomizationType.McpServer
@@ -2035,6 +2044,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 				name: c.name,
 				enabled: c.enabled,
 				status: c.state.kind,
+				...mcpServerStatusDetail(c.state),
 				logOutputChannelId,
 				setEnabled: (enabled: boolean) => {
 					const connection = this.connection;

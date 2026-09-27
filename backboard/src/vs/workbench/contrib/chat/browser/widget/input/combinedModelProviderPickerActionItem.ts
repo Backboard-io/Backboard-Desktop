@@ -237,7 +237,27 @@ export function formatModelLabel(name: string): string {
 
 /** Match the model author, including models routed through aggregators. */
 export function modelBrandIconKey(model: ILanguageModelChatMetadataAndIdentifier): string {
-	const identity = `${model.metadata.id} ${model.metadata.name}`.toLowerCase();
+	return modelBrandIconKeyForName(`${model.metadata.id} ${model.metadata.name}`)
+		?? providerIconKeyForCombinedModelSection(`provider:${upstreamProviderId(model)}`)
+		?? providerIconKeyForCombinedModelSection(`provider:${model.metadata.targetChatSessionType ?? ''}`)
+		?? 'backboard';
+}
+
+/**
+ * The brand logo key (`.combined-model-logo.provider-<key>`) for a model's id
+ * or display name, including image and video generators; `undefined` when
+ * no author is recognised.
+ */
+export function modelBrandIconKeyForName(name: string): string | undefined {
+	const identity = name.toLowerCase();
+	// Media generators, named by product rather than author.
+	if (/seedance|seedream|bytedance/.test(identity)) { return 'bytedance'; }
+	if (/(?:^|[ /])veo[ -]?\d|imagen|nano[ -]?banana/.test(identity)) { return 'google'; }
+	if (/kling|kuaishou/.test(identity)) { return 'kwaipilot'; }
+	if (/hailuo/.test(identity)) { return 'minimax'; }
+	if (/(?:^|[ /])wan[ -]?\d|tongyi|alibaba/.test(identity)) { return 'qwen'; }
+	if (/sora|dall-?e|gpt[ -]?image/.test(identity)) { return 'open-ai'; }
+	if (/grok[ -]imagine|aurora/.test(identity)) { return 'x-ai'; }
 	if (/dotsstudio|dots3/.test(identity)) { return 'dotsstudio'; }
 	if (/longcat|meituan/.test(identity)) { return 'longcat'; }
 	if (/nex-agi|nex[ -]n2/.test(identity)) { return 'nexagi'; }
@@ -289,9 +309,7 @@ export function modelBrandIconKey(model: ILanguageModelChatMetadataAndIdentifier
 	if (/mistral|mixtral|codestral|devstral/.test(identity)) { return 'mistral'; }
 	if (/grok|x-ai/.test(identity)) { return 'x-ai'; }
 	if (/cohere|command-r|command-a/.test(identity)) { return 'cohere'; }
-	return providerIconKeyForCombinedModelSection(`provider:${upstreamProviderId(model)}`)
-		?? providerIconKeyForCombinedModelSection(`provider:${model.metadata.targetChatSessionType ?? ''}`)
-		?? 'backboard';
+	return undefined;
 }
 
 /** Builds the compact source label shown below a model name. */
@@ -568,7 +586,6 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		trigger.tabIndex = 0;
 		trigger.setAttribute('role', 'button');
 		trigger.setAttribute('aria-haspopup', 'true');
-		dom.append(trigger, dom.$('span.combined-model-provider-brain', { 'aria-hidden': 'true' }));
 		this._triggerBrand = dom.append(trigger, dom.$('span.combined-model-logo'));
 		this._triggerBrand.setAttribute('aria-hidden', 'true');
 		this._triggerLabel = dom.append(trigger, dom.$('span.combined-model-provider-trigger-label'));
@@ -831,6 +848,9 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			}));
 		}
 
+		// Pinned summary of the model in use, so it is obvious whichever section
+		// or search is showing (the in-use row may not be in the current list).
+		const current = dom.append(pane, dom.$('.combined-model-provider-current'));
 		const list = dom.append(pane, dom.$('.combined-model-provider-list'));
 		const footer = dom.append(pane, dom.$('.combined-model-provider-footer'));
 		const thinking = dom.append(pane, dom.$('.combined-model-provider-thinking'));
@@ -1000,10 +1020,49 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			}
 		};
 
+		const renderCurrent = () => {
+			dom.clearNode(current);
+			const model = this._modelDelegate.currentModel.get();
+			current.classList.toggle('hidden', !model);
+			for (const [id, button] of railButtons) {
+				button.classList.toggle('has-current', !!model && id === combinedModelSectionId(model));
+			}
+			if (!model) {
+				return;
+			}
+			const label = localize('combinedPicker.currentModelLabel', "In use");
+			dom.append(current, dom.$('.combined-model-provider-current-label')).textContent = label;
+			const card = dom.append(current, dom.$('button.combined-model-provider-current-card')) as HTMLButtonElement;
+			card.type = 'button';
+			dom.append(card, dom.$(`.combined-model-logo.provider-${modelBrandIconKey(model)}`)).setAttribute('aria-hidden', 'true');
+			const main = dom.append(card, dom.$('.combined-model-provider-row-main'));
+			const name = formatModelLabel(model.metadata.name);
+			dom.append(main, dom.$('.combined-model-provider-row-name')).textContent = name;
+			const detail = formatModelProviderDetail(model);
+			if (detail) {
+				dom.append(main, dom.$('.combined-model-provider-row-sub')).textContent = detail;
+			}
+			card.appendChild(renderIcon(Codicon.check));
+			card.title = localize('combinedPicker.showCurrentModel', "{0} is in use. Show it in its provider's list.", name);
+			card.setAttribute('aria-label', card.title);
+			listStore.add(dom.addDisposableListener(card, dom.EventType.CLICK, e => {
+				dom.EventHelper.stop(e, true);
+				const sectionId = combinedModelSectionId(model);
+				if (sections.some(section => section.id === sectionId)) {
+					this._railSection = sectionId;
+				}
+				this._searchValue = '';
+				search.value = '';
+				updateRailSelection();
+				renderList();
+			}));
+		};
+
 		const renderList = () => {
 			listStore.clear();
 			dom.clearNode(list);
 			dom.clearNode(footer);
+			renderCurrent();
 			const renderSetupAction = () => {
 				const byokFooter = this._railSection ? byokFooterForSection(this._railSection) : undefined;
 				if (byokFooter && this._sessionTypeDelegate.runSetup) {
@@ -1106,15 +1165,16 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 				row.setAttribute('role', 'button');
 				if (model.identifier === currentModelId) {
 					row.classList.add('selected');
+					row.setAttribute('aria-current', 'true');
 				}
 
 				const logo = dom.append(row, dom.$(`.combined-model-logo.provider-${modelBrandIconKey(model)}`));
 				logo.setAttribute('aria-hidden', 'true');
 				const main = dom.append(row, dom.$('.combined-model-provider-row-main'));
 				const nameRow = dom.append(main, dom.$('.combined-model-provider-row-name'));
-				nameRow.textContent = formatModelLabel(model.metadata.name);
+				dom.append(nameRow, dom.$('span.combined-model-provider-row-name-text')).textContent = formatModelLabel(model.metadata.name);
 				if (model.identifier === currentModelId) {
-					nameRow.appendChild(renderIcon(Codicon.check));
+					dom.append(nameRow, dom.$('span.combined-model-provider-row-in-use')).textContent = localize('combinedPicker.inUse', "In use");
 				}
 				const routingOption = upstreamProviderId(model) === 'openrouter' ? this._routingOption(model) : undefined;
 				const routingIndex = routingOption?.values.findIndex(value => Object.is(value, routingOption.currentValue)) ?? -1;
@@ -1155,6 +1215,9 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			});
 
 			renderSetupAction();
+			if (!query) {
+				list.querySelector<HTMLElement>('.combined-model-provider-row.selected')?.scrollIntoView({ block: 'nearest' });
+			}
 		};
 
 		let previousGroup: CombinedModelSectionGroup | undefined;

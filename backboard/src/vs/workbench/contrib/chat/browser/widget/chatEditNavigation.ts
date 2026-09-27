@@ -11,7 +11,7 @@ import { localize } from '../../../../../nls.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IOpenEditorOptions } from '../../../../../platform/editor/browser/editor.js';
-import { ACTIVE_GROUP, IEditorService, SIDE_GROUP } from '../../../../services/editor/common/editorService.js';
+import { ACTIVE_GROUP, IEditorService, PreferredGroup, SIDE_GROUP } from '../../../../services/editor/common/editorService.js';
 
 /** Opens the workspace file by default; historical comparisons require an explicit target. */
 export async function openChatEdit(
@@ -24,9 +24,10 @@ export async function openChatEdit(
 	isDeletion: boolean,
 	{ editorOptions: options, openToSide }: IOpenEditorOptions,
 	target: 'file' | 'change' = 'file',
+	preferredGroup?: PreferredGroup,
 ): Promise<void> {
 	const deleted = isDeletion && (target === 'change' || !await fileService.exists(resource));
-	const group = openToSide ? SIDE_GROUP : ACTIVE_GROUP;
+	const group = preferredGroup ?? (openToSide ? SIDE_GROUP : ACTIVE_GROUP);
 	const pane = target === 'change' && original && modified
 		? await editorService.openEditor({
 			original: { resource: original },

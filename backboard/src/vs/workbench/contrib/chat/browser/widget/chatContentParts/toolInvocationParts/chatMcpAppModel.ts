@@ -133,7 +133,7 @@ export class ChatMcpAppModel extends Disposable {
 		// Create the webview element
 		this._webview = this._register(this._webviewService.createWebviewElement({
 			origin: this._webviewOrigin,
-			title: localize('mcpAppTitle', 'MCP App'),
+			title: localize('mcpAppTitle', 'Connector App'),
 			options: {
 				purpose: WebviewContentPurpose.ChatOutputItem,
 				enableFindWidget: false,

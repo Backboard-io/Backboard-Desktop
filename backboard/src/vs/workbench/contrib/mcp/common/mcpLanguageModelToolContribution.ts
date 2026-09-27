@@ -220,7 +220,7 @@ class McpToolImplementation implements IToolImpl {
 
 		const mcpToolWarning = localize(
 			'mcp.tool.warning',
-			"Note that MCP servers or malicious conversation content may attempt to misuse '{0}' through tools.",
+			"Note that connectors or malicious conversation content may attempt to misuse '{0}' through tools.",
 			this._productService.nameShort
 		);
 
@@ -247,7 +247,7 @@ class McpToolImplementation implements IToolImpl {
 			confirmationMessages: confirm,
 			invocationMessage: new MarkdownString(localize('msg.run', "Running {0}", title)),
 			pastTenseMessage: new MarkdownString(localize('msg.ran', "Ran {0} ", title)),
-			originMessage: localize('msg.subtitle', "{0} (MCP Server)", server.definition.label),
+			originMessage: localize('msg.subtitle', "{0} (connector)", server.definition.label),
 			toolSpecificData: {
 				kind: 'input',
 				rawInput: context.parameters,

@@ -309,13 +309,13 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 		}, options);
 	}
 
-	async openAgentsWindow(windowId: number | undefined, options?: { folderUri?: UriComponents; sessionResource?: UriComponents }): Promise<void> {
+	async openAgentsWindow(windowId: number | undefined, options?: { folderUri?: UriComponents; sessionResource?: UriComponents; canvasImageUrl?: string }): Promise<void> {
 		await this.windowsMainService.openAgentsWindow({
 			context: OpenContext.API,
 			contextWindowId: windowId,
 			cli: this.environmentMainService.args,
 			forceReuseWindow: true,
-		}, options?.folderUri ? URI.revive(options.folderUri) : undefined, options?.sessionResource ? URI.revive(options.sessionResource) : undefined);
+		}, options?.folderUri ? URI.revive(options.folderUri) : undefined, options?.sessionResource ? URI.revive(options.sessionResource) : undefined, options?.canvasImageUrl);
 	}
 
 	async openOptimusWindow(windowId: number | undefined): Promise<void> {

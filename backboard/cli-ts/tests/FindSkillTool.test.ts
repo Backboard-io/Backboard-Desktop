@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { EventBus } from "../src/core/bus/EventBus.ts";
+import type { PermissionMode } from "../src/core/permissions/index.ts";
+import { parseRuleSet } from "../src/core/permissions/PermissionRules.ts";
 import type { Skill } from "../src/core/skills/Skill.ts";
 import type { SkillsShListItem } from "../src/core/skills/skillsSh.ts";
 import type { ToolContext } from "../src/core/tools/ToolContext.ts";
@@ -73,6 +75,21 @@ function ctx(answer = "Download", depth = 0): ToolContext {
 		signal: new AbortController().signal,
 		askUser: async () => answer,
 		agentDepth: depth,
+	};
+}
+
+/** A context whose prompt fails the test if it is ever shown. */
+function silentCtx(mode: PermissionMode, depth = 0): ToolContext {
+	return {
+		...ctx("Cancel", depth),
+		askUser: async (question) => {
+			throw new Error(`unexpected prompt: ${question}`);
+		},
+		permissions: {
+			mode,
+			rules: parseRuleSet({}),
+			interactive: depth === 0,
+		},
 	};
 }
 
@@ -187,5 +204,51 @@ describe("FindSkillTool", () => {
 		);
 		expect(fake.installed).toEqual([]);
 		expect(res.forLLM).toContain("sub-agent cannot prompt");
+	});
+
+	it("downloads without a confirm under Full Access (bypass)", async () => {
+		const fake = new FakeSkills(
+			[skill("commit", "git commit message")],
+			[remote("acme/pdf-tools", "pdf-tools", "2K")],
+		);
+		const tool = new FindSkillTool(fake);
+		const res = await tool.execute(
+			{ task: "convert a pdf-tools document" },
+			silentCtx("bypass"),
+		);
+		expect(fake.installed).toEqual(["acme/pdf-tools"]);
+		expect(res.data.source).toBe("remote");
+	});
+
+	it("downloads from a sub-agent under Full Access (no prompt is needed)", async () => {
+		const fake = new FakeSkills(
+			[skill("commit", "git commit message")],
+			[remote("acme/pdf-tools", "pdf-tools", "2K")],
+		);
+		const tool = new FindSkillTool(fake);
+		await tool.execute({ task: "pdf-tools please" }, silentCtx("bypass", 1));
+		expect(fake.installed).toEqual(["acme/pdf-tools"]);
+	});
+
+	it("still asks under Approve for me (auto)", async () => {
+		const fake = new FakeSkills(
+			[skill("commit", "git commit message")],
+			[remote("acme/pdf-tools", "pdf-tools", "2K")],
+		);
+		const tool = new FindSkillTool(fake);
+		const questions: string[] = [];
+		const res = await tool.execute(
+			{ task: "pdf-tools please" },
+			{
+				...silentCtx("auto"),
+				askUser: async (question) => {
+					questions.push(question);
+					return "Cancel";
+				},
+			},
+		);
+		expect(questions).toHaveLength(1);
+		expect(fake.installed).toEqual([]);
+		expect(res.forLLM).toContain("declined");
 	});
 });

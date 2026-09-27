@@ -786,7 +786,7 @@ export class McpServer extends Disposable implements IMcpServer {
 	private showInteractiveError(cnx: IMcpServerConnection, error: McpConnectionState.Error, debug?: boolean) {
 		if (cnx.definition.sandboxEnabled) {
 			if (!this.showSandboxConfigSuggestionFromPotentialBlocks(cnx, this._potentialSandboxBlocks)) {
-				this._notificationService.warn(localize('mcpServerError', 'The MCP server {0} could not be started: {1}', cnx.definition.label, error.message));
+				this._notificationService.warn(localize('mcpServerError', 'The Connector {0} could not be started: {1}', cnx.definition.label, error.message));
 			}
 			return;
 		}
@@ -829,7 +829,7 @@ export class McpServer extends Disposable implements IMcpServer {
 
 			this._notificationService.prompt(Severity.Error, localize('mcpServerNotFound', 'The command "{0}" needed to run {1} was not found.', cnx.launchDefinition.command, cnx.definition.label), options);
 		} else {
-			this._notificationService.prompt(Severity.Error, localize('mcpServerError', 'The MCP server {0} could not be started: {1}', cnx.definition.label, error.message), [{
+			this._notificationService.prompt(Severity.Error, localize('mcpServerError', 'The Connector {0} could not be started: {1}', cnx.definition.label, error.message), [{
 				label: localize('mcp.command.showOutput', "Show Output"),
 				run: () => this.showOutput(),
 			}]);
@@ -1337,7 +1337,7 @@ function warnInvalidTools(instaService: IInstantiationService, serverName: strin
 		const editorService = accessor.get(IEditorService);
 		notificationService.notify({
 			severity: Severity.Warning,
-			message: localize('mcpBadSchema', 'MCP server `{0}` has tools with invalid parameters which will be omitted.', serverName),
+			message: localize('mcpBadSchema', 'Connector `{0}` has tools with invalid parameters which will be omitted.', serverName),
 			actions: {
 				primary: [{
 					class: undefined,

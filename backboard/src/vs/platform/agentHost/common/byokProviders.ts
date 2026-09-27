@@ -91,15 +91,23 @@ export const BYOK_KEY_ARG = 'key';
  */
 export const BYOK_GENERATION_ARG = 'generation';
 
-/**
- * Session settings that only Backboard's own services provide. A request
- * billed to the user's key never reaches them, so their chips are hidden for
- * key-billed selections.
- */
-const BACKBOARD_ONLY_SESSION_CONFIG_KEYS: ReadonlySet<string> = new Set(['memory', 'imageGeneration']);
+/** Session settings for Backboard's hosted image and video generation. */
+const BACKBOARD_MEDIA_SESSION_CONFIG_KEYS: ReadonlySet<string> = new Set(['imageGeneration', 'imageModel', 'videoModel']);
 
-export function isBackboardOnlyConfigProperty(property: string): boolean {
-	return BACKBOARD_ONLY_SESSION_CONFIG_KEYS.has(property);
+/**
+ * Whether a session setting applies to a model selection, given as a model id
+ * or a `vendor:provider/model` language-model identifier. Backboard's hosted
+ * media only runs on Backboard-billed requests: a key or subscription request
+ * never reaches it, and routing media through Backboard anyway would bill a
+ * second account. Memory is a Backboard service too, but subscriptions keep
+ * their own local memory, so only key-billed selections lose it.
+ */
+export function isConfigPropertyAvailableForModel(property: string, modelId: string | undefined): boolean {
+	const source = parseBillingRoute(modelId?.replace(/^[^/]*:/, ''))?.source;
+	if (BACKBOARD_MEDIA_SESSION_CONFIG_KEYS.has(property)) {
+		return source !== 'byok' && source !== 'subscription';
+	}
+	return property !== 'memory' || source !== 'byok';
 }
 
 export function isByokProviderId(value: unknown): value is ByokProviderId {

@@ -24,7 +24,7 @@ export class ManageTrustedMcpServersForAccountAction extends Action2 {
 	constructor() {
 		super({
 			id: '_manageTrustedMCPServersForAccount',
-			title: localize2('manageTrustedMcpServersForAccount', "Manage Trusted MCP Servers For Account"),
+			title: localize2('manageTrustedMcpServersForAccount', "Manage Trusted Connectors For Account"),
 			category: localize2('accounts', "Accounts"),
 			f1: true,
 			precondition: ContextKeyExpr.and(ChatContextKeys.Setup.hidden.negate(), ChatContextKeys.Setup.disabledInWorkspace.negate())
@@ -77,7 +77,7 @@ class ManageTrustedMcpServersForAccountActionImpl {
 
 		const accounts = await this._getAllAvailableAccounts();
 		const pick = await this._quickInputService.pick(accounts, {
-			placeHolder: localize('pickAccount', "Pick an account to manage trusted MCP servers for"),
+			placeHolder: localize('pickAccount', "Pick an account to manage trusted connectors for"),
 			matchOnDescription: true,
 		});
 
@@ -126,7 +126,7 @@ class ManageTrustedMcpServersForAccountActionImpl {
 			});
 
 		if (!filteredMcpServers.length) {
-			this._dialogService.info(localize('noTrustedMcpServers', "This account has not been used by any MCP servers."));
+			this._dialogService.info(localize('noTrustedMcpServers', "This account has not been used by any connectors."));
 			return [];
 		}
 
@@ -149,7 +149,7 @@ class ManageTrustedMcpServersForAccountActionImpl {
 		let tooltip: string | undefined;
 		let disabled: boolean | undefined;
 		if (mcpServer.trusted) {
-			tooltip = localize('trustedMcpServerTooltip', "This MCP server is trusted by Microsoft and\nalways has access to this account");
+			tooltip = localize('trustedMcpServerTooltip', "This connector is trusted by Microsoft and\nalways has access to this account");
 			disabled = true;
 		}
 		return {
@@ -159,7 +159,7 @@ class ManageTrustedMcpServersForAccountActionImpl {
 			tooltip,
 			disabled,
 			buttons: [{
-				tooltip: localize('accountPreferences', "Manage account preferences for this MCP server"),
+				tooltip: localize('accountPreferences', "Manage account preferences for this connector"),
 				iconClass: ThemeIcon.asClassName(Codicon.settingsGear),
 			}],
 			picked: mcpServer.allowed === undefined || mcpServer.allowed
@@ -175,8 +175,8 @@ class ManageTrustedMcpServersForAccountActionImpl {
 		quickPick.customButton = true;
 		quickPick.customLabel = localize('manageTrustedMcpServers.cancel', 'Cancel');
 		quickPick.customButtonSecondary = true;
-		quickPick.title = localize('manageTrustedMcpServers', "Manage Trusted MCP Servers");
-		quickPick.placeholder = localize('manageMcpServers', "Choose which MCP servers can access this account");
+		quickPick.title = localize('manageTrustedMcpServers', "Manage Trusted Connectors");
+		quickPick.placeholder = localize('manageMcpServers', "Choose which connectors can access this account");
 
 		// Set up event handlers
 		disposableStore.add(quickPick.onDidAccept(() => {

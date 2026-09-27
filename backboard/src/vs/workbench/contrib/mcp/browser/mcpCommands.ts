@@ -144,7 +144,7 @@ export class ListMcpServerCommand extends Action2 {
 
 		const store = new DisposableStore();
 		const pick = quickInput.createQuickPick<ItemType>({ useSeparators: true });
-		pick.placeholder = localize('mcp.selectServer', 'Select an MCP Server');
+		pick.placeholder = localize('mcp.selectServer', 'Select a connector');
 
 		mcpService.activateCollections();
 
@@ -205,7 +205,7 @@ export class ListMcpServerCommand extends Action2 {
 
 		const store = new DisposableStore();
 		const pick = quickInput.createQuickPick<ItemType>({ useSeparators: true });
-		pick.placeholder = localize('mcp.selectAgentHostServer', 'Select an MCP Server for this session');
+		pick.placeholder = localize('mcp.selectAgentHostServer', 'Select a connector for this session');
 
 		store.add(pick);
 
@@ -216,15 +216,16 @@ export class ListMcpServerCommand extends Action2 {
 			pick.items = [
 				...(servers.length === 0 ? [{
 					id: '$empty',
-					label: localize('mcp.agentHost.noServers', 'No MCP servers'),
-					description: localize('mcp.agentHost.noServers.description', 'This session does not expose any MCP servers'),
+					label: localize('mcp.agentHost.noServers', 'No Connectors'),
+					description: localize('mcp.agentHost.noServers.description', 'This session does not expose any connectors'),
 					alwaysShow: true,
 				} satisfies ItemType] : servers.map((server): ItemType => ({
 					id: server.id,
 					label: server.name,
 					description: server.enabled
-						? mcpServerStatusToLabel(server.status)
+						? agentHostServerStatusLabel(server)
 						: localize('mcp.disabled', 'Disabled'),
+					detail: server.enabled && server.status === McpServerStatus.Error ? server.statusMessage : undefined,
 				}))),
 				{ type: 'separator' } satisfies IQuickPickSeparator,
 				{
@@ -276,6 +277,15 @@ interface IListMcpServerServices {
 	readonly quickInput: IQuickInputService;
 }
 
+/** An MCP server of an agent-host session, as listed by {@link IAgentHostCustomizationService}. */
+type AgentHostMcpServer = ReturnType<IAgentHostCustomizationService['getMcpServers']>[number];
+
+function agentHostServerStatusLabel(server: AgentHostMcpServer): string {
+	return server.needsSignIn
+		? localize('mcp.agentHost.status.signIn', 'Sign-in required')
+		: mcpServerStatusToLabel(server.status);
+}
+
 function mcpServerStatusToLabel(status: McpServerStatus): string {
 	switch (status) {
 		case McpServerStatus.Starting:
@@ -315,20 +325,34 @@ export class McpAgentHostServerOptionsCommand extends Action2 {
 
 		const logOutputChannelId = server.logOutputChannelId;
 
-		type ItemType = { action: 'toggle' | 'showOutput' } & IQuickPickItem;
+		type ItemType = { action: 'toggle' | 'signIn' | 'reconnect' | 'showOutput' } & IQuickPickItem;
 
 		const items: (ItemType | IQuickPickSeparator)[] = [
 			{ type: 'separator', label: localize('mcp.actions.status', 'Status') },
-			{
-				label: server.enabled
-					? localize('mcp.agentHost.disable', 'Disable Server')
-					: localize('mcp.agentHost.enable', 'Enable Server'),
-				description: server.enabled
-					? mcpServerStatusToLabel(server.status)
-					: localize('mcp.disabled', 'Disabled'),
-				action: 'toggle',
-			},
 		];
+		if (server.enabled && server.needsSignIn) {
+			items.push({
+				label: localize('mcp.agentHost.signIn', 'Sign In'),
+				description: localize('mcp.agentHost.signIn.description', 'Opens your browser'),
+				detail: server.statusMessage,
+				action: 'signIn',
+			});
+		} else if (server.enabled && server.status === McpServerStatus.Error) {
+			items.push({
+				label: localize('mcp.agentHost.reconnect', 'Reconnect'),
+				detail: server.statusMessage,
+				action: 'reconnect',
+			});
+		}
+		items.push({
+			label: server.enabled
+				? localize('mcp.agentHost.disable', 'Disable Server')
+				: localize('mcp.agentHost.enable', 'Enable Server'),
+			description: server.enabled
+				? agentHostServerStatusLabel(server)
+				: localize('mcp.disabled', 'Disabled'),
+			action: 'toggle',
+		});
 
 		if (logOutputChannelId) {
 			items.push({
@@ -354,6 +378,10 @@ export class McpAgentHostServerOptionsCommand extends Action2 {
 
 		if (picked.action === 'toggle') {
 			server.setEnabled(!server.enabled);
+		} else {
+			// The host treats enabling an enabled server as a reconnect, and a
+			// reconnect of a server waiting for sign-in as the sign-in.
+			server.setEnabled(true);
 		}
 	}
 }
@@ -480,7 +508,7 @@ export class McpServerOptionsCommand extends Action2 {
 			{ type: 'separator', label: localize('mcp.actions.sampling', 'Sampling') },
 			{
 				label: localize('mcp.configAccess', 'Configure Model Access'),
-				description: localize('mcp.showOutput.description', 'Set the models the server can use via MCP sampling'),
+				description: localize('mcp.showOutput.description', 'Set the models the server can use via connector sampling'),
 				action: 'configSampling'
 			},
 		);
@@ -551,7 +579,7 @@ export class McpServerOptionsCommand extends Action2 {
 				editorService.openEditor({
 					resource: undefined,
 					contents: samplingService.getLogText(server),
-					label: localize('mcp.samplingLog.title', 'MCP Sampling: {0}', server.definition.label),
+					label: localize('mcp.samplingLog.title', 'Connector Sampling: {0}', server.definition.label),
 				});
 				break;
 			default:
@@ -770,13 +798,13 @@ export class MCPServerActionRendering extends Disposable implements IWorkbenchCo
 					let markdown: MarkdownString;
 					if (state === DisplayedState.NewTools) {
 						markdown = new MarkdownString(single
-							? localize('mcp.newTools.md.single', "MCP server {0} has been updated and may have new tools available.", names)
-							: localize('mcp.newTools.md.multi', "MCP servers have been updated and may have new tools available:\n\n{0}", names)
+							? localize('mcp.newTools.md.single', "Connector {0} has been updated and may have new tools available.", names)
+							: localize('mcp.newTools.md.multi', "Connectors have been updated and may have new tools available:\n\n{0}", names)
 						);
 					} else if (state === DisplayedState.Error) {
 						markdown = new MarkdownString(single
-							? localize('mcp.err.md.single', "MCP server {0} was unable to start successfully.", names)
-							: localize('mcp.err.md.multi', "Multiple MCP servers were unable to start successfully:\n\n{0}", names)
+							? localize('mcp.err.md.single', "Connector {0} was unable to start successfully.", names)
+							: localize('mcp.err.md.multi', "Multiple connectors were unable to start successfully:\n\n{0}", names)
 						);
 					} else {
 						return this.getLabelForState() || undefined;
@@ -812,7 +840,7 @@ export class MCPServerActionRendering extends Disposable implements IWorkbenchCo
 
 							// Add checkbox for mcpAutoStartConfig setting
 							const checkboxContainer = $('div.mcp-hover-setting');
-							const settingLabelStr = localize('mcp.autoStart', "Automatically start MCP servers when sending a chat message");
+							const settingLabelStr = localize('mcp.autoStart', "Automatically start connectors when sending a chat message");
 
 							const checkbox = store.add(new Checkbox(
 								settingLabelStr,
@@ -932,7 +960,7 @@ export class InstallFromManifestAction extends Action2 {
 			id: McpCommandIds.InstallFromManifest,
 			title: localize2('mcp.installFromManifest', "Install Server from Manifest..."),
 			metadata: {
-				description: localize2('mcp.installFromManifest.description', "Install an MCP server from a JSON manifest file"),
+				description: localize2('mcp.installFromManifest.description', "Install a connector from a JSON manifest file"),
 			},
 			category,
 			f1: true,
@@ -1178,8 +1206,8 @@ export class McpBrowseCommand extends Action2 {
 	constructor() {
 		super({
 			id: McpCommandIds.Browse,
-			title: localize2('mcp.command.browse', "MCP Servers"),
-			tooltip: localize2('mcp.command.browse.tooltip', "Browse MCP Servers"),
+			title: localize2('mcp.command.browse', "Connectors"),
+			tooltip: localize2('mcp.command.browse.tooltip', "Browse Connectors"),
 			category,
 			icon: Codicon.search,
 			precondition: ContextKeyExpr.and(ChatContextKeys.Setup.hidden.negate(), ChatContextKeys.Setup.disabledInWorkspace.negate()),
@@ -1204,7 +1232,7 @@ export class McpBrowseCommand extends Action2 {
 MenuRegistry.appendMenuItem(MenuId.CommandPalette, {
 	command: {
 		id: McpCommandIds.Browse,
-		title: localize2('mcp.command.browse.mcp', "Browse MCP Servers"),
+		title: localize2('mcp.command.browse.mcp', "Browse Connectors"),
 		category,
 		precondition: ContextKeyExpr.and(ChatContextKeys.Setup.hidden.negate(), ChatContextKeys.Setup.disabledInWorkspace.negate()),
 	},
@@ -1234,7 +1262,7 @@ export class ShowInstalledMcpServersCommand extends Action2 {
 MenuRegistry.appendMenuItem(CHAT_CONFIG_MENU_ID, {
 	command: {
 		id: McpCommandIds.ShowInstalled,
-		title: localize2('mcp.servers', "MCP Servers")
+		title: localize2('mcp.servers', "Connectors")
 	},
 	when: ContextKeyExpr.and(ChatContextKeys.enabled, ContextKeyExpr.equals('view', ChatViewId)),
 	order: 10,
@@ -1298,7 +1326,7 @@ export class OpenWorkspaceFolderMcpResourceCommand extends Action2 {
 	constructor() {
 		super({
 			id: McpCommandIds.OpenWorkspaceFolderMcp,
-			title: localize2('mcp.command.openWorkspaceFolderMcp', "Open Workspace Folder MCP Configuration"),
+			title: localize2('mcp.command.openWorkspaceFolderMcp', "Open Workspace Folder Connector Configuration"),
 			category,
 			f1: true,
 			precondition: ContextKeyExpr.and(
@@ -1324,7 +1352,7 @@ export class OpenWorkspaceMcpResourceCommand extends Action2 {
 	constructor() {
 		super({
 			id: McpCommandIds.OpenWorkspaceMcp,
-			title: localize2('mcp.command.openWorkspaceMcp', "Open Workspace MCP Configuration"),
+			title: localize2('mcp.command.openWorkspaceMcp', "Open Workspace Connector Configuration"),
 			category,
 			f1: true,
 			precondition: ContextKeyExpr.and(
@@ -1396,7 +1424,7 @@ export class McpConfigureSamplingModels extends Action2 {
 
 		// do the quickpick selection
 		const picked = await quickInputService.pick(allItems, {
-			placeHolder: localize('mcp.configureSamplingModels.ph', 'Pick the models {0} can access via MCP sampling', server.definition.label),
+			placeHolder: localize('mcp.configureSamplingModels.ph', 'Pick the models {0} can access via connector sampling', server.definition.label),
 			canPickMany: true,
 		});
 

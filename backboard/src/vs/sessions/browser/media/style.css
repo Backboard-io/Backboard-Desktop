@@ -199,7 +199,7 @@
  * space and the Part classes subtract only their borders from internal layout.
  */
 
-.agent-sessions-workbench:not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2.vertical > .monaco-scrollable-element > .split-view-container > .split-view-view:has(> .monaco-grid-branch-node .part.sidebar) > .monaco-grid-branch-node > .monaco-split-view2.horizontal > .monaco-scrollable-element > .split-view-container > .split-view-view:has(> .monaco-grid-branch-node .part.sessionspart)::after {
+.agent-sessions-workbench:not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2.vertical > .monaco-scrollable-element > .split-view-container > .split-view-view.part-host-branch-contains-sidebar > .monaco-grid-branch-node > .monaco-split-view2.horizontal > .monaco-scrollable-element > .split-view-container > .split-view-view.part-host-branch-contains-sessionspart::after {
 	content: '';
 	position: absolute;
 	inset: 0;
@@ -213,7 +213,7 @@
 
 /* The sessions panel also owns the line on the opposite side of the sidebar.
  * Rounded sidebars must not leave a straight divider behind their corners. */
-.monaco-workbench.agent-sessions-workbench:not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2.vertical > .monaco-scrollable-element > .split-view-container > .split-view-view:has(> .monaco-grid-branch-node .part.sidebar) > .monaco-grid-branch-node > .monaco-split-view2.horizontal > .monaco-scrollable-element > .split-view-container > .split-view-view:has(> .monaco-grid-branch-node .part.sessionspart)::after {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2.vertical > .monaco-scrollable-element > .split-view-container > .split-view-view.part-host-branch-contains-sidebar > .monaco-grid-branch-node > .monaco-split-view2.horizontal > .monaco-scrollable-element > .split-view-container > .split-view-view.part-host-branch-contains-sessionspart::after {
 	border-left: 0 !important;
 	border-right: 0 !important;
 }
@@ -225,7 +225,7 @@
  * window width or only the content column, so this matches regardless of
  * that arrangement (the wrapper above only covers one of the two).
  */
-.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar)::after {
+.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar::after {
 	content: '';
 	position: absolute;
 	inset: 0;
@@ -238,7 +238,7 @@
 
 /* Keep the sidebar flush with its grid allocation. The wrapper owns the
  * Simple-mode shadow so the sidebar's clipped content cannot cut it off. */
-.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar) {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar {
 	z-index: 1;
 	overflow: visible !important;
 	background: var(--sessions-main-region-background) !important;
@@ -247,12 +247,12 @@
 	outline: 0 !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(.hc-black):not(.hc-light) .monaco-grid-view .split-view-view:has(> .part.sidebar) {
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(.hc-black):not(.hc-light) .monaco-grid-view .split-view-view.part-host-sidebar {
 	z-index: 2;
 	box-shadow: 6px 0 18px -6px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)) !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar)::after {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar::after {
 	display: none;
 }
 
@@ -267,12 +267,12 @@
 }
 
 /* Keep the resize hit target without painting another edge over the sidebar. */
-.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-split-view2.horizontal:has(.part.sidebar) > .sash-container > .monaco-sash.vertical {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-split-view2.horizontal.part-host-contains-sidebar > .sash-container > .monaco-sash.vertical {
 	background: transparent !important;
 }
 
-.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-split-view2.horizontal:has(.part.sidebar) > .sash-container > .monaco-sash.vertical::before,
-.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-split-view2.horizontal:has(.part.sidebar) > .sash-container > .monaco-sash.vertical::after {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-split-view2.horizontal.part-host-contains-sidebar > .sash-container > .monaco-sash.vertical::before,
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-split-view2.horizontal.part-host-contains-sidebar > .sash-container > .monaco-sash.vertical::after {
 	display: none !important;
 }
 
@@ -292,7 +292,7 @@
 /* The sessions panel's grid wrapper insets its own one-pixel divider on this
  * same shared edge (the box-shadow form used elsewhere between parts). Drop
  * it as well: the invisible resize sash is the only thing left on the edge. */
-.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sessionspart) {
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sessionspart {
 	box-shadow: none !important;
 }
 
@@ -420,27 +420,27 @@
 	box-shadow: none;
 }
 
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-sessionspart,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-editor,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-auxiliarybar,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-branch-contains-auxiliarybar {
 	background: var(--sessions-main-region-background) !important;
 	border-radius: 0 !important;
 	box-sizing: border-box;
 }
 
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart) {
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-sessionspart {
 	border: none !important;
 }
 
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-editor,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-auxiliarybar,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-branch-contains-auxiliarybar {
 	border: none !important;
 }
 
-.agent-sessions-workbench.noauxiliarybar .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
-.agent-sessions-workbench.noauxiliarybar .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.editor:not(.modal-editor-part)) {
+.agent-sessions-workbench.noauxiliarybar .monaco-grid-view .split-view-view.part-host-editor,
+.agent-sessions-workbench.noauxiliarybar .monaco-grid-view .split-view-view.part-host-branch-contains-editor {
 	border-right: none !important;
 }
 
@@ -628,14 +628,14 @@
  * content box while nested split-views are still laid out at the full size —
  * each nesting level then drifts 1px further right, pushing the auxiliary
  * bar past the window edge. Box-shadow paints without affecting layout. */
-.agent-sessions-workbench:not(.phone-layout):not(.nosidebar) .monaco-grid-view .split-view-view:has(> .part.sessionspart) {
+.agent-sessions-workbench:not(.phone-layout):not(.nosidebar) .monaco-grid-view .split-view-view.part-host-sessionspart {
 	border-left: none !important;
 	box-shadow: inset 1px 0 0 var(--sessions-panel-divider-color);
 }
 
-.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sessionspart),
-.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar),
-.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar) {
+.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sessionspart,
+.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar,
+.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-branch-contains-sidebar {
 	transition:
 		opacity 140ms ease-out;
 }
@@ -643,7 +643,7 @@
 /* The Simple/Advanced root grid has a branch for the chat + terminal column.
  * Animate those immediate root children too so that column and the editor move
  * with a side panel instead of snapping to their final width ahead of it. */
-.agent-sessions-workbench.parts-animating:not(:has(.monaco-sash.active)):not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2 > .monaco-scrollable-element > .split-view-container > .split-view-view {
+.agent-sessions-workbench.parts-animating:not(.sessions-sash-dragging):not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2 > .monaco-scrollable-element > .split-view-container > .split-view-view {
 	transition:
 		width 280ms cubic-bezier(0.22, 1, 0.36, 1),
 		height 280ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -826,10 +826,10 @@
 }
 
 
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.sessionspart),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-sessionspart,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-editor,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-auxiliarybar,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-branch-contains-auxiliarybar {
 	border: none !important;
 	background: var(--sessions-main-region-background) !important;
 }
@@ -852,9 +852,9 @@
 
 /* See the sessionspart divider above: box-shadow, not border, so the grid
  * layout is not distorted. */
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.editor:not(.modal-editor-part)),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .part.auxiliarybar),
-.agent-sessions-workbench .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar) {
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-editor,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-auxiliarybar,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-branch-contains-auxiliarybar {
 	border-left: none !important;
 	box-shadow: inset 1px 0 0 var(--sessions-panel-divider-color);
 }
@@ -864,7 +864,7 @@
  * by the panel's own opaque content, so — like the sidebar separator above —
  * paint it as an overlay pseudo-element with a high z-index on the auxiliary
  * bar's left edge. Foreground-based color keeps it visible in every theme. */
-.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar)::after {
+.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-auxiliarybar::after {
 	content: '';
 	position: absolute;
 	inset: 0;
@@ -2111,7 +2111,7 @@
  * these are the only control that can reach a BYOS ("bring your own server")
  * agent provider there — hiding them made BYOS unselectable in that window.
  * Drop the exclusion once Advanced grows its own provider picker. */
-.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window:has(.optimus-grid-content.focused-session)) .interactive-session .chat-input-toolbars .chat-sessionPicker-container {
+.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .interactive-session .chat-input-toolbars .chat-sessionPicker-container {
 	display: none;
 }
 
@@ -2317,10 +2317,10 @@
 		transition: none;
 	}
 
-	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sessionspart),
-	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .part.sidebar),
-	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar),
-	.agent-sessions-workbench.parts-animating:not(:has(.monaco-sash.active)):not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2 > .monaco-scrollable-element > .split-view-container > .split-view-view {
+	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sessionspart,
+	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar,
+	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-branch-contains-sidebar,
+	.agent-sessions-workbench.parts-animating:not(.sessions-sash-dragging):not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2 > .monaco-scrollable-element > .split-view-container > .split-view-view {
 		transition: none !important;
 	}
 }
@@ -2525,7 +2525,7 @@
 /* ---- Phone Layout: Bottom Sheet Panel ---- */
 
 /* Panel slides up from bottom as a sheet on phone */
-.agent-sessions-workbench.phone-layout .split-view-view:has(> .part.panel) {
+.agent-sessions-workbench.phone-layout .split-view-view.part-host-panel {
 	position: absolute !important;
 	bottom: 0 !important;
 	left: 0 !important;
@@ -2564,7 +2564,7 @@
 /* ---- Phone Layout: Auxiliary Bar Overlay ---- */
 
 /* Auxiliary bar slides in from the right as a full-height overlay on phone */
-.agent-sessions-workbench.phone-layout .split-view-view:has(> .part.auxiliarybar) {
+.agent-sessions-workbench.phone-layout .split-view-view.part-host-auxiliarybar {
 	position: absolute !important;
 	top: 0 !important;
 	right: 0 !important;
@@ -2605,33 +2605,11 @@
 
 /* Direct manipulation must track the sash, without toggle animations or
  * repeatedly sampling the browser-sized glass surface during each frame. */
-.monaco-workbench.agent-sessions-workbench:has(.monaco-sash.active) .monaco-grid-view .split-view-view {
+.monaco-workbench.agent-sessions-workbench.sessions-sash-dragging .monaco-grid-view .split-view-view {
 	transition: none !important;
 }
-.monaco-workbench.agent-sessions-workbench:has(.monaco-sash.active) .part.auxiliarybar {
+.monaco-workbench.agent-sessions-workbench.sessions-sash-dragging .part.auxiliarybar {
 	backdrop-filter: none !important;
 	-webkit-backdrop-filter: none !important;
 }
 
-/* Switch to the same brain and approval-hand controls as the editor when a
- * wider right panel leaves less room for the composer. Titles stay accessible. */
-@container chat-input-part (max-width: 520px) {
-	.monaco-workbench.agent-sessions-workbench .interactive-session .chat-input-toolbar :is(
-		.combined-model-provider-trigger-label,
-		.combined-model-provider-trigger-thinking,
-		.combined-model-provider-trigger-icon,
-		.combined-model-provider-trigger-chevron,
-		.backboard-access-mode-trigger .agent-host-chat-input-picker-label
-	) {
-		display: none !important;
-	}
-	.monaco-workbench.agent-sessions-workbench .interactive-session .chat-input-toolbar .combined-model-provider-brain {
-		display: block;
-	}
-	.monaco-workbench.agent-sessions-workbench .interactive-session .chat-input-toolbar :is(.combined-model-provider-trigger, .backboard-access-mode-trigger) {
-		min-width: 28px;
-		width: 28px;
-		padding-inline: 6px;
-		justify-content: center;
-	}
-}

@@ -4,6 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as cp from 'child_process';
+import { existsSync } from 'fs';
+import { isMacintosh } from '../../../base/common/platform.js';
+import { findExecutable } from '../../../base/node/processes.js';
 import { URI } from '../../../base/common/uri.js';
 import { VSBuffer } from '../../../base/common/buffer.js';
 import { generateUuid } from '../../../base/common/uuid.js';
@@ -207,6 +210,7 @@ export function getBranchCompletions(branches: readonly string[], options?: { re
 export class AgentHostGitService implements IAgentHostGitService {
 	declare readonly _serviceBrand: undefined;
 	private readonly _defaultBranchCache = new Map<string, { readonly expiresAt: number; readonly value: Promise<string | undefined> }>();
+	private _gitBlocked: Promise<boolean> | undefined;
 
 	constructor(
 		@IFileService private readonly _fileService: IFileService,
@@ -553,7 +557,7 @@ export class AgentHostGitService implements IAgentHostGitService {
 	}
 
 	async deleteRefs(repositoryRoot: URI, refs: readonly string[]): Promise<void> {
-		if (refs.length === 0) {
+		if (refs.length === 0 || await this._isGitBlocked()) {
 			return;
 		}
 		// Use `update-ref --stdin -z` so all deletions go through a single git
@@ -654,7 +658,22 @@ export class AgentHostGitService implements IAgentHostGitService {
 		return stripUndefined(result);
 	}
 
-	private _runGit(workingDirectory: URI, args: readonly string[], options?: { readonly timeout?: number; readonly throwOnError?: boolean; readonly logFailure?: boolean; readonly env?: Record<string, string>; readonly maxBuffer?: number }): Promise<string | undefined> {
+	private _isGitBlocked(): Promise<boolean> {
+		return this._gitBlocked ??= gitWouldPromptForDeveloperTools().then(blocked => {
+			if (blocked) {
+				this._logService.info('[agentHostGitService] git is the macOS Command Line Tools stub and the tools are not installed; skipping git so macOS does not show its install dialog');
+			}
+			return blocked;
+		});
+	}
+
+	private async _runGit(workingDirectory: URI, args: readonly string[], options?: { readonly timeout?: number; readonly throwOnError?: boolean; readonly logFailure?: boolean; readonly env?: Record<string, string>; readonly maxBuffer?: number }): Promise<string | undefined> {
+		if (await this._isGitBlocked()) {
+			if (options?.throwOnError) {
+				throw new Error('git is unavailable: the Xcode Command Line Tools are not installed');
+			}
+			return undefined;
+		}
 		this._logService.trace(`[agentHostGitService] > git ${args.join(' ')}`);
 
 		return new Promise((resolve, reject) => {
@@ -692,6 +711,20 @@ export class AgentHostGitService implements IAgentHostGitService {
 			child.on('exit', () => clearTimeout(timer));
 		});
 	}
+}
+
+/**
+ * On a Mac without the Command Line Tools, `/usr/bin/git` is a stub that pops
+ * the system "install command line developer tools" dialog instead of
+ * running. Background git probes must never raise that dialog.
+ */
+async function gitWouldPromptForDeveloperTools(): Promise<boolean> {
+	if (!isMacintosh || await findExecutable('git') !== '/usr/bin/git') {
+		return false;
+	}
+	return new Promise(resolve => {
+		cp.execFile('/usr/bin/xcode-select', ['-p'], (error, stdout) => resolve(!!error || !existsSync(stdout.trim())));
+	});
 }
 
 /**

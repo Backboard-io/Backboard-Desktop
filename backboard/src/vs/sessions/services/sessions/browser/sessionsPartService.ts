@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
-import type { SessionView } from '../../../browser/parts/sessionView.js';
+import type { ISessionSidePanel, SessionView } from '../../../browser/parts/sessionView.js';
 import { IActiveSession } from '../common/sessionsManagement.js';
 import { IProgressIndicator } from '../../../../platform/progress/common/progress.js';
 import { Event } from '../../../../base/common/event.js';
@@ -20,6 +20,29 @@ export interface IToggleMaximizeSessionEvent {
 	readonly maximized: boolean;
 }
 
+/**
+ * Shape of a split sessions grid: a session id, or cells split side by side
+ * (`h`) or stacked (`v`).
+ */
+export type SessionsGridLayout = string | { readonly split: 'h' | 'v'; readonly cells: readonly SessionsGridLayout[] };
+
+/**
+ * Payload for {@link ISessionsPartService.onDidUpdateGrid}.
+ */
+export interface ISessionsGridChangeEvent {
+	/** Whether more than one session was visible before the update. */
+	readonly wasSplit: boolean;
+	/** Whether more than one session is visible after the update. */
+	readonly isSplit: boolean;
+	/** Ids of the sessions whose columns were not visible before (`undefined` for the placeholder). */
+	readonly addedSessionIds: readonly (string | undefined)[];
+	/**
+	 * When the grid collapses to a single column: that column's visible side
+	 * panel, if it had one. It is disposed right after the event.
+	 */
+	readonly collapsingSidePanel: ISessionSidePanel | undefined;
+}
+
 export interface ISessionsPartService {
 	readonly _serviceBrand: undefined;
 
@@ -33,10 +56,44 @@ export interface ISessionsPartService {
 
 	/**
 	 * Fires with the session id of a grid slot that received keyboard focus. The
-	 * view service listens to promote that session to the active session. Only
-	 * fires for non-placeholder slots.
+	 * view service listens to promote that session to the active session. Fires
+	 * with `undefined` for the new-session placeholder only while the grid is
+	 * split.
 	 */
-	readonly onDidFocusSession: Event<string>;
+	readonly onDidFocusSession: Event<string | undefined>;
+
+	/** Whether more than one session is visible side by side. */
+	readonly isSplit: boolean;
+
+	/** Fires after a reconciliation that leaves, enters or changes a split grid. */
+	readonly onDidUpdateGrid: Event<ISessionsGridChangeEvent>;
+
+	/**
+	 * Returns the side panel of the column showing the given session (or the
+	 * placeholder column for `undefined`), whether shown or hidden.
+	 */
+	getSidePanel(sessionId: string | undefined): ISessionSidePanel | undefined;
+
+	/**
+	 * Makes `panel` the side panel of the column showing the given session and
+	 * shows it. Side panels only exist while the grid is split; the part owns
+	 * the panel from now on and disposes it when its column goes away or the
+	 * grid collapses (the panel is disposed right away otherwise).
+	 */
+	setSidePanel(sessionId: string | undefined, panel: ISessionSidePanel): void;
+
+	/** Shows or hides a side panel previously given to {@link setSidePanel}. */
+	setSidePanelVisible(panel: ISessionSidePanel, visible: boolean): void;
+
+	isSidePanelVisible(panel: ISessionSidePanel): boolean;
+
+	/**
+	 * Arranges the next reconciliation's grid in `layout` (e.g. a 2×2 grid of
+	 * chats), provided it shows exactly the sessions the layout names. Cells of
+	 * sessions that stay visible are reused. Optional: grids without free-form
+	 * layouts ignore it.
+	 */
+	setPendingLayout?(layout: SessionsGridLayout): void;
 
 	/**
 	 * Toggles the maximized state of the session view hosting the given session

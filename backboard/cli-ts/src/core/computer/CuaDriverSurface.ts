@@ -6,6 +6,7 @@ import {
 	type JevKey,
 	type JevObservation,
 	type JevSurface,
+	type ScreenImage,
 	visibleText,
 } from "./JevUseLoop.ts";
 
@@ -51,6 +52,38 @@ export function resolveCuaDriverBinary(
  * the address bar is never seen. 2000 nodes of Safari measured ~600 ms.
  */
 const MAX_ELEMENTS = 2000;
+
+/**
+ * Long edge of the screenshot a brain sees. The driver scales clicks on it back
+ * to the window, and a smaller image keeps each step's upload and read short.
+ */
+export const SCREENSHOT_MAX_DIMENSION = 1280;
+
+/** Where each observation's screenshot is written; none means no screenshot. */
+export type ScreenshotPaths = () => Promise<string>;
+
+/**
+ * Shows the Cua agent cursor, so the user can watch where the agent acts. It
+ * is only a visual aid: a driver that cannot draw it still acts.
+ */
+export async function showAgentCursor(
+	driver: Pick<CuaDriverClient, "tryCall">,
+	signal: AbortSignal,
+): Promise<void> {
+	await driver
+		.tryCall("set_agent_cursor_enabled", { enabled: true }, signal)
+		.catch(() => undefined);
+}
+
+/** The screenshot a `get_window_state` call wrote, when it wrote one. */
+export function screenImage(
+	path: string,
+	state: { screenshot_width?: number; screenshot_height?: number },
+): ScreenImage | undefined {
+	const { screenshot_width: width, screenshot_height: height } = state;
+	if (!width || !height || !existsSync(path)) return undefined;
+	return { path, width, height };
+}
 
 /**
  * Containers and page text. Inside web content these all claim `AXPress`, so
@@ -141,8 +174,9 @@ interface DriverElement {
  * (https://github.com/trycua/cua, MIT) over a persistent stdio MCP connection.
  *
  * Elements are pressed by `element_token` through the accessibility API, so
- * the pointer never moves and the target app stays in the background. The
- * tree is requested without a screenshot: no pixels are captured at all.
+ * the real pointer never moves and the target app stays in the background;
+ * the driver's agent cursor shows the user where each action lands. Each look
+ * also captures the window, for a brain that reads screenshots.
  */
 export class CuaDriverSurface implements JevSurface {
 	readonly kind = "cua-driver";
@@ -154,12 +188,14 @@ export class CuaDriverSurface implements JevSurface {
 	private lastElements: JevElement[] = [];
 	/** Role and label of the field last typed into, so Return can find it again. */
 	private lastTyped: { role: string; label?: string } | null = null;
+	private cursorShown = false;
 	/** Only a browser can be sent to an address. */
 	readonly openUrl: JevSurface["openUrl"];
 
 	constructor(
 		binaryPath: string,
 		private readonly appName: string,
+		private readonly screenshots?: ScreenshotPaths,
 	) {
 		this.driver = new CuaDriverClient(binaryPath);
 		this.openUrl = BROWSERS.test(appName)
@@ -169,6 +205,10 @@ export class CuaDriverSurface implements JevSurface {
 
 	async observe(signal: AbortSignal): Promise<JevObservation> {
 		let window = await this.targetWindow(signal);
+		if (!this.cursorShown) {
+			this.cursorShown = true;
+			await showAgentCursor(this.driver, signal);
+		}
 		let state = await this.windowState(window, signal);
 		// An app owns helper windows with no accessibility tree (Safari in full
 		// screen puts a toolbar strip above the real window). Until one window has
@@ -223,12 +263,31 @@ export class CuaDriverSurface implements JevSurface {
 			}
 		}
 		this.lastElements = elements;
+		const screenshot = state.screenshotPath
+			? screenImage(state.screenshotPath, state)
+			: undefined;
 		return {
 			appName: window.app_name,
 			windowTitle: window.title,
 			elements,
 			text: visibleText(lines),
+			...(screenshot ? { screenshot } : {}),
 		};
+	}
+
+	async pressAt(
+		x: number,
+		y: number,
+		_screenshot: ScreenImage,
+		signal: AbortSignal,
+	): Promise<void> {
+		const window = await this.targetWindow(signal);
+		// Screenshot pixels: the driver undoes the downscale and Retina backing.
+		await this.call(
+			"click",
+			{ pid: window.pid, window_id: window.window_id, x, y },
+			signal,
+		);
 	}
 
 	async press(element: JevElement, signal: AbortSignal): Promise<void> {
@@ -393,20 +452,29 @@ export class CuaDriverSurface implements JevSurface {
 		return window;
 	}
 
-	private windowState(window: DriverWindow, signal: AbortSignal) {
-		return this.call<{
+	private async windowState(window: DriverWindow, signal: AbortSignal) {
+		const screenshotPath = await this.screenshots?.();
+		const state = await this.call<{
 			elements?: DriverElement[];
 			degraded_reason?: string | null;
+			screenshot_width?: number;
+			screenshot_height?: number;
 		}>(
 			"get_window_state",
 			{
 				pid: window.pid,
 				window_id: window.window_id,
-				include_screenshot: false,
 				max_elements: MAX_ELEMENTS,
+				...(screenshotPath
+					? {
+							screenshot_out_file: screenshotPath,
+							max_dimension: SCREENSHOT_MAX_DIMENSION,
+						}
+					: { include_screenshot: false }),
 			},
 			signal,
 		);
+		return { ...state, screenshotPath };
 	}
 
 	private call<T>(

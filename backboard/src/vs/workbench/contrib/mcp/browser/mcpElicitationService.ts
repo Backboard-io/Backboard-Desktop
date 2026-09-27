@@ -126,7 +126,7 @@ export class McpElicitationService implements IMcpElicitationService {
 			// Fallback: no chat session → notification + quickpick
 			const handle = this._notificationService.notify({
 				message: elicitation.message,
-				source: localize('mcp.elicit.source', 'MCP Server ({0})', server.definition.label),
+				source: localize('mcp.elicit.source', 'Connector ({0})', server.definition.label),
 				severity: Severity.Info,
 				actions: {
 					primary: [store.add(new Action('mcp.elicit.give', localize('mcp.elicit.give', 'Respond'), undefined, true, () => resolve(this._doElicitForm(elicitation, token))))],
@@ -173,7 +173,7 @@ export class McpElicitationService implements IMcpElicitationService {
 						new MarkdownString().appendText(elicitation.message)
 							.appendMarkdown('\n\n' + localize('mcp.elicit.url.instruction', 'Open this URL?'))
 							.appendCodeblock('', elicitation.url),
-						localize('msg.subtitle', "{0} (MCP Server)", server.definition.label),
+						localize('msg.subtitle', "{0} (connector)", server.definition.label),
 						localize('mcp.elicit.url.open', 'Open {0}', URI.parse(elicitation.url).authority),
 						localize('mcp.elicit.reject', 'Cancel'),
 						async () => {
@@ -193,7 +193,7 @@ export class McpElicitationService implements IMcpElicitationService {
 			} else {
 				const handle = this._notificationService.notify({
 					message: elicitation.message + ' ' + localize('mcp.elicit.url.instruction2', 'This will open {0}', elicitation.url),
-					source: localize('mcp.elicit.source', 'MCP Server ({0})', server.definition.label),
+					source: localize('mcp.elicit.source', 'Connector ({0})', server.definition.label),
 					severity: Severity.Info,
 					actions: {
 						primary: [store.add(new Action('mcp.elicit.url.open2', localize('mcp.elicit.url.open2', 'Open URL'), undefined, true, () => resolve(this._doElicitUrl(elicitation, token))))],

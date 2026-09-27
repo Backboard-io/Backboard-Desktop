@@ -8,7 +8,7 @@ Use this whenever the user asks for a clip and the composer's Video picker is on
 Arguments:
 - prompt: the scene to generate.
 - duration, resolution, generate_audio, and aspect_ratio only when the user asked for them.
-- images: local paths of reference images the user attached, when they provided them.
+- Attached media arrives as document IDs, not paths. On OpenRouter models (the Video picker's openrouter/… models) a clip to change or extend goes in the references (input_reference_document_ids), not input_video_document_id. Describe the new video in full, following the reference video's camera motion, framing, movement and scene, with the change built in. Never word it as an edit ("keep the same footage", "change only", "replace"): Seedance then switches to a video-editing mode OpenRouter cannot run, and the job fails. Pass a still to animate as the first frame.
 
 Do not pass a model. The Video picker already selected it for this turn, and Backboard pins it on the tool call. If that model cannot satisfy the request, say so instead of substituting another model or falling back to a shell.
 `.trim(),

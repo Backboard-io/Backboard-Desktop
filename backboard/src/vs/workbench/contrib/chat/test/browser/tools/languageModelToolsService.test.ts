@@ -9,6 +9,7 @@ import { VSBuffer } from '../../../../../../base/common/buffer.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { CancellationError, isCancellationError } from '../../../../../../base/common/errors.js';
 import { URI } from '../../../../../../base/common/uri.js';
+import { autorun } from '../../../../../../base/common/observable.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { IAccessibilityService } from '../../../../../../platform/accessibility/common/accessibility.js';
 import { TestAccessibilityService } from '../../../../../../platform/accessibility/test/common/testAccessibilityService.js';
@@ -3737,6 +3738,99 @@ suite('LanguageModelToolsService', () => {
 
 		const result = await service.invokeTool(dto, async () => 0, CancellationToken.None);
 		assert.strictEqual(result.content[0].value, 'correlated result');
+	});
+
+	test('a pre-approved streaming call skips both the confirmation and the result review', async () => {
+		// An MCP tool without readOnlyHint but with openWorldHint asks before it
+		// runs and again before its result reaches the model. Agent-host
+		// sessions under Full Access pre-approve the call instead.
+		const tool = registerToolForTest(service, store, 'mcpOpenWorldTool', {
+			prepareToolInvocation: async () => ({
+				confirmationMessages: {
+					title: 'Run Search Hub',
+					message: 'Searches the hub',
+					confirmResults: true,
+				},
+			}),
+			invoke: async () => ({ content: [{ kind: 'text', value: 'hub results' }] }),
+		});
+
+		const sessionId = 'pre-approved-session';
+		const requestId = 'pre-approved-request';
+		stubGetSession(chatService, sessionId, { requestId });
+
+		const invocation = service.beginToolCall({
+			toolCallId: 'pre-approved-call',
+			toolId: tool.id,
+			chatRequestId: requestId,
+			sessionResource: LocalChatSessionUri.forSession(sessionId),
+			force: true,
+		}) as ChatToolInvocation;
+		assert.ok(invocation);
+		const states: IChatToolInvocation.StateKind[] = [];
+		store.add(autorun(reader => { states.push(invocation.state.read(reader).type); }));
+		invocation.preApprove({ type: ToolConfirmKind.Setting, id: 'autoApprove' });
+
+		const result = await service.invokeTool({
+			callId: 'pre-approved-call',
+			toolId: tool.id,
+			tokenBudget: 100,
+			parameters: { query: 'bert' },
+			context: { sessionResource: LocalChatSessionUri.forSession(sessionId) },
+			chatStreamToolCallId: 'pre-approved-call',
+		}, async () => 0, CancellationToken.None);
+
+		assert.strictEqual(result.content[0].kind === 'text' && result.content[0].value, 'hub results');
+		assert.ok(!states.includes(IChatToolInvocation.StateKind.WaitingForConfirmation), 'no confirmation card');
+		assert.ok(!states.includes(IChatToolInvocation.StateKind.WaitingForPostApproval), 'no "Approve Tool Result" card');
+		assert.strictEqual(invocation.state.get().type, IChatToolInvocation.StateKind.Completed);
+		assert.deepStrictEqual(IChatToolInvocation.executionConfirmedOrDenied(invocation), { type: ToolConfirmKind.Setting, id: 'autoApprove' });
+	});
+
+	test('without a pre-approval the result review still parks the call', async () => {
+		const tool = registerToolForTest(service, store, 'mcpReadOnlyOpenWorldTool', {
+			prepareToolInvocation: async () => ({ confirmationMessages: { confirmResults: true } }),
+			invoke: async () => ({ content: [{ kind: 'text', value: 'hub results' }] }),
+		});
+
+		const sessionId = 'review-session';
+		const requestId = 'review-request';
+		stubGetSession(chatService, sessionId, { requestId });
+
+		const invocation = service.beginToolCall({
+			toolCallId: 'review-call',
+			toolId: tool.id,
+			chatRequestId: requestId,
+			sessionResource: LocalChatSessionUri.forSession(sessionId),
+			force: true,
+		}) as ChatToolInvocation;
+		assert.ok(invocation);
+
+		const parked = new Promise<void>(resolve => {
+			store.add(autorun(reader => {
+				const state = invocation.state.read(reader);
+				if (state.type === IChatToolInvocation.StateKind.WaitingForPostApproval) {
+					resolve();
+				}
+			}));
+		});
+		const resultPromise = service.invokeTool({
+			callId: 'review-call',
+			toolId: tool.id,
+			tokenBudget: 100,
+			parameters: {},
+			context: { sessionResource: LocalChatSessionUri.forSession(sessionId) },
+			chatStreamToolCallId: 'review-call',
+		}, async () => 0, CancellationToken.None);
+
+		await parked;
+		const state = invocation.state.get();
+		assert.strictEqual(state.type, IChatToolInvocation.StateKind.WaitingForPostApproval);
+		if (state.type === IChatToolInvocation.StateKind.WaitingForPostApproval) {
+			state.confirm({ type: ToolConfirmKind.UserAction });
+		}
+		const result = await resultPromise;
+		assert.strictEqual(result.content[0].kind === 'text' && result.content[0].value, 'hub results');
 	});
 
 	test('getAllToolsIncludingDisabled returns tools regardless of when clause', () => {

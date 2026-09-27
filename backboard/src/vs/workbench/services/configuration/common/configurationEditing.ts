@@ -279,7 +279,7 @@ export class ConfigurationEditing {
 	private onInvalidConfigurationError(error: ConfigurationEditingError, operation: IConfigurationEditOperation,): void {
 		const openStandAloneConfigurationActionLabel = operation.workspaceStandAloneConfigurationKey === TASKS_CONFIGURATION_KEY ? nls.localize('openTasksConfiguration', "Open Tasks Configuration")
 			: operation.workspaceStandAloneConfigurationKey === LAUNCH_CONFIGURATION_KEY ? nls.localize('openLaunchConfiguration', "Open Launch Configuration")
-				: operation.workspaceStandAloneConfigurationKey === MCP_CONFIGURATION_KEY ? nls.localize('openMcpConfiguration', "Open MCP Configuration")
+				: operation.workspaceStandAloneConfigurationKey === MCP_CONFIGURATION_KEY ? nls.localize('openMcpConfiguration', "Open Connector Configuration")
 					: null;
 		if (openStandAloneConfigurationActionLabel) {
 			this.notificationService.prompt(Severity.Error, error.message,
@@ -386,7 +386,7 @@ export class ConfigurationEditing {
 					return nls.localize('errorInvalidLaunchConfiguration', "Unable to write into the launch configuration file. Please open it to correct errors/warnings in it and try again.");
 				}
 				if (operation.workspaceStandAloneConfigurationKey === MCP_CONFIGURATION_KEY) {
-					return nls.localize('errorInvalidMCPConfiguration', "Unable to write into the MCP configuration file. Please open it to correct errors/warnings in it and try again.");
+					return nls.localize('errorInvalidMCPConfiguration', "Unable to write into the connector configuration file. Please open it to correct errors/warnings in it and try again.");
 				}
 				switch (target) {
 					case EditableConfigurationTarget.USER_LOCAL:
@@ -417,7 +417,7 @@ export class ConfigurationEditing {
 					return nls.localize('errorLaunchConfigurationFileDirty', "Unable to write into launch configuration file because the file has unsaved changes. Please save it first and then try again.");
 				}
 				if (operation.workspaceStandAloneConfigurationKey === MCP_CONFIGURATION_KEY) {
-					return nls.localize('errorMCPConfigurationFileDirty', "Unable to write into MCP configuration file because the file has unsaved changes. Please save it first and then try again.");
+					return nls.localize('errorMCPConfigurationFileDirty', "Unable to write into connector configuration file because the file has unsaved changes. Please save it first and then try again.");
 				}
 				switch (target) {
 					case EditableConfigurationTarget.USER_LOCAL:
@@ -448,7 +448,7 @@ export class ConfigurationEditing {
 					return nls.localize('errorLaunchConfigurationFileModifiedSince', "Unable to write into launch configuration file because the content of the file is newer.");
 				}
 				if (operation.workspaceStandAloneConfigurationKey === MCP_CONFIGURATION_KEY) {
-					return nls.localize('errorMCPConfigurationFileModifiedSince', "Unable to write into MCP configuration file because the content of the file is newer.");
+					return nls.localize('errorMCPConfigurationFileModifiedSince', "Unable to write into connector configuration file because the content of the file is newer.");
 				}
 				switch (target) {
 					case EditableConfigurationTarget.USER_LOCAL:

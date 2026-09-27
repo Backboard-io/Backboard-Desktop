@@ -83,7 +83,7 @@ export class McpResourceTreeItem implements IProfileResourceTreeItem {
 
 	readonly type = ProfileResourceType.Mcp;
 	readonly handle = ProfileResourceType.Mcp;
-	readonly label = { label: localize('mcp', "MCP Servers") };
+	readonly label = { label: localize('mcp', "Connectors") };
 	readonly collapsibleState = TreeItemCollapsibleState.Expanded;
 	checkbox: ITreeItemCheckboxState | undefined;
 

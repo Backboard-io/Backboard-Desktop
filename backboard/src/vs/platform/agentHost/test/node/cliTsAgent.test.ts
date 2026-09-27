@@ -16,16 +16,35 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/c
 import { FileService } from '../../../files/common/fileService.js';
 import { DiskFileSystemProvider } from '../../../files/node/diskFileSystemProvider.js';
 import { NullLogService } from '../../../log/common/log.js';
-import { AgentSession, type AgentSignal } from '../../common/agentService.js';
+import { AgentSession, MCP_AUTH_REQUIRED_ERROR_TYPE, type AgentSignal } from '../../common/agentService.js';
 import { ActionType } from '../../common/state/sessionActions.js';
-import { CustomizationType, McpServerStatus } from '../../common/state/protocol/channels-session/state.js';
-import { buildSubagentSessionUri, FileEditKind, ResponsePartKind, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ToolCallResponsePart, type ToolResultFileEditContent } from '../../common/state/sessionState.js';
+import { CustomizationType, McpServerStatus, type Customization } from '../../common/state/protocol/channels-session/state.js';
+import { buildSubagentSessionUri, FileEditKind, ResponsePartKind, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ToolCallResponsePart, type Turn, type ToolResultFileEditContent } from '../../common/state/sessionState.js';
 import { AgentHostCheckpointService } from '../../node/agentHostCheckpointService.js';
 import { assertUsableClaudeSubscriptionLogin, buildConversationHandoffContext, CliTsAgent, cliTsToolExecutionFailed, getBackboardWorktreeBranchName, getBackboardWorktreesRoot, hasUsableChatGptSubscriptionLogin, isChatGptSubscriptionModel, isClaudeSubscriptionModel, requiresProviderThreadHandoff, withChatGptSubscriptionConnectionState, withClaudeSubscriptionConnectionState } from '../../node/cliTs/cliTsAgent.js';
 import { SessionDatabase } from '../../node/sessionDatabase.js';
 import { FileEditTracker, parseSessionDbUri } from '../../node/shared/fileEditTracker.js';
 import { NullEditSurvivalReporterFactory } from '../../node/shared/editSurvivalReporter.js';
 import { createSessionDataService, TestDiffComputeService } from '../common/sessionTestHelpers.js';
+
+/**
+ * The calm notes a turn ends with when it could not finish. Failures are
+ * never shown as error banners, so these replace `ChatError` actions.
+ */
+function failureNotes(progress: readonly AgentSignal[]): string[] {
+	assert.ok(!progress.some(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatError), 'turn failures must not surface as error banners');
+	return progress.flatMap(signal => signal.kind === 'action'
+		&& signal.action.type === ActionType.ChatResponsePart
+		&& signal.action.part.kind === ResponsePartKind.Markdown
+		&& signal.action.part.content.startsWith('_This')
+		? [signal.action.part.content] : []);
+}
+
+/** The calm note a reopened turn ends with when it did not finish, if any. */
+function failureNote(turn: Turn | undefined): string | undefined {
+	const last = turn?.responseParts.at(-1);
+	return last?.kind === ResponsePartKind.Markdown && last.content.startsWith('_This') ? last.content : undefined;
+}
 
 suite('CliTsAgent tool metadata', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -50,7 +69,9 @@ suite('CliTsAgent tool metadata', () => {
 		return service;
 	}
 
-	function createMcpSession(sessionUri: URI, onRequest: (control: { op: string; requestId?: string; servers?: Record<string, unknown>; force?: readonly string[] }) => unknown): unknown {
+	type McpControl = { op: string; requestId?: string; name?: string; servers?: Record<string, unknown>; force?: readonly string[]; authoritative?: boolean };
+
+	function createMcpSession(sessionUri: URI, onRequest: (control: McpControl) => unknown, extra: Record<string, unknown> = {}): unknown {
 		return {
 			sessionUri,
 			sessionId: AgentSession.id(sessionUri),
@@ -67,8 +88,10 @@ suite('CliTsAgent tool metadata', () => {
 			proc: {
 				isRunning: true,
 				nextRequestId: () => `request-${Math.random()}`,
-				request: async (control: { op: string; requestId?: string; servers?: Record<string, unknown>; force?: readonly string[] }) => ({ type: 'serve:mcp', payload: onRequest(control) }),
+				request: async (control: McpControl) => ({ type: 'serve:mcp', payload: onRequest(control) }),
+				dispose: () => { },
 			},
+			...extra,
 		};
 	}
 
@@ -106,8 +129,8 @@ suite('CliTsAgent tool metadata', () => {
 			selected: config.values.videoModel,
 			warmed,
 		}, {
-			images: ['off', 'provider/imageModel'], videos: ['off', 'provider/videoModel'],
-			labels: ['Off', 'videoModel'], selected: 'provider/videoModel', warmed: ['imageModel', 'videoModel'],
+			images: ['provider/imageModel'], videos: ['provider/videoModel'],
+			labels: ['videoModel'], selected: 'provider/videoModel', warmed: ['imageModel', 'videoModel'],
 		});
 		await pending.complete([]);
 	});
@@ -123,7 +146,7 @@ suite('CliTsAgent tool metadata', () => {
 				return items;
 			},
 		});
-		assert.deepStrictEqual((await agent.sessionConfigCompletions({ property: 'videoModel' })).items, [{ value: 'off', label: 'Off' }, ...items]);
+		assert.deepStrictEqual((await agent.sessionConfigCompletions({ property: 'videoModel' })).items, items);
 		await assert.rejects(agent.sessionConfigCompletions({ property: 'videoModel', refresh: true }), /offline/);
 		assert.deepStrictEqual(calls, [{ property: 'videoModel', refresh: undefined }, { property: 'videoModel', refresh: true }]);
 	});
@@ -198,6 +221,74 @@ suite('CliTsAgent tool metadata', () => {
 		assert.strictEqual(requests.length, 3);
 		assert.deepStrictEqual(requests[2].force, ['backboard']);
 		assert.strictEqual((requests[2].servers!['backboard'] as { disabled?: boolean }).disabled, undefined);
+	});
+
+	test('runtime-reported MCP servers are listed, signed in on enable, and dedupe client tools', async () => {
+		const pluginDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bb-mcp-plugin-'));
+		fs.writeFileSync(path.join(pluginDir, '.mcp.json'), JSON.stringify({
+			mcpServers: { docs: { type: 'http', url: 'https://docs.example/mcp' } },
+		}));
+		const pluginManager = {
+			syncCustomizations: async () => [{
+				customization: { type: CustomizationType.Plugin, id: 'plugin-1', uri: URI.file(pluginDir).toString(), name: 'synced', enabled: true },
+				pluginDir: URI.file(pluginDir),
+			}],
+		};
+		const agent = createAgent({}, {}, {}, {}, pluginManager, makeFileService());
+		const requests: McpControl[] = [];
+		const sessionUri = AgentSession.uri('backboard', 'mcp-runtime-session');
+		// `linear` comes from a project `.backboard/mcp.json`: the runtime runs it
+		// although the IDE never pushed it.
+		const session = createMcpSession(sessionUri, control => {
+			requests.push(control);
+			if (control.op === 'authenticateMcpServer') {
+				return { servers: [{ name: 'docs', status: 'connected' }, { name: 'linear', status: 'connected', source: 'project' }] };
+			}
+			return { servers: [{ name: 'docs', status: 'needs_authentication', message: 'Sign in to docs' }, { name: 'linear', status: 'connected', source: 'project' }] };
+		}, { mcpStatusEvents: true });
+		(agent as unknown as { _sessions: Map<string, unknown> })._sessions.set('mcp-runtime-session', session);
+
+		await agent.setClientCustomizations(sessionUri, 'client-1', [
+			{ type: CustomizationType.Plugin, id: 'plugin-1', uri: URI.file(pluginDir).toString(), name: 'synced', enabled: true } as never,
+		]);
+		const listed = await agent.getSessionCustomizations(sessionUri);
+		const summary = (customizations: readonly Customization[]) => customizations.map(c => {
+			const state = (c as { state: { kind: McpServerStatus; error?: { errorType: string } } }).state;
+			return [c.name, state.kind, state.error?.errorType];
+		}).sort();
+		assert.deepStrictEqual({ authoritative: requests[0].authoritative, listed: summary(listed) }, {
+			authoritative: true,
+			listed: [['docs', McpServerStatus.Error, MCP_AUTH_REQUIRED_ERROR_TYPE], ['linear', McpServerStatus.Ready, undefined]],
+		});
+
+		// A connected runtime server's IDE client-tool copies are dropped; the
+		// copies of a server the runtime could not connect stay.
+		Reflect.set(session as object, 'clientTools', {
+			clientId: 'client-1',
+			tools: [
+				{ name: 'linear_search', _meta: { source: 'mcp', mcpServerLabel: 'linear' } },
+				{ name: 'docs_search', _meta: { source: 'mcp', mcpServerLabel: 'docs' } },
+				{ name: 'open_browser', _meta: { source: 'internal' } },
+			],
+		});
+		const turnTools = (agent as unknown as { _clientToolsForTurn(session: unknown): readonly { name: string }[] })._clientToolsForTurn(session);
+		assert.deepStrictEqual(turnTools.map(tool => tool.name), ['docs_search', 'open_browser']);
+
+		// Enabling a server that waits for sign-in runs the runtime's sign-in.
+		agent.setCustomizationEnabled(listed.find(c => c.name === 'docs')!.id, true);
+		await new Promise(resolve => setTimeout(resolve, 0));
+		assert.deepStrictEqual(requests.map(r => r.op === 'authenticateMcpServer' ? `${r.op}:${r.name}` : r.op), ['setMcpServers', 'authenticateMcpServer:docs']);
+		assert.deepStrictEqual(summary(await agent.getSessionCustomizations(sessionUri)), [['docs', McpServerStatus.Ready, undefined], ['linear', McpServerStatus.Ready, undefined]]);
+	});
+
+	test('does not push MCP servers before the IDE has synced its set', async () => {
+		const agent = createAgent();
+		const requests: McpControl[] = [];
+		const sessionUri = AgentSession.uri('backboard', 'mcp-unsynced');
+		const session = createMcpSession(sessionUri, control => { requests.push(control); return { servers: [] }; }, { mcpStatusEvents: true });
+		(agent as unknown as { _sessions: Map<string, unknown> })._sessions.set('mcp-unsynced', session);
+		await (agent as unknown as { _pushMcpServers(session: unknown): Promise<void> })._pushMcpServers(session);
+		assert.deepStrictEqual(requests, []);
 	});
 
 	test('distinguishes successful no-match and partial searches from execution failure', () => {
@@ -592,9 +683,7 @@ suite('CliTsAgent tool metadata', () => {
 			await agent.createSession({ session: sessionUri, workingDirectory: URI.file(tempRoot), model: { id: 'openai-key/gpt-5.5' } });
 
 			await agent.sendMessage(sessionUri, 'first');
-			const errors = progress
-				.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatError)
-				.map(signal => signal.kind === 'action' ? (signal.action as { error?: { message: string } }).error?.message : undefined);
+			const errors = failureNotes(progress);
 
 			await agent.executeCommand('providerKeys.set', { provider: 'openai', key: 'sk-test-key' });
 			await agent.sendMessage(sessionUri, 'second');
@@ -602,7 +691,7 @@ suite('CliTsAgent tool metadata', () => {
 			await agent.sendMessage(sessionUri, 'third');
 
 			assert.deepStrictEqual({ errors, submits }, {
-				errors: ['No OpenAI API key is connected. Add one under API Keys to use this model.'],
+				errors: ["_This response couldn't start: No OpenAI API key is connected. Add one under API Keys to use this model._"],
 				submits: [
 					{ model: 'openai/gpt-5.5', source: 'byok' },
 					{ model: 'anthropic/claude-opus-5', source: 'backboard' },
@@ -665,16 +754,14 @@ suite('CliTsAgent tool metadata', () => {
 			const sessionUri = AgentSession.uri('backboard', 'narrow-key');
 			await agent.createSession({ session: sessionUri, workingDirectory: URI.file(tempRoot), model: { id: 'openai-key/gpt-5.5' } });
 			await agent.sendMessage(sessionUri, 'hello');
-			const errors = progress
-				.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatError)
-				.map(signal => signal.kind === 'action' ? (signal.action as { error?: { message: string } }).error?.message : undefined);
+			const errors = failureNotes(progress);
 
 			assert.deepStrictEqual({ rows, submits, errors }, {
 				// The row the new key cannot reach stays listed, so the pinned
 				// selection stays visible, but it is flagged and refused on send.
 				rows: [['openai-key/gpt-5-mini', true, true], ['openai-key/gpt-5.5', true, false]],
 				submits: [],
-				errors: ['gpt-5.5 is not available with the connected OpenAI API key. Pick another OpenAI API Key model or replace the key.'],
+				errors: ["_This response couldn't start: gpt-5.5 is not available with the connected OpenAI API key. Pick another OpenAI API Key model or replace the key._"],
 			});
 		} finally {
 			fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -797,10 +884,8 @@ suite('CliTsAgent tool metadata', () => {
 
 			await agent.sendMessage(sessionUri, 'hello');
 
-			const errors = progress
-				.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatError)
-				.map(signal => signal.kind === 'action' ? (signal.action as { error?: { message: string } }).error?.message : undefined);
-			assert.deepStrictEqual(errors, ['The bundled Backboard runtime does not support API keys. Update Backboard.']);
+			const errors = failureNotes(progress);
+			assert.deepStrictEqual(errors, ["_This response couldn't start: The bundled Backboard runtime does not support API keys. Update Backboard._"]);
 		} finally {
 			fs.rmSync(tempRoot, { recursive: true, force: true });
 		}
@@ -1667,17 +1752,23 @@ suite('CliTsAgent tool metadata', () => {
 						? 'The serve process closed before completing the request.'
 						: scenario === 'failed-payload' ? 'The Backboard agent reported a failed turn.' : undefined;
 				assert.strictEqual(persisted.sessions[0].turns[0].error?.message, expectedMessage);
-				const liveErrors = progress.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatError);
-				assert.strictEqual(liveErrors.length, expectedMessage ? 1 : 0, 'A later generic failure must not duplicate the original visible error');
+				assert.strictEqual(failureNotes(progress).length, expectedMessage ? 1 : 0, 'A later generic failure must not add a second note');
 				const reopened = createAgent();
 				(reopened as unknown as { _storePath(): string })._storePath = () => storePath;
 				const turns = await reopened.getSessionMessages(sessionUri);
-				assert.strictEqual(turns[0].state, expectedMessage ? TurnState.Error : TurnState.Complete);
-				assert.strictEqual(turns[0].error?.message, expectedMessage);
-				assert.strictEqual(turns[0].responseParts[0].kind, ResponsePartKind.Reasoning, 'An error remains visible even when reasoning is the only transcript part');
-				if (turns[0].error) {
-					assert.deepStrictEqual(Object.keys(turns[0].error).sort(), ['errorType', 'message']);
-				}
+				// The cause stays in the store; the chat shows a calm note, never an error.
+				const lastPart = turns[0].responseParts.at(-1);
+				assert.deepStrictEqual({
+					state: turns[0].state,
+					error: turns[0].error,
+					first: turns[0].responseParts[0].kind,
+					note: lastPart?.kind === ResponsePartKind.Markdown && lastPart.content.startsWith('_This response'),
+				}, {
+					state: TurnState.Complete,
+					error: undefined,
+					first: ResponsePartKind.Reasoning,
+					note: !!expectedMessage,
+				});
 			} finally {
 				fs.rmSync(tempRoot, { recursive: true, force: true });
 			}
@@ -1704,7 +1795,7 @@ suite('CliTsAgent tool metadata', () => {
 		}
 	});
 
-	test('legacy failed turns receive a visible error without inventing its original cause', async () => {
+	test('legacy failed turns end with a calm note without inventing its original cause', async () => {
 		const agent = createAgent();
 		const sessionUri = AgentSession.uri('backboard', 'legacy-failed-turn');
 		(agent as unknown as { _sessions: Map<string, unknown> })._sessions.set(AgentSession.id(sessionUri), {
@@ -1714,10 +1805,11 @@ suite('CliTsAgent tool metadata', () => {
 			],
 		});
 		const turns = await agent.getSessionMessages(sessionUri);
-		for (const turn of turns) {
-			assert.strictEqual(turn.state, TurnState.Error);
-			assert.strictEqual(turn.error?.message, 'This Backboard response failed. The original error details were not saved.');
-		}
+		assert.deepStrictEqual(turns.map(turn => [turn.state, turn.error, turn.responseParts.at(-1)]), turns.map((turn, index) => [
+			TurnState.Complete,
+			undefined,
+			{ kind: ResponsePartKind.Markdown, id: `${AgentSession.id(sessionUri)}-${index}-note`, content: '_This response stopped before it finished. Send a message to continue from here._' },
+		]));
 	});
 
 	test('in-flight first turns survive shutdown and legacy zero-turn sessions remain openable', async () => {
@@ -1782,7 +1874,7 @@ suite('CliTsAgent tool metadata', () => {
 			const restored = await agent.getSessionMessages(sessionUri);
 			assert.strictEqual(restored.length, 1);
 			assert.strictEqual(restored[0].message.text, 'Keep this exact prompt after closing');
-			assert.strictEqual(restored[0].state, TurnState.Error);
+			assert.strictEqual(restored[0].state, TurnState.Complete);
 			assert.strictEqual(restored[0].responseParts[0]?.kind, ResponsePartKind.Markdown);
 
 			fs.writeFileSync(storePath, JSON.stringify({
@@ -1799,7 +1891,7 @@ suite('CliTsAgent tool metadata', () => {
 			const legacy = await agent.getSessionMessages(AgentSession.uri('backboard', 'legacy-zero-turn'));
 			assert.strictEqual(legacy.length, 1);
 			assert.strictEqual(legacy[0].message.text, 'Prompt retained only in the old title');
-			assert.strictEqual(legacy[0].state, TurnState.Error);
+			assert.strictEqual(legacy[0].state, TurnState.Complete);
 			assert.strictEqual(legacy[0].responseParts[0]?.kind, ResponsePartKind.Markdown);
 		} finally {
 			fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -2795,9 +2887,9 @@ suite('CliTsAgent tool metadata', () => {
 		});
 		await Promise.allSettled(rootTurn.pendingCompletions);
 
-		assert.ok(progress.some(signal => signal.kind === 'action'
-			&& signal.parentToolCallId === 'spawn-rejected'
-			&& signal.action.type === ActionType.ChatError));
+		assert.deepStrictEqual(failureNotes(progress.filter(signal => signal.kind === 'action' && signal.parentToolCallId === 'spawn-rejected')), [
+			'_This subagent stopped early and handed its task back to the main agent._',
+		]);
 		assert.strictEqual(progress.filter(signal => signal.kind === 'subagent_completed').length, 1);
 		assert.strictEqual(session.subagentTurnOwners.has('spawn-rejected'), false);
 		assert.strictEqual(session.completedSubagentToolCallIds.has('spawn-rejected'), true);
@@ -2970,6 +3062,53 @@ suite('CliTsAgent tool metadata', () => {
 		}
 	});
 
+	test('agent_spawn stays detached when lifecycle events use the Subagent display name', async () => {
+		const agent = createAgent();
+		const progress: AgentSignal[] = [];
+		store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+		const sessionUri = AgentSession.uri('backboard', 'detached-display-name');
+		const ownerTurn = {
+			turnId: 'turn-display-name', prompt: 'Spawn a worker.', messageParts: new Map(), streamedText: new Map(),
+			startedToolCalls: new Set<string>(), confirmedToolCalls: new Set<string>(), childToolLines: new Map(),
+			toolSummaries: [] as string[], storedParts: [] as unknown[], storedTextParts: new Map(),
+			toolInputs: new Map<string, { name: string; input: unknown }>(), toolInputSummaries: new Map<string, string>(),
+			toolUi: new Map(), terminalOutputs: new Map(), pendingCompletions: [] as Promise<void>[],
+			subagentTurns: new Map<string, { completion?: Promise<void> }>(), workerWorkspaces: new Map(), responseText: '', reasoningText: '',
+		};
+		const session = {
+			sessionUri, sessionId: AgentSession.id(sessionUri), turn: ownerTurn, storedTurns: [],
+			storedSubagentTurns: new Map(), subagentTurnOwners: new Map(), modifiedAt: 0,
+		};
+		const internals = agent as unknown as {
+			_sessions: Map<string, unknown>;
+			_handleAgentEvent(session: unknown, event: unknown): void;
+			_writeStore(): void;
+			_readRuntimeSubagentRecovery(): Promise<undefined>;
+		};
+		internals._sessions.set(AgentSession.id(sessionUri), session);
+		internals._writeStore = () => { };
+		internals._readRuntimeSubagentRecovery = async () => undefined;
+
+		// cli-ts reports the provider call as `agent_spawn`, but every lifecycle
+		// event carries AgentSpawnTool's display name, `Subagent`.
+		internals._handleAgentEvent(session, { type: 'tool:requested', calls: [{ id: 'spawn-display', name: 'agent_spawn', input: { name: 'BackgroundWorker', prompt: 'Run a command.' } }] });
+		internals._handleAgentEvent(session, { type: 'tool:start', toolCallId: 'spawn-display', name: 'Subagent', inputSummary: 'Run a command.' });
+		internals._handleAgentEvent(session, { type: 'tool:result', toolCallId: 'spawn-display', name: 'Subagent', title: 'Worker queued' });
+		await Promise.allSettled(ownerTurn.pendingCompletions);
+		internals._handleAgentEvent(session, {
+			type: 'agent:child_event', agentToolCallId: 'spawn-display',
+			event: { type: 'assistant:delta', turnId: 'child-display', messageId: 'child-answer', text: 'Worker report.' },
+		});
+
+		const actions = progress.flatMap(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallStart && signal.action.toolCallId === 'spawn-display' ? [signal.action] : []);
+		assert.deepStrictEqual({
+			startDetached: actions[0]?._meta?.subagentDetached,
+			launcherCompleted: progress.some(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallComplete && signal.action.toolCallId === 'spawn-display'),
+			childCompleted: progress.some(signal => signal.kind === 'subagent_completed'),
+			childDeltaRouted: progress.some(signal => signal.kind === 'action' && signal.parentToolCallId === 'spawn-display' && signal.action.type === ActionType.ChatResponsePart),
+		}, { startDetached: true, launcherCompleted: false, childCompleted: false, childDeltaRouted: true });
+	});
+
 	test('isolated child edits remain proposals until integration and recovery preserves failure', async () => {
 		const agent = createAgent();
 		const progress: AgentSignal[] = [];
@@ -3067,7 +3206,7 @@ suite('CliTsAgent tool metadata', () => {
 		assert.deepStrictEqual(progress.filter(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallComplete).map(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallComplete ? [signal.action.toolCallId, signal.action.result.success] : undefined), [['Alpha', true], ['Beta', false], ['Gamma', false]]);
 		assert.strictEqual(progress.some(signal => signal.kind === 'action' && signal.action.type === ActionType.ChatToolCallStart && signal.action.toolName === 'apply_worker_changes'), false, 'Modern missing exact records must not publish private proposals');
 		const beta = await agent.getSessionMessages(URI.parse(buildSubagentSessionUri(sessionUri.toString(), 'Beta')));
-		assert.deepStrictEqual([beta[0]?.state, beta[0]?.error?.message], [TurnState.Error, 'Could not save worker result']);
+		assert.deepStrictEqual([beta[0]?.state, beta[0]?.error, failureNote(beta[0])], [TurnState.Complete, undefined, '_This subagent stopped early and handed its task back to the main agent._']);
 		const parent = await agent.getSessionMessages(sessionUri);
 		assert.deepStrictEqual(parent[0].responseParts.filter(part => part.kind === ResponsePartKind.ToolCall).map(part => part.kind === ResponsePartKind.ToolCall ? part.toolCall._meta?.subagentRevision : undefined), [4, 3, 2]);
 	});
@@ -3094,7 +3233,7 @@ suite('CliTsAgent tool metadata', () => {
 			// A stale snapshot read after the newer record must not regress the UI.
 			fs.writeFileSync(taskFile, JSON.stringify({ version: 1, tasks: [original] }));
 			const child = await agent.getSessionMessages(URI.parse(buildSubagentSessionUri(sessionUri.toString(), 'worker')));
-			assert.deepStrictEqual([child[0]?.state, child[0]?.error?.message], [TurnState.Error, recovered.error]);
+			assert.deepStrictEqual([child[0]?.state, child[0]?.error, !!failureNote(child[0])], [TurnState.Complete, undefined, true]);
 		} finally {
 			fs.rmSync(tempRoot, { recursive: true, force: true });
 		}
@@ -3571,7 +3710,7 @@ suite('CliTsAgent tool metadata', () => {
 				workspace.status = status;
 				const unintegrated = await agent.getSessionMessages(childUri);
 				if (status === 'Conflict' || status === 'Failed' || status === 'Cancelled') {
-					assert.strictEqual(unintegrated[0]?.state, TurnState.Error, `${status} must not reopen as a successful worker`);
+					assert.ok(failureNote(unintegrated[0]), `${status} must not reopen as a successful worker`);
 				}
 				const write = unintegrated[0]?.responseParts.find((part): part is ToolCallResponsePart => part.kind === ResponsePartKind.ToolCall);
 				assert.ok(write?.toolCall.status === ToolCallStatus.Completed);
@@ -3827,6 +3966,44 @@ suite('CliTsAgent tool metadata', () => {
 		// is not forwarded again.
 		agent.onClientToolCallComplete(sessionUri, 'call-client-1', { success: true, pastTenseMessage: 'Opened page' });
 		assert.strictEqual(notified.length, 1);
+	});
+
+	test('a Full Access (bypass) turn stamps client tool calls auto-approved', () => {
+		// The workbench runs client tools (IDE-side MCP servers) through its own
+		// confirmation and result-review gates; this stamp is what lets it skip
+		// both, so Full Access never shows an approval card.
+		const agent = createAgent();
+		const progress: AgentSignal[] = [];
+		store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+		const sessionUri = AgentSession.uri('backboard', 'client-tool-full-access');
+		const session = {
+			sessionUri,
+			sessionId: AgentSession.id(sessionUri),
+			clientTools: { clientId: 'client-1', tools: [{ name: 'hf_hub_query' }] },
+			turnAutoApproves: true,
+			pendingClientToolCalls: new Set<string>(),
+			proc: { isRunning: true, notify: () => { }, dispose: () => { } },
+		};
+		const internals = agent as unknown as {
+			_sessions: Map<string, unknown>;
+			_handleMappedAgentEvent(session: unknown, event: unknown, turn: unknown): void;
+		};
+		internals._sessions.set(session.sessionId, session);
+		const turn = { turnId: 'turn-full-access', startedToolCalls: new Set<string>(), toolInputSummaries: new Map<string, string>(), toolInputs: new Map<string, { name: string; input: unknown }>() };
+
+		internals._handleMappedAgentEvent(session, {
+			type: 'client_tool:call',
+			toolCallId: 'call-full-access',
+			name: 'hf_hub_query',
+			input: { query: 'bert' },
+		}, turn);
+
+		const ready = progress
+			.map(signal => signal.kind === 'action' ? signal.action : undefined)
+			.find(action => action?.type === ActionType.ChatToolCallReady);
+		assert.ok(ready && ready.type === ActionType.ChatToolCallReady);
+		assert.strictEqual(ready._meta?.autoApproveBySetting, true);
+		assert.strictEqual(ready.confirmed, ToolCallConfirmationReason.NotNeeded);
 	});
 
 	test('a declined client tool call is answered with an error result', () => {

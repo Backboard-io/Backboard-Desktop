@@ -116,16 +116,16 @@ export class ChatMcpServersInteractionContentPart extends Disposable implements 
 		const skipText = createMarkdownCommandLink({
 			text: localize('mcp.skip.link', 'Skip?'),
 			id: McpCommandIds.SkipCurrentAutostart,
-			tooltip: localize('mcp.skip.tooltip', 'Skip starting this MCP server'),
+			tooltip: localize('mcp.skip.tooltip', 'Skip starting this connector'),
 		});
 
 		let content: MarkdownString;
 		if (state.starting.length === 0) {
-			content = new MarkdownString(undefined, { isTrusted: true }).appendText(localize('mcp.working.mcp', 'Activating MCP extensions...') + ' ').appendMarkdown(skipText);
+			content = new MarkdownString(undefined, { isTrusted: true }).appendText(localize('mcp.working.mcp', 'Activating connector extensions...') + ' ').appendMarkdown(skipText);
 		} else {
 			// Update to show specific server names as command links
 			const serverLinks = this.createServerCommandLinks(state.starting);
-			content = new MarkdownString(undefined, { isTrusted: true }).appendMarkdown(localize('mcp.starting.servers', 'Starting MCP servers {0}...', serverLinks) + ' ').appendMarkdown(skipText);
+			content = new MarkdownString(undefined, { isTrusted: true }).appendMarkdown(localize('mcp.starting.servers', 'Starting Connectors {0}...', serverLinks) + ' ').appendMarkdown(skipText);
 		}
 
 		if (this.workingProgressPart) {
@@ -173,8 +173,8 @@ export class ChatMcpServersInteractionContentPart extends Disposable implements 
 		const links = this.createServerCommandLinks(serversRequiringInteraction);
 
 		const content = count === 1
-			? localize('mcp.start.single', 'The MCP server {0} may have new tools and requires interaction to start. [Start it now?]({1})', links, '#start')
-			: localize('mcp.start.multiple', 'The MCP servers {0} may have new tools and require interaction to start. [Start them now?]({1})', links, '#start');
+			? localize('mcp.start.single', 'The Connector {0} may have new tools and requires interaction to start. [Start it now?]({1})', links, '#start')
+			: localize('mcp.start.multiple', 'The Connectors {0} may have new tools and require interaction to start. [Start them now?]({1})', links, '#start');
 		const str = new MarkdownString(content, { isTrusted: true });
 		const messageMd = this.interactionMd.value = this._markdownRendererService.render(str, {
 			actionHandler: (content) => {

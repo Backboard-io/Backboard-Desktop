@@ -3,15 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-/* ------------------------------------------------------------------------- *
- * Inactive session chat input state
- *
- * When a session column is not the active/focused/selected one, fade out all
- * of its chat input controls (attach, mode/model pickers, etc.) and keep only
- * the send button visible in a desaturated state. This reduces visual noise
- * across the multi-session grid so attention stays on the active session.
- * ------------------------------------------------------------------------- */
-
 /* Session header, tabs, and chat content are all hosted in this centered
  * inner container so alignment is controlled in one place. */
 .session-view .session-view-centered-content {
@@ -190,85 +181,164 @@
 	background: var(--vscode-button-hoverBackground);
 }
 
-/* Transitions apply to both active and inactive states so controls fade
+/* Transitions apply to both active and inactive states so the header fades
  * smoothly in either direction. Only declared when the user has not requested
  * reduced motion so we never need to unset them. */
 @media (prefers-reduced-motion: no-preference) {
-	.session-view .chat-composite-bar.session-header-bar,
-	.session-view .interactive-session .interactive-list,
-	.session-view .interactive-session .interactive-list .chat-tool-invocation-part,
-	.session-view .interactive-session .interactive-list .chat-thinking-box,
-	.session-view .interactive-session .interactive-list .chat-footer-toolbar,
-	.session-view .interactive-session .chat-input-toolbars > .chat-input-toolbar,
-	.session-view .interactive-session .chat-secondary-toolbar,
-	.session-view .interactive-session .chat-attachments-container,
-	.session-view .interactive-session .interactive-input-followups {
+	.session-view .chat-composite-bar.session-header-bar {
 		transition: opacity 0.15s ease;
-	}
-
-	.session-view .interactive-session .chat-input-toolbars > .chat-execute-toolbar {
-		transition: filter 0.15s ease, opacity 0.15s ease;
 	}
 }
 
-/* Strongly recede the whole header (title, meta, toolbar) for inactive sessions
- * so the active session's header stands out, while keeping it legible. */
+/* Recede the header (title, meta, toolbar) of inactive sessions so the active
+ * session's header stands out. Everything else stays fully visible: every
+ * pane's composer keeps its model/mode pickers, attach and send controls, so
+ * side-by-side chats can be read and driven without clicking into each. */
 .session-view:not(.is-active) .chat-composite-bar.session-header-bar {
 	opacity: 0.6;
 }
 
-/* Recede the chat transcript for inactive sessions so it reads as quiet but
- * stays legible at a glance. The list as a whole is only lightly dimmed so the
- * agent's text responses remain readable; non-text content (tool calls) is
- * dimmed further below to keep the visual hierarchy. */
-.session-view:not(.is-active) .interactive-session .interactive-list {
-	opacity: 0.9;
-}
-
-/* Push tool calls / invocations, thinking sections, and the per-response footer
- * toolbar further back than plain text responses in inactive sessions. Opacity
- * nests multiplicatively, so this stacks on top of the list's 0.9 for an
- * effective ~0.54 while the plain text stays at 0.9. */
-.session-view:not(.is-active) .interactive-session .interactive-list .chat-tool-invocation-part,
-.session-view:not(.is-active) .interactive-session .interactive-list .chat-thinking-box,
-.session-view:not(.is-active) .interactive-session .interactive-list .chat-footer-toolbar {
-	opacity: 0.6;
-}
-
-/* Fully fade out the in-input controls (attach, mode/model/harness pickers,
- * etc.) for inactive sessions so only the send button remains as a quiet
- * affordance. */
-.session-view:not(.is-active) .interactive-session .chat-input-toolbars > .chat-input-toolbar {
-	opacity: 0;
-	visibility: hidden;
-	pointer-events: none;
-}
-
-/* Fade out the controls that sit below the input box (secondary toolbar,
- * attachments row and followups) so the inactive input reads as quiet. */
-.session-view:not(.is-active) .interactive-session .chat-secondary-toolbar,
-.session-view:not(.is-active) .interactive-session .chat-attachments-container,
-.session-view:not(.is-active) .interactive-session .interactive-input-followups {
-	opacity: 0;
-	pointer-events: none;
-}
-
-/* Fade the chat input editor (including placeholder/draft text) for inactive sessions. */
-.session-view:not(.is-active) .interactive-session .chat-editor-container {
-	opacity: 0.6;
-}
-
-/* Fully desaturate the in-flight chat-input border beam in inactive sessions so
- * it matches the muted treatment of the rest of the inactive input controls.
- * Relative color syntax zeroes the saturation channel while preserving hue and
- * lightness — unlike mixing toward a fixed gray, this keeps the accent's
- * lightness intact so high-contrast themes (white/black accents) still read. */
+/* Desaturate the in-flight chat-input border beam in inactive sessions so the
+ * active session's beam is the one that draws the eye. Relative color syntax
+ * zeroes the saturation channel while preserving hue and lightness. */
 .session-view:not(.is-active) .interactive-session .chat-input-container.working {
 	--chat-input-working-border-color1: hsl(from var(--vscode-chat-inputWorkingBorderColor1) h 0% l);
 }
 
-/* Desaturate the send button so it reads as muted while still discoverable. */
-.session-view:not(.is-active) .interactive-session .chat-input-toolbars > .chat-execute-toolbar {
-	filter: grayscale(1);
-	opacity: 0.6;
+/* ------------------------------------------------------------------------- *
+ * Split grid
+ *
+ * With more than one session visible, the window's shared header row is
+ * hidden and every column shows its own row (same classes, so it inherits the
+ * shared row's look and window-drag behavior). The left-most column borrows
+ * the window chrome, the placeholder column the new-chat breadcrumb/toolbar.
+ * ------------------------------------------------------------------------- */
+
+.session-view > .sessions-panel-header.session-view-split-header :is(
+	.session-view-split-header-chrome,
+	.session-view-split-header-leading,
+	.session-view-split-header-trailing) {
+	display: flex;
+	align-items: center;
+	height: 100%;
+	min-width: 0;
+}
+
+.session-view > .sessions-panel-header.session-view-split-header :is(
+	.session-view-split-header-chrome,
+	.session-view-split-header-leading,
+	.session-view-split-header-trailing):empty {
+	display: none;
+}
+
+/* The window header's left section, relocated into the left-most column. */
+.session-view > .sessions-panel-header.session-view-split-header .session-view-split-header-chrome > .sessions-panel-header-left {
+	display: flex;
+	align-items: center;
+	height: 100%;
+	min-width: 0;
+}
+
+/* Each column's own right panel, sized by SessionView (sash on its left edge). */
+.session-view > .session-view-side-panel {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 2;
+	overflow: hidden;
+}
+
+.session-view > .session-view-side-panel > .session-split-right-panel {
+	position: relative;
+	height: 100%;
+}
+
+.session-view > .session-view-side-panel::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	z-index: 20;
+	width: 1px;
+	background: var(--vscode-agentsPanel-border, var(--vscode-panel-border));
+	pointer-events: none;
+}
+
+/* Wallpaper: like the auxiliary bar, a column's panel wrappers reveal the
+ * shared window image (codexTheme.css); open tool surfaces keep their own
+ * backgrounds via rightWorkbenchSimple.css. */
+.monaco-workbench.agent-sessions-workbench:is(.sessions-chat-custom-background, .sessions-new-chat-custom-background):not(.optimus-window):not(.hc-black):not(.hc-light) .session-view > .session-view-side-panel :is(
+	.session-split-right-panel,
+	.session-split-right-panel > .content,
+	.session-split-right-panel .pane,
+	.session-split-right-panel .pane-body) {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+/* Every cell has its own Back/Forward (SessionViewNavigationToolbar); the
+ * window-level pair that moved along with the chrome is hidden while split. */
+.part.sessionspart.sessions-grid-split .sessions-header-navigation:not(.session-view-pane-navigation) {
+	display: none;
+}
+
+.session-view > .sessions-panel-header.session-view-split-header .session-view-split-header-navigation {
+	display: flex;
+	align-items: center;
+	height: 100%;
+}
+
+/* Only cells along the window's top edge stand in for the title bar; headers
+ * of stacked cells lower down must not move the window. */
+.agent-sessions-workbench .session-view:not(.is-grid-top) > .sessions-panel-header.session-view-split-header,
+.agent-sessions-workbench .session-view:not(.is-grid-top) > .sessions-panel-header.session-view-split-header :is(
+	.titlebar-drag-region,
+	.sessions-panel-header-left,
+	.sessions-panel-header-center,
+	.sessions-panel-header-right,
+	.panel-header-toolbar-container,
+	.monaco-toolbar,
+	.monaco-action-bar,
+	.actions-container) {
+	-webkit-app-region: no-drag;
+}
+
+.agent-sessions-workbench .session-view:not(.is-grid-top) > .session-view-side-panel .sessions-right-workbench-header {
+	-webkit-app-region: no-drag;
+}
+
+/* Split panes are narrow: keep the composer tip on one line (ellipsized). The
+ * part also carries `chat-input-single-line-placeholder`, which tells
+ * ChatInputPart to size the input for that single line instead of the
+ * wrapped tip, so every pane's composer stays compact. */
+.monaco-workbench.agent-sessions-workbench .part.sessionspart.sessions-grid-split .session-view .interactive-session .interactive-input-part:not(.compact) .chat-editor-container .monaco-editor [class^="ced-chat-session-detail"] {
+	display: inline-block;
+	max-width: 100%;
+	/* Leave room for the context-usage ring in the input's top-right corner. */
+	max-width: calc(100cqi - 36px);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	vertical-align: bottom;
+}
+
+/* Split panes use the composer's shared model-control size ladder
+ * (chatDevinPresentation.css): the name ellipsizes before anything hides. */
+
+/* Narrow panes: keep the title readable by dropping the header's secondary
+ * actions (environment, terminal, maximize); the right panel toggle and
+ * Close stay. Environment and terminal remain reachable from the composer
+ * and the command palette. */
+.session-view > .sessions-panel-header.session-view-split-header {
+	container: session-view-header / inline-size;
+}
+
+@container session-view-header (max-width: 440px) {
+	.session-view > .sessions-panel-header.session-view-split-header .sessions-header-session-toolbar-slot :is(
+		.sessions-environment-titlebar-widget,
+		.action-item:has(> .action-label:is(.codicon-terminal, .codicon-screen-full, .codicon-screen-normal))) {
+		display: none !important;
+	}
 }

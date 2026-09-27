@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { Config } from "../src/config/Config.ts";
 import { AgentController } from "../src/core/agent/AgentController.ts";
+import { TURN_MAX_ATTEMPTS } from "../src/core/agent/TurnRetry.ts";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { AgentEvent } from "../src/core/bus/events.ts";
 import type { CheckpointRecorder } from "../src/core/checkpoints/CheckpointStore.ts";
@@ -229,6 +230,7 @@ function controllerWith(
 		skillController,
 		permissions: TEST_PERMISSIONS,
 		autoCompact: options.autoCompact,
+		turnRetryBackoffMs: 0,
 		...(options.onThreadReplaced
 			? { onThreadReplaced: options.onThreadReplaced }
 			: {}),
@@ -1043,7 +1045,7 @@ describe("AgentController loop (mocked Backboard)", () => {
 					event.message.includes("retrying with"),
 			),
 		).toBeFalse();
-	});
+	}, 30_000);
 
 	it("retries with thinking off when a provider rejects thinking", async () => {
 		class ThinkingFallbackClient extends FakeClient {
@@ -1164,12 +1166,13 @@ describe("AgentController loop (mocked Backboard)", () => {
 		const status = await ctrl.submit("do it");
 
 		expect(status).toBe("failed");
+		// Each silent turn attempt spends the stream's own retry budget.
 		expect(client.messageRequests).toHaveLength(
-			1 + DEFAULT_STREAM_SERVER_ERROR_RETRIES,
+			TURN_MAX_ATTEMPTS * (1 + DEFAULT_STREAM_SERVER_ERROR_RETRIES),
 		);
-	});
+	}, 30_000);
 
-	it("does not retry non-retryable stream failures", async () => {
+	it("retries non-retryable stream failures only as whole turn attempts", async () => {
 		const client = new FakeClient(
 			[
 				{
@@ -1187,7 +1190,50 @@ describe("AgentController loop (mocked Backboard)", () => {
 		const status = await ctrl.submit("do it");
 
 		expect(status).toBe("failed");
-		expect(client.messageRequests).toHaveLength(1);
+		expect(client.messageRequests).toHaveLength(TURN_MAX_ATTEMPTS);
+	});
+
+	it("recovers from a failed turn silently and keeps the original request", async () => {
+		class FailsOnceClient extends FakeClient {
+			failed = false;
+			constructor() {
+				super([], []);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				if (!this.failed) {
+					this.failed = true;
+					yield {
+						kind: "failed",
+						error: "Backboard requested tool outputs without tool calls",
+					};
+					return;
+				}
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new FailsOnceClient();
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("rename the widget");
+
+		expect(status).toBe("completed");
+		expect(client.messageRequests).toHaveLength(2);
+		expect(client.messageRequests[1]?.content).toContain(
+			"Request:\nrename the widget",
+		);
+		expect(events.some((event) => event.type === "run:error")).toBeFalse();
+		expect(
+			events.filter((event) => event.type === "turn:end").map((e) => e.status),
+		).toEqual(["completed"]);
 	});
 
 	it("queues prompts submitted while a turn is running", async () => {

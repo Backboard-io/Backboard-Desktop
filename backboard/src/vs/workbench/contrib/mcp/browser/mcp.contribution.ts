@@ -116,7 +116,7 @@ Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane
 	EditorPaneDescriptor.create(
 		McpServerEditor,
 		McpServerEditor.ID,
-		localize('mcpServer', "MCP Server")
+		localize('mcpServer', "Connector")
 	),
 	[
 		new SyncDescriptor(McpServerEditorInput)
@@ -126,9 +126,9 @@ Registry.as<IQuickAccessRegistry>(QuickAccessExtensions.Quickaccess).registerQui
 	ctor: McpResourceQuickAccess,
 	prefix: McpResourceQuickAccess.PREFIX,
 	when: ChatContextKeys.enabled,
-	placeholder: localize('mcp.quickaccess.placeholder', "Filter to an MCP resource"),
+	placeholder: localize('mcp.quickaccess.placeholder', "Filter to a connector resource"),
 	helpEntries: [{
-		description: localize('mcp.quickaccess.add', "MCP Server Resources"),
+		description: localize('mcp.quickaccess.add', "Connector Resources"),
 		commandId: McpCommandIds.AddConfiguration
 	}]
 });

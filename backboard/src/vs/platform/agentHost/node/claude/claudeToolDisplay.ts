@@ -167,7 +167,7 @@ export function getClaudeToolDisplayName(toolName: string): string {
 		case 'AskUserQuestion': return localize('claude.tool.askUserQuestion', "Ask user a question");
 	}
 	if (toolName.startsWith(MCP_TOOL_PREFIX)) {
-		return localize('claude.tool.mcp', "Run MCP tool {0}", toolName.slice(MCP_TOOL_PREFIX.length));
+		return localize('claude.tool.mcp', "Run connector tool {0}", toolName.slice(MCP_TOOL_PREFIX.length));
 	}
 	return toolName;
 }

@@ -14,7 +14,7 @@
 }
 
 /* Hide titlebar actions while policy-blocked */
-.monaco-workbench:has(.sessions-policy-blocked-overlay) .part.titlebar .titlebar-right {
+.monaco-workbench.sessions-policy-blocked .part.titlebar .titlebar-right {
 	visibility: hidden;
 }
 

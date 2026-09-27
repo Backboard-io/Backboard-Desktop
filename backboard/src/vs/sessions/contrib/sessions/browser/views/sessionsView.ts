@@ -55,6 +55,9 @@ import { IProductService } from '../../../../../platform/product/common/productS
 import { isRecentFolder, IWorkspacesService } from '../../../../../platform/workspaces/common/workspaces.js';
 import { BackboardUsageView } from '../backboardUsage.js';
 import { SimpleModeBackgroundPicker } from '../../../chat/browser/simpleModeBackgroundPicker.js';
+import { RightWorkbenchCommandId } from '../../../rightWorkbench/browser/rightWorkbench.js';
+import { IEditorGroupsService } from '../../../../../workbench/services/editor/common/editorGroupsService.js';
+import { CLOSE_CANVAS_COMMAND_ID, IS_CANVAS_OPEN_COMMAND_ID } from '../../../rightWorkbench/browser/canvasOverlay.js';
 
 const $ = DOM.$;
 export const SessionsViewId = 'sessions.workbench.view.sessionsView';
@@ -146,6 +149,7 @@ export class SessionsView extends ViewPane {
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
 		@ISessionsService private readonly sessionsService: ISessionsService,
 		@ICommandService private readonly commandService: ICommandService,
+		@IEditorGroupsService private readonly editorGroupsService: IEditorGroupsService,
 		@IHostService private readonly hostService: IHostService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
@@ -294,7 +298,10 @@ export class SessionsView extends ViewPane {
 
 			this.createSidebarAction(primaryActions, Codicon.edit, localize('newChat', "New chat"), () => this.startNewChat());
 			const mcpPage = this.mcpPage = this._register(this.instantiationService.createInstance(SimpleMcpPage));
-			this.createSidebarAction(primaryActions, Codicon.extensions, localize('simpleMcps', "MCPs"), anchor => mcpPage.show(anchor));
+			this.createSidebarAction(primaryActions, Codicon.extensions, localize('simpleMcps', "Connectors"), async anchor => {
+				await this.closeFullWindowPages('connectors');
+				mcpPage.show(anchor);
+			});
 			const mcpButton = primaryActions.lastElementChild;
 			this._register(mcpPage.onDidChangeVisibility(selected => {
 				mcpButton?.classList.toggle('active', selected);
@@ -304,14 +311,26 @@ export class SessionsView extends ViewPane {
 					mcpButton?.removeAttribute('aria-current');
 				}
 			}));
+			// Canvas: every image and video from the chat, full-window (the Codex-style playground).
+			this.createSidebarAction(primaryActions, Codicon.fileMedia, localize('canvas', "Canvas"), async () => {
+				// Toggles Canvas when it is what shows; brings it up when another page covers it.
+				const covered = await this.closeFullWindowPages('canvas');
+				if (covered && await this.commandService.executeCommand<boolean>(IS_CANVAS_OPEN_COMMAND_ID)) {
+					return;
+				}
+				await this.commandService.executeCommand(RightWorkbenchCommandId.OpenCanvas);
+			});
 			this.createSidebarAction(primaryActions, Codicon.graphLine, localize('usage', "Usage"), () => {
 				// Simple mode can run without an extension host, so open the built-in
 				// usage view instead of dispatching the extension-owned command.
 				this.logService.info('[Backboard] Opening the Simple mode usage view.');
-				this.usageView ??= this._register(this.instantiationService.createInstance(BackboardUsageView));
-				this.usageView.show();
+				void this.closeFullWindowPages('usage').then(() => {
+					this.usageView ??= this._register(this.instantiationService.createInstance(BackboardUsageView));
+					this.usageView.show();
+				});
 			});
-			this.createSidebarAction(primaryActions, Codicon.settingsGear, localize('settings', "Settings"), () => {
+			this.createSidebarAction(primaryActions, Codicon.settingsGear, localize('settings', "Settings"), async () => {
+				await this.closeFullWindowPages('settings');
 				void this.commandService.executeCommand('workbench.action.openSettings');
 			});
 			this.createProjectFilterRow(primaryActions);
@@ -530,6 +549,20 @@ export class SessionsView extends ViewPane {
 		const footer = DOM.append(container, $('.agent-sessions-footer'));
 		if (simpleMode) {
 			const navigation = DOM.append(footer, $('.agent-sessions-footer-navigation'));
+			// Switches between one chat and a 2×2 grid of the most recent chats;
+			// pressed while more than one chat is visible. Sits beside Background.
+			this.createSidebarAction(navigation, Codicon.table, localize('chatGrid', "Grid view"), () => this.sessionsService.toggleSessionGrid());
+			const gridButton = navigation.lastElementChild as HTMLElement | null;
+			if (gridButton) {
+				this._register(autorun(reader => {
+					const isGrid = this.sessionsService.visibleSessions.read(reader).length > 1;
+					const label = isGrid ? localize('showOneChat', "Show One Chat") : localize('showChatGrid', "Show Chats in a 2×2 Grid");
+					gridButton.classList.toggle('active', isGrid);
+					gridButton.setAttribute('aria-pressed', String(isGrid));
+					gridButton.title = label;
+					gridButton.setAttribute('aria-label', label);
+				}));
+			}
 			const backgroundPicker = this._register(this.instantiationService.createInstance(SimpleModeBackgroundPicker));
 			this.createSidebarAction(navigation, Codicon.fileMedia, localize('background', "Background"), anchor => {
 				backgroundPicker.toggle(anchor);
@@ -622,6 +655,29 @@ export class SessionsView extends ViewPane {
 		}).catch(error => {
 			this.logService.warn(`[Backboard] Failed to resolve user info for the sidebar footer: ${error instanceof Error ? error.message : String(error)}`);
 		});
+	}
+
+	/**
+	 * Connectors, Canvas, Usage and Settings are full-window pages in
+	 * different layers; the one picked in the sidebar always shows, so the
+	 * others close first. Resolves whether anything besides `keep` was open.
+	 */
+	private async closeFullWindowPages(keep: 'connectors' | 'canvas' | 'usage' | 'settings'): Promise<boolean> {
+		let closed = false;
+		if (keep !== 'connectors' && this.mcpPage?.isVisible) {
+			this.mcpPage.hide();
+			closed = true;
+		}
+		if (keep !== 'canvas' && await this.commandService.executeCommand<boolean>(IS_CANVAS_OPEN_COMMAND_ID)) {
+			await this.commandService.executeCommand(CLOSE_CANVAS_COMMAND_ID);
+			closed = true;
+		}
+		// Usage and Settings open as modal editors.
+		if (this.editorGroupsService.activeModalEditorPart) {
+			await this.commandService.executeCommand('workbench.action.closeModalEditor');
+			closed = true;
+		}
+		return closed;
 	}
 
 	private createSidebarAction(container: HTMLElement, icon: ThemeIcon, label: string, run: (anchor: HTMLElement) => void, hasPopup = false): void {

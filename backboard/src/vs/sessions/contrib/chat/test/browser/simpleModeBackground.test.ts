@@ -11,6 +11,7 @@ import { IContextViewService } from '../../../../../platform/contextview/browser
 import { IFileDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { IStorageService, InMemoryStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
+import { IWorkbenchEnvironmentService } from '../../../../../workbench/services/environment/common/environmentService.js';
 import { SimpleModeBackgroundPicker } from '../../browser/simpleModeBackgroundPicker.js';
 import { simpleModeBackgroundPresets } from '../../browser/simpleModeBackgroundPresets.js';
 import { ISimpleModeBackgroundService, SimpleModeBackgroundService } from '../../browser/simpleModeBackgroundService.js';
@@ -27,6 +28,7 @@ suite('Simple Mode Background', () => {
 		instantiation.stub(IStorageService, storage);
 		instantiation.stub(IContextKeyService, new MockContextKeyService());
 		instantiation.stub(IFileDialogService, { showOpenDialog: async () => undefined });
+		instantiation.stub(IWorkbenchEnvironmentService, { isOptimusWindow: false });
 		service = store.add(instantiation.createInstance(SimpleModeBackgroundService));
 		instantiation.stub(ISimpleModeBackgroundService, service);
 	});
@@ -48,6 +50,16 @@ suite('Simple Mode Background', () => {
 		migrated.clearBackgroundImage();
 		const restored = store.add(instantiation.createInstance(SimpleModeBackgroundService));
 		assert.strictEqual(restored.backgroundImage, undefined);
+	});
+
+	test('never shows the wallpaper in the Canvas window', () => {
+		service.selectPresetBackground('wild-coast');
+		instantiation.stub(IWorkbenchEnvironmentService, { isOptimusWindow: true });
+		const canvas = store.add(instantiation.createInstance(SimpleModeBackgroundService));
+		const fired: (URI | undefined)[] = [];
+		store.add(canvas.onDidChangeBackgroundImage(resource => fired.push(resource)));
+		canvas.selectPresetBackground('wild-coast');
+		assert.deepStrictEqual({ image: canvas.backgroundImage, fired }, { image: undefined, fired: [] });
 	});
 
 	test('shares selections with another mode service already open', () => {

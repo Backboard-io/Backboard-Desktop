@@ -97,10 +97,13 @@ describe("ComputerTool", () => {
 			resolveCuaDriver: () => "/driver",
 			browserFactory: (path, name) => new UnavailableBrowser(path, name),
 			jevWriter: async () => null,
-			jevDecider: async () => {
-				decisions++;
-				throw new Error("must not decide");
-			},
+			brain: () => ({
+				name: "test",
+				next: async () => {
+					decisions++;
+					throw new Error("must not decide");
+				},
+			}),
 		});
 		const result = await runtime.execute(
 			[{ action: "task", appName: "Brave", goal: "Draw a cat" }],
@@ -125,9 +128,12 @@ describe("ComputerTool", () => {
 				throw new Error("must not launch");
 			},
 			jevWriter: async () => null,
-			jevDecider: async () => {
-				throw new Error("must not decide");
-			},
+			brain: () => ({
+				name: "test",
+				next: async () => {
+					throw new Error("must not decide");
+				},
+			}),
 		});
 		const result = await runtime.execute(
 			[{ action: "task", appName: "Safari", goal: "Draw a cat" }],
@@ -182,17 +188,14 @@ describe("ComputerTool", () => {
 				created++;
 				return new FakeBrowser(path, name);
 			},
-			jevDecider: async () => ({
-				thread_id: "test",
-				model: "jev",
-				answers: {
-					operation: {
-						type: "choice",
-						choice: "DONE",
-						confidence: 1,
-						probabilities: { DONE: 1 },
-					},
-				},
+			brain: () => ({
+				name: "test",
+				next: async () => ({
+					operation: "DONE",
+					unsure: false,
+					confidence: 1,
+					complete: 1,
+				}),
 			}),
 			jevWriter: async () => null,
 		});

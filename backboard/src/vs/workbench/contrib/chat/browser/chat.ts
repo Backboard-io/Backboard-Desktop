@@ -265,6 +265,11 @@ export interface IChatWidgetViewOptions {
 	useBackboardPanelEmptyHome?: boolean;
 	/** Host navigation for the Editor-style empty home. */
 	panelEmptyHomeNavigation?: { openSession(resource: URI): Promise<void>; openHistory(): void };
+	/**
+	 * Opens a file picked from the changed-files strip above the input. Resolves
+	 * `true` when the host showed it; otherwise its diff opens in the editor area.
+	 */
+	openChangedFile?(resource: URI): Promise<boolean>;
 	autoScroll?: boolean | ((mode: ChatModeKind) => boolean);
 	renderInputOnTop?: boolean;
 	renderFollowups?: boolean;

@@ -1,0 +1,134 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* The Editor window's right-panel chat wears Simple mode's composer. Values
+ * are the Simple window's measured result (sessions style.css "T3 Code
+ * composer shell" plus its theme layer), re-expressed on theme tokens and
+ * scoped to the Editor window's auxiliary bar so Simple itself is untouched.
+ * The transcript is shared already (chatCodexTranscript.css / codex/*).
+ * chatDevinPresentation.css forces the panel's Devin composer with
+ * !important; the extra `.backboard-clean-chat.backboard-composer` scope
+ * outweighs it; declarations it also forces are marked !important here. */
+
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .interactive-input-part {
+	display: flex !important;
+	max-width: 760px !important;
+	margin: 12px 16px 10px !important;
+	padding: 0 !important;
+}
+
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-container {
+	padding: 8px !important;
+	gap: 0 !important;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent) !important;
+	border-radius: var(--bb-composer-radius, 18px) !important;
+	box-shadow: none !important;
+}
+
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-container:is(.focused, :focus-within) {
+	border-color: color-mix(in srgb, var(--vscode-foreground) 12%, transparent) !important;
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent) !important;
+}
+
+/* Attachments and the prompt stack inside the card, as in Simple. */
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .interactive-input-part .chat-editor-container {
+	display: block !important;
+	min-height: 22px !important;
+	padding: 4px !important;
+}
+
+/* Footer row: 28px ghost controls, 4px apart. */
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbars {
+	height: 28px !important;
+	min-height: 28px !important;
+	margin-top: 6px !important;
+	padding: 0 !important;
+	gap: 4px !important;
+}
+
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
+	display: flex !important;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	height: 28px !important;
+	min-width: 28px !important;
+	padding: 0 !important;
+	border-radius: 8px !important;
+}
+
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label.codicon,
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon {
+	font-size: 14px !important;
+	line-height: 14px !important;
+}
+
+/* Chips with a text label keep their horizontal padding. */
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):is(:has(.chat-input-picker-label), :has(.combined-model-provider-trigger-label)) {
+	padding: 0 8px;
+}
+
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label:not(.model-picker-split):hover,
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label.codicon-mic:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+/* The model selector reads as quiet text in the row, not a chip. */
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label.combined-model-provider-trigger {
+	padding: 0 4px !important;
+	border: 0;
+	border-radius: 8px !important;
+	color: color-mix(in srgb, var(--vscode-foreground) 62%, transparent) !important;
+	background: transparent !important;
+	box-shadow: none;
+}
+
+/* Primary action: a filled circle on the theme's button colour — 32px on an
+ * empty composer, 24px once the chat has a transcript. */
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > :is(.action-label.codicon-arrow-up, .action-label.codicon-newline, .action-label.codicon-stop-circle) {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: 32px;
+	height: 32px;
+	min-width: 32px;
+	padding: 0;
+	border-radius: 999px !important;
+	transition: background-color 120ms ease, box-shadow 150ms ease;
+}
+
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session:not(.chat-composer-empty) .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > :is(.action-label.codicon-arrow-up, .action-label.codicon-newline, .action-label.codicon-stop-circle) {
+	width: 24px;
+	height: 24px;
+	min-width: 24px;
+}
+
+/* Enabled send keeps chatDevinPresentation's foreground-filled circle, which
+ * is what Simple shows too; only its shadow is added here. */
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > :is(.action-label.codicon-arrow-up, .action-label.codicon-newline) {
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* Disabled keeps the fill, faded into the composer, so the glyph stays legible. */
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > :is(.action-label.codicon-arrow-up, .action-label.codicon-newline) {
+	color: var(--vscode-button-foreground) !important;
+	background: color-mix(in srgb, var(--vscode-button-background) 45%, var(--vscode-agentsChatInput-background, var(--vscode-editor-background)));
+	opacity: 1;
+}
+
+/* Stop sits on the composer's own surface; only the glyph reads during a run. */
+.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle {
+	color: var(--vscode-foreground) !important;
+	background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > :is(.action-label.codicon-arrow-up, .action-label.codicon-newline, .action-label.codicon-stop-circle) {
+		transition: none;
+	}
+}

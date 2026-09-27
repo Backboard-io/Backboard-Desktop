@@ -110,7 +110,7 @@ class ManageAccountsActionImpl {
 
 		if (canUseMcp) {
 			items.push({
-				label: localize('manageTrustedMCPServers', "Manage Trusted MCP Servers"),
+				label: localize('manageTrustedMCPServers', "Manage Trusted Connectors"),
 				action: () => this.commandService.executeCommand('_manageTrustedMCPServersForAccount', { providerId, accountLabel })
 			});
 		}

@@ -226,6 +226,19 @@ export interface IBrowserViewOpenHandler {
  * Workbench-level service for browser views that provides model-based access to browser views.
  * This service manages browser view models that proxy to the main process browser view service.
  */
+/**
+ * A host rule for where native browser views may paint in a window. Native
+ * views are drawn above all workbench DOM, so hosts that only have one legal
+ * surface for them (e.g. the Sessions window's right-panel Browser tab) use a
+ * policy to keep every other path from showing a page.
+ */
+export interface IBrowserViewVisibilityPolicy {
+	/** Whether the view may be visible right now. */
+	canShow(viewId: string): boolean;
+	/** Fires when {@link canShow}'s answer may have changed for any view. */
+	readonly onDidChange: Event<void>;
+}
+
 export interface IBrowserViewWorkbenchService {
 	readonly _serviceBrand: undefined;
 
@@ -289,6 +302,23 @@ export interface IBrowserViewWorkbenchService {
 	 * caller must not open a browser editor.
 	 */
 	adoptUrlOpen(request: IBrowserViewUrlOpenRequest): boolean;
+
+	/**
+	 * Register a policy restricting where native browser views may paint in
+	 * this window. While policies are registered a view may become visible only
+	 * if every policy allows it; the model enforces this before asking the main
+	 * process to show the view, so a disallowed view never reaches the screen.
+	 */
+	registerVisibilityPolicy(policy: IBrowserViewVisibilityPolicy): IDisposable;
+
+	/** Whether every registered visibility policy allows the view to be visible. */
+	canShowBrowserView(viewId: string): boolean;
+
+	/**
+	 * Fires when a registered policy's answers may have changed (or a policy was
+	 * added or removed), so surfaces that want to show a view can re-evaluate.
+	 */
+	readonly onDidChangeVisibilityPolicy: Event<void>;
 
 	/**
 	 * Get an existing browser view for the given ID, or create a new one if it doesn't exist.
@@ -684,6 +714,13 @@ export class BrowserViewModel extends Disposable implements IBrowserViewModel {
 	}
 
 	async setVisible(visible: boolean): Promise<void> {
+		if (visible && !this.browserViewWorkbenchService.canShowBrowserView(this.id)) {
+			// A host policy owns where native views may paint in this window;
+			// keep the view hidden rather than letting it float over the UI.
+			// Surfaces re-request visibility on onDidChangeVisibilityPolicy.
+			this.logService.trace(`[BrowserView] visibility of ${this.id} denied by host policy`);
+			visible = false;
+		}
 		this._visible = visible; // Set optimistically so model is in sync immediately
 		return this.browserViewService.setVisible(this.id, visible);
 	}

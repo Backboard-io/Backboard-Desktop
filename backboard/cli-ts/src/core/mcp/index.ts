@@ -11,14 +11,21 @@ export {
 	type McpServerFileEntry,
 	type McpServerTransport,
 	mcpConfigPaths,
+	mcpConfigToFileEntry,
 	mcpProjectConfigPath,
 	normalizeMcpServer,
 	removeConfiguredMcpServer,
 	removeProjectMcpServer,
 	saveProjectMcpServer,
+	saveUserMcpServer,
 } from "./config.ts";
-export { McpClientManager } from "./MCPClientManager.ts";
 export {
+	McpClientManager,
+	type McpServerProvenance,
+	type McpSetServersOptions,
+} from "./MCPClientManager.ts";
+export {
+	type McpAddOptions,
 	type McpAddResult,
 	McpController,
 	type McpControllerDeps,
@@ -62,6 +69,7 @@ export type {
 	McpResourceRefreshResult,
 	McpResourceTemplateDefinition,
 	McpServerMutationResult,
+	McpServerOrigin,
 	McpServerRuntimeState,
 	McpServerRuntimeStatus,
 	McpToolDefinition,

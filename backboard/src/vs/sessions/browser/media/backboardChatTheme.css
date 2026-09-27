@@ -365,12 +365,8 @@
 }
 
 /* Questions keep the normal composer's inset and editor size. Only the
- * question area scrolls when its contents would take over the chat. */
+ * pop-out question card scrolls when its contents would take over the chat. */
 .monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.sessionspart .backboard-composer .interactive-session > .interactive-input-part:has(.chat-question-editor-panel:not(.chat-question-carousel-used), .chat-tool-confirmation-carousel) {
-	padding: 6px 28px 10px !important;
-	background: transparent !important;
-
-	/* The composer shell is the shared surface; the bands only cap their height. */
 	.chat-question-carousel-widget-container,
 	.chat-tool-confirmation-carousel-container {
 		min-height: 0;

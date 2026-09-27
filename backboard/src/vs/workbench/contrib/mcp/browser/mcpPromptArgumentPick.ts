@@ -354,7 +354,7 @@ export class McpPromptArgumentPick extends Disposable {
 		// https://github.com/microsoft/vscode/blob/6a016f2507cd200b12ca6eecdab2f59da15aacb1/src/vs/workbench/browser/parts/editor/editorGroupView.ts#L1084
 		const terminal = (this._terminal ??= this._register(await this._terminalService.createTerminal({
 			config: {
-				name: localize('mcp.terminal.name', "MCP Terminal"),
+				name: localize('mcp.terminal.name', "Connector Terminal"),
 				isTransient: true,
 				forceShellIntegration: true,
 				isFeatureTerminal: true,

@@ -281,7 +281,7 @@ export function createCoreToolCardViewModel(data: IChatCoreToolInvocationData): 
 			const toolNames = stringArray(output.toolNames);
 			return {
 				...common,
-				title: localize('chat.coreTool.findMcp.title', "Find an MCP server"),
+				title: localize('chat.coreTool.findMcp.title', "Find a connector"),
 				summary: added
 					? localize('chat.coreTool.findMcp.connected', "Connected {0}", added)
 					: firstString(input, ['server', 'task']),
@@ -298,13 +298,13 @@ export function createCoreToolCardViewModel(data: IChatCoreToolInvocationData): 
 					const requiredEnv = stringArray(candidate.requiredEnv);
 					const description = firstString(candidate, ['description']);
 					return {
-						title: firstString(candidate, ['title', 'id']) ?? localize('chat.coreTool.findMcp.candidateFallback', "MCP server"),
+						title: firstString(candidate, ['title', 'id']) ?? localize('chat.coreTool.findMcp.candidateFallback', "Connector"),
 						detail: [description, requiredEnv.length ? localize('chat.coreTool.findMcp.env', "Requires {0}", requiredEnv.join(', ')) : undefined].filter(Boolean).join(' · ') || undefined,
 						state: firstString(candidate, ['title']) === added ? 'complete' : undefined,
 					};
 				}),
 				preview: toolNames.length ? textPreview(localize('chat.coreTool.findMcp.availableTools', "Available tools"), toolNames.join(', ')) : undefined,
-				emptyMessage: !added && candidates.length === 0 ? localize('chat.coreTool.findMcp.empty', "No matching MCP server was found.") : undefined,
+				emptyMessage: !added && candidates.length === 0 ? localize('chat.coreTool.findMcp.empty', "No matching connector was found.") : undefined,
 				useCompletionMessage: !added,
 				uiTruncated: common.uiTruncated || candidates.length > MAX_ITEMS,
 			};

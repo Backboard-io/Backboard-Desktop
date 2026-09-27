@@ -40,6 +40,12 @@ import {
 } from "./ThinkingEvidence.ts";
 import { ToolRoundProcessor } from "./ToolRoundProcessor.ts";
 import { Turn } from "./Turn.ts";
+import {
+	abortableDelay,
+	TURN_FALLBACK_FROM_ATTEMPT,
+	turnRetryDelayMs,
+	turnRetryPrompt,
+} from "./TurnRetry.ts";
 
 const SUBAGENT_PROVIDER_IDLE_TIMEOUT_MS = 30_000;
 const SUBAGENT_PROVIDER_MAX_RETRIES = 1;
@@ -94,6 +100,16 @@ export interface AgentLoopDeps {
 	resolveCapacityFallback?: CapacityFallbackResolver;
 	onModelSucceeded?: ModelSucceededHandler;
 	onThinkingDisabled?: ThinkingDisabledHandler;
+	/**
+	 * When set, a failed turn hands its error here instead of emitting
+	 * `run:error`, so a caller that retries the turn decides whether the
+	 * failure is terminal (the host marks a chat failed on any `run:error`).
+	 */
+	onRunError?: (error: string) => void;
+	/** Attempts a failed turn gets before it is reported (default 1). */
+	maxTurnAttempts?: number;
+	/** Base retry backoff in ms; tests pass 0. */
+	turnRetryBackoffMs?: number;
 }
 
 /**
@@ -225,124 +241,169 @@ export class AgentLoop {
 				notifications.activeNotificationHidesResponse(),
 		});
 
-		try {
-			if (ctx.signal.aborted) throw new AbortError();
-			let initialThinking = this.resolveThinking(
-				{
-					phase: "initial",
-					requestKind: this.deps.requestKind ?? "user",
-					hasDiagnosticText: hasStructuralDiagnosticText(content),
-					routineTask: isRoutineTask(content),
-				},
-				activeThinkingResolver,
-				activeModel,
-			);
-			if (
-				initialThinking === null &&
-				this.deps.thinkingResolver?.intent !== undefined &&
-				this.deps.thinkingResolver.intent !== null
-			) {
-				await disableThinking("the selected thinking controls are unsupported");
+		const switchToFallbackModel = async (): Promise<void> => {
+			const fallback = await this.deps
+				.resolveCapacityFallback?.(activeModel, attemptedModelKeys, ctx.signal)
+				.catch(() => null);
+			if (!fallback) return;
+			activeModel.provider = fallback.provider;
+			activeModel.model = fallback.model;
+			attemptedModelKeys.add(modelKey(activeModel));
+			// Re-resolve the user's intent against the fallback's capabilities.
+			if (activeThinkingResolver) {
+				const intent = activeThinkingResolver.intent;
+				activeThinkingResolver = await createRuntimeThinkingResolver(
+					{ model: activeModel, thinkingIntent: intent },
+					this.deps.client,
+				).catch(() => activeThinkingResolver);
 			}
-			const messageOptions = {
-				signal: ctx.signal,
-				attachmentFilePaths: this.deps.attachmentFilePaths,
-				displayContent: this.deps.displayContent,
-				durableSession: this.deps.durableSession,
-			};
-			const buildMessageRequest = () =>
-				buildRunMessageRequest(
-					content,
-					{ ...this.deps, model: activeModel },
-					initialThinking,
-				);
-			const createMessageStream = (signal: AbortSignal) =>
-				this.deps.client.runMessage(buildMessageRequest(), {
-					...messageOptions,
-					signal,
-				});
+			forceThinkingOff = false;
+		};
 
-			const early = processor.createEarlyRound(ctx, turn.id);
-			const pending = await consumer.consumeWithRetry(
-				createMessageStream,
-				assistant,
-				ctx.signal,
-				early,
-				() =>
-					this.deps.client.preserveFailedMessage?.(
-						buildMessageRequest(),
-						messageOptions,
-					) ?? Promise.resolve(null),
-				async (error) => {
-					if (isThinkingCompatibilityError(error)) {
-						initialThinking = null;
-						await disableThinking(errorMessage(error));
-						return;
+		// A failed turn is retried silently on the same thread (see TurnRetry.ts):
+		// the model resumes with everything it already did, and later attempts
+		// move to a fallback model. Only the last failure is reported.
+		const maxAttempts = this.deps.maxTurnAttempts ?? 1;
+		let attemptContent = content;
+		for (let attempt = 1; ; attempt++) {
+			try {
+				if (ctx.signal.aborted) throw new AbortError();
+				let initialThinking = this.resolveThinking(
+					{
+						phase: "initial",
+						requestKind: this.deps.requestKind ?? "user",
+						hasDiagnosticText: hasStructuralDiagnosticText(attemptContent),
+						routineTask: isRoutineTask(attemptContent),
+					},
+					activeThinkingResolver,
+					activeModel,
+				);
+				if (
+					initialThinking === null &&
+					this.deps.thinkingResolver?.intent !== undefined &&
+					this.deps.thinkingResolver.intent !== null
+				) {
+					await disableThinking(
+						"the selected thinking controls are unsupported",
+					);
+				}
+				const messageOptions = {
+					signal: ctx.signal,
+					attachmentFilePaths: this.deps.attachmentFilePaths,
+					displayContent: this.deps.displayContent,
+					durableSession: this.deps.durableSession,
+				};
+				const buildMessageRequest = () =>
+					buildRunMessageRequest(
+						attemptContent,
+						{ ...this.deps, model: activeModel },
+						initialThinking,
+					);
+				const createMessageStream = (signal: AbortSignal) =>
+					this.deps.client.runMessage(buildMessageRequest(), {
+						...messageOptions,
+						signal,
+					});
+
+				const early = processor.createEarlyRound(ctx, turn.id);
+				const pending = await consumer.consumeWithRetry(
+					createMessageStream,
+					assistant,
+					ctx.signal,
+					early,
+					() =>
+						this.deps.client.preserveFailedMessage?.(
+							buildMessageRequest(),
+							messageOptions,
+						) ?? Promise.resolve(null),
+					async (error) => {
+						if (isThinkingCompatibilityError(error)) {
+							initialThinking = null;
+							await disableThinking(errorMessage(error));
+							return;
+						}
+						if (!isModelAvailabilityError(error)) return;
+						const fallback = await this.deps.resolveCapacityFallback?.(
+							activeModel,
+							attemptedModelKeys,
+							ctx.signal,
+						);
+						if (!fallback) return;
+						activeModel.provider = fallback.provider;
+						activeModel.model = fallback.model;
+						attemptedModelKeys.add(modelKey(activeModel));
+						// Re-resolve the user's intent against the fallback's capabilities.
+						if (activeThinkingResolver) {
+							activeThinkingResolver = await createRuntimeThinkingResolver(
+								{
+									model: activeModel,
+									thinkingIntent: activeThinkingResolver.intent,
+								},
+								this.deps.client,
+							);
+							initialThinking = this.resolveThinking(
+								{
+									phase: "initial",
+									requestKind: this.deps.requestKind ?? "user",
+									routineTask: isRoutineTask(attemptContent),
+									hasDiagnosticText:
+										hasStructuralDiagnosticText(attemptContent),
+								},
+								activeThinkingResolver,
+								activeModel,
+							);
+						} else
+							initialThinking = this.deps.thinking === null ? null : undefined;
+						forceThinkingOff = false;
+						bus.emit({
+							type: "system:warning",
+							message: `Model unavailable; retrying with ${activeModel.provider}/${activeModel.model}.`,
+						});
+					},
+				);
+				await processor.process(pending, turn.id, assistant, ctx, early);
+				this.executedToolRounds = processor.executedRounds;
+				notificationsStarted = true;
+				await notifications.runPending(turn.id, assistant, ctx);
+				this.executedToolRounds = processor.executedRounds;
+				turn.status = "completed";
+				await this.deps.onModelSucceeded?.(activeModel);
+				break;
+			} catch (err) {
+				this.executedToolRounds = processor.executedRounds;
+				if (err instanceof AbortError || ctx.signal.aborted) {
+					turn.status = "cancelled";
+					// Preserve whatever streamed before the interrupt: commit the
+					// accumulated partial to the session so the next turn keeps it as
+					// context (no-op if nothing streamed yet).
+					assistant.finalize();
+					bus.emit({ type: "turn:cancelled", turnId: turn.id });
+					await finishTurn("cancelled");
+					return "cancelled";
+				}
+				if (attempt < maxAttempts) {
+					// Keep any partial answer as context for the continuation.
+					assistant.finalize();
+					attemptContent = turnRetryPrompt(content, errorMessage(err));
+					if (attempt + 1 >= TURN_FALLBACK_FROM_ATTEMPT) {
+						await switchToFallbackModel();
 					}
-					if (!isModelAvailabilityError(error)) return;
-					const fallback = await this.deps.resolveCapacityFallback?.(
-						activeModel,
-						attemptedModelKeys,
+					await abortableDelay(
+						turnRetryDelayMs(attempt, this.deps.turnRetryBackoffMs),
 						ctx.signal,
 					);
-					if (!fallback) return;
-					activeModel.provider = fallback.provider;
-					activeModel.model = fallback.model;
-					attemptedModelKeys.add(modelKey(activeModel));
-					// Re-resolve the user's intent against the fallback's capabilities.
-					if (activeThinkingResolver) {
-						activeThinkingResolver = await createRuntimeThinkingResolver(
-							{
-								model: activeModel,
-								thinkingIntent: activeThinkingResolver.intent,
-							},
-							this.deps.client,
-						);
-						initialThinking = this.resolveThinking(
-							{
-								phase: "initial",
-								requestKind: this.deps.requestKind ?? "user",
-								routineTask: isRoutineTask(content),
-								hasDiagnosticText: hasStructuralDiagnosticText(content),
-							},
-							activeThinkingResolver,
-							activeModel,
-						);
-					} else
-						initialThinking = this.deps.thinking === null ? null : undefined;
-					forceThinkingOff = false;
+					continue;
+				}
+				turn.status = "failed";
+				if (this.deps.onRunError) this.deps.onRunError(errorMessage(err));
+				else
 					bus.emit({
-						type: "system:warning",
-						message: `Model unavailable; retrying with ${activeModel.provider}/${activeModel.model}.`,
+						type: "run:error",
+						error: errorMessage(err),
 					});
-				},
-			);
-			await processor.process(pending, turn.id, assistant, ctx, early);
-			this.executedToolRounds = processor.executedRounds;
-			notificationsStarted = true;
-			await notifications.runPending(turn.id, assistant, ctx);
-			this.executedToolRounds = processor.executedRounds;
-			turn.status = "completed";
-			await this.deps.onModelSucceeded?.(activeModel);
-		} catch (err) {
-			this.executedToolRounds = processor.executedRounds;
-			if (err instanceof AbortError || ctx.signal.aborted) {
-				turn.status = "cancelled";
-				// Preserve whatever streamed before the interrupt: commit the
-				// accumulated partial to the session so the next turn keeps it as
-				// context (no-op if nothing streamed yet).
-				assistant.finalize();
-				bus.emit({ type: "turn:cancelled", turnId: turn.id });
-				await finishTurn("cancelled");
-				return "cancelled";
+				await finishTurn("failed");
+				return "failed";
 			}
-			turn.status = "failed";
-			bus.emit({
-				type: "run:error",
-				error: errorMessage(err),
-			});
-			await finishTurn("failed");
-			return "failed";
 		}
 
 		await finishTurn(turn.status);

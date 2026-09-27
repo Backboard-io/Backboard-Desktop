@@ -43,11 +43,14 @@ const COMPLETION_DRAIN_MS = 450;
 const MAX_COMPLETION_DRAIN_WORDS = 300;
 
 /**
- * Commit cadence. The word-level text reveal staggers each commit's words
- * across the gap to the next one, so short responses can commit at roughly
- * display rate without per-token re-renders.
+ * Commit cadence. Each commit rebuilds the markdown DOM, so it is the main
+ * streaming cost. When the word-level text reveal paces the visible frontier
+ * it staggers each commit's words across the gap to the next one (and runs
+ * ~600ms ahead), so commits can be much rarer than frames with no visible
+ * change. Without the reveal, commits are the typing itself and stay frequent.
  */
 const SHORT_RESPONSE_COMMIT_INTERVAL = 32;
+const REVEAL_PACED_COMMIT_INTERVAL = 150;
 const MEDIUM_RESPONSE_COMMIT_INTERVAL = 150;
 const LONG_RESPONSE_COMMIT_INTERVAL = 400;
 
@@ -82,6 +85,7 @@ export class WordBuffer implements IIncrementalRenderingBuffer {
 
 	/** Estimated word production rate (words/sec). */
 	private _rate: number = DEFAULT_RATE;
+	private _revealPaced: boolean = false;
 	private _isComplete: boolean = false;
 	private _completionDrainRate: number | undefined;
 	private readonly _wordCounter = new IncrementalWordCounter();
@@ -110,8 +114,9 @@ export class WordBuffer implements IIncrementalRenderingBuffer {
 	 * Set the estimated word production rate from the model's
 	 * `impliedWordLoadRate`. Called by the orchestrator.
 	 */
-	setRate(rate: number | undefined, isComplete: boolean): void {
+	setRate(rate: number | undefined, isComplete: boolean, revealPaced = false): void {
 		this._isComplete = isComplete;
+		this._revealPaced = revealPaced;
 		if (isComplete) {
 			this._rate = typeof rate === 'number'
 				? Math.max(rate, MIN_RATE_AFTER_COMPLETE)
@@ -121,6 +126,16 @@ export class WordBuffer implements IIncrementalRenderingBuffer {
 				? Math.min(Math.max(rate, MIN_RATE), MAX_RATE)
 				: DEFAULT_RATE;
 		}
+	}
+
+	private _commitInterval(markdown: string): number {
+		if (markdown.length >= 50_000) {
+			return LONG_RESPONSE_COMMIT_INTERVAL;
+		}
+		if (markdown.length >= 15_000) {
+			return MEDIUM_RESPONSE_COMMIT_INTERVAL;
+		}
+		return this._revealPaced ? REVEAL_PACED_COMMIT_INTERVAL : SHORT_RESPONSE_COMMIT_INTERVAL;
 	}
 
 	getRenderable(fullMarkdown: string, _lastRendered: string): string {
@@ -158,9 +173,7 @@ export class WordBuffer implements IIncrementalRenderingBuffer {
 			// Compute how many words to reveal based on elapsed time
 			// and the estimated rate, matching the original approach.
 			const elapsed = now - this._lastCommitTime;
-			const commitInterval = markdown.length >= 50_000
-				? LONG_RESPONSE_COMMIT_INTERVAL
-				: markdown.length >= 15_000 ? MEDIUM_RESPONSE_COMMIT_INTERVAL : SHORT_RESPONSE_COMMIT_INTERVAL;
+			const commitInterval = this._commitInterval(markdown);
 			if (elapsed < commitInterval) {
 				this._needsNextFrame = true;
 				this._nextRenderDelay = commitInterval - elapsed;
@@ -187,9 +200,7 @@ export class WordBuffer implements IIncrementalRenderingBuffer {
 		}
 
 		this._needsNextFrame = true;
-		const commitInterval = markdown.length >= 50_000
-			? LONG_RESPONSE_COMMIT_INTERVAL
-			: markdown.length >= 15_000 ? MEDIUM_RESPONSE_COMMIT_INTERVAL : SHORT_RESPONSE_COMMIT_INTERVAL;
+		const commitInterval = this._commitInterval(markdown);
 		this._nextRenderDelay = Math.max(commitInterval, Math.ceil(1000 / Math.max(this._rate, 1)));
 
 		if (result.value.length <= this._lastCommittedMarkdown.length) {

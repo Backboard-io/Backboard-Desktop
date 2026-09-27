@@ -863,8 +863,8 @@ class McpSettingsRenderer extends Disposable implements languages.CodeActionProv
 	private generateMcpConfigurationMarker(setting: ISetting): IMarkerData {
 		const isRemote = this.settingsEditorModel.configurationTarget === ConfigurationTarget.USER_REMOTE;
 		const message = isRemote
-			? nls.localize('mcp.renderer.remoteConfigFound', 'MCP servers should not be configured in remote user settings. Use the dedicated MCP configuration instead.')
-			: nls.localize('mcp.renderer.userConfigFound', 'MCP servers should not be configured in user settings. Use the dedicated MCP configuration instead.');
+			? nls.localize('mcp.renderer.remoteConfigFound', 'Connectors should not be configured in remote user settings. Use the dedicated connector configuration instead.')
+			: nls.localize('mcp.renderer.userConfigFound', 'Connectors should not be configured in user settings. Use the dedicated connector configuration instead.');
 
 		return {
 			severity: MarkerSeverity.Warning,
@@ -876,8 +876,8 @@ class McpSettingsRenderer extends Disposable implements languages.CodeActionProv
 	private generateMcpConfigurationCodeActions(diagnostics: IMarkerData[]): languages.CodeAction[] {
 		const isRemote = this.settingsEditorModel.configurationTarget === ConfigurationTarget.USER_REMOTE;
 		const openConfigLabel = isRemote
-			? nls.localize('mcp.renderer.openRemoteConfig', 'Open Remote User MCP Configuration')
-			: nls.localize('mcp.renderer.openUserConfig', 'Open User MCP Configuration');
+			? nls.localize('mcp.renderer.openRemoteConfig', 'Open Remote User Connector Configuration')
+			: nls.localize('mcp.renderer.openUserConfig', 'Open User Connector Configuration');
 
 		const commandId = isRemote ? McpCommandIds.OpenRemoteUserMcp : McpCommandIds.OpenUserMcp;
 

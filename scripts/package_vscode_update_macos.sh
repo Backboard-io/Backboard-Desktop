@@ -38,38 +38,19 @@ DMG_ASSETS_DIR="${DMG_ASSETS_DIR:-${REPO_ROOT}/scripts/dmg-assets}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 SKIP_SIGNING="${SKIP_SIGNING:-0}"
 BACKBOARD_KEEP_ALL_LOCALES="${BACKBOARD_KEEP_ALL_LOCALES:-0}"
-BACKBOARD_SIGNING_PROFILE="${BACKBOARD_SIGNING_PROFILE:-robert}"
 BACKBOARD_INSTALL_BOOTSTRAP_LAUNCHER="${BACKBOARD_INSTALL_BOOTSTRAP_LAUNCHER:-0}"
 BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS="${BACKBOARD_BOOTSTRAP_LAUNCH_DELAY_SECONDS:-0}"
 BOOTSTRAP_REAL_EXECUTABLE=""
 
-case "${BACKBOARD_SIGNING_PROFILE}" in
-  robert)
-    DEFAULT_SIGNING_DIR="${HOME}/.backboard/apple-notarization-robert"
-    DEFAULT_NOTARIZATION_KEY_ID="H4T54P4BTU"
-    DEFAULT_NOTARIZATION_ISSUER_ID="11ee54e4-9610-4049-b9ed-d630e07950db"
-    DEFAULT_IDENTITY="Developer ID Application: Robert Imbeault (M4UYB6AG86)"
-    DEFAULT_EXPECTED_TEAM_ID="M4UYB6AG86"
-    ;;
-  bagel)
-    DEFAULT_SIGNING_DIR="${HOME}/.backboard/apple-notarization"
-    DEFAULT_NOTARIZATION_KEY_ID="394Z48F5U4"
-    DEFAULT_NOTARIZATION_ISSUER_ID="8ff632f9-6430-4bcf-aa2b-115b23c1150e"
-    DEFAULT_IDENTITY="Developer ID Application: Bagel Ventures LLC (VR8YRDMDSP)"
-    DEFAULT_EXPECTED_TEAM_ID="VR8YRDMDSP"
-    ;;
-  custom)
-    DEFAULT_SIGNING_DIR=""
-    DEFAULT_NOTARIZATION_KEY_ID=""
-    DEFAULT_NOTARIZATION_ISSUER_ID=""
-    DEFAULT_IDENTITY=""
-    DEFAULT_EXPECTED_TEAM_ID=""
-    ;;
-  *)
-    echo "Unsupported BACKBOARD_SIGNING_PROFILE=${BACKBOARD_SIGNING_PROFILE}; expected robert, bagel, or custom." >&2
-    exit 1
-    ;;
-esac
+# Every shipped build is signed by this one team. macOS keys users' privacy
+# grants (Desktop/Documents access, Accessibility, Screen Recording, Automation)
+# on bundle id + team, so shipping under any other team would silently re-raise
+# every permission prompt for every user after they update.
+BACKBOARD_RELEASE_TEAM_ID="M4UYB6AG86"
+DEFAULT_SIGNING_DIR="${HOME}/.backboard/apple-notarization-robert"
+DEFAULT_NOTARIZATION_KEY_ID="H4T54P4BTU"
+DEFAULT_NOTARIZATION_ISSUER_ID="11ee54e4-9610-4049-b9ed-d630e07950db"
+DEFAULT_IDENTITY="Developer ID Application: Robert Imbeault (${BACKBOARD_RELEASE_TEAM_ID})"
 
 P12_PATH="${P12_PATH:-${DEFAULT_SIGNING_DIR:+${DEFAULT_SIGNING_DIR}/developer-id-application.p12}}"
 P12_PASSWORD_PATH="${P12_PASSWORD_PATH:-${DEFAULT_SIGNING_DIR:+${DEFAULT_SIGNING_DIR}/p12-password.txt}}"
@@ -79,7 +60,11 @@ APPLE_NOTARIZATION_ISSUER_ID="${APPLE_NOTARIZATION_ISSUER_ID:-${DEFAULT_NOTARIZA
 KEYCHAIN_NAME="${KEYCHAIN_NAME:-backboard-vscode-signing.keychain}"
 KEYCHAIN_PATH="${KEYCHAIN_PATH:-${HOME}/Library/Keychains/${KEYCHAIN_NAME}-db}"
 IDENTITY="${IDENTITY:-${DEFAULT_IDENTITY}}"
-EXPECTED_TEAM_ID="${EXPECTED_TEAM_ID:-${DEFAULT_EXPECTED_TEAM_ID}}"
+EXPECTED_TEAM_ID="${EXPECTED_TEAM_ID:-${BACKBOARD_RELEASE_TEAM_ID}}"
+if [[ "${EXPECTED_TEAM_ID}" != "${BACKBOARD_RELEASE_TEAM_ID}" ]]; then
+  echo "Refusing to sign for team ${EXPECTED_TEAM_ID}: releases must stay on ${BACKBOARD_RELEASE_TEAM_ID} or every user's macOS permission grants reset." >&2
+  exit 1
+fi
 
 if [[ -z "${VERSION}" ]]; then
   echo "Missing VERSION. Example: VERSION=1.3.10 $0" >&2
@@ -276,14 +261,14 @@ require_file "${VSAPP}/Contents/Info.plist"
 require_file "${VSAPP}/Contents/Resources/app"
 if [[ "${SKIP_SIGNING}" != "1" ]]; then
   if [[ -z "${P12_PATH}" || -z "${P12_PASSWORD_PATH}" || -z "${IDENTITY}" || -z "${EXPECTED_TEAM_ID}" ]]; then
-    echo "Signing profile ${BACKBOARD_SIGNING_PROFILE} is incomplete. Set P12_PATH, P12_PASSWORD_PATH, IDENTITY, and EXPECTED_TEAM_ID." >&2
+    echo "Signing configuration is incomplete. Set P12_PATH, P12_PASSWORD_PATH, and IDENTITY." >&2
     exit 1
   fi
   require_file "${P12_PATH}"
 fi
 if [[ "${SKIP_SIGNING}" != "1" && "${SKIP_NOTARIZATION}" != "1" ]]; then
   if [[ -z "${ASC_KEY_PATH}" || -z "${APPLE_NOTARIZATION_KEY_ID}" || -z "${APPLE_NOTARIZATION_ISSUER_ID}" ]]; then
-    echo "Notarization profile ${BACKBOARD_SIGNING_PROFILE} is incomplete." >&2
+    echo "Notarization configuration is incomplete. Set ASC_KEY_PATH, APPLE_NOTARIZATION_KEY_ID, and APPLE_NOTARIZATION_ISSUER_ID." >&2
     exit 1
   fi
   require_file "${ASC_KEY_PATH}"
@@ -312,6 +297,10 @@ rebuild_backboard_runtime() {
     *) cli_target="" ;;
   esac
   (cd "${BACKBOARD_EXTENSION_SOURCE}" && BACKBOARD_CLI_TARGET="${cli_target}" npm run package-cli-ts)
+  # cargo builds the computer-use driver for the host only.
+  if [[ "${ARCH}" == "aarch64" && "$(uname -m)" == "arm64" ]]; then
+    "${VSCODE_ROOT}/scripts/build-cua-driver.sh"
+  fi
 }
 
 sync_backboard_extension_runtime() {
@@ -332,6 +321,21 @@ sync_backboard_extension_runtime() {
   mkdir -p "${BACKBOARD_EXTENSION_PATH}/bin"
   cp "${BACKBOARD_CLI_SOURCE}" "${BACKBOARD_EXTENSION_PATH}/bin/backboard-cli-ts"
   chmod 755 "${BACKBOARD_EXTENSION_PATH}/bin/backboard-cli-ts"
+
+  # Computer use drives apps through this driver (Accessibility and
+  # ScreenCaptureKit). Without it cli-ts falls back to osascript "System Events"
+  # scripting, which costs users an extra macOS Automation prompt.
+  local cua_driver="${BACKBOARD_EXTENSION_SOURCE}/bin/cua-driver"
+  local cua_arch="arm64"
+  if [[ "${ARCH}" == "x86_64" ]]; then
+    cua_arch="x86_64"
+  fi
+  if [[ -f "${cua_driver}" ]] && lipo -archs "${cua_driver}" 2>/dev/null | tr ' ' '\n' | grep -qx "${cua_arch}"; then
+    cp "${cua_driver}" "${BACKBOARD_EXTENSION_PATH}/bin/cua-driver"
+    chmod 755 "${BACKBOARD_EXTENSION_PATH}/bin/cua-driver"
+  else
+    echo "WARNING: no ${cua_arch} cua-driver at ${cua_driver}; computer use will fall back to osascript and raise an extra Automation prompt." >&2
+  fi
 }
 
 prune_release_app() {
@@ -493,7 +497,7 @@ fi
 
 echo "Packaging ${VSAPP} for ${CHANNEL} updates"
 if [[ "${SKIP_SIGNING}" != "1" ]]; then
-  echo "Signing profile: ${BACKBOARD_SIGNING_PROFILE} (${EXPECTED_TEAM_ID})"
+  echo "Signing identity: ${IDENTITY} (${EXPECTED_TEAM_ID})"
 fi
 rm -rf "${OUT}"
 mkdir -p "${OUT}/dmg"

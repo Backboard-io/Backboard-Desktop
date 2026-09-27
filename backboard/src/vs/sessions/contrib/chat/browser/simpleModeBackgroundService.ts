@@ -12,6 +12,7 @@ import { IContextKey, IContextKeyService, RawContextKey } from '../../../../plat
 import { IFileDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+import { IWorkbenchEnvironmentService } from '../../../../workbench/services/environment/common/environmentService.js';
 
 import { simpleModeBackgroundPresets } from './simpleModeBackgroundPresets.js';
 
@@ -56,8 +57,15 @@ export class SimpleModeBackgroundService extends Disposable implements ISimpleMo
 	private pendingChooseBackgroundImage: Promise<void> | undefined;
 
 	get backgroundImage(): URI | undefined {
-		return this._backgroundImage;
+		return this.appliesToWindow ? this._backgroundImage : undefined;
 	}
+
+	/**
+	 * The wallpaper belongs to Simple's chat. The Canvas window reuses those
+	 * chat surfaces for its docked agent, where a photo behind the board and
+	 * the transcript only fights the media.
+	 */
+	private readonly appliesToWindow: boolean;
 
 	get backgroundImageRevision(): number {
 		return this._backgroundImageRevision;
@@ -67,8 +75,10 @@ export class SimpleModeBackgroundService extends Disposable implements ISimpleMo
 		@IFileDialogService private readonly fileDialogService: IFileDialogService,
 		@IStorageService private readonly storageService: IStorageService,
 		@IContextKeyService contextKeyService: IContextKeyService,
+		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
 	) {
 		super();
+		this.appliesToWindow = !environmentService.isOptimusWindow;
 
 		this.backgroundImageSetContext = SimpleModeBackgroundImageSetContext.bindTo(contextKeyService);
 		// Share the preference across mode profiles, preserving existing selections.
@@ -176,6 +186,8 @@ export class SimpleModeBackgroundService extends Disposable implements ISimpleMo
 		this._backgroundImage = resource;
 		this._backgroundImageRevision++;
 		this.backgroundImageSetContext.set(!!resource);
-		this._onDidChangeBackgroundImage.fire(resource);
+		if (this.appliesToWindow) {
+			this._onDidChangeBackgroundImage.fire(resource);
+		}
 	}
 }

@@ -25,6 +25,15 @@ describe('macUpdateInstallerScript', () => {
 		assert.doesNotMatch(script, /rm -rf "\$APP_PATH"/);
 	});
 
+	test('refuses a staged app signed by a different team before reporting ready', () => {
+		const script = macUpdateInstallerScript();
+		const prepareIndex = script.indexOf('prepare_staged_app "$SOURCE_APP"');
+		const teamIndex = script.indexOf('require_same_signing_team "$STAGED_APP" "$APP_PATH"');
+		const readyIndex = script.indexOf('write_status "ready"');
+
+		assert.deepStrictEqual({ teamAfterPrepare: teamIndex > prepareIndex, teamBeforeReady: teamIndex < readyIndex }, { teamAfterPrepare: true, teamBeforeReady: true });
+	});
+
 	test('waits for a clean app exit and never force-terminates the IDE', () => {
 		const script = macUpdateInstallerScript();
 

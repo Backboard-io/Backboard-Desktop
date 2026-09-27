@@ -202,9 +202,14 @@ export class FindSkillTool extends Tool<Input, Output> {
 
 		const c = best.candidate;
 
-		// A download runs third-party code and needs a human confirm; a sub-agent
-		// can't prompt, so surface the candidate instead of throwing on askUser.
-		if ((ctx.agentDepth ?? 0) > 0) {
+		// Full Access (bypass) skips the confirm: that mode already lets the
+		// model run `npx skills add` itself through Execute, so asking here
+		// would only stop the turn without protecting anything.
+		const fullAccess = ctx.permissions?.mode === "bypass";
+		// Otherwise a download runs third-party code and needs a human confirm;
+		// a sub-agent can't prompt, so surface the candidate instead of throwing
+		// on askUser.
+		if (!fullAccess && (ctx.agentDepth ?? 0) > 0) {
 			return ok(
 				{ task: input.task, candidates: remoteCandidates(ranked) },
 				`Found "${c.slug}" on skills.sh, but downloading a third-party skill must be confirmed by the user and a sub-agent cannot prompt. Ask the main agent to run find_skill for this task.`,
@@ -212,12 +217,14 @@ export class FindSkillTool extends Tool<Input, Output> {
 			);
 		}
 
-		const answer = await ctx.askUser(
-			`Download and use "${c.slug}" from skills.sh?` +
-				` Source: ${c.source}${c.installs ? `, ${c.installs} installs` : ""}.` +
-				` This runs "npx skills add" to install third-party code into this repo.`,
-			["Download", "Cancel"],
-		);
+		const answer = fullAccess
+			? "Download"
+			: await ctx.askUser(
+					`Download and use "${c.slug}" from skills.sh?` +
+						` Source: ${c.source}${c.installs ? `, ${c.installs} installs` : ""}.` +
+						` This runs "npx skills add" to install third-party code into this repo.`,
+					["Download", "Cancel"],
+				);
 		if (answer !== "Download") {
 			return ok(
 				{ task: input.task, candidates: remoteCandidates(ranked) },

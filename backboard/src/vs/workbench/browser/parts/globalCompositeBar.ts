@@ -397,7 +397,7 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 					if (canUseMcp) {
 						const manageMCPAction = toAction({
 							id: `configureSessions${account.label}`,
-							label: localize('manageTrustedMCPServers', "Manage Trusted MCP Servers"),
+							label: localize('manageTrustedMCPServers', "Manage Trusted Connectors"),
 							enabled: true,
 							run: () => this.commandService.executeCommand('_manageTrustedMCPServersForAccount', { providerId, accountLabel: account.label })
 						});
@@ -460,7 +460,7 @@ export class AccountsActivityActionViewItem extends AbstractGlobalActivityAction
 					const providerSubMenuActions: IAction[] = [];
 					const manageMCPAction = toAction({
 						id: `configureSessions${account.label}`,
-						label: localize('manageTrustedMCPServers', "Manage Trusted MCP Servers"),
+						label: localize('manageTrustedMCPServers', "Manage Trusted Connectors"),
 						enabled: true,
 						run: () => this.commandService.executeCommand('_manageTrustedMCPServersForAccount', { providerId, accountLabel: account.label })
 					});

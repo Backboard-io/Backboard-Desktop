@@ -102,6 +102,11 @@ export interface LoadMcpConfigOptions {
 	homeDir?: string;
 	env?: RuntimeEnv;
 	paths?: McpConfigPaths;
+	/**
+	 * Which files to read; defaults to both. The IDE-driven serve host reads
+	 * only the project file once the IDE has taken ownership of the user file.
+	 */
+	scopes?: readonly McpConfigSourceScope[];
 }
 
 interface LoadedFile {
@@ -120,11 +125,14 @@ export async function loadMcpConfig(
 	const cwd = path.resolve(options.cwd);
 	const paths = options.paths ?? mcpConfigPaths(cwd, options.homeDir);
 	const warnings: string[] = [];
+	const scopes = options.scopes ?? ["project", "user"];
 	const files = await loadFiles(
-		[
-			{ scope: "project", path: paths.project },
-			{ scope: "user", path: paths.user },
-		],
+		(
+			[
+				{ scope: "project", path: paths.project },
+				{ scope: "user", path: paths.user },
+			] satisfies McpConfigSource[]
+		).filter((source) => scopes.includes(source.scope)),
 		warnings,
 	);
 	let timeoutMs = DEFAULT_MCP_TIMEOUT_MS;
@@ -212,6 +220,80 @@ export async function saveProjectMcpServer(
 	await mkdir(path.dirname(filePath), { recursive: true });
 	await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`);
 	return filePath;
+}
+
+/**
+ * Adds a server to the user file (`~/.backboard/mcp.json`), which every
+ * Backboard window and worktree reads. An existing entry with the same name
+ * is left untouched and reported as `created: false`.
+ */
+export async function saveUserMcpServer(
+	filePath: string,
+	name: string,
+	server: McpServerFileEntry,
+): Promise<{ path: string; created: boolean }> {
+	const data = await readMcpFile(filePath);
+	const existingServers = isRecord(data.mcpServers) ? data.mcpServers : {};
+	if (Object.hasOwn(existingServers, name)) {
+		return { path: filePath, created: false };
+	}
+	data.mcpServers = {
+		...existingServers,
+		[name]: server,
+	};
+
+	await mkdir(path.dirname(filePath), { recursive: true });
+	await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`);
+	return { path: filePath, created: true };
+}
+
+/**
+ * Converts a normalized server config back into the on-disk entry shape,
+ * preserving every field that `normalizeMcpServer` reads, so
+ * `normalizeMcpServer(name, mcpConfigToFileEntry(config))` round-trips.
+ */
+export function mcpConfigToFileEntry(
+	server: McpServerConfig,
+): McpServerFileEntry & { disabled?: boolean } {
+	const filters = {
+		...(server.enabledTools ? { enabledTools: [...server.enabledTools] } : {}),
+		...(server.disabledTools.length > 0
+			? { disabledTools: [...server.disabledTools] }
+			: {}),
+		...(server.enabledPrompts
+			? { enabledPrompts: [...server.enabledPrompts] }
+			: {}),
+		...(server.disabledPrompts.length > 0
+			? { disabledPrompts: [...server.disabledPrompts] }
+			: {}),
+		...(server.enabledResources
+			? { enabledResources: [...server.enabledResources] }
+			: {}),
+		...(server.disabledResources.length > 0
+			? { disabledResources: [...server.disabledResources] }
+			: {}),
+		timeoutMs: server.timeoutMs,
+		...(server.trustToolAnnotations ? { trustToolAnnotations: true } : {}),
+		...(server.disabled ? { disabled: true } : {}),
+	};
+	if (server.type === "stdio") {
+		return {
+			type: "stdio",
+			...(server.command ? { command: server.command } : {}),
+			args: [...server.args],
+			...(Object.keys(server.env).length > 0 ? { env: { ...server.env } } : {}),
+			...(server.cwd ? { cwd: server.cwd } : {}),
+			...filters,
+		};
+	}
+	return {
+		type: "streamable-http",
+		...(server.url ? { url: server.url } : {}),
+		...(Object.keys(server.headers).length > 0
+			? { headers: { ...server.headers } }
+			: {}),
+		...filters,
+	};
 }
 
 export async function disableProjectMcpServer(

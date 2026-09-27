@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import '../../../../workbench/contrib/chat/browser/widget/media/chatPanelCursorLook.css';
-import { $, addDisposableListener, append, EventType } from '../../../../base/browser/dom.js';
+import { $, addDisposableListener, append, EventType, getWindow } from '../../../../base/browser/dom.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../base/common/observable.js';
@@ -171,6 +171,10 @@ export class OptimusChatViewPane extends ViewPane implements IChatResourceNaviga
 		// Keep the Editor host hierarchy so its full panel styles apply, including
 		// the recent-chat welcome surface and bottom-anchored composer.
 		container.classList.add('optimus-chat-view', 'chat-viewpane');
+		// Panel tokens key on this part class rather than a :has() on the part.
+		const targetWindow = getWindow(container);
+		targetWindow.requestAnimationFrame(() => container.closest('.part.auxiliarybar')?.classList.add('part-has-optimus-chat-view'));
+		this._register(toDisposable(() => container.closest('.part.auxiliarybar')?.classList.remove('part-has-optimus-chat-view')));
 
 		const header = append(container, $('.optimus-chat-folder-header'));
 		this.folderRow = append(header, $('.optimus-chat-header-folder.new-session-workspace-picker-container'));

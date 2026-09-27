@@ -1,6 +1,9 @@
-import type { WorkerWorkspaceProgress, WorkerIntegrationStatus } from "../workspaces/WorkerWorkspaceTypes.ts";
 import type { AgentToolOutput } from "../tools/AgentToolOutput.ts";
 import type { ToolExecutionMetadata } from "../tools/ToolFailure.ts";
+import type {
+	WorkerIntegrationStatus,
+	WorkerWorkspaceProgress,
+} from "../workspaces/WorkerWorkspaceTypes.ts";
 
 export type AgentTaskStatus =
 	| "queued"
@@ -18,7 +21,14 @@ export interface AgentTaskResultBundle {
 	completedAt: string;
 }
 
-export type AgentExecutionStatus = "queued" | "preparing" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+export type AgentExecutionStatus =
+	| "queued"
+	| "preparing"
+	| "running"
+	| "completed"
+	| "failed"
+	| "cancelled"
+	| "interrupted";
 
 export interface AgentTaskRecord {
 	/** Monotonic public lifecycle revision; legacy records begin at zero. */
@@ -58,4 +68,7 @@ export interface AgentTaskStoreData {
 }
 
 /** Content-free result projection: reports remain available through AgentWait. */
-export type AgentWorkerState = Omit<AgentTaskRecord, "result" | "inputFingerprint" | "execution">;
+export type AgentWorkerState = Omit<
+	AgentTaskRecord,
+	"result" | "inputFingerprint" | "execution"
+>;

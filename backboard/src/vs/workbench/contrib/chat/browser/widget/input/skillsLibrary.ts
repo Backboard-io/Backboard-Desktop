@@ -64,7 +64,7 @@ const NON_INSTALLABLE_ANTHROPIC_SESSION_SKILLS = new Set([
 ]);
 
 export type SkillsLibraryCategory = 'pinned' | 'installed' | 'official' | 'all';
-type SkillsMarketplacePage = 'skills' | 'mcp';
+export type SkillsMarketplacePage = 'skills' | 'mcp';
 
 const SKILLS_LIBRARY_CATEGORIES: readonly { readonly id: SkillsLibraryCategory; readonly label: string; readonly gapBefore?: boolean }[] = [
 	{ id: 'pinned', label: localize('chat.skillsLibrary.category.pinned', "Pinned") },
@@ -75,7 +75,7 @@ const SKILLS_LIBRARY_CATEGORIES: readonly { readonly id: SkillsLibraryCategory; 
 
 const SKILLS_MARKETPLACE_PAGES: readonly { readonly id: SkillsMarketplacePage; readonly label: string }[] = [
 	{ id: 'skills', label: localize('chat.skillsLibrary.page.skills', "Skills") },
-	{ id: 'mcp', label: localize('chat.skillsLibrary.page.mcp', "MCP") },
+	{ id: 'mcp', label: localize('chat.skillsLibrary.page.mcp', "Connectors") },
 ];
 
 import { IMcpCliServerConfig, IMcpMarketplaceCatalogEntry, MCP_MARKETPLACE_CATALOG, McpCatalogInstallability, McpMarketplaceCategory } from './mcpMarketplaceCatalog.js';
@@ -129,13 +129,13 @@ const MCP_MARKETPLACE_CATEGORIES: readonly { readonly id: McpMarketplaceCategory
 	{ id: 'infrastructure-devops', label: localize('chat.skillsLibrary.mcpCategory.infrastructure', "Infrastructure") },
 	{ id: 'stdio-utilities', label: localize('chat.skillsLibrary.mcpCategory.utilities', "Utilities") },
 	{ id: 'remote-servers', label: localize('chat.skillsLibrary.mcpCategory.integrations', "Integrations") },
-	{ id: 'all', label: localize('chat.skillsLibrary.mcpCategory.all', "All MCPs"), gapBefore: true },
+	{ id: 'all', label: localize('chat.skillsLibrary.mcpCategory.all', "All Connectors"), gapBefore: true },
 ];
 
 const EMBEDDED_MCP_MARKETPLACE_CATEGORIES: readonly { readonly id: McpMarketplaceCategory; readonly label: string }[] = [
 	{ id: 'pinned', label: localize('chat.skillsLibrary.mcpCategory.pinned', "Pinned") },
 	{ id: 'installed', label: localize('chat.skillsLibrary.mcpCategory.installed', "Installed") },
-	{ id: 'all', label: localize('chat.skillsLibrary.mcpCategory.all', "All MCPs") },
+	{ id: 'all', label: localize('chat.skillsLibrary.mcpCategory.all', "All Connectors") },
 	{ id: 'development-testing', label: localize('chat.skillsLibrary.mcpCategory.development', "Development") },
 	{ id: 'project-management-docs', label: localize('chat.skillsLibrary.mcpCategory.projectManagement', "Projects & Docs") },
 	{ id: 'payments-commerce', label: localize('chat.skillsLibrary.mcpCategory.payments', "Payments") },
@@ -949,7 +949,7 @@ function createMcpMarketplaceItem(entry: IMcpMarketplaceCatalogEntry, gallery?: 
 		registryName,
 		expectedNames: entry.expectedNames,
 		officialPublisherHints: entry.officialPublisherHints,
-		description: gallery?.description ?? entry.description ?? localize('chat.skillsLibrary.mcpDefaultDescription', "{0} MCP server", entry.label),
+		description: gallery?.description ?? entry.description ?? localize('chat.skillsLibrary.mcpDefaultDescription', "{0} connector", entry.label),
 		publisher: gallery?.publisherDisplayName ?? gallery?.publisher ?? entry.publisher ?? entry.label,
 		source: entry.id,
 		installConfiguration: entry.installConfiguration,
@@ -1372,7 +1372,7 @@ export class SkillsLibraryController {
 		});
 	}
 
-	showMarketplace(anchor?: HTMLElement): void {
+	showMarketplace(anchor?: HTMLElement, page: SkillsMarketplacePage = 'skills'): void {
 		const ownerDocument = anchor?.ownerDocument ?? dom.getActiveWindow().document;
 		const existingOverlay = ownerDocument.querySelector('.skills-library-overlay');
 		if (dom.isHTMLElement(existingOverlay)) {
@@ -1389,14 +1389,15 @@ export class SkillsLibraryController {
 			host: overlayParent,
 			ownerDocument,
 			embedded: false,
+			page,
 		});
 	}
 
-	private createMarketplaceSession(options: { readonly host: HTMLElement; readonly ownerDocument: Document; readonly embedded: boolean; readonly simpleMode?: boolean }): DisposableStore {
+	private createMarketplaceSession(options: { readonly host: HTMLElement; readonly ownerDocument: Document; readonly embedded: boolean; readonly simpleMode?: boolean; readonly page?: SkillsMarketplacePage }): DisposableStore {
 		const { embedded, host, ownerDocument, simpleMode = false } = options;
 		const store = new DisposableStore();
 		const simpleRenderStore = store.add(new DisposableStore());
-		let activeMarketplacePage: SkillsMarketplacePage = simpleMode ? 'mcp' : 'skills';
+		let activeMarketplacePage: SkillsMarketplacePage = simpleMode ? 'mcp' : options.page ?? 'skills';
 		let activeCategory: SkillsLibraryCategory = simpleMode ? 'installed' : 'all';
 		let activeMcpCategory: McpMarketplaceCategory = 'all';
 		let installedFilter: InstalledSkillFilter = 'all';
@@ -1719,7 +1720,7 @@ export class SkillsLibraryController {
 				if (embeddedFilterButton) {
 					const categoryLabel = getActiveEmbeddedCategoryLabel();
 					const filterLabel = activeMarketplacePage === 'mcp'
-						? localize('chat.skillsLibrary.filterMcpCategory', "Filter MCP servers by category: {0}", categoryLabel)
+						? localize('chat.skillsLibrary.filterMcpCategory', "Filter connectors by category: {0}", categoryLabel)
 						: localize('chat.skillsLibrary.filterSkillCategory', "Filter skills by category: {0}", categoryLabel);
 					embeddedFilterButton.setAttribute('aria-label', filterLabel);
 					embeddedFilterButton.title = filterLabel;
@@ -1863,12 +1864,12 @@ export class SkillsLibraryController {
 
 		const renderHeading = (): void => {
 			if (activeMarketplacePage === 'mcp') {
-				title.textContent = simpleMode ? localize('simpleMcp.title', "MCPs") : localize('chat.skillsLibrary.mcpTitle', "MCP");
-				subtitle.textContent = simpleMode ? localize('simpleMcp.subtitle', "Work with Backboard across your favorite tools") : localize('chat.skillsLibrary.mcpSubtitle', "Browse and install MCP servers.");
+				title.textContent = simpleMode ? localize('simpleMcp.title', "Connectors") : localize('chat.skillsLibrary.mcpTitle', "Connectors");
+				subtitle.textContent = simpleMode ? localize('simpleMcp.subtitle', "Work with Backboard across your favorite tools") : localize('chat.skillsLibrary.mcpSubtitle', "Browse and install connectors.");
 				search.placeholder = embedded && !simpleMode
-					? localize('chat.skillsLibrary.searchMcpMarketplacePlaceholder', "Search MCP Servers in Marketplace")
-					: localize('chat.skillsLibrary.searchMcpPlaceholder', "Search MCPs");
-				search.setAttribute('aria-label', localize('chat.skillsLibrary.searchMcpAria', "Search MCP servers"));
+					? localize('chat.skillsLibrary.searchMcpMarketplacePlaceholder', "Search connectors in Marketplace")
+					: localize('chat.skillsLibrary.searchMcpPlaceholder', "Search Connectors");
+				search.setAttribute('aria-label', localize('chat.skillsLibrary.searchMcpAria', "Search Connectors"));
 				return;
 			}
 			title.textContent = localize('chat.skillsLibrary.skillsTitle', "Skills");
@@ -1882,12 +1883,12 @@ export class SkillsLibraryController {
 		const renderMcpContent = (): void => {
 			if (mcpState.loading) {
 				content.classList.add('skills-library-content-centered');
-				dom.append(content, dom.$('.skills-library-status', undefined, localize('chat.skillsLibrary.mcpLoading', "Loading MCP servers...")));
+				dom.append(content, dom.$('.skills-library-status', undefined, localize('chat.skillsLibrary.mcpLoading', "Loading Connectors...")));
 				return;
 			}
 			content.classList.remove('skills-library-content-centered');
 			if (mcpState.error && activeMcpCategory !== 'installed') {
-				dom.append(content, dom.$('.skills-library-error', undefined, localize('chat.skillsLibrary.mcpErrorDetail', "Unable to load MCP registry: {0}", mcpState.error)));
+				dom.append(content, dom.$('.skills-library-error', undefined, localize('chat.skillsLibrary.mcpErrorDetail', "Unable to load the connector registry: {0}", mcpState.error)));
 			}
 			if (activeMcpCategory === 'installed' && !simpleMode) {
 				renderInstalledMcpContent();
@@ -1928,7 +1929,7 @@ export class SkillsLibraryController {
 				renderSimpleMcpDeleteButton(entry, server);
 			}
 			if (!strip.childElementCount) {
-				dom.append(strip, dom.$('span.simple-mcp-empty', undefined, localize('simpleMcp.empty', "Your installed MCPs will appear here.")));
+				dom.append(strip, dom.$('span.simple-mcp-empty', undefined, localize('simpleMcp.empty', "Your installed connectors will appear here.")));
 			}
 			const tabs = dom.append(content, dom.$('.simple-mcp-scope'));
 			for (const [id, label] of [['all', localize('simpleMcp.public', "Public")], ['installed', localize('simpleMcp.personal', "Personal")]] as const) {
@@ -1975,13 +1976,13 @@ export class SkillsLibraryController {
 				const normalizedQuery = query.trim();
 				let emptyMessage: string;
 				if (normalizedQuery) {
-					emptyMessage = localize('chat.skillsLibrary.noMcpSearchResults', "No MCP servers found");
+					emptyMessage = localize('chat.skillsLibrary.noMcpSearchResults', "No connectors found");
 				} else if (activeMcpCategory === 'pinned') {
-					emptyMessage = localize('chat.skillsLibrary.noPinnedMcps', "You don't have any pinned MCP servers yet. Explore MCPs and pin the ones you want quick access to.");
+					emptyMessage = localize('chat.skillsLibrary.noPinnedMcps', "You don't have any pinned connectors yet. Explore connectors and pin the ones you want quick access to.");
 				} else if (activeMcpCategory === 'installed') {
-					emptyMessage = localize('chat.skillsLibrary.noInstalledMcps', "You don't have any installed MCP servers yet. Explore MCPs to add one.");
+					emptyMessage = localize('chat.skillsLibrary.noInstalledMcps', "You don't have any installed connectors yet. Explore connectors to add one.");
 				} else {
-					emptyMessage = localize('chat.skillsLibrary.noMcpResults', "More MCP servers are coming soon");
+					emptyMessage = localize('chat.skillsLibrary.noMcpResults', "More connectors are coming soon");
 				}
 				dom.append(content, dom.$('.skills-library-status', undefined, emptyMessage));
 				return;
@@ -2057,7 +2058,7 @@ export class SkillsLibraryController {
 			const { footer } = renderMcpCardShell(parent, item);
 			const favoriteButton = dom.append(footer, dom.$('button.skills-library-icon-button.skills-library-pin-button', {
 				type: 'button',
-				'aria-label': favorite ? localize('chat.skillsLibrary.unfavoriteMcp', "Unpin MCP server") : localize('chat.skillsLibrary.favoriteMcp', "Pin MCP server"),
+				'aria-label': favorite ? localize('chat.skillsLibrary.unfavoriteMcp', "Unpin Connector") : localize('chat.skillsLibrary.favoriteMcp', "Pin Connector"),
 			}, renderIcon(favorite ? Codicon.pinned : Codicon.pin)));
 			store.add(dom.addDisposableListener(favoriteButton, dom.EventType.CLICK, () => {
 				this.setMcpFavorite(item.id, !favorite);
@@ -2102,7 +2103,7 @@ export class SkillsLibraryController {
 			const { footer } = renderMcpCardShell(parent, item ?? server);
 			const favoriteButton = dom.append(footer, dom.$('button.skills-library-icon-button.skills-library-pin-button', {
 				type: 'button',
-				'aria-label': favorite ? localize('chat.skillsLibrary.unfavoriteMcp', "Unpin MCP server") : localize('chat.skillsLibrary.favoriteMcp', "Pin MCP server"),
+				'aria-label': favorite ? localize('chat.skillsLibrary.unfavoriteMcp', "Unpin Connector") : localize('chat.skillsLibrary.favoriteMcp', "Pin Connector"),
 			}, renderIcon(favorite ? Codicon.pinned : Codicon.pin)));
 			store.add(dom.addDisposableListener(favoriteButton, dom.EventType.CLICK, () => {
 				this.setMcpFavorite(favoriteId, !favorite);
@@ -2143,7 +2144,7 @@ export class SkillsLibraryController {
 			const { footer } = renderMcpCardShell(parent, item ?? removed.server, true);
 			const favoriteButton = dom.append(footer, dom.$('button.skills-library-icon-button.skills-library-pin-button', {
 				type: 'button',
-				'aria-label': favorite ? localize('chat.skillsLibrary.unfavoriteMcp', "Unpin MCP server") : localize('chat.skillsLibrary.favoriteMcp', "Pin MCP server"),
+				'aria-label': favorite ? localize('chat.skillsLibrary.unfavoriteMcp', "Unpin Connector") : localize('chat.skillsLibrary.favoriteMcp', "Pin Connector"),
 			}, renderIcon(favorite ? Codicon.pinned : Codicon.pin)));
 			store.add(dom.addDisposableListener(favoriteButton, dom.EventType.CLICK, () => {
 				this.setMcpFavorite(favoriteId, !favorite);
@@ -2801,7 +2802,7 @@ export class SkillsLibraryController {
 			await this._progressService.withProgress(
 				{
 					location: ProgressLocation.Notification,
-					title: localize('chat.skillsLibrary.mcpInstalling', "Installing MCP server '{0}'...", item.label),
+					title: localize('chat.skillsLibrary.mcpInstalling', "Installing Connector '{0}'...", item.label),
 					cancellable: false,
 				},
 				async () => {
@@ -2825,7 +2826,7 @@ export class SkillsLibraryController {
 							? await this.resolveGalleryMcpForInstall(item)
 							: createTrustedGithubMcpGalleryServer(item);
 						if (!galleryServer) {
-							throw new Error(localize('chat.skillsLibrary.mcpGalleryUnavailable', "MCP registry is unavailable."));
+							throw new Error(localize('chat.skillsLibrary.mcpGalleryUnavailable', "The connector registry is unavailable."));
 						}
 						await this._mcpManagementService.installFromGallery(galleryServer, item.preferredPackageType ? { packageType: item.preferredPackageType } : undefined);
 					}
@@ -2834,12 +2835,12 @@ export class SkillsLibraryController {
 					await this.addToBackboardCliConfig(item);
 				}
 			);
-			this._notificationService.info(localize('chat.skillsLibrary.mcpInstallSuccess', "Installed MCP server '{0}'.", item.label));
+			this._notificationService.info(localize('chat.skillsLibrary.mcpInstallSuccess', "Installed Connector '{0}'.", item.label));
 		} catch (err) {
 			this._logService.error('[SkillsLibrary] Failed to install MCP server:', err);
 			this._notificationService.notify({
 				severity: Severity.Error,
-				message: localize('chat.skillsLibrary.mcpInstallFailed', "Failed to install MCP server '{0}': {1}", item.label, getMcpInstallFailureMessage(err)),
+				message: localize('chat.skillsLibrary.mcpInstallFailed', "Failed to install connector '{0}': {1}", item.label, getMcpInstallFailureMessage(err)),
 			});
 			throw err;
 		}
@@ -2852,7 +2853,7 @@ export class SkillsLibraryController {
 			this._logService.error('[SkillsLibrary] Failed to open MCP server options:', err);
 			this._notificationService.notify({
 				severity: Severity.Error,
-				message: localize('chat.skillsLibrary.mcpOptionsFailed', "Failed to open setup for MCP server '{0}': {1}", server.displayName ?? server.name, err?.message ?? String(err)),
+				message: localize('chat.skillsLibrary.mcpOptionsFailed', "Failed to open setup for connector '{0}': {1}", server.displayName ?? server.name, err?.message ?? String(err)),
 			});
 		}
 	}
@@ -2862,7 +2863,7 @@ export class SkillsLibraryController {
 			const definitionId = getMcpDefinitionIdForWorkbenchServer(server);
 			const runtimeServer = this._mcpService.servers.get().find(candidate => candidate.definition.id === definitionId);
 			if (!runtimeServer) {
-				this._notificationService.info(localize('chat.skillsLibrary.mcpOutputUnavailable', "No output is available for MCP server '{0}' yet. Start the server first.", server.displayName ?? server.name));
+				this._notificationService.info(localize('chat.skillsLibrary.mcpOutputUnavailable', "No output is available for connector '{0}' yet. Start it first.", server.displayName ?? server.name));
 				await this.openMcpServerOptions(server);
 				return;
 			}
@@ -2871,7 +2872,7 @@ export class SkillsLibraryController {
 			this._logService.error('[SkillsLibrary] Failed to open MCP server output:', err);
 			this._notificationService.notify({
 				severity: Severity.Error,
-				message: localize('chat.skillsLibrary.mcpOutputFailed', "Failed to open output for MCP server '{0}': {1}", server.displayName ?? server.name, err instanceof Error ? err.message : String(err)),
+				message: localize('chat.skillsLibrary.mcpOutputFailed', "Failed to open output for connector '{0}': {1}", server.displayName ?? server.name, err instanceof Error ? err.message : String(err)),
 			});
 		}
 	}
@@ -2888,7 +2889,7 @@ export class SkillsLibraryController {
 			this._logService.error('[SkillsLibrary] Failed to open MCP server configuration:', err);
 			this._notificationService.notify({
 				severity: Severity.Error,
-				message: localize('chat.skillsLibrary.mcpConfigurationFailed', "Failed to open configuration for MCP server '{0}': {1}", server.displayName ?? server.name, err instanceof Error ? err.message : String(err)),
+				message: localize('chat.skillsLibrary.mcpConfigurationFailed', "Failed to open configuration for connector '{0}': {1}", server.displayName ?? server.name, err instanceof Error ? err.message : String(err)),
 			});
 		}
 	}
@@ -2980,12 +2981,12 @@ export class SkillsLibraryController {
 		try {
 			await this._mcpManagementService.uninstall(server);
 			await this.removeFromBackboardCliConfig(server.name);
-			this._notificationService.info(localize('chat.skillsLibrary.mcpRemoveSuccess', "Removed MCP server '{0}'.", server.displayName ?? server.name));
+			this._notificationService.info(localize('chat.skillsLibrary.mcpRemoveSuccess', "Removed Connector '{0}'.", server.displayName ?? server.name));
 		} catch (err) {
 			this._logService.error('[SkillsLibrary] Failed to remove MCP server:', err);
 			this._notificationService.notify({
 				severity: Severity.Error,
-				message: localize('chat.skillsLibrary.mcpRemoveFailed', "Failed to remove MCP server '{0}': {1}", server.displayName ?? server.name, err?.message ?? String(err)),
+				message: localize('chat.skillsLibrary.mcpRemoveFailed', "Failed to remove connector '{0}': {1}", server.displayName ?? server.name, err?.message ?? String(err)),
 			});
 			throw err;
 		}

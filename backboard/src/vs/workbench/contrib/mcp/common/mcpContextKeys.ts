@@ -17,8 +17,8 @@ import { IMcpService, LazyCollectionState, McpConnectionState, McpServerCacheSta
 
 export namespace McpContextKeys {
 
-	export const serverCount = new RawContextKey<number>('mcp.serverCount', undefined, { type: 'number', description: localize('mcp.serverCount.description', "Context key that has the number of registered MCP servers") });
-	export const hasUnknownTools = new RawContextKey<boolean>('mcp.hasUnknownTools', undefined, { type: 'boolean', description: localize('mcp.hasUnknownTools.description', "Indicates whether there are MCP servers with unknown tools.") });
+	export const serverCount = new RawContextKey<number>('mcp.serverCount', undefined, { type: 'number', description: localize('mcp.serverCount.description', "Context key that has the number of registered connectors") });
+	export const hasUnknownTools = new RawContextKey<boolean>('mcp.hasUnknownTools', undefined, { type: 'boolean', description: localize('mcp.hasUnknownTools.description', "Indicates whether there are connectors with unknown tools.") });
 	/**
 	 * A context key that indicates whether there are any servers with errors.
 	 *
@@ -26,14 +26,14 @@ export namespace McpContextKeys {
 	 * @default undefined
 	 * @description This key is used to track the presence of servers with errors in the MCP context.
 	 */
-	export const hasServersWithErrors = new RawContextKey<boolean>('mcp.hasServersWithErrors', undefined, { type: 'boolean', description: localize('mcp.hasServersWithErrors.description', "Indicates whether there are any MCP servers with errors.") });
+	export const hasServersWithErrors = new RawContextKey<boolean>('mcp.hasServersWithErrors', undefined, { type: 'boolean', description: localize('mcp.hasServersWithErrors.description', "Indicates whether there are any connectors with errors.") });
 	/**
 	 * Whether the focused chat session exposes MCP servers of its own (e.g. an
 	 * agent-host session whose runtime owns the servers). Drives the composer's
 	 * MCP chip so users can connect or disconnect a server for that session.
 	 */
-	export const hasAgentHostServers = new RawContextKey<boolean>('mcp.hasAgentHostServers', false, { type: 'boolean', description: localize('mcp.hasAgentHostServers.description', "Indicates whether the active chat session exposes its own MCP servers.") });
-	export const toolsCount = new RawContextKey<number>('mcp.toolsCount', undefined, { type: 'number', description: localize('mcp.toolsCount.description', "Context key that has the number of registered MCP tools") });
+	export const hasAgentHostServers = new RawContextKey<boolean>('mcp.hasAgentHostServers', false, { type: 'boolean', description: localize('mcp.hasAgentHostServers.description', "Indicates whether the active chat session exposes its own connectors.") });
+	export const toolsCount = new RawContextKey<number>('mcp.toolsCount', undefined, { type: 'number', description: localize('mcp.toolsCount.description', "Context key that has the number of registered connector tools") });
 }
 
 

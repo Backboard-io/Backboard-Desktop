@@ -68,10 +68,18 @@ export interface McpResourceRefreshResult {
 }
 
 export type McpServerRuntimeState =
+	| "connecting"
 	| "connected"
 	| "needs_authentication"
 	| "error"
 	| "disabled";
+
+/**
+ * Where a live server's configuration came from: pushed by the IDE, read from
+ * the user or project `mcp.json`, or added at runtime (find_mcp) by this
+ * process.
+ */
+export type McpServerOrigin = "ide" | "user" | "project" | "runtime";
 
 export interface McpServerRuntimeStatus {
 	name: string;
@@ -80,6 +88,8 @@ export interface McpServerRuntimeStatus {
 	status: McpServerRuntimeState;
 	message?: string;
 	toolNames: string[];
+	/** Filled in by `McpClientManager.listServerStatuses`. */
+	source?: McpServerOrigin;
 	capabilities?: ServerCapabilities;
 	promptNames?: string[];
 	resourceUris?: string[];

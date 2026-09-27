@@ -147,7 +147,7 @@ export class IncrementalDOMMorpher extends Disposable {
 			// throttles DOM commits: holding text back here would starve the
 			// reveal clock of the lead it needs to ride out network jitter.
 			const revealPaces = !!this._textReveal && this._lastMarkdown.length < TEXT_REVEAL_MAX_LENGTH;
-			this._buffer.setRate(revealPaces ? Number.MAX_SAFE_INTEGER : rate, isComplete);
+			this._buffer.setRate(revealPaces ? Number.MAX_SAFE_INTEGER : rate, isComplete, revealPaces);
 		}
 
 		// For buffers that don't handle their own flushing (e.g.

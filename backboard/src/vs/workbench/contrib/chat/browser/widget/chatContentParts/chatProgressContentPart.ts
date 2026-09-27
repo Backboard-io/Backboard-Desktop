@@ -454,7 +454,8 @@ export class ChatWorkingProgressContentPart extends Disposable implements IChatC
 		if (this.useCursorTranscriptPresentation && !isComplete) {
 			// Codex's "Thinking" placeholder (`SAi`): dim label in the cadenced shimmer, no spinner.
 			iconElement.remove();
-			messageContainer.hidden = true;
+			// Detach rather than hide: transcript CSS forces the progress text visible.
+			messageContainer.remove();
 			const placeholder = applyCodexRoot(cxEl('div', 'cx-thinking-placeholder min-w-0 text-size-chat leading-normal py-0'));
 			const line = cxEl('div', 'inline-flex max-w-full min-w-0 items-center overflow-hidden text-text/60 [&_*:not(button)]:!text-text/60');
 			this.codexShimmer = this._register(new CodexCadencedShimmer(localize('chat.codex.thinking', "Thinking"), 'min-w-0 flex-1 truncate select-none'));

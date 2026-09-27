@@ -27,6 +27,18 @@ export interface McpServerConnectorOptions {
 	onPromptListChanged: (serverName: string) => void;
 	onResourceListChanged: (serverName: string) => void;
 	onResourceUpdated: (serverName: string, uri: string) => void;
+	/**
+	 * Fired when an established connection closes (the stdio process exits,
+	 * the HTTP session ends). Deliberate closes fire it too; the receiver
+	 * compares `client` against its live connection to tell them apart.
+	 */
+	onConnectionClosed?: (serverName: string, client: Client) => void;
+	/** Fired for transport/protocol errors on an established connection. */
+	onConnectionError?: (
+		serverName: string,
+		client: Client,
+		error: Error,
+	) => void;
 }
 
 export class McpServerConnector {
@@ -89,6 +101,11 @@ export class McpServerConnector {
 				);
 			}
 			authProvider?.closeCallbackServer();
+			const connectedClient = client;
+			connectedClient.onclose = () =>
+				this.options.onConnectionClosed?.(server.name, connectedClient);
+			connectedClient.onerror = (error) =>
+				this.options.onConnectionError?.(server.name, connectedClient, error);
 			return {
 				connection: {
 					server,

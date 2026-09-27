@@ -312,7 +312,7 @@ export class AuthenticationMcpService extends Disposable implements IAuthenticat
 		}
 		const { result } = await this.dialogService.prompt<SessionPromptChoice>({
 			type: Severity.Info,
-			message: nls.localize('confirmAuthenticationAccess', "The MCP server '{0}' wants to access the {1} account '{2}'.", mcpServerName, provider.label, accountName),
+			message: nls.localize('confirmAuthenticationAccess', "The Connector '{0}' wants to access the {1} account '{2}'.", mcpServerName, provider.label, accountName),
 			buttons: [
 				{
 					label: nls.localize({ key: 'allow', comment: ['&& denotes a mnemonic'] }, "&&Allow"),

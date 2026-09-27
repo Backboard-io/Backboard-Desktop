@@ -15,7 +15,7 @@ import { generateUuid } from '../../../../base/common/uuid.js';
 import { localize } from '../../../../nls.js';
 import { ILogService } from '../../../log/common/log.js';
 import { bridgeConfig } from './backboardRuntimeShared.js';
-import { CLI_TS_HOST_MANAGED_BYOK_CAPABILITY, type CliTsAgentEvent, type CliTsReadyPayload, type CliTsRecord, type CliTsServeControl, isCliTsRecord } from './cliTsProtocol.js';
+import { CLI_TS_HOST_MANAGED_BYOK_CAPABILITY, type CliTsAgentEvent, type CliTsMcpListPayload, type CliTsReadyPayload, type CliTsRecord, type CliTsServeControl, isCliTsRecord } from './cliTsProtocol.js';
 
 /** Tells cli-ts that provider keys come only from the host, never from `~/.backboard/keys.json`. */
 const HOST_MANAGED_KEYS_ENV = 'BACKBOARD_HOST_MANAGED_KEYS';
@@ -256,7 +256,13 @@ export interface CliTsServeProcessOptions {
 	 * read control lines. Used to push state the process cannot read from disk
 	 * (the IDE-owned MCP server set) into a freshly started run.
 	 */
-	readonly onReady?: () => void;
+	readonly onReady?: (payload: CliTsReadyPayload) => void;
+	/**
+	 * Receives unsolicited `serve:mcp` snapshots (no `requestId`), written by
+	 * runtimes with the `mcp-status-events` capability whenever an MCP
+	 * server's status changes (background connect, `find_mcp`, sign-in, crash).
+	 */
+	readonly onMcpStatus?: (payload: CliTsMcpListPayload) => void;
 	/**
 	 * The host's credential snapshot for this runtime. It is written after
 	 * every spawn, once the child has announced itself and proved it honours
@@ -655,7 +661,7 @@ export class CliTsServeProcess extends Disposable {
 				this.ready.complete(payload);
 			}
 			try {
-				this.options.onReady?.();
+				this.options.onReady?.(payload);
 			} catch (error) {
 				this.logService.warn(`[cli-ts] onReady callback failed: ${error instanceof Error ? error.message : String(error)}`);
 			}
@@ -663,6 +669,14 @@ export class CliTsServeProcess extends Disposable {
 		}
 		const requestId = record.requestId;
 		if (!requestId) {
+			if (record.type === 'serve:mcp') {
+				try {
+					this.options.onMcpStatus?.((record.payload && typeof record.payload === 'object' ? record.payload : {}) as CliTsMcpListPayload);
+				} catch (error) {
+					this.logService.warn(`[cli-ts] onMcpStatus callback failed: ${error instanceof Error ? error.message : String(error)}`);
+				}
+				return;
+			}
 			if (record.type === 'serve:error') {
 				this.logService.warn(`[cli-ts] serve error: ${JSON.stringify(record.payload)}`);
 			}
@@ -699,7 +713,7 @@ export class CliTsServeProcess extends Disposable {
 	}
 }
 
-/** Read by cli-ts to locate the Cua Driver that executes Jev computer-use tasks. */
+/** Read by cli-ts to locate the Cua Driver that executes computer-use tasks. */
 const CUA_DRIVER_BIN_ENV = 'BACKBOARD_CUA_DRIVER_BIN';
 
 /**

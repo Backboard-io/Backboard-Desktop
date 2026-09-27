@@ -1,6 +1,7 @@
 import type {
 	MemoryMode,
 	MemoryProfile,
+	ModelRef,
 	ThinkingConfig,
 } from "../../config/defaults.ts";
 import type { RuntimeThinkingResolver } from "../../config/thinkingRuntime.ts";
@@ -26,6 +27,10 @@ export interface SubAgentRunnerDeps {
 	/** The parent's selection and billing route, captured once per spawn. */
 	getRoute: () => ModelRoute;
 	getOpenRouterProvider?: () => string | undefined;
+	/** Recently successful models, tried first when a worker needs another model. */
+	getSuccessfulModels?: () => readonly ModelRef[];
+	/** Base delay before a failed worker turn is retried; doubles per attempt. */
+	retryBackoffMs?: number;
 	memory: MemoryMode;
 	memoryProfile: MemoryProfile;
 	getThinking: () => Promise<ThinkingConfig | null | undefined>;

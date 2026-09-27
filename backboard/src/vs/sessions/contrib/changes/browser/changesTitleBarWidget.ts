@@ -18,7 +18,9 @@ import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/l
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { registerIcon } from '../../../../platform/theme/common/iconRegistry.js';
 import { Menus } from '../../../browser/menus.js';
-import { SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { MultipleSessionsVisibleContext, SessionSidePanelVisibleContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { ISessionsPartService } from '../../../services/sessions/browser/sessionsPartService.js';
+import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
 import { logChangesViewToggle } from '../../../common/sessionsTelemetry.js';
 import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
 
@@ -29,6 +31,16 @@ const TOGGLE_SECONDARY_SIDEBAR_TOOLTIP = localize('toggleSecondarySidebarTooltip
 const changesButtonIcon = registerIcon('agent-right-panel-changes', Codicon.gitCompare, localize('agentRightPanelChangesIcon', "Icon for opening the session changes view."));
 const secondarySidebarToggleClosedIcon = registerIcon('agent-secondary-sidebar-toggle-closed', Codicon.layoutSidebarRightOff, localize('agentSecondarySidebarToggleClosedIcon', "Icon for the sessions secondary sidebar when closed."));
 const secondarySidebarToggleOpenIcon = registerIcon('agent-secondary-sidebar-toggle-open', Codicon.layoutSidebarRight, localize('agentSecondarySidebarToggleOpenIcon', "Icon for the sessions secondary sidebar when open."));
+
+/**
+ * The right panel is the auxiliary bar for a single session, and each
+ * column's own panel while the grid is split (evaluated in the column's
+ * scoped context, so every header shows its own column's state).
+ */
+const RightPanelVisibleCondition = ContextKeyExpr.or(
+	ContextKeyExpr.and(MultipleSessionsVisibleContext.toNegated(), AuxiliaryBarVisibleContext),
+	ContextKeyExpr.and(MultipleSessionsVisibleContext, SessionSidePanelVisibleContext),
+)!;
 
 /**
  * Registers the Changes view toggle action in the titlebar session toolbar.
@@ -47,7 +59,7 @@ export class ChangesTitleBarContribution extends Disposable implements IWorkbenc
 				tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
 				icon: secondarySidebarToggleClosedIcon,
 				toggled: {
-					condition: AuxiliaryBarVisibleContext,
+					condition: RightPanelVisibleCondition,
 					icon: secondarySidebarToggleOpenIcon,
 					title: localize('hideRightPanel', "Hide Right Panel"),
 					tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
@@ -74,7 +86,7 @@ export class ChangesTitleBarContribution extends Disposable implements IWorkbenc
 				tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
 				icon: secondarySidebarToggleClosedIcon,
 				toggled: {
-					condition: AuxiliaryBarVisibleContext,
+					condition: RightPanelVisibleCondition,
 					icon: secondarySidebarToggleOpenIcon,
 					title: localize('hideRightPanel', "Hide Right Panel"),
 					tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
@@ -108,7 +120,7 @@ registerAction2(class extends Action2 {
 			tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
 			icon: secondarySidebarToggleClosedIcon,
 			toggled: {
-				condition: AuxiliaryBarVisibleContext,
+				condition: RightPanelVisibleCondition,
 				icon: secondarySidebarToggleOpenIcon,
 				title: localize('hideRightPanel', "Hide Right Panel"),
 				tooltip: TOGGLE_SECONDARY_SIDEBAR_TOOLTIP,
@@ -121,6 +133,21 @@ registerAction2(class extends Action2 {
 		const layoutService = accessor.get(IWorkbenchLayoutService);
 		const commandService = accessor.get(ICommandService);
 		const telemetryService = accessor.get(ITelemetryService);
+		const sessionsPartService = accessor.get(ISessionsPartService);
+
+		if (sessionsPartService.isSplit) {
+			// Toggle the active column's own panel. Header toolbars activate their
+			// column before running, so this is the column that was clicked.
+			const panel = sessionsPartService.getSidePanel(accessor.get(ISessionsService).activeSession.get()?.sessionId);
+			const show = !panel || !sessionsPartService.isSidePanelVisible(panel);
+			if (show) {
+				void commandService.executeCommand(RightWorkbenchCommandId.OpenLauncherMode, { preserveActiveTab: true });
+			} else {
+				sessionsPartService.setSidePanelVisible(panel, false);
+			}
+			logChangesViewToggle(telemetryService, show);
+			return;
+		}
 
 		const isVisible = !layoutService.isVisible(Parts.AUXILIARYBAR_PART);
 

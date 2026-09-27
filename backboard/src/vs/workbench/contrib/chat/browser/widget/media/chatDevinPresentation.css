@@ -10,23 +10,37 @@
  * inset, 8px marker gap, 2px row padding, and 14/20px copy. Questions share
  * a single surface with the existing composer, which stays fully available. */
 .monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-composer .interactive-session .interactive-input-part {
-	/* Pending questions and approvals are bands inside the composer shell (the
-	 * outer surface that also wraps the editor), like Devin's composer bands:
-	 * no card of their own, 6px inset, and a hairline between band and input. */
-	.backboard-composer-shell > :is(.chat-question-carousel-widget-container, .chat-tool-confirmation-carousel-container):not(:empty) {
-		width: 100%;
+	/* Pending questions and approvals pop out of the input box's top edge: a
+	 * card slightly inset from the composer, open at the bottom, whose last
+	 * 14px tuck under the input's rounded top so the two read as one piece
+	 * (the same way the changed-files tab attaches). */
+	> :is(.chat-question-carousel-widget-container, .chat-tool-confirmation-carousel-container):not(:empty) {
+		position: relative;
+		z-index: 1;
+		width: auto;
 		min-width: 0;
-		margin: -4px 0 6px;
-		padding: 0 0 5px;
+		margin: 0 10px -14px !important;
+		padding: 6px 6px 20px;
 		box-sizing: border-box;
-		border-bottom: 1px solid var(--bb-devin-card-border, color-mix(in srgb, var(--vscode-foreground) 7%, transparent));
+		border: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent);
+		border-bottom: 0;
+		border-radius: 16px 16px 0 0;
+		background: var(--bb-devin-card-surface, var(--vscode-editorWidget-background));
+		box-shadow: 0 -4px 12px rgb(0 0 0 / 0.12);
+		animation: backboard-composer-popout 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
 	}
 
-	.backboard-composer-shell > :is(.chat-question-carousel-widget-container, .chat-tool-confirmation-carousel-container):empty {
+	> :is(.chat-question-carousel-widget-container, .chat-tool-confirmation-carousel-container):empty {
 		display: none;
 	}
 
-	.backboard-composer-shell .chat-question-editor-panel:not(.chat-question-carousel-used) {
+	/* The input box stays on top of the tucked edge. */
+	> .interactive-input-and-side-toolbar {
+		position: relative;
+		z-index: 2;
+	}
+
+	.chat-question-editor-panel:not(.chat-question-carousel-used) {
 		max-height: min(420px, calc(100vh - 260px));
 		margin: 0;
 		padding: 0;
@@ -36,7 +50,7 @@
 		box-shadow: none;
 	}
 
-	.backboard-composer-shell .chat-tool-confirmation-carousel {
+	> .chat-tool-confirmation-carousel-container .chat-tool-confirmation-carousel {
 		margin: 0;
 		padding: 0;
 		border: 0;
@@ -388,7 +402,7 @@
 	padding: 4px 10px 6px !important;
 	gap: 0 !important;
 	border: 1px solid var(--bb-devin-card-border) !important;
-	border-radius: 12px !important;
+	border-radius: var(--bb-composer-radius, 18px) !important;
 	background: var(--bb-composer-surface) !important;
 	box-shadow: 0 0 0 5px var(--bb-devin-card-surface) !important;
 }
@@ -414,12 +428,15 @@
 	--bb-cursor-transcript-muted: var(--bb-devin-text-secondary, var(--vscode-descriptionForeground));
 	--bb-cursor-transcript-thought: var(--bb-cursor-transcript-muted);
 
+	/* Codex's user-message action row: under the bubble, right-aligned with it,
+	 * 4px below, shown on hover. Pinned to the row's top corner it overlapped
+	 * the bubble and ran past its right edge. */
 	.interactive-item-container.interactive-request > .checkpoint-container {
-		position: absolute;
-		top: 0;
-		right: var(--bb-editor-panel-gutter);
+		position: static;
+		order: 2;
+		align-self: flex-end;
 		width: auto;
-		margin: 0;
+		margin: 4px 0 0;
 	}
 
 	.interactive-item-container.interactive-response {
@@ -946,6 +963,40 @@
 			background: transparent;
 		}
 
+		/* Title and tool description share one line: the description is a
+		 * muted, ellipsized tail (no upstream en-dash, no second wrapped line). */
+		.chat-confirmation-widget-title .chat-query-title-part {
+			display: flex;
+			align-items: baseline;
+			gap: 6px;
+			min-width: 0;
+			overflow: hidden;
+		}
+
+		.chat-confirmation-widget-title .chat-query-title-part > .rendered-markdown {
+			flex: 0 0 auto;
+			white-space: nowrap;
+		}
+
+		.chat-confirmation-widget-title small {
+			min-width: 0;
+			overflow: hidden;
+			color: var(--vscode-descriptionForeground);
+			opacity: 1;
+			font-size: 12px;
+			white-space: nowrap;
+			text-overflow: ellipsis;
+
+			&::before { content: none; }
+
+			.rendered-markdown,
+			.rendered-markdown p {
+				display: inline;
+				margin: 0;
+				white-space: nowrap;
+			}
+		}
+
 		/* A single inset code surface; no second dark message frame. */
 		.chat-confirmation-widget-message .interactive-result-code-block {
 			margin: 0;
@@ -1023,11 +1074,28 @@
 		.chat-buttons > .monaco-button-dropdown > .monaco-button:not(.monaco-dropdown-button)::before {
 			content: counter(approval-choice, upper-alpha);
 			flex: 0 0 auto;
-			align-self: flex-start;
+			align-self: baseline;
+			width: 12px;
 			margin-left: 2px;
 			color: var(--vscode-descriptionForeground);
 			font-size: 12px;
 			line-height: 18px;
+		}
+
+		/* Letter hint and label share a baseline; the scope chevron hugs the label. */
+		.chat-buttons .monaco-button {
+			align-items: baseline;
+		}
+
+		.chat-buttons > .monaco-button-dropdown {
+			display: flex;
+			align-items: center;
+			justify-content: flex-start;
+
+			> .monaco-button:not(.monaco-dropdown-button) {
+				flex: 0 1 auto;
+				width: auto;
+			}
 		}
 
 		.chat-buttons .monaco-button:hover:not(.disabled) {
@@ -1215,21 +1283,38 @@
 	}
 
 	.combined-model-provider-picker-item {
+		flex: 0 1 auto;
 		margin-left: auto !important;
 		min-width: 0;
 		max-width: none !important;
+		overflow: hidden;
 	}
 
 	.combined-model-provider-trigger {
-		max-width: none !important;
-		height: auto !important;
-		min-height: 26px;
+		display: flex;
+		align-items: center;
+		flex-wrap: nowrap;
+		gap: 5px;
+		max-width: 100% !important;
+		min-width: 0;
+		height: 28px !important;
+		padding: 0 6px !important;
+		box-sizing: border-box;
+		overflow: hidden;
 	}
 
+	/* The name gives way first (ellipsis); logo, level and chevron never squeeze. */
 	.combined-model-provider-trigger-label {
-		text-overflow: clip !important;
-		white-space: normal !important;
-		overflow-wrap: anywhere;
+		flex: 0 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis !important;
+		white-space: nowrap !important;
+	}
+
+	.combined-model-provider-trigger > :is(.combined-model-logo, .combined-model-provider-trigger-thinking, .combined-model-provider-trigger-chevron) {
+		flex-shrink: 0;
+		white-space: nowrap;
 	}
 }
 
@@ -1259,8 +1344,12 @@
 	}
 }
 
-/* Separate themed composer shell, with breathing room and a location footer. */
-.backboard-composer-location { display: none; }
+/* One corner radius for every Backboard composer (Simple and the editor panel). */
+.monaco-workbench {
+	--bb-composer-radius: 18px;
+}
+
+/* Floating composer card: breathing room around a single input box. */
 
 .monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part {
 	background: transparent !important;
@@ -1276,7 +1365,7 @@
 	.chat-input-container:focus-within {
 		min-height: 86px !important;
 		padding: 8px !important;
-		border-radius: 12px !important;
+		border-radius: var(--bb-composer-radius, 18px) !important;
 		border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent) !important;
 		--bb-composer-surface: color-mix(in srgb, var(--vscode-foreground) 6%, var(--bb-devin-card-surface, var(--vscode-editorWidget-background))) !important;
 		background: var(--bb-composer-surface) !important;
@@ -1299,26 +1388,6 @@
 		background: var(--vscode-foreground) !important;
 		color: var(--vscode-editor-background) !important;
 	}
-
-	.backboard-composer-location {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		min-height: 32px;
-		padding: 4px 9px;
-		box-sizing: border-box;
-		color: var(--vscode-descriptionForeground);
-		font-size: 12px;
-		line-height: 20px;
-	}
-	.backboard-composer-location-item {
-		display: flex;
-		align-items: center;
-		gap: 5px;
-		min-width: 0;
-	}
-	.backboard-composer-location-item > .codicon { font-size: 16px; flex: 0 0 16px; }
-	.backboard-composer-folder > span:not(.codicon) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
 /* Let the context tip use both input lines instead of truncating at the edge. */
@@ -1330,87 +1399,67 @@
 	vertical-align: top;
 }
 
-/* Keep the input and control row separate even when a long model name wraps. */
+/* One 28px control row: every item is a flex box centred on the row, so
+ * icons, the model name and the send button share a single centre line
+ * (block items left shorter labels such as the 24px send button top-pinned). */
 .monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part {
-	.chat-input-toolbars { margin-top: 6px !important; flex-shrink: 0; }
+	.chat-input-toolbars { margin-top: 6px !important; flex-shrink: 0; align-items: center; }
+	.chat-input-toolbars .monaco-action-bar .action-item {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
 	.chat-input-toolbars .combined-model-provider-picker-item,
-	.chat-input-toolbars .combined-model-provider-trigger { height: auto !important; }
+	.chat-input-toolbars .combined-model-provider-trigger { height: 28px !important; }
 	.chat-input-toolbars .combined-model-provider-trigger-label { line-height: 18px; }
 }
 
-/* Collapse the model control before its name can wrap into the input area. */
+/* The control row is the size container for the model control's ladder below. */
 .monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .chat-input-toolbars {
 	container-type: inline-size;
 	container-name: backboard-composer-controls;
 }
 
-@container backboard-composer-controls (max-width: 420px) {
+/* One size ladder for the model control, measured on the composer's own
+ * control row so Simple, split panes and the editor panel behave alike:
+ * the name ellipsizes first, then the reasoning level and chevron drop, and
+ * only a very narrow row falls back to the provider logo alone. */
+@container backboard-composer-controls (max-width: 380px) {
+	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger > .combined-model-provider-trigger-thinking {
+		display: none !important;
+	}
+}
+
+@container backboard-composer-controls (max-width: 300px) {
+	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger > .combined-model-provider-trigger-chevron {
+		display: none !important;
+	}
+}
+
+@container backboard-composer-controls (max-width: 240px) {
 	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger > :not(.combined-model-logo) {
 		display: none !important;
 	}
 	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger {
 		width: 28px !important;
 		min-width: 28px !important;
-		height: 28px !important;
 		padding: 0 !important;
 		gap: 0 !important;
 		justify-content: center;
 	}
 	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger .combined-model-logo {
 		margin: 0 !important;
-		flex-shrink: 0;
 	}
 }
 
-.backboard-composer-host {
-	appearance: none; border: 0; background: transparent; color: inherit;
-	font: inherit; padding: 0 4px; border-radius: 12px; cursor: pointer;
-}
-.backboard-composer-host:is(:hover, [aria-expanded="true"]) { background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
-.backboard-composer-host:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
-.backboard-location-menu {
-	width: 240px; max-width: calc(100vw - 24px); padding: 7px;
-	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent);
-	border-radius: 12px; background: var(--vscode-editorWidget-background);
-	color: var(--vscode-foreground); box-shadow: 0 10px 28px #0004;
-	font-size: 13px;
-}
-.backboard-location-menu-row {
-	display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px;
-	padding: 5px 7px; border: 0; border-radius: 6px; background: transparent;
-	color: inherit; font: inherit; text-align: left; cursor: pointer;
-}
-.backboard-location-menu-row:hover:not(:disabled), .backboard-location-menu-row:focus-visible { background: var(--vscode-list-hoverBackground); outline: none; }
-.backboard-location-menu-row > .codicon { font-size: 16px; color: var(--vscode-descriptionForeground); }
-.backboard-location-menu-row:disabled { cursor: default; color: var(--vscode-descriptionForeground); }
-.backboard-location-check, .backboard-location-coming-soon { margin-left: auto; }
-.backboard-location-coming-soon { font-size: 11px; color: var(--vscode-descriptionForeground); }
-.backboard-location-menu-divider { height: 1px; margin: 7px 4px; background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
-.backboard-location-menu-heading { padding: 2px 7px 6px; color: var(--vscode-descriptionForeground); font-size: 11px; }
-
-/* Compact footer inset; the location row already supplies its own padding. */
-.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part:has(.backboard-composer-location) {
-	padding-bottom: 4px !important;
-}
-
-.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .backboard-composer-shell {
-	background: var(--bb-devin-card-surface, var(--vscode-editorWidget-background));
-	border-radius: 18px;
-	padding: 10px 6px 0;
-	box-sizing: border-box;
-	width: 100%;
-	min-width: 0;
-	flex-shrink: 0;
-}
+/* The changed-files band tucks its 18px bottom padding (chat.css) under the
+ * input box's rounded top, so it reads as a tab on the composer, not a box with
+ * an empty strip under its title. */
 .monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-input-part .chat-editing-session:not(:empty) {
-	margin: 0 auto -2px !important;
+	margin: 0 auto -18px !important;
 }
 
-/* Tuck the review card beneath the shell so no bottom border leaks through. */
-.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .backboard-composer-shell {
-	position: relative;
-	z-index: 2;
-}
+/* No bottom border leaks through where the review card tucks under the input. */
 .monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-input-part .chat-editing-session-container {
 	border-bottom: 0 !important;
 }
@@ -1447,4 +1496,229 @@
 	align-items: center;
 	justify-content: center;
 	color: var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground));
+}
+
+@keyframes backboard-composer-popout {
+	from { opacity: 0; transform: translateY(10px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench .backboard-composer .interactive-session .interactive-input-part > :is(.chat-question-carousel-widget-container, .chat-tool-confirmation-carousel-container) {
+		animation: none;
+	}
+}
+
+/* The session location view marks the machine the session runs on. */
+.backboard-composer-flow .backboard-composer-location-check {
+	margin-left: 6px;
+	font-size: 14px;
+	color: var(--vscode-foreground);
+}
+
+/* Session location sub-view of the "+" menu: title row with a back chevron,
+ * then plain option rows, matching the menu it came from. */
+.monaco-workbench .backboard-composer-flow.backboard-composer-location-flow {
+	width: 264px;
+}
+
+.monaco-workbench .backboard-composer-location-flow > .backboard-composer-flow-header {
+	justify-content: flex-start;
+	gap: 2px;
+	min-height: 30px;
+	padding: 4px 8px 0 4px;
+	font-size: 12px;
+}
+
+.monaco-workbench .backboard-composer-location-flow > .backboard-composer-flow-header > button.backboard-composer-flow-back {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border-radius: 5px !important;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .backboard-composer-location-flow > .backboard-composer-flow-header > button.backboard-composer-flow-back:hover {
+	background: var(--vscode-list-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .backboard-composer-location-flow > .backboard-composer-flow-header > button.backboard-composer-flow-back .codicon {
+	font-size: 14px;
+}
+
+.monaco-workbench .backboard-composer-location-flow .backboard-composer-drawer-option:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+
+.monaco-workbench .backboard-composer-location-flow .backboard-composer-drawer-value {
+	max-width: 120px;
+}
+
+/* Chips above the input: active capabilities, files, skills and images share
+ * one row and one chip style, inset to line up with the input text. Every chip
+ * reads [icon][label][×] at the same 22px height, so mixed chips stay aligned. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-container > .chat-attachments-container {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	margin: 0 0 2px !important;
+	padding: 0 2px;
+	box-sizing: border-box;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-container > .chat-attachments-container > :is(.chat-attached-context, .backboard-capability-chips) {
+	display: contents;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container :is(.backboard-capability-chip, .chat-attached-context .chat-attached-context-attachment) {
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	width: auto;
+	max-width: min(220px, 100%);
+	min-width: 0;
+	height: 22px;
+	margin: 0;
+	padding: 0 4px 0 5px;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+	border-radius: 7px;
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+	color: var(--vscode-foreground);
+	font: normal 12px/20px var(--vscode-font-family);
+	overflow: hidden;
+	cursor: default;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .backboard-capability-chip {
+	cursor: pointer;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container :is(.backboard-capability-chip, .chat-attached-context .chat-attached-context-attachment):hover {
+	border-color: color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+}
+
+/* Leading icon: one 14px slot for capability glyphs, file icons and thumbnails. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .backboard-capability-chip > .codicon:first-child,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container :is(.backboard-capability-chip-avatar, .chat-attached-context-avatar),
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .monaco-icon-label > .codicon,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .monaco-icon-label-iconpath {
+	flex: 0 0 14px;
+	width: 14px;
+	height: 14px;
+	margin: 0;
+	padding: 0;
+	font-size: 14px;
+	line-height: 14px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .chat-attached-context-pill {
+	flex: 0 0 16px;
+	width: 16px;
+	height: 16px;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .chat-attached-context-pill-image {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+/* Label: single line, ellipsized, never taller than the chip. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .backboard-capability-chip-label,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .monaco-icon-label,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .chat-attached-context-custom-text {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	min-width: 0;
+	height: 20px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .monaco-icon-label::before {
+	flex: 0 0 14px;
+	width: 14px;
+	height: 20px;
+	margin: 0;
+	padding: 0;
+	background-size: 14px;
+	background-position: center;
+}
+
+/* Trailing ×: capability chips and removable attachments end the same way. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .backboard-capability-chip-remove,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment > .monaco-button {
+	order: 99;
+	flex: 0 0 16px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	margin: 0 -2px 0 0 !important;
+	padding: 0 !important;
+	border-radius: 4px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	outline-offset: 0;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment > .monaco-button:hover,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .backboard-capability-chip:hover .backboard-capability-chip-remove {
+	background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+	color: var(--vscode-foreground);
+}
+
+/* A codicon attachment (skills, pages) has no file-icon glyph: drop the empty
+ * pseudo slot so its label sits the same distance from its icon as others. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .monaco-icon-label:has(> .monaco-icon-label-iconpath)::before {
+	display: none;
+}
+
+/* Avatar glyphs (capabilities, referenced conversations) are images, not glyph
+ * fonts: keep them crisp and centered in the leading slot. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container :is(.backboard-capability-chip-avatar, .chat-attached-context-avatar) {
+	display: block;
+	object-fit: contain;
+}
+
+/* `$(icon) name` labels put the codicon inline in the text run; center it on the
+ * text instead of letting it sit on the baseline above the label. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .monaco-highlighted-label > .codicon {
+	font-size: 14px;
+	line-height: 20px;
+	vertical-align: top;
+	margin-right: 1px;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* Ellipsize at the innermost label so long names end in "…" instead of clipping. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment :is(.monaco-icon-label-container, .monaco-icon-name-container, .label-name, .monaco-highlighted-label) {
+	display: block;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+/* Image chips show their thumbnail in the icon slot; the empty label adds no gap. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment.image-attachment > .monaco-icon-label:empty {
+	display: none;
 }

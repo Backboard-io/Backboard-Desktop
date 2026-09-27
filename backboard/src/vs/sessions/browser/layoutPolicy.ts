@@ -157,14 +157,15 @@ export class SessionsLayoutPolicy extends Disposable {
 	}
 
 	/**
-	 * Part visibility for the Advanced (Optimus) window: the board owns the
-	 * centre, the conversation is always docked on the right, and the editor
-	 * and panel stay out of the way until something explicitly opens them.
+	 * Part visibility for the Canvas window (the former Advanced/Optimus
+	 * window): the studio owns the centre and docks the project's agent
+	 * itself, so the right panel, editor and panel stay closed until
+	 * something explicitly opens them.
 	 */
 	getOptimusPartVisibilityDefaults(): IPartVisibilityDefaults {
 		return {
 			sidebar: true,
-			auxiliaryBar: true,
+			auxiliaryBar: false,
 			panel: false,
 			sessions: true,
 			editor: false

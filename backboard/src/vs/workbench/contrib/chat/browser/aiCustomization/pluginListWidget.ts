@@ -497,7 +497,7 @@ export class PluginListWidget extends Disposable {
 		sectionTitle.textContent = localize('plugins', "Plugins");
 		const sectionTitleDescription = DOM.append(this.sectionTitleHeader, $('p.section-title-description'));
 		const sectionTitleDescriptionText = DOM.append(sectionTitleDescription, $('span.section-title-description-text'));
-		sectionTitleDescriptionText.textContent = localize('pluginsDescription', "Extend your AI agent with plugins that add commands, skills, agents, hooks, and MCP servers from reusable packages.");
+		sectionTitleDescriptionText.textContent = localize('pluginsDescription', "Extend your AI agent with plugins that add commands, skills, agents, hooks, and connectors from reusable packages.");
 		// Real whitespace text node between description and link so the gap collapses
 		// when the link wraps to a new line (a CSS margin-left would push it inward).
 		sectionTitleDescription.appendChild(document.createTextNode(' '));

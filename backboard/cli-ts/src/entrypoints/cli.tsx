@@ -376,12 +376,19 @@ async function main(): Promise<void> {
 		mcpToolRegistrar.emitWarnings(prompts.warnings);
 		mcpToolRegistrar.emitWarnings(resources.warnings);
 	};
+	mcpManager.onDidLoseTools((toolNames) =>
+		mcpToolRegistrar.unregister({ toolNames, warnings: [] }),
+	);
 	const mcpController = new McpController({
 		cwd: config.cwd,
-		activateServer: async (name, server, signal) => {
+		userConfigPath: config.mcpConfigPaths.user,
+		activateServer: async (name, server, signal, source) => {
 			const controller = signal ?? new AbortController().signal;
 			return mcpToolRegistrar.register(
-				await mcpManager.addServer(name, server, controller),
+				await mcpManager.addServer(name, server, controller, {
+					...(source ? { configSources: [source] } : {}),
+					origin: "runtime",
+				}),
 			);
 		},
 		authenticateServer: async (name, signal) => {

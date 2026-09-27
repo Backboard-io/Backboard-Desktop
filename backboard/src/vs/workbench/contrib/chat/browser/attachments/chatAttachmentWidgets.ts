@@ -53,6 +53,8 @@ import { IMarkdownRendererService } from '../../../../../platform/markdown/brows
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { IOpenerService, OpenInternalOptions } from '../../../../../platform/opener/common/opener.js';
 import { FolderThemeIcon, IThemeService } from '../../../../../platform/theme/common/themeService.js';
+import { isDark } from '../../../../../platform/theme/common/theme.js';
+import { codexAgentAvatar } from '../widget/chatContentParts/codex/codexAvatars.js';
 import { fillEditorsDragData } from '../../../../browser/dnd.js';
 import { IFileLabelOptions, IResourceLabel, ResourceLabels } from '../../../../browser/labels.js';
 import { StaticResourceContextKey } from '../../../../common/contextkeys.js';
@@ -759,10 +761,24 @@ export class DefaultChatAttachmentWidget extends AbstractChatAttachmentWidget {
 		@IHoverService private readonly hoverService: IHoverService,
 		@IModelService private readonly modelService: IModelService,
 		@ILanguageService private readonly languageService: ILanguageService,
+		@IThemeService private readonly themeService: IThemeService,
 	) {
 		super(attachment, options, container, contextResourceLabels, currentLanguageModel, commandService, openerService, configurationService);
 
 		const attachmentLabel = attachment.fullName ?? attachment.name;
+
+		// A referenced conversation is another agent thread: it wears the same
+		// seeded avatar glyph the subagent strip gives an agent thread.
+		if (attachment.kind === 'sessionReference') {
+			this.label.setLabel(attachmentLabel, correspondingContentReference?.options?.status?.description);
+			const light = !isDark(this.themeService.getColorTheme().type);
+			this.element.insertBefore(codexAgentAvatar(attachment.id, light, 'chat-attached-context-avatar'), this.label.element);
+			this.element.ariaLabel = this.appendDeletionHint(localize('chat.attachment', "Attached context, {0}", attachment.name));
+			if (resource) {
+				this.addResourceOpenHandlers(resource, range);
+			}
+			return;
+		}
 
 		// Derive icon classes from resourceUri for file/folder icons
 		if (isStringVariableEntry(attachment) && attachment.icon && (ThemeIcon.isFile(attachment.icon) || ThemeIcon.isFolder(attachment.icon)) && attachment.resourceUri) {

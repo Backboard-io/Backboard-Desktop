@@ -11,6 +11,7 @@ const KNOWN_OPS = new Set<ServeControl["op"]>([
 	"clientToolResult",
 	"setModel",
 	"setMcpServers",
+	"authenticateMcpServer",
 	"setCredentials",
 	"listModels",
 	"listImageModels",
@@ -185,6 +186,16 @@ export function parseControlLine(line: string): ParsedControlLine | null {
 					record.force.some((name) => typeof name !== "string"))
 			)
 				return missing("force");
+			if (
+				record.authoritative !== undefined &&
+				typeof record.authoritative !== "boolean"
+			)
+				return missing("authoritative");
+			break;
+		case "authenticateMcpServer":
+			if (typeof record.requestId !== "string") return missing("requestId");
+			if (typeof record.name !== "string" || record.name.trim() === "")
+				return missing("name");
 			break;
 		case "listModels":
 		case "waitForIdle":

@@ -88,6 +88,12 @@ Object.assign(globalThis, {
 	__mkdirPInTests: path => fs.promises.mkdir(path, { recursive: true }),
 });
 
+// Tests run with node integration, so `process.execPath` here is the Electron
+// renderer helper. A child that execs it without ELECTRON_RUN_AS_NODE boots a
+// full Electron app named "Electron", which raises a macOS Keychain prompt for
+// "Electron Safe Storage". Children inherit this, so every such spawn runs as Node.
+process.env['ELECTRON_RUN_AS_NODE'] = '1';
+
 const IS_CI = !!process.env.BUILD_ARTIFACTSTAGINGDIRECTORY || !!process.env.GITHUB_WORKSPACE;
 const _tests_glob = '**/test/**/*.test.js';
 

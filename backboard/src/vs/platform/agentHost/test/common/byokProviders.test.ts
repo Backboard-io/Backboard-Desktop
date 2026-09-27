@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { byokProviderDefinition, isByokProviderId, keyBilledProviderId, parseBillingRoute, routeProviderFamily, vendorOfProvider } from '../../common/byokProviders.js';
+import { byokProviderDefinition, isByokProviderId, isConfigPropertyAvailableForModel, keyBilledProviderId, parseBillingRoute, routeProviderFamily, vendorOfProvider } from '../../common/byokProviders.js';
 
 suite('byokProviders', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -51,6 +51,20 @@ suite('byokProviders', () => {
 				vendor: 'openai',
 				unsupported: false,
 			},
+		);
+	});
+
+	test('hides Backboard media for key and subscription models, and memory only for keys', () => {
+		const models = ['anthropic/claude-opus-5', 'openai-key/gpt-5.5', 'backboard:openai-subscription/gpt-5.5', 'anthropic-subscription/opus[1m]', undefined];
+		assert.deepStrictEqual(
+			['imageModel', 'videoModel', 'imageGeneration', 'memory', 'webSearch'].map(property => models.map(model => isConfigPropertyAvailableForModel(property, model))),
+			[
+				[true, false, false, false, true],
+				[true, false, false, false, true],
+				[true, false, false, false, true],
+				[true, false, true, true, true],
+				[true, true, true, true, true],
+			],
 		);
 	});
 

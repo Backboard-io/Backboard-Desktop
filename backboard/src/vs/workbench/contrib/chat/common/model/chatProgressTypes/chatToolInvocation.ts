@@ -59,6 +59,12 @@ export class ChatToolInvocation implements IChatToolInvocation {
 	private readonly _progress = observableValue<{ message?: string | IMarkdownString; progress: number | undefined }>(this, { progress: 0 });
 	private readonly _state: ISettableObservable<IChatToolInvocation.State>;
 
+	/**
+	 * Approval granted up front by whoever owns this call (an agent-host
+	 * session running under Full Access). See {@link preApprove}.
+	 */
+	private _preApproval: ConfirmedReason | undefined;
+
 	// Streaming-related observables
 	private readonly _partialInput = observableValue<unknown>(this, undefined);
 	private readonly _streamingMessage = observableValue<string | IMarkdownString | undefined>(this, undefined);
@@ -164,6 +170,24 @@ export class ChatToolInvocation implements IChatToolInvocation {
 	}
 
 	/**
+	 * Approves this call ahead of its gates. Both the pre-execution
+	 * confirmation and the post-execution result review (MCP tools that
+	 * `confirmResults`) resolve with `reason`, so the invocation never enters
+	 * a waiting state and no confirmation card renders, not even for a frame.
+	 * A gate that is already open resolves immediately.
+	 */
+	public preApprove(reason: ConfirmedReason): void {
+		if (reason.type === ToolConfirmKind.Denied || reason.type === ToolConfirmKind.Skipped) {
+			return;
+		}
+		this._preApproval = reason;
+		const state = this._state.get();
+		if (state.type === IChatToolInvocation.StateKind.WaitingForConfirmation || state.type === IChatToolInvocation.StateKind.WaitingForPostApproval) {
+			state.confirm(reason);
+		}
+	}
+
+	/**
 	 * Update the partial input observable during streaming.
 	 */
 	public updatePartialInput(input: unknown): void {
@@ -262,6 +286,10 @@ export class ChatToolInvocation implements IChatToolInvocation {
 			}
 		};
 
+		// A pre-approval only stands in for a confirmation the tool asks for;
+		// calls that need none keep reporting `ConfirmationNotNeeded`.
+		autoConfirmed ??= this.confirmationMessages?.title ? this._preApproval : undefined;
+
 		// Transition to the appropriate state
 		if (autoConfirmed) {
 			confirm(autoConfirmed);
@@ -313,7 +341,7 @@ export class ChatToolInvocation implements IChatToolInvocation {
 		}
 
 		if (this.confirmationMessages?.confirmResults && !result?.toolResultError && result?.confirmResults !== false && !final) {
-			const autoApproved = await checkIfResultAutoApproved?.();
+			const autoApproved = this._preApproval ?? await checkIfResultAutoApproved?.();
 			if (autoApproved) {
 				this._setCompleted(result, autoApproved);
 			} else {

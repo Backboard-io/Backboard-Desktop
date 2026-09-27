@@ -12,7 +12,8 @@ VERSION="${VERSION:-}"
 ARCH="${ARCH:-aarch64}"
 CHANNEL="${CHANNEL:-stable}"
 DMG_PATH="${DMG_PATH:-}"
-EXPECTED_TEAM_ID="${EXPECTED_TEAM_ID:-}"
+# Signed artifacts must come from the one release team; see package_vscode_update_macos.sh.
+EXPECTED_TEAM_ID="${EXPECTED_TEAM_ID:-M4UYB6AG86}"
 ALLOW_UNSIGNED_SANDBOX=0
 
 usage() {

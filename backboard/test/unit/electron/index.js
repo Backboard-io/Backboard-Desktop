@@ -11,6 +11,13 @@
 process.env.MOCHA_COLORS = '1';
 
 const { app, BrowserWindow, ipcMain, crashReporter, session } = require('electron');
+
+// Never touch the macOS Keychain from tests: an ad-hoc signed dev build raises a
+// consent prompt for every Keychain read. Mirrors the mock keychain in src/main.ts.
+if (process.platform === 'darwin') {
+	app.commandLine.appendSwitch('use-mock-keychain');
+}
+
 const product = require('../../../product.json');
 const { tmpdir } = require('os');
 const { existsSync, mkdirSync, promises } = require('fs');

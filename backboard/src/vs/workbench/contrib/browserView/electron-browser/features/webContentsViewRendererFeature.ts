@@ -14,7 +14,7 @@ import { ILogService } from '../../../../../platform/log/common/log.js';
 import {
 	IBrowserViewKeyDownEvent,
 } from '../../../../../platform/browserView/common/browserView.js';
-import { IBrowserViewModel } from '../../common/browserView.js';
+import { IBrowserViewModel, IBrowserViewWorkbenchService } from '../../common/browserView.js';
 import {
 	BrowserEditor,
 	BrowserEditorContribution,
@@ -61,8 +61,20 @@ class WebContentsViewRendererFeature extends BrowserEditorContribution {
 		editor: BrowserEditor,
 		@ILogService private readonly logService: ILogService,
 		@IKeybindingService private readonly keybindingService: IKeybindingService,
+		@IBrowserViewWorkbenchService browserViewWorkbenchService: IBrowserViewWorkbenchService,
 	) {
 		super(editor);
+
+		// A host visibility policy may have refused an earlier show (the model
+		// keeps the view hidden); re-evaluate once the policy's answer changes.
+		// Also re-evaluate when this window comes back on screen: modes that
+		// share a native window can hide a view another mode was showing.
+		this._register(browserViewWorkbenchService.onDidChangeVisibilityPolicy(() => this._refresh()));
+		this._register(addDisposableListener(editor.window.document, 'visibilitychange', () => {
+			if (editor.window.document.visibilityState === 'visible') {
+				this._refresh();
+			}
+		}));
 
 		this._overlayManager = this._register(new BrowserOverlayManager(editor.window));
 

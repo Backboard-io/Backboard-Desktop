@@ -4,12 +4,15 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import * as sinon from 'sinon';
 import { mainWindow } from '../../../../../../base/browser/window.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { IChatToolInvocationSerialized } from '../../../common/chatService/chatService.js';
 import {
 	formatBackboardWorkTimer,
+	getBackboardTurnElapsedMs,
+	IBackboardTurnTicker,
 	isBackboardWorkerWait,
 	getBackboardTurnChronologicalWorkNodes,
 	getBackboardTurnFinalContentIndexes,
@@ -20,6 +23,7 @@ import {
 	reconcileBackboardTurnNodeOrder,
 	resolveBackboardTurnExpandedState,
 	syncBackboardSubagentStrip,
+	syncBackboardTurnTicker,
 	shouldRenderBackboardEditStandalone,
 	shouldScheduleInitialHeightChange,
 	shouldSplitBackboardThinkingBeforeEdit,
@@ -34,7 +38,79 @@ suite('ChatListRenderer', () => {
 			formatBackboardWorkTimer(608000, false),
 			formatBackboardWorkTimer(608000, true),
 			formatBackboardWorkTimer(-100, true),
-		], ['Working for 0s', 'Working for 10m 8s', 'Worked for 10m 8s', 'Worked']);
+		], ['Working for 0s', 'Working for 10m 8s', 'Finished Working', 'Finished Working']);
+	});
+
+	test('work timer counts wall-clock time through approval waits and never reads less once the turn ends', () => {
+		// The request started at 0s; an approval (answered late, or stale and never
+		// answered) was pending from 10s to 40s, which shifts the model's
+		// confirmation-adjusted start to 30s once the wait ends.
+		const live = { startedAt: 0, completedAt: undefined, elapsedMs: undefined, confirmationAdjustedStartedAt: 0, watchedLive: true };
+		const finished = { ...live, completedAt: 50_000, elapsedMs: 20_000, confirmationAdjustedStartedAt: 30_000 };
+		assert.deepStrictEqual({
+			duringWait: getBackboardTurnElapsedMs(live, false, 35_000),
+			afterWait: getBackboardTurnElapsedMs({ ...live, confirmationAdjustedStartedAt: 30_000 }, false, 41_000),
+			lastLive: getBackboardTurnElapsedMs(finished, false, 49_900),
+			worked: getBackboardTurnElapsedMs(finished, true, 60_000),
+			history: getBackboardTurnElapsedMs({ ...finished, watchedLive: false }, true, 60_000),
+			historyWithoutElapsed: getBackboardTurnElapsedMs({ ...finished, watchedLive: false, elapsedMs: undefined }, true, 60_000),
+		}, {
+			duringWait: 35_000,
+			afterWait: 41_000,
+			lastLive: 49_900,
+			worked: 50_000,
+			history: 20_000,
+			historyWithoutElapsed: 20_000,
+		});
+	});
+
+	test('the fold ticker is rebound by a re-render that rebuilds nothing and stops once the turn ends', () => {
+		const clock = sinon.useFakeTimers({ now: 0 });
+		const tickers = new Map<string, IBackboardTurnTicker>();
+		try {
+			let complete = false;
+			const render = (target: HTMLElement) => {
+				target.textContent = formatBackboardWorkTimer(Date.now(), complete);
+				return complete;
+			};
+			const label = mainWindow.document.createElement('span');
+			syncBackboardTurnTicker(tickers, 'response', label, render);
+			clock.tick(3_000);
+			const ticking = label.textContent;
+			// Every model change disposes the row (disposeElement stops the ticker) ...
+			tickers.get('response')?.dispose();
+			tickers.delete('response');
+			clock.tick(2_000);
+			const withoutRebind = label.textContent;
+			// ... and the render that follows rebinds it even when no part changed;
+			// binding the same label again keeps the one ticker.
+			syncBackboardTurnTicker(tickers, 'response', label, render);
+			syncBackboardTurnTicker(tickers, 'response', label, render);
+			clock.tick(4_000);
+			const resumed = label.textContent;
+			// A rebuilt fold moves the ticker to its new label.
+			const rebuilt = mainWindow.document.createElement('span');
+			syncBackboardTurnTicker(tickers, 'response', rebuilt, render);
+			clock.tick(1_000);
+			complete = true;
+			clock.tick(1_000);
+			const settled = rebuilt.textContent;
+			clock.tick(5_000);
+			assert.deepStrictEqual({ ticking, withoutRebind, resumed, oldLabel: label.textContent, settled, later: rebuilt.textContent, running: tickers.size }, {
+				ticking: 'Working for 3s',
+				withoutRebind: 'Working for 3s',
+				resumed: 'Working for 9s',
+				oldLabel: 'Working for 9s',
+				settled: 'Finished Working',
+				later: 'Finished Working',
+				running: 0,
+			});
+		} finally {
+			for (const ticker of tickers.values()) {
+				ticker.dispose();
+			}
+			clock.restore();
+		}
 	});
 
 	test('worker wait chrome is suppressed without suppressing other tools', () => {

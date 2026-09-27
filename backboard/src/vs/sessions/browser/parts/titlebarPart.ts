@@ -99,6 +99,8 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 	private panelDividersUpdateHandle: { dispose(): void } | undefined;
 	private panelDividersRetryCount = 0;
 	private readonly panelDividersResizeObserverStore = this._register(new DisposableStore());
+	private panelDividersResizeObserver: ResizeObserver | undefined;
+	private readonly panelDividersObservedParts = new Set<HTMLElement>();
 
 	constructor(
 		id: string,
@@ -275,7 +277,7 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 
 		this.updateStyles();
 		this.updateWelcomeToolbarVisibility();
-		this.updatePanelDividerResizeObservers();
+		this.updatePanelDividerResizeObservers(this.getPanelDividerParts());
 		this.schedulePanelDividersUpdate(true);
 
 		return this.element;
@@ -362,16 +364,15 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		}
 
 		clearNode(this.panelChromeContainer);
-		this.updatePanelDividerResizeObservers();
+		const parts = this.getPanelDividerParts();
+		this.updatePanelDividerResizeObservers(parts);
 
-		const targetWindow = getWindow(this.element);
 		const titlebarBounds = this.element.getBoundingClientRect();
-		const selector = '.part.sidebar, .part.sessionspart, .part.editor:not(.modal-editor-part), .part.auxiliarybar';
 		const positions = new Set<number>();
 		let sectionCount = 0;
 		let foundAuxiliaryBar = false;
 
-		for (const part of Array.from(targetWindow.document.querySelectorAll<HTMLElement>(selector))) {
+		for (const part of parts) {
 			const bounds = part.getBoundingClientRect();
 			const left = Math.round(bounds.left - titlebarBounds.left);
 			const width = Math.round(bounds.width);
@@ -428,27 +429,44 @@ export class TitlebarPart extends Part implements ITitlebarPart {
 		}
 	}
 
-	private updatePanelDividerResizeObservers(): void {
+	private getPanelDividerParts(): HTMLElement[] {
+		const selector = '.part.sidebar, .part.sessionspart, .part.editor:not(.modal-editor-part), .part.auxiliarybar';
+		// eslint-disable-next-line no-restricted-syntax
+		return Array.from(getWindow(this.element).document.querySelectorAll<HTMLElement>(selector));
+	}
+
+	/**
+	 * Observes the titlebar and every part whose bounds position the dividers.
+	 * One observer lives for the part's lifetime: a freshly created observer
+	 * reports each target once on observe(), so recreating it per update made
+	 * every update schedule the next one — a per-frame loop even at rest.
+	 */
+	private updatePanelDividerResizeObservers(parts: readonly HTMLElement[]): void {
 		if (!this.element) {
 			return;
 		}
 
-		const targetWindow = getWindow(this.element);
-		const ResizeObserverCtor = targetWindow.ResizeObserver;
-		if (!ResizeObserverCtor) {
-			return;
+		if (!this.panelDividersResizeObserver) {
+			const ResizeObserverCtor = getWindow(this.element).ResizeObserver;
+			if (!ResizeObserverCtor) {
+				return;
+			}
+			const resizeObserver = this.panelDividersResizeObserver = new ResizeObserverCtor(() => this.schedulePanelDividersUpdate(true));
+			this.panelDividersResizeObserverStore.add({
+				dispose: () => {
+					resizeObserver.disconnect();
+					this.panelDividersResizeObserver = undefined;
+					this.panelDividersObservedParts.clear();
+				}
+			});
+			resizeObserver.observe(this.element);
 		}
 
-		this.panelDividersResizeObserverStore.clear();
-
-		const resizeObserver = new ResizeObserverCtor(() => this.schedulePanelDividersUpdate(true));
-		this.panelDividersResizeObserverStore.add({ dispose: () => resizeObserver.disconnect() });
-
-		resizeObserver.observe(this.element);
-
-		const selector = '.part.sidebar, .part.sessionspart, .part.editor:not(.modal-editor-part), .part.auxiliarybar';
-		for (const part of Array.from(targetWindow.document.querySelectorAll<HTMLElement>(selector))) {
-			resizeObserver.observe(part);
+		for (const part of parts) {
+			if (!this.panelDividersObservedParts.has(part)) {
+				this.panelDividersObservedParts.add(part);
+				this.panelDividersResizeObserver.observe(part);
+			}
 		}
 	}
 

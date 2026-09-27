@@ -47,7 +47,7 @@ import { AgentHostModePicker } from './agentHostModePicker.js';
 import { MobileAgentHostModePicker } from './mobile/mobileAgentHostModePicker.js';
 import { AgentHostPermissionPickerDelegate, isWellKnownAutoApproveSchema, isWellKnownClaudePermissionModeSchema, isWellKnownModeSchema } from './agentHostPermissionPickerDelegate.js';
 import { SessionConfigKey } from '../../../../../platform/agentHost/common/sessionConfigKeys.js';
-import { isBackboardOnlyConfigProperty, isKeyBilledModelId } from '../../../../../platform/agentHost/common/byokProviders.js';
+import { isConfigPropertyAvailableForModel } from '../../../../../platform/agentHost/common/byokProviders.js';
 import { AgentHostClaudePermissionModePicker } from './agentHostClaudePermissionModePicker.js';
 import { ClaudeSessionConfigKey } from '../../../../../platform/agentHost/common/claudeSessionConfigKeys.js';
 
@@ -430,9 +430,9 @@ export class AgentHostSessionConfigPicker extends Disposable {
 	 * see {@link _isReadOnlyChip}.
 	 */
 	protected _shouldRenderProperty(property: string, schema: SessionConfigPropertySchema, isNewSession: boolean): boolean {
-		if (isBackboardOnlyConfigProperty(property) && isKeyBilledModelId(this._session.get()?.modelId.get())) {
-			// Memory and image generation are Backboard services; a request billed
-			// to the user's own key never reaches them.
+		if (!isConfigPropertyAvailableForModel(property, this._session.get()?.modelId.get())) {
+			// Backboard's media (and, for keys, memory) never reaches a request
+			// billed to the user's own key or subscription.
 			return false;
 		}
 		return isNewSession || !!schema.sessionMutable;

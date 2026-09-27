@@ -28,6 +28,7 @@ import { CommandsRegistry, ICommandService } from '../../../../../platform/comma
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
+import { OPEN_CANVAS_IN_SIMPLE_COMMAND_ID } from '../../browser/widget/chatGeneratedImageGallery.js';
 
 /**
  * Records the folder this editor window is on so that switching back to Editor
@@ -117,9 +118,9 @@ export class OpenOptimusWindowAction extends Action2 {
 	constructor() {
 		super({
 			id: OpenOptimusWindowAction.ID,
-			title: localize2('openOptimusWindow', "Open Advanced"),
-			category: localize2('optimus', "Advanced"),
-			f1: true,
+			title: localize2('openCanvasWindow', "Open Canvas"),
+			category: localize2('canvas', "Canvas"),
+			f1: false, // Canvas is hidden for now.
 		});
 	}
 
@@ -182,6 +183,39 @@ export class OpenChatSessionInAgentsWindowAction extends Action2 {
 		await nativeHostService.openAgentsWindow({
 			folderUri: folderUri?.scheme === Schemas.file ? folderUri.toJSON() : undefined,
 			sessionResource: sessionResource && !isUntitledChatSession(sessionResource) ? sessionResource.toJSON() : undefined,
+		});
+	}
+}
+
+/**
+ * The Editor window's "Canvas" button on a generated image: switches to the
+ * Simple window on the same chat and opens its Canvas on that image.
+ */
+export class OpenImageInSimpleCanvasAction extends Action2 {
+
+	static readonly ID = OPEN_CANVAS_IN_SIMPLE_COMMAND_ID;
+
+	constructor() {
+		super({
+			id: OpenImageInSimpleCanvasAction.ID,
+			title: localize2('openImageInSimpleCanvas', "Open Image in Canvas"),
+			category: CHAT_CATEGORY,
+			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
+			f1: false,
+		});
+	}
+
+	async run(accessor: ServicesAccessor, arg?: { readonly imageUrl?: string }): Promise<void> {
+		const imageUrl = arg?.imageUrl;
+		if (typeof imageUrl !== 'string' || !imageUrl) {
+			return;
+		}
+		const sessionResource = accessor.get(IChatWidgetService).lastFocusedWidget?.viewModel?.sessionResource;
+		const folderUri = rememberEditorFolder(accessor);
+		await accessor.get(INativeHostService).openAgentsWindow({
+			folderUri: folderUri?.scheme === Schemas.file ? folderUri.toJSON() : undefined,
+			sessionResource: sessionResource && !isUntitledChatSession(sessionResource) ? sessionResource.toJSON() : undefined,
+			canvasImageUrl: imageUrl,
 		});
 	}
 }

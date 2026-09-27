@@ -105,12 +105,12 @@
 	transform: rotate(90deg);
 }
 
-/* ---- Rhythm: 16px between blocks, 4px between rows of one activity run ----- */
+/* ---- Rhythm: 8px between blocks, 4px between rows of one activity run ------ */
 
 .backboard-clean-chat .interactive-list.backboard-cursor-transcript:not(#cx-transcript) .chat-backboard-turn-work-body {
 	display: flex !important;
 	flex-direction: column;
-	gap: 16px;
+	gap: 8px;
 	padding: 0 !important;
 }
 

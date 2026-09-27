@@ -16,7 +16,7 @@ const AVATARS = [
 	'14-violet-1', '15-clear-sky-2', '16-sprout-2', '17-teal-2', '18-lavender-2', '19-sunbeam-halo',
 	'20-coral-pop-clover', '21-bloom-orbit', '22-violet-2', '23-clear-sky-1', '24-sprout-bud', '25-mint-2',
 	'26-teal-1', '27-lavender-1',
-];
+] as const;
 
 const HASH_MODULUS = 2147483647;
 
@@ -29,12 +29,20 @@ export function codexAvatarIndex(seed: string): number {
 	return hash % AVATARS.length;
 }
 
+/** Name of one of Codex's avatar glyphs, e.g. `'13-bloom-rosette'`. */
+export type CodexAvatarName = typeof AVATARS[number];
+
 /** `<img class="size-3.5 shrink-0 …">` showing the seeded glyph for the current theme. */
 export function codexAgentAvatar(seed: string, light: boolean, className = ''): HTMLImageElement {
+	return codexAvatarImage(AVATARS[codexAvatarIndex(seed)], light, `size-3.5 shrink-0${className ? ` ${className}` : ''}`);
+}
+
+/** A specific avatar glyph, for surfaces that want a fixed identity instead of a seeded one. */
+export function codexAvatarImage(name: CodexAvatarName, light: boolean, className = ''): HTMLImageElement {
 	const img = mainWindow.document.createElement('img');
-	img.className = `size-3.5 shrink-0${className ? ` ${className}` : ''}`;
+	img.className = className;
 	img.alt = '';
 	img.draggable = false;
-	img.src = FileAccess.asBrowserUri(`vs/workbench/contrib/chat/browser/widget/media/codexAvatars/${AVATARS[codexAvatarIndex(seed)]}-${light ? 'light' : 'dark'}.svg`).toString(true);
+	img.src = FileAccess.asBrowserUri(`vs/workbench/contrib/chat/browser/widget/media/codexAvatars/${name}-${light ? 'light' : 'dark'}.svg`).toString(true);
 	return img;
 }

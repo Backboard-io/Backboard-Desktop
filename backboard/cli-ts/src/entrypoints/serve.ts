@@ -23,8 +23,6 @@ import {
 	McpClientManager,
 	McpController,
 	McpToolRegistrar,
-	type McpServerConfig,
-	type McpServerFileEntry,
 } from "../core/mcp/index.ts";
 import {
 	buildPermissionContext,
@@ -58,6 +56,14 @@ import {
 import { parseControlLine } from "./serveControl.ts";
 import { buildServeConversationContext } from "./serveConversationContext.ts";
 import { ServeSessionRestore } from "./ServeSessionRestore.ts";
+import {
+	McpStatusPublisher,
+	McpWorkQueue,
+	mcpTurnWaitMs,
+	resolveMcpServerSet,
+	type ServeRuntimeMcpServer,
+	waitForMcpWork,
+} from "./serveMcp.ts";
 
 /**
  * Persistent IDE host for the public Backboard R-CLI runtime.
@@ -137,8 +143,15 @@ export async function runServe(argv: string[]): Promise<void> {
 		cwd: config.cwd,
 		paths: config.mcpConfigPaths,
 	});
+	// Connecting is deferred until after `serve:ready` (see below): the IDE
+	// kills a runtime that is not ready within 30s, and each server may take
+	// up to its timeout to connect.
 	const mcpManager = new McpClientManager(mcpConfig, config.cwd);
-	const mcp = await mcpManager.initialize(new AbortController().signal);
+	/** Aborted on shutdown so no MCP connect or OAuth wait outlives the process. */
+	const mcpShutdown = new AbortController();
+	const mcpWork = new McpWorkQueue();
+	/** Servers find_mcp added in this process, until the IDE adopts them. */
+	const runtimeMcpServers = new Map<string, ServeRuntimeMcpServer>();
 	for (const warning of hookConfig.warnings) {
 		bus.emit({ type: "system:warning", message: warning });
 	}
@@ -167,12 +180,28 @@ export async function runServe(argv: string[]): Promise<void> {
 		}),
 	);
 	const mcpToolRegistrar = new McpToolRegistrar(registry, bus);
-	mcpToolRegistrar.register({ ...mcp, warnings: [] });
+	mcpManager.onDidLoseTools((toolNames) =>
+		mcpToolRegistrar.unregister({ toolNames, warnings: [] }),
+	);
 	const clientToolBridge = new ClientToolBridge(bus, registry);
 	const mcpRefreshTtlMs = 60_000;
+	const mcpTurnWait = mcpTurnWaitMs();
 	let lastMcpRefreshAt = Date.now();
 	let mcpRefreshInFlight: Promise<void> | undefined;
+	// Runs before every turn (submit or steer) snapshots its tool list: the
+	// turn first waits for queued MCP reconfiguration (the initial connect,
+	// IDE pushes), capped so a slow server joins from a later turn instead.
 	const syncMcpToolUpdates = async (signal: AbortSignal): Promise<void> => {
+		const waited = await waitForMcpWork(
+			mcpWork.turnBarrier,
+			mcpTurnWait,
+			signal,
+		);
+		if (waited === "timeout") {
+			process.stderr.write(
+				`MCP servers still connecting after ${mcpTurnWait}ms; starting the turn without them.\n`,
+			);
+		}
 		if (Date.now() - lastMcpRefreshAt < mcpRefreshTtlMs) return;
 		if (!mcpRefreshInFlight) {
 			mcpRefreshInFlight = (async () => {
@@ -191,30 +220,48 @@ export async function runServe(argv: string[]): Promise<void> {
 		}
 		await mcpRefreshInFlight;
 	};
+	const mcpSignal = (signal?: AbortSignal): AbortSignal =>
+		signal ? AbortSignal.any([signal, mcpShutdown.signal]) : mcpShutdown.signal;
+	// Every server-set mutation goes through `mcpWork` so it never interleaves
+	// with the initial connect or an IDE push.
 	mcpController = new McpController({
 		cwd: config.cwd,
-		activateServer: async (name, server, signal) => {
-			const controller = signal ?? new AbortController().signal;
-			return mcpToolRegistrar.register(
-				await mcpManager.addServer(name, server, controller),
-			);
-		},
-		authenticateServer: async (name, signal) => {
-			const controller = signal ?? new AbortController().signal;
-			const previousToolNames =
-				mcpManager.listServerStatuses().find((status) => status.name === name)
-					?.toolNames ?? [];
-			const result = await mcpManager.authenticateServer(name, controller);
-			mcpToolRegistrar.unregister({
-				toolNames: previousToolNames,
-				warnings: [],
-			});
-			return mcpToolRegistrar.register(result);
-		},
-		disableServer: async (name) =>
-			mcpToolRegistrar.unregister(await mcpManager.disableServer(name)),
-		removeServer: async (name) =>
-			mcpToolRegistrar.unregister(await mcpManager.removeServer(name)),
+		userConfigPath: config.mcpConfigPaths.user,
+		activateServer: (name, server, signal, source) =>
+			mcpWork.run(async () => {
+				const configSources = source ? [source] : [];
+				const result = mcpToolRegistrar.register(
+					await mcpManager.addServer(name, server, mcpSignal(signal), {
+						configSources,
+						origin: "runtime",
+					}),
+				);
+				runtimeMcpServers.set(name, { entry: server, configSources });
+				return result;
+			}),
+		authenticateServer: (name, signal) =>
+			mcpWork.run(async () => {
+				const previousToolNames =
+					mcpManager.listServerStatuses().find((status) => status.name === name)
+						?.toolNames ?? [];
+				const result = await mcpManager.authenticateServer(
+					name,
+					mcpSignal(signal),
+				);
+				mcpToolRegistrar.unregister({
+					toolNames: previousToolNames,
+					warnings: [],
+				});
+				return mcpToolRegistrar.register(result);
+			}),
+		disableServer: (name) =>
+			mcpWork.run(async () =>
+				mcpToolRegistrar.unregister(await mcpManager.disableServer(name)),
+			),
+		removeServer: (name) =>
+			mcpWork.run(async () =>
+				mcpToolRegistrar.unregister(await mcpManager.removeServer(name)),
+			),
 		listServerStatuses: () => mcpManager.listServerStatuses(),
 		listPrompts: (name, signal) => mcpManager.listPrompts(name, signal),
 		getPrompt: (serverName, name, args, signal) =>
@@ -322,12 +369,22 @@ export async function runServe(argv: string[]): Promise<void> {
 		};
 		process.stdout.write(`${JSON.stringify(record)}\n`);
 	};
+	// Unsolicited `serve:mcp`: a full snapshot after any server-set or status
+	// change (background connect, pushes, find_mcp, OAuth, disable/remove, a
+	// connection that drops later), coalesced over 50ms.
+	const mcpStatus = new McpStatusPublisher(
+		(payload) => writeRecord("serve:mcp", undefined, payload),
+		() => mcpManager.listServerStatuses(),
+	);
+	mcpManager.onDidChangeStatus(() => mcpStatus.schedule());
 
 	let disposed = false;
 	const flush = async (): Promise<void> => {
 		if (disposed) return;
 		disposed = true;
 		clientToolBridge.rejectAll("serve process is shutting down");
+		mcpShutdown.abort();
+		mcpStatus.dispose();
 		await controller.dispose();
 		await workerWorkspaceManager.waitForIdle();
 		await lsp.shutdown();
@@ -533,38 +590,64 @@ export async function runServe(argv: string[]): Promise<void> {
 				return;
 			case "setMcpServers": {
 				// The IDE owns MCP configuration for the session and pushes the
-				// full set on every change. Servers it no longer lists are
-				// disconnected; untouched servers keep their live connection.
-				// Servers configured directly in `.backboard/mcp.json` stay
-				// available: the push layers on top of the files on disk.
-				const configured = await loadMcpConfig({
-					cwd: config.cwd,
-					paths: config.mcpConfigPaths,
-				});
-				const servers: Record<string, McpServerFileEntry> = {};
-				for (const server of configured.servers) {
-					if (server.disabled) continue;
-					servers[server.name] = mcpConfigToFileEntry(server);
-				}
-				for (const [name, entry] of Object.entries(control.servers)) {
-					servers[name] = entry;
-				}
-				const result = await mcpManager.setServers(
-					servers,
-					new AbortController().signal,
-					{
-						forceNames: control.force,
-						configSource: {
-							scope: "user",
-							path: config.mcpConfigPaths.user,
-						},
+				// full set on every change. Servers missing from the layered
+				// set are disconnected; untouched servers keep their live
+				// connection. See ServeTypes for what `authoritative` layers.
+				const result = await mcpWork.run(
+					async () => {
+						const { entries, sources } = await resolveMcpServerSet({
+							cwd: config.cwd,
+							paths: config.mcpConfigPaths,
+							pushed: control.servers,
+							authoritative: control.authoritative === true,
+							runtime: runtimeMcpServers,
+						});
+						// A find_mcp server the IDE now lists is the IDE's: a later
+						// push that drops it must disconnect it.
+						for (const name of Object.keys(control.servers)) {
+							runtimeMcpServers.delete(name);
+						}
+						return mcpManager.setServers(entries, mcpShutdown.signal, {
+							forceNames: control.force,
+							sources,
+							onUpdate: (update) =>
+								mcpToolRegistrar.applyRefresh({ ...update, warnings: [] }),
+						});
 					},
+					{ blocksTurns: true },
 				);
-				mcpToolRegistrar.applyRefresh(result);
-				writeRecord("serve:mcp", control.requestId, {
-					servers: mcpManager.listServerStatuses(),
-					warnings: result.warnings,
-				});
+				mcpToolRegistrar.emitWarnings(result.warnings);
+				writeRecord(
+					"serve:mcp",
+					control.requestId,
+					mcpStatus.snapshot(result.warnings),
+				);
+				mcpStatus.schedule();
+				return;
+			}
+			case "authenticateMcpServer": {
+				const current = mcpManager
+					.listServerStatuses()
+					.find((entry) => entry.name === control.name);
+				if (!current) {
+					throw new Error(`Unknown MCP server '${control.name}'.`);
+				}
+				if (current.type !== "http") {
+					throw new Error(
+						`MCP server '${control.name}' is a stdio server and has no OAuth sign-in; reconnect it instead.`,
+					);
+				}
+				// Queued through `mcpWork` by the controller's authenticateServer.
+				await mcpController.authenticateServer(current, mcpShutdown.signal);
+				const after = mcpManager
+					.listServerStatuses()
+					.find((entry) => entry.name === control.name);
+				if (after?.status !== "connected") {
+					throw new Error(
+						`Sign-in for MCP server '${control.name}' did not complete: ${after?.message ?? "the server is no longer configured"}`,
+					);
+				}
+				writeRecord("serve:mcp", control.requestId, mcpStatus.snapshot());
 				return;
 			}
 			case "setCredentials": {
@@ -671,6 +754,8 @@ export async function runServe(argv: string[]): Promise<void> {
 			case "dispose":
 				disposing = true;
 				controller.cancel({ clearQueue: true });
+				// Unblocks pending MCP connects/OAuth so the wait below is short.
+				mcpShutdown.abort();
 				// handleControl reaches this await before the dispose promise is
 				// inserted into pendingOps, so the snapshot contains only older work.
 				await Promise.allSettled([...pendingOps]);
@@ -708,6 +793,30 @@ export async function runServe(argv: string[]): Promise<void> {
 		runtime,
 	});
 
+	// Connect configured MCP servers in the background. The initialize call
+	// marks them `connecting` synchronously, which the status publisher
+	// reports; each server's tools register as soon as it connects. Queued
+	// first, so IDE pushes and turns line up behind it.
+	void mcpWork
+		.run(
+			async () => {
+				const result = await mcpManager.initialize(mcpShutdown.signal, {
+					onUpdate: (update) =>
+						mcpToolRegistrar.register({ ...update, warnings: [] }),
+				});
+				// Startup warnings stay out of the transcript (they cluttered
+				// every launch); the IDE gets them with the status snapshot.
+				mcpStatus.schedule(result.warnings);
+			},
+			{ blocksTurns: true },
+		)
+		.catch((error) => {
+			process.stderr.write(
+				`MCP initialization failed: ${errorMessage(error)}\n`,
+			);
+			mcpStatus.schedule();
+		});
+
 	const reader = createInterface({ input: process.stdin });
 	reader.on("line", (line) => {
 		if (disposing) return;
@@ -736,6 +845,7 @@ export async function runServe(argv: string[]): Promise<void> {
 
 	await new Promise<void>((resolve) => reader.on("close", resolve));
 	if (!disposing) controller.cancel({ clearQueue: true });
+	mcpShutdown.abort();
 	await Promise.allSettled([...pendingOps]);
 	await flush();
 }
@@ -745,29 +855,6 @@ export async function runServe(argv: string[]): Promise<void> {
  * Provider names never contain a slash, so splitting on the first one keeps
  * OpenRouter video ids (e.g. `openrouter/google/veo-3.1`) intact.
  */
-/**
- * Converts a normalized MCP config back into the on-disk entry shape, used
- * when re-reading `.backboard/mcp.json` servers into a `setMcpServers` push.
- */
-function mcpConfigToFileEntry(server: McpServerConfig): McpServerFileEntry {
-	if (server.type === "stdio") {
-		return {
-			type: "stdio",
-			...(server.command ? { command: server.command } : {}),
-			args: [...server.args],
-			...(Object.keys(server.env).length > 0 ? { env: { ...server.env } } : {}),
-			...(server.cwd ? { cwd: server.cwd } : {}),
-		};
-	}
-	return {
-		type: "streamable-http",
-		...(server.url ? { url: server.url } : {}),
-		...(Object.keys(server.headers).length > 0
-			? { headers: { ...server.headers } }
-			: {}),
-	};
-}
-
 function parseGenerativeModelRef(
 	value: string,
 ): { provider: string; name: string } | undefined {

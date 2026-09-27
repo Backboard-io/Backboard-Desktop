@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 /* Match the signed-out chat gate without covering the sidebar's window controls. */
-.monaco-workbench:has(.chat-viewpane .backboard-auth-gate-active) .part.sidebar > .content {
+.monaco-workbench.backboard-chat-auth-gated .part.sidebar > .content {
 	filter: blur(4px);
 	opacity: 0.48;
 	pointer-events: none;

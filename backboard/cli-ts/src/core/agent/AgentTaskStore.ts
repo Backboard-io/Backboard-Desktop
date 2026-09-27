@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { atomicWriteDurable } from "../../utils/atomicWriteDurable.ts";
 import { dirname } from "node:path";
+import { atomicWriteDurable } from "../../utils/atomicWriteDurable.ts";
 import { ensureDir } from "../../utils/fs.ts";
 import {
 	type ToolExecutionMetadata,
@@ -120,7 +120,10 @@ export class AgentTaskStore {
 			version: AGENT_TASK_STORE_VERSION,
 			tasks,
 		};
-		await atomicWriteDurable(this.filePath, `${JSON.stringify(data, null, 2)}\n`);
+		await atomicWriteDurable(
+			this.filePath,
+			`${JSON.stringify(data, null, 2)}\n`,
+		);
 	}
 }
 
@@ -145,12 +148,45 @@ function isAgentTaskRecord(value: unknown): value is AgentTaskRecord {
 		typeof record.status === "string" &&
 		taskStatuses.has(record.status) &&
 		typeof record.createdAt === "string" &&
-		(record.revision === undefined || (Number.isSafeInteger(record.revision) && record.revision >= 0)) &&
-		(record.executionStatus === undefined || ["queued", "preparing", "running", "completed", "failed", "cancelled", "interrupted"].includes(record.executionStatus)) &&
-		(record.integrationStatus === undefined || ["not_required", "pending", "integrating", "integrated", "conflict", "skipped"].includes(record.integrationStatus)) &&
-		(record.name === undefined || (typeof record.name === "string" && record.name.length > 0 && record.name.length <= 80 && !/[\r\n]/.test(record.name))) &&
-		(record.capabilities === undefined || (!!record.capabilities && typeof record.capabilities === "object" && typeof record.capabilities.readOnly === "boolean" && (record.capabilities.permissionMode === undefined || typeof record.capabilities.permissionMode === "string"))) &&
-		(record.workspace === undefined || (!!record.workspace && typeof record.workspace === "object" && typeof record.workspace.workerId === "string" && typeof record.workspace.status === "string" && Number.isSafeInteger(record.workspace.changedFileCount) && record.workspace.changedFileCount >= 0)) &&
+		(record.revision === undefined ||
+			(Number.isSafeInteger(record.revision) && record.revision >= 0)) &&
+		(record.executionStatus === undefined ||
+			[
+				"queued",
+				"preparing",
+				"running",
+				"completed",
+				"failed",
+				"cancelled",
+				"interrupted",
+			].includes(record.executionStatus)) &&
+		(record.integrationStatus === undefined ||
+			[
+				"not_required",
+				"pending",
+				"integrating",
+				"integrated",
+				"conflict",
+				"skipped",
+			].includes(record.integrationStatus)) &&
+		(record.name === undefined ||
+			(typeof record.name === "string" &&
+				record.name.length > 0 &&
+				record.name.length <= 80 &&
+				!/[\r\n]/.test(record.name))) &&
+		(record.capabilities === undefined ||
+			(!!record.capabilities &&
+				typeof record.capabilities === "object" &&
+				typeof record.capabilities.readOnly === "boolean" &&
+				(record.capabilities.permissionMode === undefined ||
+					typeof record.capabilities.permissionMode === "string"))) &&
+		(record.workspace === undefined ||
+			(!!record.workspace &&
+				typeof record.workspace === "object" &&
+				typeof record.workspace.workerId === "string" &&
+				typeof record.workspace.status === "string" &&
+				Number.isSafeInteger(record.workspace.changedFileCount) &&
+				record.workspace.changedFileCount >= 0)) &&
 		[
 			record.turnId,
 			record.parentBatchToolCallId,

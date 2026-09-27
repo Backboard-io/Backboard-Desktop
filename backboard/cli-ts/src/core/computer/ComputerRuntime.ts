@@ -17,10 +17,11 @@ import {
 	CuaDriverSurface,
 	isBrowserApp,
 	resolveCuaDriverBinary,
+	type ScreenshotPaths,
 } from "./CuaDriverSurface.ts";
 import { describeStep, JevSubagent } from "./JevSubagent.ts";
 import {
-	type JevDecider,
+	type ComputerBrain,
 	type JevSurface,
 	JevUseLoop,
 	type JevWriterPacket,
@@ -38,20 +39,32 @@ export type RoutedJevWriter = (
 	options: { signal: AbortSignal; modelRoute?: Readonly<ModelRoute> },
 ) => Promise<string | null>;
 
+/** What a brain is built with, once per task. */
+export interface ComputerBrainContext {
+	/** The route the user's turn was captured with, for billing and fallback. */
+	modelRoute?: Readonly<ModelRoute>;
+	/** Streams a status line into the task's tool card. */
+	onStatus: (message: string) => void;
+}
+
 export interface ComputerRuntimeOptions {
 	platform?: Platform;
-	/** Backboard's System One route to Jev; without it `task` actions are refused. */
-	jevDecider?: JevDecider;
-	/** Composes typed text and addresses, since Jev itself can only choose. */
+	/** Chooses every step of a task; without it `task` actions are refused. */
+	brain?: (context: ComputerBrainContext) => ComputerBrain;
+	/** Composes drawings, and text for a brain that can only choose. */
 	jevWriter?: RoutedJevWriter;
 	/** Injectable for tests; defaults to the bundled or installed Cua Driver. */
 	resolveCuaDriver?: () => string | undefined;
-	browserFactory?: (path: string, name: string) => CuaBrowserSurface;
+	browserFactory?: (
+		path: string,
+		name: string,
+		screenshots: ScreenshotPaths,
+	) => CuaBrowserSurface;
 }
 
 export class ComputerRuntime {
 	private readonly platform: Platform;
-	private readonly jevDecider?: JevDecider;
+	private readonly brain?: (context: ComputerBrainContext) => ComputerBrain;
 	private readonly jevWriter?: RoutedJevWriter;
 	private readonly resolveCuaDriver: () => string | undefined;
 	private lastObservation: ComputerObservation | null = null;
@@ -59,16 +72,18 @@ export class ComputerRuntime {
 	private readonly browserFactory: (
 		path: string,
 		name: string,
+		screenshots: ScreenshotPaths,
 	) => CuaBrowserSurface;
 
 	constructor(options: ComputerRuntimeOptions = {}) {
 		this.platform = options.platform ?? createPlatform();
-		this.jevDecider = options.jevDecider;
+		this.brain = options.brain;
 		this.jevWriter = options.jevWriter;
 		this.resolveCuaDriver = options.resolveCuaDriver ?? resolveCuaDriverBinary;
 		this.browserFactory =
 			options.browserFactory ??
-			((path, name) => new CuaBrowserSurface(path, name));
+			((path, name, screenshots) =>
+				new CuaBrowserSurface(path, name, undefined, screenshots));
 	}
 
 	async execute(
@@ -202,24 +217,28 @@ export class ComputerRuntime {
 	}
 
 	/**
-	 * Hands a goal to Jev. Prefers the Cua Driver, which presses elements in the
-	 * background; without it the built-in platform layer drives the real pointer.
+	 * Hands a goal to the computer-use agent. Prefers the Cua Driver, which
+	 * presses elements in the background; without it the built-in platform layer
+	 * drives the real pointer.
 	 */
 	private async runJevTask(
 		action: Extract<ComputerAction, { action: "task" }>,
 		ctx: ToolContext,
 	): Promise<JevTaskResult | ComputerActionResult> {
-		if (!this.jevDecider || !this.jevWriter) {
+		if (!this.brain || !this.jevWriter) {
 			return {
 				success: false,
 				action: "task",
 				verification: "failed",
-				summary: "Jev tasks are unavailable.",
+				summary: "Computer-use tasks are unavailable.",
 				error:
-					"Jev runs through Backboard. Sign in to Backboard, or use direct actions instead.",
+					"No computer-use model is configured. Sign in to Backboard, or use direct actions instead.",
 			};
 		}
 		const driver = this.resolveCuaDriver();
+		// Each look is kept beside the session's other screenshots.
+		const paths = new ComputerPaths(ctx.sessionId);
+		const screenshots = () => paths.nextScreenshotPath();
 		let surface: JevSurface;
 		try {
 			if (isBrowserApp(action.appName)) {
@@ -232,10 +251,15 @@ export class ComputerRuntime {
 						`${action.appName} does not support the driver's DOM/canvas route. Use Brave, Chrome, or Edge; when the user did not specify a browser, use appName "Browser". Do not retry this task through browser toolbar accessibility.`,
 					);
 				}
-				surface = await this.browserSurface(driver, action.appName, ctx.signal);
+				surface = await this.browserSurface(
+					driver,
+					action.appName,
+					screenshots,
+					ctx.signal,
+				);
 			} else {
 				surface = driver
-					? new CuaDriverSurface(driver, action.appName)
+					? new CuaDriverSurface(driver, action.appName, screenshots)
 					: new PlatformJevSurface(this.platform, action.appName);
 			}
 		} catch (error) {
@@ -248,7 +272,7 @@ export class ComputerRuntime {
 				error: errorMessage(error),
 			};
 		}
-		// Shown to a host as a sub-agent of this tool call, with Jev as its brain.
+		// Shown to a host as a sub-agent of this tool call, named after its brain.
 		const subagent = ctx.toolCallId
 			? new JevSubagent(ctx.bus, ctx.toolCallId)
 			: undefined;
@@ -260,16 +284,17 @@ export class ComputerRuntime {
 				data: { kind: "terminal-output", text: `${line}\n` },
 			});
 		};
-		subagent?.start(action.appName, action.goal);
+		const brain = this.brain({
+			modelRoute: ctx.modelRoute,
+			onStatus: (message) => progress(`${message}...`),
+		});
+		subagent?.start(brain.name, action.appName, action.goal);
 		try {
-			// Any earlier screenshot is stale once Jev has pressed things.
+			// Any earlier screenshot is stale once the agent has pressed things.
 			this.lastObservation = null;
 			const writer = this.jevWriter;
-			const result = await new JevUseLoop(
-				surface,
-				this.jevDecider,
-				(packet, options) =>
-					writer(packet, { ...options, modelRoute: ctx.modelRoute }),
+			const result = await new JevUseLoop(surface, brain, (packet, options) =>
+				writer(packet, { ...options, modelRoute: ctx.modelRoute }),
 			).run(
 				{
 					goal: action.goal,
@@ -281,6 +306,17 @@ export class ComputerRuntime {
 						progress(`${step.step}. ${describeStep(step)}`);
 					},
 					onStatus: (message) => progress(`${message}...`),
+					// A spawned sub-agent cannot prompt the user; without `ask` the run
+					// hands sign-ins and consequential controls back to its caller.
+					...((ctx.agentDepth ?? 0) === 0
+						? {
+								ask: (
+									question: string,
+									choices: string[],
+									signal: AbortSignal,
+								) => ctx.askUser(question, choices, signal),
+							}
+						: {}),
 				},
 				ctx.signal,
 			);
@@ -319,12 +355,13 @@ export class ComputerRuntime {
 	private async browserSurface(
 		driver: string,
 		appName: string,
+		screenshots: ScreenshotPaths,
 		signal: AbortSignal,
 	): Promise<CuaBrowserSurface> {
 		const key = canonicalAppName(appName).toLowerCase();
 		const existing = this.browsers.get(key);
 		if (existing) return existing;
-		const surface = this.browserFactory(driver, appName);
+		const surface = this.browserFactory(driver, appName, screenshots);
 		try {
 			await surface.observe(signal);
 			this.browsers.set(key, surface);

@@ -453,7 +453,9 @@ configurationRegistry.registerConfiguration({
 				nls.localize('chat.notifyWindowOnConfirmation.always', "Always show OS notifications for confirmations, even when the window is focused."),
 			],
 			description: nls.localize('chat.notifyWindowOnConfirmation', "Controls whether a chat session should present the user with an OS notification when a confirmation or question needs input. This includes a window badge as well as notification toast."),
-			default: 'windowNotFocused',
+			// Backboard: off by default. The first OS notification makes macOS ask
+			// for notification permission, a system popup nobody opted into.
+			default: 'off',
 		},
 		[ChatConfiguration.AutoReply]: {
 			default: false,
@@ -737,7 +739,8 @@ configurationRegistry.registerConfiguration({
 				nls.localize('chat.notifyWindowOnResponseReceived.windowNotFocused', "Show OS notifications for responses when the window is not focused."),
 				nls.localize('chat.notifyWindowOnResponseReceived.always', "Always show OS notifications for responses, even when the window is focused."),
 			],
-			default: 'windowNotFocused',
+			// Backboard: off by default, see chat.notifyWindowOnConfirmation.
+			default: 'off',
 			description: nls.localize('chat.notifyWindowOnResponseReceived', "Controls whether a chat session should present the user with an OS notification when a response is received. This includes a window badge as well as notification toast."),
 		},
 		'chat.checkpoints.enabled': {
@@ -759,9 +762,9 @@ configurationRegistry.registerConfiguration({
 				McpAccessValue.All
 			],
 			enumDescriptions: [
-				nls.localize('chat.mcp.access.none', "No access to MCP servers."),
-				nls.localize('chat.mcp.access.registry', "Allows access to MCP servers installed from the connected registry."),
-				nls.localize('chat.mcp.access.any', "Allow access to any installed MCP server.")
+				nls.localize('chat.mcp.access.none', "No access to connectors."),
+				nls.localize('chat.mcp.access.registry', "Allows access to connectors installed from the connected registry."),
+				nls.localize('chat.mcp.access.any', "Allow access to any installed connector.")
 			],
 			default: McpAccessValue.All,
 			policy: {
@@ -784,13 +787,13 @@ configurationRegistry.registerConfiguration({
 					},
 					enumDescriptions: [
 						{
-							key: 'chat.mcp.access.none', value: nls.localize('chat.mcp.access.none', "No access to MCP servers."),
+							key: 'chat.mcp.access.none', value: nls.localize('chat.mcp.access.none', "No access to connectors."),
 						},
 						{
-							key: 'chat.mcp.access.registry', value: nls.localize('chat.mcp.access.registry', "Allows access to MCP servers installed from the connected registry."),
+							key: 'chat.mcp.access.registry', value: nls.localize('chat.mcp.access.registry', "Allows access to connectors installed from the connected registry."),
 						},
 						{
-							key: 'chat.mcp.access.any', value: nls.localize('chat.mcp.access.any', "Allow access to any installed MCP server.")
+							key: 'chat.mcp.access.any', value: nls.localize('chat.mcp.access.any', "Allow access to any installed connector.")
 						}
 					]
 				},
@@ -798,7 +801,7 @@ configurationRegistry.registerConfiguration({
 		},
 		[mcpAutoStartConfig]: {
 			type: 'string',
-			description: nls.localize('chat.mcp.autostart', "Controls whether MCP servers should be automatically started when the chat messages are submitted."),
+			description: nls.localize('chat.mcp.autostart', "Controls whether connectors should be automatically started when the chat messages are submitted."),
 			default: McpAutoStartValue.NewAndOutdated,
 			enum: [
 				McpAutoStartValue.Never,
@@ -806,15 +809,15 @@ configurationRegistry.registerConfiguration({
 				McpAutoStartValue.NewAndOutdated
 			],
 			enumDescriptions: [
-				nls.localize('chat.mcp.autostart.never', "Never automatically start MCP servers."),
-				nls.localize('chat.mcp.autostart.onlyNew', "Only automatically start new MCP servers that have never been run."),
-				nls.localize('chat.mcp.autostart.newAndOutdated', "Automatically start new and outdated MCP servers that are not yet running.")
+				nls.localize('chat.mcp.autostart.never', "Never automatically start connectors."),
+				nls.localize('chat.mcp.autostart.onlyNew', "Only automatically start new connectors that have never been run."),
+				nls.localize('chat.mcp.autostart.newAndOutdated', "Automatically start new and outdated connectors that are not yet running.")
 			],
 			tags: ['experimental'],
 		},
 		[mcpAppsEnabledConfig]: {
 			type: 'boolean',
-			description: nls.localize('chat.mcp.ui.enabled', "Controls whether MCP servers can provide custom UI for tool invocations."),
+			description: nls.localize('chat.mcp.ui.enabled', "Controls whether connectors can provide custom UI for tool invocations."),
 			default: true,
 			tags: ['experimental'],
 		},
@@ -840,7 +843,7 @@ configurationRegistry.registerConfiguration({
 					markdownDescription: nls.localize('mcp.enterpriseManagedAuth.idp.clientSecret', "The OAuth client secret paired with `clientId`. Intended for local development only."),
 				},
 			},
-			markdownDescription: nls.localize('mcp.enterpriseManagedAuth.idp', "(Preview) The OAuth/OIDC IdP configuration used for enterprise-managed Model Context Protocol (MCP) servers. Typically delivered via enterprise policy (Windows Group Policy / macOS managed preferences / Linux `/etc/vscode/policy.json`); developers may hand-edit `settings.json` for local testing. Properties: `issuer` (HTTPS URL), `clientId`, `clientSecret`."),
+			markdownDescription: nls.localize('mcp.enterpriseManagedAuth.idp', "(Preview) The OAuth/OIDC IdP configuration used for enterprise-managed Model Context Protocol (connector) servers. Typically delivered via enterprise policy (Windows Group Policy / macOS managed preferences / Linux `/etc/vscode/policy.json`); developers may hand-edit `settings.json` for local testing. Properties: `issuer` (HTTPS URL), `clientId`, `clientSecret`."),
 			policy: {
 				name: 'McpEnterpriseManagedAuthIdp',
 				category: PolicyCategory.InteractiveSession,
@@ -848,14 +851,14 @@ configurationRegistry.registerConfiguration({
 				localization: {
 					description: {
 						key: 'mcp.enterpriseManagedAuth.idp.policy',
-						value: nls.localize('mcp.enterpriseManagedAuth.idp.policy', "The OAuth/OIDC IdP configuration used for enterprise-managed Model Context Protocol (MCP) server authentication. Delivered through enterprise policy (Windows Group Policy, macOS managed preferences, Linux `/etc/vscode/policy.json`)."),
+						value: nls.localize('mcp.enterpriseManagedAuth.idp.policy', "The OAuth/OIDC IdP configuration used for enterprise-managed Model Context Protocol (connector) server authentication. Delivered through enterprise policy (Windows Group Policy, macOS managed preferences, Linux `/etc/vscode/policy.json`)."),
 					}
 				}
 			},
 		},
 		[mcpServerCollisionBehaviorSection]: {
 			type: 'string',
-			description: nls.localize('chat.mcp.collisionBehavior', "Controls behavior when multiple MCP servers are discovered with the same name. 'disable' disables lower-priority duplicates. 'suffix' appends numeric suffixes to disambiguate."),
+			description: nls.localize('chat.mcp.collisionBehavior', "Controls behavior when multiple connectors are discovered with the same name. 'disable' disables lower-priority duplicates. 'suffix' appends numeric suffixes to disambiguate."),
 			enum: [
 				McpCollisionBehavior.Disable,
 				McpCollisionBehavior.Suffix,
@@ -868,7 +871,7 @@ configurationRegistry.registerConfiguration({
 		},
 		[mcpServerSamplingSection]: {
 			type: 'object',
-			description: nls.localize('chat.mcp.serverSampling', "Configures which models are exposed to MCP servers for sampling (making model requests in the background). This setting can be edited in a graphical way under the `{0}` command.", 'MCP: ' + nls.localize('mcp.list', 'List Servers')),
+			description: nls.localize('chat.mcp.serverSampling', "Configures which models are exposed to connectors for sampling (making model requests in the background). This setting can be edited in a graphical way under the `{0}` command.", 'MCP: ' + nls.localize('mcp.list', 'List Servers')),
 			scope: ConfigurationScope.RESOURCE,
 			additionalProperties: {
 				type: 'object',
@@ -887,7 +890,7 @@ configurationRegistry.registerConfiguration({
 						type: 'array',
 						items: {
 							type: 'string',
-							description: nls.localize('chat.mcp.serverSampling.model', "A model the MCP server has access to."),
+							description: nls.localize('chat.mcp.serverSampling.model', "A model the connector has access to."),
 						},
 					}
 				}
@@ -895,7 +898,7 @@ configurationRegistry.registerConfiguration({
 		},
 		[AssistedTypes[AddConfigurationType.NuGetPackage].enabledConfigKey]: {
 			type: 'boolean',
-			description: nls.localize('chat.mcp.assisted.nuget.enabled.description', "Enables NuGet packages for AI-assisted MCP server installation. Used to install MCP servers by name from the central registry for .NET packages (NuGet.org)."),
+			description: nls.localize('chat.mcp.assisted.nuget.enabled.description', "Enables NuGet packages for AI-assisted connector installation. Used to install connectors by name from the central registry for .NET packages (NuGet.org)."),
 			default: false,
 			tags: ['experimental'],
 			experiment: {
@@ -1267,12 +1270,12 @@ configurationRegistry.registerConfiguration({
 			type: 'boolean',
 			default: false,
 			tags: ['preview'],
-			description: nls.localize('chat.mcp.gallery.enabled', "Enables the default Marketplace for Model Context Protocol (MCP) servers."),
+			description: nls.localize('chat.mcp.gallery.enabled', "Enables the default Marketplace for Model Context Protocol (connector) servers."),
 			included: product.quality === 'stable'
 		},
 		[mcpGalleryServiceUrlConfig]: {
 			type: 'string',
-			description: nls.localize('mcp.gallery.serviceUrl', "Configure the MCP Gallery service URL to connect to"),
+			description: nls.localize('mcp.gallery.serviceUrl', "Configure the Connector Gallery service URL to connect to"),
 			default: '',
 			scope: ConfigurationScope.APPLICATION,
 			tags: ['usesOnlineServices', 'advanced'],
@@ -1285,7 +1288,7 @@ configurationRegistry.registerConfiguration({
 				localization: {
 					description: {
 						key: 'mcp.gallery.serviceUrl',
-						value: nls.localize('mcp.gallery.serviceUrl', "Configure the MCP Gallery service URL to connect to"),
+						value: nls.localize('mcp.gallery.serviceUrl', "Configure the Connector Gallery service URL to connect to"),
 					}
 				}
 			},

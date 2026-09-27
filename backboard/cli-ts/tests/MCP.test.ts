@@ -28,7 +28,9 @@ import {
 	type McpServerConfig,
 	type McpServerRuntimeStatus,
 	type McpToolDefinition,
+	mcpConfigToFileEntry,
 	mcpFunctionName,
+	normalizeMcpServer,
 	parseManualMcpInput,
 	removeConfiguredMcpServer,
 	removeProjectMcpServer,
@@ -1765,6 +1767,252 @@ describe("MCP primitive manager", () => {
 		expect(status.updatedResourceUris).toEqual([]);
 	});
 });
+
+describe("MCP serve integration", () => {
+	it("round-trips every normalized field through the file entry shape", () => {
+		const sources = [
+			{ scope: "project" as const, path: "/repo/.backboard/mcp.json" },
+		];
+		const stdio = serverConfig({
+			name: "local",
+			type: "stdio",
+			command: "node",
+			args: ["server.js", "--flag"],
+			env: { TOKEN: "abc" },
+			cwd: "/work",
+			url: undefined,
+			configSources: sources,
+			enabledTools: ["keep"],
+			disabledTools: ["drop"],
+			enabledPrompts: ["p1"],
+			disabledPrompts: ["p2"],
+			enabledResources: ["file://a"],
+			disabledResources: ["file://b"],
+			timeoutMs: 4_321,
+			trustToolAnnotations: true,
+			disabled: true,
+		});
+		const http = serverConfig({
+			name: "remote",
+			headers: { Authorization: "Bearer x" },
+			configSources: sources,
+			disabledTools: ["write"],
+			timeoutMs: 9_000,
+		});
+		for (const server of [stdio, http]) {
+			const entry = mcpConfigToFileEntry(server);
+			expect(
+				normalizeMcpServer(server.name, entry, {
+					timeoutMs: 1,
+					env: {},
+					configSources: sources,
+				}),
+			).toEqual(server);
+		}
+		expect(mcpConfigToFileEntry(stdio)).toMatchObject({
+			disabled: true,
+			enabledTools: ["keep"],
+			disabledTools: ["drop"],
+			timeoutMs: 4_321,
+			trustToolAnnotations: true,
+		});
+	});
+
+	it("saves registry adds to the user file and treats an existing entry as installed", async () => {
+		const home = await tempDir();
+		const userPath = path.join(home, ".backboard", "mcp.json");
+		await writeJson(userPath, {
+			mcpServers: { existing: { command: "custom", args: ["--mine"] } },
+		});
+		const activated: { name: string; source: unknown }[] = [];
+		const controller = new McpController({
+			cwd: await tempDir(),
+			userConfigPath: userPath,
+			listRegistryServers: async () =>
+				["existing", "fresh"].map((name) => ({
+					name,
+					title: name,
+					category: "Development & Testing" as const,
+					description: "",
+					detail: "",
+					config: { command: "npx", args: ["-y", name] },
+					requiredEnv: [],
+				})),
+			saveProjectServer: async () => {
+				throw new Error("find_mcp must not write the project file");
+			},
+			activateServer: async (name, _server, _signal, source) => {
+				activated.push({ name, source });
+				return { toolNames: [`mcp__${name}__tool`], warnings: [] };
+			},
+		});
+		const [existing, fresh] = await controller.listRegistryServers();
+		if (!existing || !fresh) throw new Error("expected registry items");
+
+		const installed = await controller.addRegistryServer(existing, undefined, {
+			target: "user",
+		});
+		expect(installed).toMatchObject({ alreadyInstalled: true, toolNames: [] });
+		expect(activated).toEqual([]);
+
+		const added = await controller.addRegistryServer(fresh, undefined, {
+			target: "user",
+		});
+		expect(added.alreadyInstalled).toBeUndefined();
+		expect(activated).toEqual([
+			{ name: "fresh", source: { scope: "user", path: userPath } },
+		]);
+		expect(JSON.parse(await readFile(userPath, "utf8"))).toEqual({
+			mcpServers: {
+				existing: { command: "custom", args: ["--mine"] },
+				fresh: { command: "npx", args: ["-y", "fresh"] },
+			},
+		});
+	});
+
+	it("connects pushed servers in parallel and reports provenance and progress", async () => {
+		const manager = new McpClientManager(
+			{ timeoutMs: 1_000, servers: [], warnings: [] },
+			await tempDir(),
+		);
+		const started: string[] = [];
+		let releaseSlow: () => void = () => undefined;
+		const slowGate = new Promise<void>((resolve) => {
+			releaseSlow = resolve;
+		});
+		Object.assign(manager as unknown as { connector: unknown }, {
+			connector: {
+				connect: async (server: McpServerConfig) => {
+					started.push(server.name);
+					// Sequential connects would never start `fast` while `slow` waits.
+					if (server.name === "slow") await slowGate;
+					return fakeConnectResult(server, "tool");
+				},
+			},
+		});
+		const statusChanges: string[][] = [];
+		manager.onDidChangeStatus(() =>
+			statusChanges.push(
+				manager.listServerStatuses().map((s) => `${s.name}:${s.status}`),
+			),
+		);
+		const updates: string[][] = [];
+		const done = manager.setServers(
+			{
+				slow: { command: "node", args: ["slow.js"] },
+				fast: { command: "node", args: ["fast.js"] },
+			},
+			new AbortController().signal,
+			{
+				sources: {
+					slow: { origin: "ide", configSources: [] },
+					fast: {
+						origin: "project",
+						configSources: [{ scope: "project", path: "/p/mcp.json" }],
+					},
+				},
+				onUpdate: (update) =>
+					updates.push(update.tools.map((tool) => tool.registeredName)),
+			},
+		);
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(started).toEqual(["slow", "fast"]);
+		expect(statusChanges).toContainEqual([
+			"slow:connecting",
+			"fast:connecting",
+		]);
+		expect(updates).toEqual([["mcp__fast__tool"]]);
+		releaseSlow();
+		const result = await done;
+		expect(updates).toEqual([["mcp__fast__tool"], ["mcp__slow__tool"]]);
+		expect(result.tools.map((tool) => tool.registeredName)).toEqual([
+			"mcp__slow__tool",
+			"mcp__fast__tool",
+		]);
+		expect(
+			manager
+				.listServerStatuses()
+				.map(({ name, status, source }) => ({ name, status, source })),
+		).toEqual([
+			{ name: "slow", status: "connected", source: "ide" },
+			{ name: "fast", status: "connected", source: "project" },
+		]);
+	});
+
+	it("reports a connection that closes on its own and releases its tools", async () => {
+		const manager = new McpClientManager(
+			{ timeoutMs: 1_000, servers: [], warnings: [] },
+			await tempDir(),
+		);
+		const client = {} as Client;
+		Object.assign(manager as unknown as { connector: unknown }, {
+			connector: {
+				connect: async (server: McpServerConfig) =>
+					fakeConnectResult(server, "tool", client),
+			},
+		});
+		await manager.setServers(
+			{ flaky: { command: "node" } },
+			new AbortController().signal,
+		);
+		const lost: string[][] = [];
+		manager.onDidLoseTools((names) => lost.push(names));
+		(
+			manager as unknown as {
+				handleConnectionClosed(name: string, client: Client): void;
+			}
+		).handleConnectionClosed("flaky", client);
+		expect(lost).toEqual([["mcp__flaky__tool"]]);
+		expect(manager.listServerStatuses()).toEqual([
+			expect.objectContaining({
+				name: "flaky",
+				status: "error",
+				message: "Connection closed.",
+				toolNames: [],
+			}),
+		]);
+	});
+});
+
+function fakeConnectResult(
+	server: McpServerConfig,
+	toolName: string,
+	client: Client = {} as Client,
+) {
+	return {
+		connection: {
+			server,
+			client,
+			transport: { close: async () => undefined },
+			tools: new Map(),
+			prompts: new Map(),
+			resources: new Map(),
+			updatedResourceUris: new Set(),
+			subscribedResourceUris: new Set(),
+			capabilities: { tools: {} },
+		},
+		tools: [
+			{
+				serverName: server.name,
+				toolName,
+				description: "",
+				inputSchema: { type: "object" },
+				trustAnnotations: false,
+				timeoutMs: 1_000,
+				call: async () => ({ content: [] }),
+			},
+		],
+		status: {
+			name: server.name,
+			type: server.type,
+			configSources: [...server.configSources],
+			status: "connected" as const,
+			toolNames: [],
+			capabilities: { tools: {} },
+		},
+		warnings: [],
+	};
+}
 
 async function tempDir(): Promise<string> {
 	return mkdtemp(path.join(os.tmpdir(), "cli-mcp-"));

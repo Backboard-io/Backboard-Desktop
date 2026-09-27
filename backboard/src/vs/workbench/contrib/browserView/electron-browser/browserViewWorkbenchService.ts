@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { BrowserViewCommandId, BrowserViewStorageScope, IBrowserViewOpenOptions, IBrowserViewOwner, IBrowserViewService, IBrowserViewState, IBrowserViewTheme, ipcBrowserViewChannelName } from '../../../../platform/browserView/common/browserView.js';
-import { IBrowserViewWorkbenchService, IBrowserViewModel, BrowserViewModel, IBrowserEditorViewState, IBrowserViewContextualFilter, IBrowserViewFilterContext, IBrowserViewOpenHandler, IBrowserViewUrlOpenRequest } from '../common/browserView.js';
+import { IBrowserViewWorkbenchService, IBrowserViewModel, BrowserViewModel, IBrowserEditorViewState, IBrowserViewContextualFilter, IBrowserViewFilterContext, IBrowserViewOpenHandler, IBrowserViewUrlOpenRequest, IBrowserViewVisibilityPolicy } from '../common/browserView.js';
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
 import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
@@ -220,6 +220,31 @@ export class BrowserViewWorkbenchService extends Disposable implements IBrowserV
 		return toDisposable(() => {
 			this._openHandlers.delete(handler);
 		});
+	}
+
+	private readonly _visibilityPolicies = new Set<IBrowserViewVisibilityPolicy>();
+	private readonly _onDidChangeVisibilityPolicy = this._register(new Emitter<void>());
+	readonly onDidChangeVisibilityPolicy: Event<void> = this._onDidChangeVisibilityPolicy.event;
+
+	registerVisibilityPolicy(policy: IBrowserViewVisibilityPolicy): IDisposable {
+		this._visibilityPolicies.add(policy);
+		const listener = policy.onDidChange(() => this._onDidChangeVisibilityPolicy.fire());
+		this._onDidChangeVisibilityPolicy.fire();
+		return toDisposable(() => {
+			listener.dispose();
+			if (this._visibilityPolicies.delete(policy)) {
+				this._onDidChangeVisibilityPolicy.fire();
+			}
+		});
+	}
+
+	canShowBrowserView(viewId: string): boolean {
+		for (const policy of this._visibilityPolicies) {
+			if (!policy.canShow(viewId)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	adoptUrlOpen(request: IBrowserViewUrlOpenRequest): boolean {

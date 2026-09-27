@@ -8,7 +8,7 @@ import {
 	unlink,
 	writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventBus } from "../src/core/bus/EventBus.ts";
 import { BlobStore } from "../src/core/checkpoints/blobStore.ts";
@@ -150,6 +150,23 @@ describe("WorkspaceIndex", () => {
 		const diff = index.diff(before, after);
 		expect(diff.modified.map((entry) => entry.path)).toEqual([file]);
 		expect(await readFile(file, "utf8")).toBe("a1");
+	});
+
+	it("never walks a home directory or the filesystem root", async () => {
+		const blobs = new BlobStore(join(root, "objects"));
+		const home = new WorkspaceIndex(homedir());
+
+		expect({
+			home: home.disabled,
+			homeSnapshot: await home.refresh(blobs),
+			fsRoot: new WorkspaceIndex("/").disabled,
+			project: new WorkspaceIndex(work).disabled,
+		}).toEqual({
+			home: "workspace is the home directory",
+			homeSnapshot: null,
+			fsRoot: "workspace is the filesystem root",
+			project: null,
+		});
 	});
 
 	it("ignores deny-listed directories and symlinks", async () => {

@@ -1,6 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import type { ModelRef } from "../../config/defaults.ts";
+import { normalizeSelectableModels } from "../../providers/backboard/modelCatalog.ts";
 import { shortId } from "../../utils/id.ts";
 import { EventBus } from "../bus/EventBus.ts";
 import type { AgentEvent } from "../bus/events.ts";
@@ -15,11 +17,19 @@ import {
 import type { ToolContext } from "../tools/ToolContext.ts";
 import { ToolRegistry } from "../tools/ToolRegistry.ts";
 import { AgentLoopFactory } from "./AgentLoopFactory.ts";
+import { capacityFallbackCandidates, modelKey } from "./RuntimeRecovery.ts";
 import type {
 	SubAgentResult,
 	SubAgentRunnerDeps,
 	SubAgentRunParams,
 } from "./SubAgentTypes.ts";
+import {
+	abortableDelay,
+	TURN_FALLBACK_FROM_ATTEMPT,
+	TURN_MAX_ATTEMPTS,
+	turnRetryDelayMs,
+	turnRetryPrompt,
+} from "./TurnRetry.ts";
 
 export type {
 	SubAgentResult,
@@ -120,23 +130,32 @@ export class SubAgentRunner {
 			const checkpoints = params.parentTurnId
 				? parentRecorder?.scopedToTurn(params.parentTurnId)
 				: undefined;
-			const loop = loopFactory.createLoop({
-				scheduler,
-				session,
-				bus,
-				tools: toolSchemas,
-				systemPrompt: params.isolatedWorkspace
-					? `${this.deps.systemPrompt}\n\nYou are running in an isolated native Git worktree at ${params.parentCwd}. This path is authoritative even if delegated prose names a different project directory. Prefer workspace-relative paths and use this worktree as the root for every file and terminal operation. Modify files only with Write, Edit, or ApplyPatch—not shell redirection, mkdir, installers, formatters, or other shell commands that mutate the checkout. Execute is read-only for the checkout; only its private scratch/cache is writable. Never read from or write to the coordinator checkout or another worker worktree. Backboard automatically collects and integrates successful file-tool edits into the coordinator workspace after you finish. In your final report, describe completed edits and verification; never tell the parent to copy, merge, cherry-pick, or open files from this private worktree.`
-					: this.deps.systemPrompt,
-				model: { provider: route.provider, model: route.model },
-				source: route.source,
-				openRouterProvider: this.deps.getOpenRouterProvider?.(),
-				memory: this.deps.memory,
-				memoryProfile: this.deps.memoryProfile,
-				thinking,
-				thinkingResolver,
-				requestKind: "subagent",
-			});
+			const activeModel = { provider: route.provider, model: route.model };
+			const attemptedModelKeys = new Set([modelKey(activeModel)]);
+			let lastError: string | undefined;
+			const createLoop = () =>
+				loopFactory.createLoop({
+					scheduler,
+					session,
+					bus,
+					tools: toolSchemas,
+					systemPrompt: params.isolatedWorkspace
+						? `${this.deps.systemPrompt}\n\nYou are running in an isolated native Git worktree at ${params.parentCwd}. This path is authoritative even if delegated prose names a different project directory. Prefer workspace-relative paths and use this worktree as the root for every file and terminal operation. Modify files only with Write, Edit, or ApplyPatch—not shell redirection, mkdir, installers, formatters, or other shell commands that mutate the checkout. Execute is read-only for the checkout; only its private scratch/cache is writable. Never read from or write to the coordinator checkout or another worker worktree. Backboard automatically collects and integrates successful file-tool edits into the coordinator workspace after you finish. In your final report, describe completed edits and verification; never tell the parent to copy, merge, cherry-pick, or open files from this private worktree.`
+						: this.deps.systemPrompt,
+					model: { ...activeModel },
+					source: route.source,
+					openRouterProvider: this.deps.getOpenRouterProvider?.(),
+					memory: this.deps.memory,
+					memoryProfile: this.deps.memoryProfile,
+					thinking,
+					thinkingResolver,
+					requestKind: "subagent",
+					// Failures stay private until every attempt is exhausted; the host
+					// marks the child chat failed on any relayed run:error.
+					onRunError: (error) => {
+						lastError = error;
+					},
+				});
 
 			// One worker-lifetime scratch directory lets repeated Execute calls reuse
 			// package-manager caches. Per-command mkdtemp/rm made parallel workers pay
@@ -178,7 +197,50 @@ export class SubAgentRunner {
 					: { mode: "manual", rules: emptyRuleSet(), interactive: false },
 			};
 
-			const status = await loop.run(params.prompt.trim(), ctx);
+			// A failed turn is retried silently on the same thread, so the worker
+			// resumes with everything it already did. Later attempts switch to a
+			// fallback model when one is available.
+			let status: SubAgentResult["status"] = "failed";
+			let toolRounds = 0;
+			let previousError: string | undefined;
+			for (let attempt = 1; ; attempt++) {
+				lastError = undefined;
+				const loop = createLoop();
+				status = await loop.run(
+					attempt === 1
+						? params.prompt.trim()
+						: turnRetryPrompt(params.prompt.trim(), previousError),
+					ctx,
+				);
+				toolRounds += loop.toolRounds;
+				if (
+					status !== "failed" ||
+					ctx.signal.aborted ||
+					attempt >= TURN_MAX_ATTEMPTS
+				) {
+					break;
+				}
+				previousError = lastError;
+				if (
+					attempt + 1 >= TURN_FALLBACK_FROM_ATTEMPT &&
+					route.source !== "byok"
+				) {
+					const fallback = await this.resolveFallbackModel(
+						attemptedModelKeys,
+						session.threadId ?? undefined,
+						ctx.signal,
+					);
+					if (fallback) {
+						activeModel.provider = fallback.provider;
+						activeModel.model = fallback.model;
+						attemptedModelKeys.add(modelKey(fallback));
+					}
+				}
+				await abortableDelay(
+					turnRetryDelayMs(attempt, this.deps.retryBackoffMs),
+					ctx.signal,
+				);
+			}
 			finalStatus = status;
 			if (isolatedProcessToken) {
 				try {
@@ -191,10 +253,13 @@ export class SubAgentRunner {
 			}
 
 			return {
-				report: reports.at(-1) ?? "(the sub-agent produced no output)",
+				report:
+					status === "failed"
+						? handoffReport(reports.at(-1), lastError)
+						: (reports.at(-1) ?? "(the sub-agent produced no output)"),
 				status,
 				usage: session.usage,
-				toolRounds: loop.toolRounds,
+				toolRounds,
 			};
 		} finally {
 			if (isolatedProcessToken && !processesTerminated) {
@@ -231,6 +296,36 @@ export class SubAgentRunner {
 				);
 			}
 		}
+	}
+
+	/**
+	 * Another model for a failing worker: recently successful models first,
+	 * then the catalog's recovery candidates. Only models billed on the same
+	 * route as the worker's thread qualify, so a switch never changes billing.
+	 */
+	private async resolveFallbackModel(
+		attemptedModelKeys: ReadonlySet<string>,
+		threadId: string | undefined,
+		signal: AbortSignal,
+	): Promise<ModelRef | null> {
+		const { client } = this.deps;
+		const catalog = await client
+			.listModels({ signal })
+			.then((result) => normalizeSelectableModels(result.models))
+			.catch(() => []);
+		const threadSource = threadId
+			? client.sourceForThread?.(threadId)
+			: undefined;
+		return (
+			capacityFallbackCandidates(
+				catalog,
+				this.deps.getSuccessfulModels?.() ?? [],
+			).find((candidate) => {
+				if (attemptedModelKeys.has(modelKey(candidate))) return false;
+				const modelSource = client.sourceFor?.(candidate);
+				return !modelSource || !threadSource || modelSource === threadSource;
+			}) ?? null
+		);
 	}
 
 	private attachParentProgressRelay(
@@ -335,6 +430,21 @@ export class SubAgentRunner {
 			flush();
 		};
 	}
+}
+
+/**
+ * A worker that exhausted its attempts hands the task back instead of
+ * failing it outright, so the coordinator finishes the work itself.
+ */
+function handoffReport(
+	lastReport: string | undefined,
+	error: string | undefined,
+): string {
+	return [
+		`The worker could not finish this task after ${TURN_MAX_ATTEMPTS} attempts${error ? ` (last problem: ${error.trim()})` : ""}.`,
+		"Complete the remaining work directly in this turn instead of delegating it again.",
+		...(lastReport ? [`Worker progress so far:\n${lastReport}`] : []),
+	].join("\n\n");
 }
 
 /**

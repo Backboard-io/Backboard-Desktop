@@ -14,6 +14,8 @@ export type GenerativeModelProperty = 'imageModel' | 'videoModel';
 export interface GenerativeModelItem {
 	readonly value: string;
 	readonly label: string;
+	/** Picker secondary text; video models carry their capabilities (see generativeMediaCapabilities.ts). */
+	readonly description?: string;
 }
 
 interface CatalogEntry {
@@ -97,7 +99,7 @@ export class GenerativeModelCatalog extends Disposable {
 					&& entry.fetchedAt >= 0 && entry.fetchedAt <= this.now() && Array.isArray(entry.items)
 					&& entry.items.every((item: GenerativeModelItem | null) => item && typeof item.value === 'string'
 						&& item.value.length > 0 && typeof item.label === 'string' && item.label.length > 0)) {
-					this.entries.set(property, { fetchedAt: entry.fetchedAt, items: entry.items.map((item: GenerativeModelItem) => ({ value: item.value, label: item.label })) });
+					this.entries.set(property, { fetchedAt: entry.fetchedAt, items: entry.items.map((item: GenerativeModelItem) => ({ value: item.value, label: item.label, ...(typeof item.description === 'string' ? { description: item.description } : {}) })) });
 				}
 			}
 		} catch {

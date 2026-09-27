@@ -491,8 +491,8 @@ export function getToolDisplayName(toolName: string): string {
 		case CopilotToolName.StoreMemory: return localize('toolName.storeMemory', "Store Memory");
 		case CopilotToolName.ParallelValidation: return localize('toolName.parallelValidation', "Validate Changes");
 		case CopilotToolName.WriteAgent: return localize('toolName.writeAgent', "Write to Agent");
-		case CopilotToolName.McpReload: return localize('toolName.mcpReload', "Reload MCP Config");
-		case CopilotToolName.McpValidate: return localize('toolName.mcpValidate', "Validate MCP Config");
+		case CopilotToolName.McpReload: return localize('toolName.mcpReload', "Reload Connector Config");
+		case CopilotToolName.McpValidate: return localize('toolName.mcpValidate', "Validate Connector Config");
 		case CopilotToolName.ToolSearchToolRegex: return localize('toolName.toolSearchToolRegex', "Search Tools");
 		default: return toolName;
 	}
@@ -1023,7 +1023,7 @@ export function getPermissionDisplay(request: ITypedPermissionRequest, workingDi
 				permissionPath: path,
 			};
 		case 'mcp': {
-			const title = toolName ?? localize('copilot.permission.mcp.defaultTool', "MCP Tool");
+			const title = toolName ?? localize('copilot.permission.mcp.defaultTool', "Connector Tool");
 			return {
 				confirmationTitle: serverName
 					? localize('copilot.permission.mcp.title', "Allow tool from {0}?", serverName)

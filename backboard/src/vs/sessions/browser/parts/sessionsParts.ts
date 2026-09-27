@@ -10,11 +10,11 @@ import { getClientArea } from '../../../base/browser/dom.js';
 import { mainWindow } from '../../../base/browser/window.js';
 import { SessionsPart } from './sessionsPart.js';
 import { MobileSessionsPart } from './mobile/mobileSessionsPart.js';
-import { SessionView } from './sessionView.js';
+import { ISessionSidePanel, SessionView } from './sessionView.js';
 import { IActiveSession } from '../../services/sessions/common/sessionsManagement.js';
 import { IProgressIndicator } from '../../../platform/progress/common/progress.js';
 import { Emitter, Event } from '../../../base/common/event.js';
-import { ISessionsPartService, IToggleMaximizeSessionEvent } from '../../services/sessions/browser/sessionsPartService.js';
+import { ISessionsGridChangeEvent, ISessionsPartService, IToggleMaximizeSessionEvent, SessionsGridLayout } from '../../services/sessions/browser/sessionsPartService.js';
 
 /**
  * Owns the lifecycle of the {@link SessionsPart}. Selects the mobile vs. desktop
@@ -35,8 +35,16 @@ export class SessionsParts extends Disposable implements ISessionsPartService {
 	private readonly _onDidToggleMaximizeSession = this._register(new Emitter<IToggleMaximizeSessionEvent>());
 	readonly onDidToggleMaximizeSession: Event<IToggleMaximizeSessionEvent> = this._onDidToggleMaximizeSession.event;
 
-	get onDidFocusSession(): Event<string> {
+	get onDidFocusSession(): Event<string | undefined> {
 		return this._mainPart.onDidFocusSession;
+	}
+
+	get onDidUpdateGrid(): Event<ISessionsGridChangeEvent> {
+		return this._mainPart.onDidUpdateGrid;
+	}
+
+	get isSplit(): boolean {
+		return this._mainPart.isSplit;
 	}
 
 	constructor(
@@ -75,6 +83,26 @@ export class SessionsParts extends Disposable implements ISessionsPartService {
 
 	getProgressIndicator(): IProgressIndicator {
 		return this._mainPart.getProgressIndicator();
+	}
+
+	getSidePanel(sessionId: string | undefined): ISessionSidePanel | undefined {
+		return this._mainPart.getSidePanel(sessionId);
+	}
+
+	setSidePanel(sessionId: string | undefined, panel: ISessionSidePanel): void {
+		this._mainPart.setSidePanel(sessionId, panel);
+	}
+
+	setSidePanelVisible(panel: ISessionSidePanel, visible: boolean): void {
+		this._mainPart.setSidePanelVisible(panel, visible);
+	}
+
+	isSidePanelVisible(panel: ISessionSidePanel): boolean {
+		return this._mainPart.isSidePanelVisible(panel);
+	}
+
+	setPendingLayout(layout: SessionsGridLayout): void {
+		this._mainPart.setPendingLayout(layout);
 	}
 }
 

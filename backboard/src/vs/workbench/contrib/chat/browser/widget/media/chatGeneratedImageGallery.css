@@ -3,9 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-/* Generated images as Codex's chat gallery: a 480px stage with 16px corners
- * (270px tall for 16:9), a 56px thumbnail strip 8px to its right when a turn
- * produced several images, and a glass "Canvas" action on hover. */
+/* Generated images as Codex's chat gallery: a stage shaped exactly like the
+ * image (aspect-ratio set from the image; 400px wide for portrait, 480px up to
+ * 2:1, full column beyond) with 16px corners — no frame or band around it — a
+ * 56px thumbnail strip 8px to its right when a turn produced several images,
+ * and a glass "Canvas" action on hover. */
 .chat-generated-image-gallery {
 	display: flex;
 	align-items: flex-start;
@@ -16,8 +18,10 @@
 
 .chat-generated-image-stage {
 	position: relative;
-	flex: 0 1 480px;
+	flex: 1 1 auto;
+	width: 100%;
 	min-width: 0;
+	/* Refined per image shape once it loads (sizeStage). */
 	max-width: 480px;
 	overflow: hidden;
 	border-radius: 16px;
@@ -31,7 +35,9 @@
 }
 
 .chat-generated-image-preview {
-	flex-shrink: 0;
+	/* One preview per stage width, so the next image never peeks in. */
+	flex: 0 0 100%;
+	width: 100%;
 	height: 100%;
 	padding: 0;
 	border: 0;
@@ -51,7 +57,7 @@
 /* Beats chat.css's standalone generated-image card, which targets the same <img>. */
 .interactive-item-container .value .rendered-markdown .chat-generated-image-gallery img.chat-generated-image-img {
 	display: block;
-	width: auto;
+	width: 100%;
 	max-width: none;
 	height: 100%;
 	max-height: none;
@@ -59,7 +65,8 @@
 	border: 0;
 	border-radius: 0;
 	background: none;
-	object-fit: contain;
+	/* The stage has the image's own ratio; cover only absorbs sub-pixel rounding. */
+	object-fit: cover;
 }
 
 .chat-generated-image-actions {
@@ -111,7 +118,12 @@
 	flex-direction: column;
 	flex-shrink: 0;
 	gap: 8px;
-	max-height: var(--chat-generated-image-stage-height, 270px);
+	/* As tall as the stage: size containment keeps the thumbnails from growing
+	 * the row, and stretch then gives the strip the stage's height to scroll in. */
+	contain: size;
+	align-self: stretch;
+	box-sizing: border-box;
+	width: 64px;
 	padding: 4px;
 	overflow-y: auto;
 }
@@ -181,4 +193,63 @@
 
 .monaco-workbench.monaco-reduce-motion .chat-generated-image-placeholder-dots {
 	animation: none;
+}
+
+/* Generated videos use the same gallery: a frame shaped like the clip with
+ * its own player controls, a 16:9 placeholder while it renders, and the
+ * Canvas action moved to the top so it never covers the controls. */
+.chat-generated-image-preview.video {
+	cursor: default;
+}
+
+.interactive-item-container .value .rendered-markdown .chat-generated-image-gallery video.chat-generated-image-img {
+	display: block;
+	width: 100%;
+	max-width: none;
+	height: 100%;
+	max-height: none;
+	margin: 0;
+	border: 0;
+	border-radius: 0;
+	background: #000000;
+	object-fit: cover;
+}
+
+.chat-generated-image-stage.video .chat-generated-image-actions {
+	top: 8px;
+	bottom: auto;
+}
+
+.chat-generated-image-thumb {
+	position: relative;
+}
+
+.interactive-item-container .value .rendered-markdown .chat-generated-image-strip video.chat-generated-image-img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.chat-generated-image-thumb-play {
+	position: absolute;
+	left: 4px;
+	bottom: 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	border-radius: 50%;
+	color: #ffffff;
+	background: rgba(0, 0, 0, 0.45);
+	pointer-events: none;
+}
+
+.chat-generated-image-thumb-play .codicon {
+	font-size: 10px;
+}
+
+.chat-generated-image-placeholder.video {
+	max-width: 480px;
+	aspect-ratio: 16 / 9;
 }

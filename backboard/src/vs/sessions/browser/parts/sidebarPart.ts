@@ -155,8 +155,11 @@ export class SidebarPart extends AbstractPaneCompositePart {
 			? { classes: ['sidebar-part-header'], windowControls: { left: true } }
 			: {
 				classes: ['sidebar-part-header'],
-				left: [{ menuId: Menus.TitleBarLeftLayout, telemetrySource: 'sidebarPanelHeader.left' }],
-				right: [{ menuId: Menus.TitleBarCenterLeft, telemetrySource: 'sidebarPanelHeader.centerLeft' }],
+				// The sidebar toggle sits right after the mode switcher.
+				left: [
+					{ menuId: Menus.TitleBarLeftLayout, telemetrySource: 'sidebarPanelHeader.left' },
+					{ menuId: Menus.TitleBarCenterLeft, telemetrySource: 'sidebarPanelHeader.centerLeft' },
+				],
 				windowControls: { left: true },
 			}));
 
@@ -194,6 +197,15 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		}));
 	}
 
+	/**
+	 * `--sessions-sidebar-inset` on the main container: the sidebar's right
+	 * edge while it shows, else 0. Full-window surfaces use it so the sidebar
+	 * stays visible and usable beside them.
+	 */
+	private publishInset(inset: number): void {
+		this.layoutService.mainContainer.style.setProperty('--sessions-sidebar-inset', `${Math.round(inset)}px`);
+	}
+
 	private getFooterHeight(): number {
 		const actionCount = this.footerToolbar?.getItemsLength() ?? 0;
 		if (actionCount === 0) {
@@ -214,6 +226,13 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		}
 
 		footer.style.display = this.getFooterHeight() > 0 ? '' : 'none';
+	}
+
+	override setVisible(visible: boolean): void {
+		super.setVisible(visible);
+		if (!visible) {
+			this.publishInset(0);
+		}
 	}
 
 	override updateStyles(): void {
@@ -242,8 +261,11 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		this.previousLayoutDimensions = { width, height, top, left };
 
 		if (!this.layoutService.isVisible(Parts.SIDEBAR_PART)) {
+			this.publishInset(0);
 			return;
 		}
+		// Full-window surfaces (Usage, Settings, Canvas) start where the sidebar ends.
+		this.publishInset(left + width);
 
 		this.updateFooterVisibility();
 		const footerHeight = Math.min(height, this.getFooterHeight());

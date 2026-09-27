@@ -2045,7 +2045,8 @@
 
 .settings-editor.backboard-settings-experience {
 	--backboard-settings-background: var(--vscode-editor-background);
-	--backboard-settings-sidebar-background: color-mix(in srgb, var(--vscode-editor-background) 97%, var(--vscode-foreground) 3%);
+	/* The sidebar shares the page surface; only its rows and search tint it. */
+	--backboard-settings-sidebar-background: var(--backboard-settings-background);
 	--backboard-settings-foreground: var(--vscode-foreground);
 	--backboard-settings-muted-foreground: var(--vscode-descriptionForeground);
 	--backboard-settings-sidebar-foreground: var(--vscode-foreground);
@@ -2073,7 +2074,7 @@
 
 .monaco-workbench.vs-dark .settings-editor.backboard-settings-experience {
 	--backboard-settings-background: #181818;
-	--backboard-settings-sidebar-background: #2c2c2c;
+	--backboard-settings-sidebar-background: #181818;
 	--backboard-settings-sidebar-foreground: #ededed;
 	--backboard-settings-foreground: #ededed;
 	--backboard-settings-muted-foreground: #b4b4b4;
@@ -2155,7 +2156,7 @@
 .monaco-workbench.vs-dark .settings-editor.backboard-settings-experience > .settings-body .settings-toc-container .monaco-list,
 .monaco-workbench.vs-dark .settings-editor.backboard-settings-experience > .settings-body .settings-toc-container .monaco-list-rows,
 .monaco-workbench.vs-dark .settings-editor.backboard-settings-experience > .settings-body .settings-toc-container .monaco-scrollable-element {
-	background-color: #2c2c2c !important;
+	background-color: var(--backboard-settings-sidebar-background) !important;
 }
 
 .settings-editor.backboard-settings-experience .settings-sidebar-header {

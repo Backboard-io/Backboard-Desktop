@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
+import { JevBrain, type JevDecider } from "../src/core/computer/JevBrain.ts";
 import { JevStaleTargetError } from "../src/core/computer/JevSurfaceError.ts";
 import {
 	describeElement,
-	type JevDecider,
 	type JevElement,
 	type JevKey,
 	type JevSurface,
@@ -143,7 +143,7 @@ const run = (
 	write: JevWriter = writer(null),
 	goal = "Search for Justin Bieber and open his artist page",
 ) =>
-	new JevUseLoop(surface, decide, write, 0, 0).run(
+	new JevUseLoop(surface, new JevBrain(decide), write, 0, 0).run(
 		{ goal },
 		new AbortController().signal,
 	);
@@ -156,7 +156,7 @@ describe("JevUseLoop", () => {
 		] as const) {
 			const result = await new JevUseLoop(
 				new FakeSurface([[el("Editor")]], { static: true }),
-				decider(Array<Move>(200).fill("SCROLL_DOWN")),
+				new JevBrain(decider(Array<Move>(200).fill("SCROLL_DOWN"))),
 				writer(null),
 				0,
 				0,
@@ -483,10 +483,10 @@ describe("JevUseLoop", () => {
 		const scripted = decider(Array<Move>(30).fill("WAIT"));
 		const result = await new JevUseLoop(
 			new FakeSurface([[el("Loading")]]),
-			async (request, options) => {
+			new JevBrain(async (request, options) => {
 				now += 10_000;
 				return scripted(request, options);
-			},
+			}),
 			writer(null),
 			0,
 			0,
@@ -535,11 +535,11 @@ describe("JevUseLoop", () => {
 		});
 	});
 
-	it("reports each step as it happens and which surface ran", async () => {
+	it("reports each step as it happens and which surface and brain ran", async () => {
 		const live: string[] = [];
 		const result = await new JevUseLoop(
 			new FakeSurface([[el("Next")], [el("Finish")]]),
-			decider([{ click: /Next/ }, "DONE"]),
+			new JevBrain(decider([{ click: /Next/ }, "DONE"])),
 			writer(null),
 			0,
 			0,
@@ -547,9 +547,10 @@ describe("JevUseLoop", () => {
 			{ goal: "Finish setup", onStep: (step) => live.push(step.operation) },
 			new AbortController().signal,
 		);
-		expect({ live, surface: result.surface }).toEqual({
+		expect({ live, surface: result.surface, brain: result.brain }).toEqual({
 			live: ["CLICK", "DONE"],
 			surface: "fake",
+			brain: "jev",
 		});
 	});
 });

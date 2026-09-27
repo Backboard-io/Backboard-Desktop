@@ -41,6 +41,7 @@ import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitled
 import { toAgentHostBackendSessionUri } from './agentHostSessionUri.js';
 import { resolveSessionConfigShared } from './agentHostSessionConfigResolveCache.js';
 import { BackboardLogoIcon } from '../agentSessions.js';
+import { videoModelSummary } from '../../../../../../platform/agentHost/common/generativeMediaCapabilities.js';
 
 const FILTER_THRESHOLD = 10;
 
@@ -195,7 +196,7 @@ function toActionItems(property: string, items: readonly IConfigPickerItem[], cu
 	return items.map(item => ({
 		kind: ActionListItemKind.Action,
 		label: item.label,
-		detail: item.description,
+		detail: videoModelSummary(item.description),
 		group: { title: '', icon: getConfigIcon(property, item.value) },
 		disabled: policyRestricted && property === SessionConfigKey.AutoApprove && (item.value === 'autoApprove' || item.value === 'autopilot'),
 		item: { ...item, label: isSelectedValue(currentValue, item.value) ? `${item.label} ${localize('selected', "(Selected)")}` : item.label },

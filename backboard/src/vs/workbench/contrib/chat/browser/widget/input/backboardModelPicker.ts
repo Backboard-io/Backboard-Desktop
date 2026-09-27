@@ -8,6 +8,7 @@ import { renderIcon } from '../../../../../../base/browser/ui/iconLabel/iconLabe
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Disposable, DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../../nls.js';
+import { videoModelSummary } from '../../../../../../platform/agentHost/common/generativeMediaCapabilities.js';
 import type { IAgentHostGenericConfigOption } from '../../agentSessions/agentHost/agentHostGenericConfigChips.js';
 
 type ModelOption = Pick<IAgentHostGenericConfigOption, 'label' | 'getEnumInfo' | 'getCurrentValue' | 'getDynamicEnumInfo' | 'setValue'>;
@@ -129,7 +130,8 @@ export class BackboardModelPicker extends Disposable {
 	}
 
 	private applyCatalog(catalog: ModelCatalog): void {
-		this.items = catalog.values.map((value, index) => ({ value, label: catalog.labels[index] ?? value, description: catalog.descriptions[index] }));
+		// Video rows append machine-readable capabilities; people read the summary.
+		this.items = catalog.values.map((value, index) => ({ value, label: catalog.labels[index] ?? value, description: videoModelSummary(catalog.descriptions[index]) }));
 		this.renderModels();
 	}
 
@@ -165,6 +167,9 @@ export class BackboardModelPicker extends Disposable {
 			row.title = item.description ? `${item.label} — ${item.description}` : item.label;
 			const copy = dom.append(row, dom.$('.backboard-composer-model-choice-copy'));
 			dom.append(copy, dom.$('.backboard-composer-model-choice-label', undefined, item.label));
+			if (item.description) {
+				dom.append(copy, dom.$('.backboard-composer-model-choice-detail', undefined, item.description));
+			}
 			if (isSelected) { dom.append(row, dom.$('span.codicon.codicon-check.backboard-composer-model-check', { 'aria-hidden': 'true' })); }
 			this.rows.add(dom.addDisposableListener(row, 'pointerdown', event => event.preventDefault()));
 			this.rows.add(dom.addDisposableListener(row, 'click', event => {

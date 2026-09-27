@@ -73,7 +73,7 @@
 	border-radius: 0 4px 4px 0;
 }
 
-.chat-context-usage-details .quota-indicator .quota-bar .quota-bit:not(.output-buffer):has(+ .quota-bit.output-buffer:not([style*="display: none"])) {
+.chat-context-usage-details .quota-indicator .quota-bar .quota-bit:not(.output-buffer):has(+ .quota-bit.output-buffer:not(.is-hidden)) {
 	border-radius: 4px 0 0 4px;
 }
 

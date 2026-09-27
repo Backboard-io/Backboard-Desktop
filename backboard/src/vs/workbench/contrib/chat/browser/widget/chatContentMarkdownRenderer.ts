@@ -18,7 +18,7 @@ import product from '../../../../../platform/product/common/product.js';
 import { FileAccess, Schemas } from '../../../../../base/common/network.js';
 import { AGENT_HOST_SCHEME } from '../../../../../platform/agentHost/common/agentHostUri.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { OPEN_CANVAS_COMMAND_ID, renderGeneratedImageGalleries } from './chatGeneratedImageGallery.js';
+import { OPEN_CANVAS_COMMAND_ID, OPEN_CANVAS_IN_SIMPLE_COMMAND_ID, renderGeneratedImageGalleries } from './chatGeneratedImageGallery.js';
 
 const BACKBOARD_GENERATED_IMAGE_HOST = 'backboard-prod.s3.ca-central-1.amazonaws.com';
 /**
@@ -196,9 +196,12 @@ export class ChatContentMarkdownRenderer implements IMarkdownRenderer {
 			}
 		}
 		const upgraded = this.upgradeGeneratedVideos(result);
+		// The Sessions window opens its own Canvas; the Editor window hands the
+		// image over to the Simple window's Canvas instead.
+		const canvasCommand = [OPEN_CANVAS_COMMAND_ID, OPEN_CANVAS_IN_SIMPLE_COMMAND_ID].find(id => !!CommandsRegistry.getCommand(id));
 		const gallery = renderGeneratedImageGalleries(upgraded.element, isBackboardGeneratedImage, {
-			canOpenCanvas: !!CommandsRegistry.getCommand(OPEN_CANVAS_COMMAND_ID),
-			openCanvas: (imageUrl, view) => { void this.commandService.executeCommand(OPEN_CANVAS_COMMAND_ID, { imageUrl, view }); },
+			canOpenCanvas: !!canvasCommand,
+			openCanvas: (imageUrl, view) => { void this.commandService.executeCommand(canvasCommand!, { imageUrl, view }); },
 		});
 		return this.attachCustomHover(upgraded, gallery);
 	}
@@ -229,6 +232,8 @@ export class ChatContentMarkdownRenderer implements IMarkdownRenderer {
 			});
 			const label = image.getAttribute('alt');
 			if (label) { video.setAttribute('aria-label', label); }
+			// The markdown URL identifies the clip for the gallery and Canvas.
+			video.dataset.mediaUrl = src;
 			image.replaceWith(video);
 		}
 		return result;

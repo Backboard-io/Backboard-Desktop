@@ -294,7 +294,7 @@ export const knownClaudeTools = [
 	{ name: 'LSP', description: localize('claude.lsp', 'Code intelligence (requires plugin)'), toolEquivalent: [] },
 	{ name: 'NotebookEdit', description: localize('claude.notebookEdit', 'Modify Jupyter notebooks'), toolEquivalent: ['edit/editNotebook'] },
 	{ name: 'AskUserQuestion', description: localize('claude.askUserQuestion', 'Ask multiple-choice questions'), toolEquivalent: ['vscode/askQuestions'] },
-	{ name: 'MCPSearch', description: localize('claude.mcpSearch', 'Searches for MCP tools when tool search is enabled'), toolEquivalent: [] }
+	{ name: 'MCPSearch', description: localize('claude.mcpSearch', 'Searches for connector tools when tool search is enabled'), toolEquivalent: [] }
 ];
 
 export const knownClaudeModels = [
@@ -375,7 +375,7 @@ export const claudeAgentAttributes: Record<string, IAttributeDefinition> = {
 	},
 	'mcpServers': {
 		type: 'sequence',
-		description: localize('attribute.mcpServers', "MCP servers available to this subagent."),
+		description: localize('attribute.mcpServers', "Connectors available to this subagent."),
 	},
 	'hooks': {
 		type: 'object',

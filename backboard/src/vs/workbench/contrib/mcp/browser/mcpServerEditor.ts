@@ -683,7 +683,7 @@ export class McpServerEditor extends EditorPane {
 				content.removeChild(content.firstChild);
 			}
 			const noManifestMessage = append(content, $('.no-manifest'));
-			noManifestMessage.textContent = localize('noManifest', "No manifest available for this MCP server.");
+			noManifestMessage.textContent = localize('noManifest', "No manifest available for this connector.");
 		}
 
 		const scrollableContent = new DomScrollableElement(content, {});
@@ -702,7 +702,7 @@ export class McpServerEditor extends EditorPane {
 
 		if (!config) {
 			const noConfigMessage = append(container, $('.no-config'));
-			noConfigMessage.textContent = localize('noConfig', "No configuration available for this MCP server.");
+			noConfigMessage.textContent = localize('noConfig', "No configuration available for this connector.");
 			return;
 		}
 

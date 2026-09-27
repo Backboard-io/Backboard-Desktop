@@ -351,9 +351,11 @@ class ActionItemRenderer<T> implements IListRenderer<IActionListItem<T>, IAction
 		if (element.detail) {
 			data.detail.textContent = stripNewlines(element.detail);
 			data.detail.style.display = '';
+			data.detail.classList.remove('is-hidden');
 		} else {
 			data.detail.textContent = '';
 			data.detail.style.display = 'none';
+			data.detail.classList.add('is-hidden');
 		}
 
 		const actionTitle = this._keybindingService.lookupKeybinding(acceptSelectedActionCommand)?.getLabel();

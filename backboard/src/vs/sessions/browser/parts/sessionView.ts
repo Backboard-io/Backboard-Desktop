@@ -6,10 +6,12 @@
 import { renderBackboardAuthSetup } from '../../../workbench/contrib/chat/browser/backboardAuthSetup.js';
 import { BackboardAuthContextKeys, BackboardAuthGateContextKeys, IBackboardAuthService } from '../../../workbench/contrib/chat/common/backboardAuth.js';
 import './media/sessionView.css';
-import { $, addDisposableListener, EventType, size } from '../../../base/browser/dom.js';
+import { $, addDisposableListener, EventType, getWindow, scheduleAtNextAnimationFrame, size } from '../../../base/browser/dom.js';
 import { ISerializableView, IViewSize } from '../../../base/browser/ui/grid/grid.js';
+import { Orientation, Sash } from '../../../base/browser/ui/sash/sash.js';
 import { Emitter, Event } from '../../../base/common/event.js';
-import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../base/common/lifecycle.js';
+import { syncRootPresenceClass } from '../../../workbench/browser/part.js';
 import { isEqual } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
 import { IAccessibilityService } from '../../../platform/accessibility/common/accessibility.js';
@@ -23,10 +25,11 @@ import { IActiveSession } from '../../services/sessions/common/sessionsManagemen
 import { IChatViewFactory } from '../../services/chatView/browser/chatViewFactory.js';
 import { AbstractChatView, ChatViewKind, IChatViewOptions } from './chatView.js';
 import { ChatCompositeBar } from './chatCompositeBar.js';
-import { SessionHeader, SessionViewFloatingToolbar } from './sessionHeader.js';
+import { SessionHeader, SessionViewFloatingToolbar, SessionViewNavigationToolbar } from './sessionHeader.js';
+import { SessionsPanelHeader } from './panelHeader.js';
 import { ISessionContext, SessionContext } from '../../services/sessions/browser/sessionContext.js';
 import { autorun, observableValue } from '../../../base/common/observable.js';
-import { SessionIsArchivedContext, SessionIsCreatedContext, SessionIsMaximizedContext, SessionIsReadContext, SessionIsStickyContext, SessionSupportsMultipleChatsContext, ChatSessionProviderIdContext, ChatSessionTypeContext, SessionHasChangesContext } from '../../common/contextkeys.js';
+import { SessionIsArchivedContext, SessionIsCreatedContext, SessionIsMaximizedContext, SessionIsReadContext, SessionIsStickyContext, SessionSupportsMultipleChatsContext, ChatSessionProviderIdContext, ChatSessionTypeContext, SessionHasChangesContext, SessionPaneCanGoBackContext, SessionPaneCanGoForwardContext, SessionSidePanelVisibleContext } from '../../common/contextkeys.js';
 import { activeSessionViewBackground, activeSessionViewForeground, inactiveSessionViewBackground, inactiveSessionViewForeground } from '../../common/theme.js';
 import { SessionStatus } from '../../services/sessions/common/session.js';
 import { localize } from '../../../nls.js';
@@ -37,6 +40,30 @@ import { ChatResourceNavigationHistory } from './chatResourceNavigationHistory.j
  * options so they can be forwarded to the new-chat views the host creates.
  */
 export interface ISessionViewOptions extends IChatViewOptions { }
+
+/**
+ * A right panel owned by one grid column of the sessions part. While the grid
+ * is split, every visible session gets its own panel next to its chat instead
+ * of sharing the window's auxiliary bar. Contributions implement the panel;
+ * the {@link SessionView} only hosts and sizes it.
+ */
+export interface ISessionSidePanel extends IDisposable {
+	readonly element: HTMLElement;
+	/** Binds the panel to the session currently shown in its grid column. */
+	setSession(session: IActiveSession | undefined): void;
+	setVisible(visible: boolean): void;
+	layout(width: number, height: number): void;
+}
+
+/** Hosts in a {@link SessionView}'s own header row, shown while the grid is split. */
+export interface ISessionViewSplitHeaderSlots {
+	/** Leading edge: window chrome (traffic-light spacer, navigation) for the left-most column. */
+	readonly chrome: HTMLElement;
+	/** After the chrome: the new-chat breadcrumb for the placeholder column. */
+	readonly leading: HTMLElement;
+	/** Trailing edge: the new-chat toolbar for the placeholder column. */
+	readonly trailing: HTMLElement;
+}
 
 export interface IChatResourceViewContext {
 	readonly title: string;
@@ -58,6 +85,10 @@ export class SessionView extends Disposable implements ISerializableView {
 	static readonly TYPE = 'sessions.sessionView';
 	private static readonly CENTERED_CONTENT_MAX_WIDTH = 950;
 	private static readonly CHAT_NAVIGATION_HEIGHT = 44;
+	private static readonly SIDE_PANEL_MIN_WIDTH = 260;
+	private static readonly SIDE_PANEL_DEFAULT_WIDTH = 420;
+	private static readonly CHAT_MIN_WIDTH = 240;
+	private static readonly PANE_HISTORY_LIMIT = 50;
 	private static readonly ACTIVE_BACKGROUND = asCssVariable(activeSessionViewBackground);
 	private static readonly ACTIVE_FOREGROUND = asCssVariable(activeSessionViewForeground);
 	private static readonly INACTIVE_BACKGROUND = asCssVariable(inactiveSessionViewBackground);
@@ -84,11 +115,29 @@ export class SessionView extends Disposable implements ISerializableView {
 	private readonly _floatingToolbar: SessionViewFloatingToolbar;
 	private readonly _centeredContentContainer: HTMLElement;
 	private _headerInPanel = false;
+	private _splitHeader: { readonly header: SessionsPanelHeader; readonly navigation: SessionViewNavigationToolbar; readonly title: HTMLElement; readonly toolbar: HTMLElement; readonly slots: ISessionViewSplitHeaderSlots } | undefined;
+	/** Sessions this grid cell showed before (Back) and after (Forward) its current one. */
+	private readonly _paneBack: URI[] = [];
+	private readonly _paneForward: URI[] = [];
+	private _pendingPaneNavigation: { readonly direction: 'back' | 'forward'; readonly target: URI } | undefined;
+	private _splitHeaderVisible = false;
+	/** The split header row's height, measured once when first shown (reading it forces a reflow). */
+	private _splitHeaderHeight: number | undefined;
+	private readonly _sidePanelHost: HTMLElement;
+	private readonly _sidePanelStore = this._register(new DisposableStore());
+	private _sidePanel: ISessionSidePanel | undefined;
+	/** User-sized width of the side panel; `undefined` until the sash is dragged. */
+	private _sidePanelWidth: number | undefined;
+	private _chatWidth = 0;
+	private _isGridVisible = true;
+	private _layoutSuspended = false;
+	private _layoutPending = false;
 	private readonly _contentContainer: HTMLElement;
 	private readonly _scopedInstantiationService: IInstantiationService;
 	private _backboardAuthGateOverlay: HTMLElement | undefined;
 
 	private readonly _currentView = this._register(new MutableDisposable<AbstractChatView>());
+	private readonly _rootClassSync = this._register(new MutableDisposable());
 	private _lastLayout: { readonly width: number; readonly height: number; readonly top: number; readonly left: number } | undefined;
 
 	private _openSessionDisposables = this._register(new DisposableStore());
@@ -107,6 +156,9 @@ export class SessionView extends Disposable implements ISerializableView {
 	private readonly _chatSessionProviderIdKey: IContextKey<string>;
 	private readonly _chatSessionTypeKey: IContextKey<string>;
 	private readonly _sessionHasChangesKey: IContextKey<boolean>;
+	private readonly _sessionSidePanelVisibleKey: IContextKey<boolean>;
+	private readonly _sessionPaneCanGoBackKey: IContextKey<boolean>;
+	private readonly _sessionPaneCanGoForwardKey: IContextKey<boolean>;
 
 	/** Whether this view currently hosts the active session in the grid. */
 	private _isActive = true;
@@ -123,6 +175,11 @@ export class SessionView extends Disposable implements ISerializableView {
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
 	) {
 		super();
+		this._register(toDisposable(() => {
+			// The element leaves the DOM around disposal; re-check on the next frame.
+			const targetWindow = getWindow(this.element);
+			targetWindow.requestAnimationFrame(() => SessionView.syncRootClasses(targetWindow));
+		}));
 
 		// Scoped context key service so toolbars hosted within can react to
 		// session-specific context keys (e.g. sessionIsCreated, sessionIsSticky).
@@ -136,6 +193,9 @@ export class SessionView extends Disposable implements ISerializableView {
 		this._chatSessionProviderIdKey = ChatSessionProviderIdContext.bindTo(scopedContextKeyService);
 		this._chatSessionTypeKey = ChatSessionTypeContext.bindTo(scopedContextKeyService);
 		this._sessionHasChangesKey = SessionHasChangesContext.bindTo(scopedContextKeyService);
+		this._sessionSidePanelVisibleKey = SessionSidePanelVisibleContext.bindTo(scopedContextKeyService);
+		this._sessionPaneCanGoBackKey = SessionPaneCanGoBackContext.bindTo(scopedContextKeyService);
+		this._sessionPaneCanGoForwardKey = SessionPaneCanGoForwardContext.bindTo(scopedContextKeyService);
 
 		// Scoped service exposing this view's session so toolbars and contributed
 		// action view items (e.g. the changes diff stats in the header) can read it.
@@ -193,6 +253,10 @@ export class SessionView extends Disposable implements ISerializableView {
 		this._contentContainer = $('.session-view-content');
 		this.element.appendChild(this._contentContainer);
 
+		this._sidePanelHost = $('.session-view-side-panel');
+		this._sidePanelHost.style.display = 'none';
+		this.element.appendChild(this._sidePanelHost);
+
 		this._floatingToolbar = this._register(this._scopedInstantiationService.createInstance(SessionViewFloatingToolbar));
 		this.element.appendChild(this._floatingToolbar.element);
 		this._createBackboardAuthGate();
@@ -220,6 +284,7 @@ export class SessionView extends Disposable implements ISerializableView {
 			return;
 		}
 		this._hasOpenedSession = true;
+		this._recordPaneHistory(this._currentSession, session);
 		this._currentSession = session;
 		this._chatResourceOverride = undefined;
 		this._chatResourceHistory.reset();
@@ -269,6 +334,7 @@ export class SessionView extends Disposable implements ISerializableView {
 				this._contentContainer.replaceChildren(view.element);
 				this._currentView.value = view;
 				view.setActive(this._isActive);
+				this._scheduleRootClassSync();
 			}
 			isFirstRun = false;
 
@@ -279,6 +345,7 @@ export class SessionView extends Disposable implements ISerializableView {
 			}
 
 			this._header.setSession(session);
+			this._splitHeader?.navigation.setSession(session);
 			this._compositeBar.setSession(session);
 			this._floatingToolbar.setSession(session);
 			this._layoutChildren();
@@ -287,6 +354,22 @@ export class SessionView extends Disposable implements ISerializableView {
 				this._animateSessionGraduation(composerInputRect);
 			}
 		}));
+	}
+
+	/**
+	 * Mirrors what this view shows onto the workbench root, where stylesheets
+	 * read it instead of a root `:has()` (see `syncRootPresenceClass`). Runs a
+	 * frame later so a view created before this element is attached counts.
+	 */
+	private _scheduleRootClassSync(): void {
+		const targetWindow = getWindow(this.element);
+		this._rootClassSync.value = scheduleAtNextAnimationFrame(targetWindow, () => SessionView.syncRootClasses(targetWindow));
+	}
+
+	private static syncRootClasses(targetWindow: Window): void {
+		syncRootPresenceClass(targetWindow, 'sessions-chat-view-open', '.part.sessionspart .chat-view-chat');
+		syncRootPresenceClass(targetWindow, 'sessions-new-chat-custom-background', '.new-chat-widget-content.has-custom-background');
+		syncRootPresenceClass(targetWindow, 'backboard-session-auth-gated', '.session-view.backboard-auth-gate-active');
 	}
 
 	/** Loads a child chat in this session's existing grid slot. */
@@ -372,7 +455,68 @@ export class SessionView extends Disposable implements ISerializableView {
 		if (didChange) {
 			this._onDidChangeCanNavigateBack.fire(canNavigateBack);
 		}
+		this._updatePaneNavigationKeys();
 		this._layoutChildren();
+	}
+
+	/**
+	 * Records the session this grid cell leaves in its own Back/Forward
+	 * history. A navigation started with {@link beginPaneNavigation} moves the
+	 * entry between the two stacks instead of starting a new branch. Drafts
+	 * and the new-session placeholder are not recorded.
+	 */
+	private _recordPaneHistory(previous: IActiveSession | undefined, next: IActiveSession | undefined): void {
+		if (!previous || !next || previous.sessionId === next.sessionId || !previous.isCreated.get()) {
+			return;
+		}
+		const navigation = this._pendingPaneNavigation;
+		if (navigation && isEqual(navigation.target, next.resource)) {
+			const [from, to] = navigation.direction === 'back' ? [this._paneBack, this._paneForward] : [this._paneForward, this._paneBack];
+			from.pop();
+			to.push(previous.resource);
+			this._pendingPaneNavigation = undefined;
+		} else {
+			this._paneBack.push(previous.resource);
+			this._paneForward.length = 0;
+		}
+		if (this._paneBack.length > SessionView.PANE_HISTORY_LIMIT) {
+			this._paneBack.shift();
+		}
+		this._updatePaneNavigationKeys();
+	}
+
+	/**
+	 * Starts navigating this cell Back or Forward and returns the session to
+	 * open, or `undefined` when there is none. Pair with
+	 * {@link endPaneNavigation} once the session was opened.
+	 */
+	beginPaneNavigation(direction: 'back' | 'forward'): URI | undefined {
+		const target = (direction === 'back' ? this._paneBack : this._paneForward).at(-1);
+		this._pendingPaneNavigation = target ? { direction, target } : undefined;
+		return target;
+	}
+
+	/**
+	 * Ends a navigation started with {@link beginPaneNavigation}. When the
+	 * cell did not end up showing the target (it is gone, or shown by another
+	 * cell, which then got focus instead), the entry is dropped so Back never
+	 * gets stuck on it.
+	 */
+	endPaneNavigation(): void {
+		const navigation = this._pendingPaneNavigation;
+		this._pendingPaneNavigation = undefined;
+		if (navigation) {
+			const stack = navigation.direction === 'back' ? this._paneBack : this._paneForward;
+			if (stack.length && isEqual(stack.at(-1), navigation.target)) {
+				stack.pop();
+			}
+			this._updatePaneNavigationKeys();
+		}
+	}
+
+	private _updatePaneNavigationKeys(): void {
+		this._sessionPaneCanGoBackKey.set(this._paneBack.length > 0 || this._chatResourceHistory.canGoBack);
+		this._sessionPaneCanGoForwardKey.set(this._paneForward.length > 0);
 	}
 
 	/**
@@ -485,7 +629,30 @@ export class SessionView extends Disposable implements ISerializableView {
 	layout(width: number, height: number, top: number, left: number): void {
 		size(this.element, width, height);
 		this._lastLayout = { width, height, top, left };
+		if (this._layoutSuspended) {
+			this._layoutPending = true;
+			return;
+		}
 		this._layoutChildren();
+	}
+
+	/**
+	 * Defers laying out the hosted chat until {@link resumeLayout}. A grid
+	 * change (moving or adding a pane) lays every view out several times; each
+	 * chat layout measures the DOM and forces a reflow, so doing it once at the
+	 * end keeps drag and drop snappy. The view's own element is still sized
+	 * immediately so the grid stays consistent.
+	 */
+	suspendLayout(): void {
+		this._layoutSuspended = true;
+	}
+
+	resumeLayout(): void {
+		this._layoutSuspended = false;
+		if (this._layoutPending) {
+			this._layoutPending = false;
+			this._layoutChildren();
+		}
 	}
 
 	private _layoutChildren(): void {
@@ -494,12 +661,26 @@ export class SessionView extends Disposable implements ISerializableView {
 		}
 		const { width, height, top, left } = this._lastLayout;
 
+		// A side panel (split grid only) takes the right edge of the view; the
+		// header row, tabs and chat share the remaining column.
+		const sidePanelWidth = this._sidePanel ? this._getSidePanelWidth(width) : 0;
+		const chatWidth = width - sidePanelWidth;
+		this._chatWidth = chatWidth;
+
+		const splitHeaderHeight = this._splitHeaderVisible ? this._getSplitHeaderHeight() : 0;
+		if (this._splitHeader) {
+			this._splitHeader.header.element.style.width = `${chatWidth}px`;
+		}
+
 		// Apply the centered band's width first so the header and tabs wrap to
 		// their final layout before we measure their combined height. Measuring
 		// before the width is applied could read a stale (pre-cap) height and
 		// cause a transient overlap until a later layout pass corrects it.
-		const centeredWidth = Math.min(width, SessionView.CENTERED_CONTENT_MAX_WIDTH);
+		const centeredWidth = Math.min(chatWidth, SessionView.CENTERED_CONTENT_MAX_WIDTH);
 		this._centeredContentContainer.style.width = `${centeredWidth}px`;
+		// `margin: 0 auto` centers across the whole view; with a side panel the
+		// band must center over the chat column instead.
+		this._centeredContentContainer.style.marginLeft = this._sidePanel ? `${Math.max(0, (chatWidth - centeredWidth) / 2)}px` : '';
 
 		// When the header is relocated into the window header row it no longer
 		// occupies the centered band, so the transcript reclaims that height.
@@ -514,7 +695,135 @@ export class SessionView extends Disposable implements ISerializableView {
 
 		// Lay out the chat content at full width so its scrollbar reaches the
 		// right edge; the chat rows and input center themselves via CSS.
-		this._currentView.value?.layout(width, height - barHeight, top + barHeight, left);
+		this._contentContainer.style.width = this._sidePanel ? `${chatWidth}px` : '';
+		const chatTop = splitHeaderHeight + barHeight;
+		this._currentView.value?.layout(chatWidth, height - chatTop, top + chatTop, left);
+
+		if (this._sidePanel) {
+			this._sidePanelHost.style.width = `${sidePanelWidth}px`;
+			this._sidePanel.layout(sidePanelWidth, height);
+		}
+	}
+
+	private _getSplitHeaderHeight(): number {
+		// The row has a fixed CSS height; measuring it on every layout would force
+		// a synchronous reflow per pane per grid change (dragging panes around).
+		if (!this._splitHeaderHeight && this._splitHeader) {
+			this._splitHeaderHeight = this._splitHeader.header.height || undefined;
+		}
+		return this._splitHeaderHeight ?? 0;
+	}
+
+	private _getSidePanelWidth(viewWidth: number): number {
+		const preferred = this._sidePanelWidth ?? Math.min(SessionView.SIDE_PANEL_DEFAULT_WIDTH, Math.round(viewWidth * 0.45));
+		const max = Math.max(SessionView.SIDE_PANEL_MIN_WIDTH, viewWidth - SessionView.CHAT_MIN_WIDTH);
+		return Math.max(SessionView.SIDE_PANEL_MIN_WIDTH, Math.min(preferred, max));
+	}
+
+	/**
+	 * Called by the grid when this view is hidden or shown (e.g. while another
+	 * view is maximized). The side panel follows so a native browser page it
+	 * shows never floats over the maximized view.
+	 */
+	setVisible(visible: boolean): void {
+		this._isGridVisible = visible;
+		this._sidePanel?.setVisible(visible);
+	}
+
+	/** The side panel currently hosted by this view, if any. */
+	get sidePanel(): ISessionSidePanel | undefined {
+		return this._sidePanel;
+	}
+
+	/**
+	 * Hosts `panel` at the right edge of this view (or removes the current one
+	 * when `undefined`). The owner of the panel keeps its lifecycle: detaching
+	 * only hides it, so it can be re-attached to whichever view shows its
+	 * session after the grid reorders.
+	 */
+	setSidePanel(panel: ISessionSidePanel | undefined): void {
+		if (this._sidePanel === panel) {
+			return;
+		}
+		if (this._sidePanel) {
+			this._sidePanel.setVisible(false);
+			this._sidePanel.element.remove();
+		}
+		this._sidePanelStore.clear();
+		this._sidePanel = panel;
+		this._sessionSidePanelVisibleKey.set(!!panel);
+		this.element.classList.toggle('has-side-panel', !!panel);
+		this._sidePanelHost.style.display = panel ? '' : 'none';
+		if (panel) {
+			this._sidePanelHost.appendChild(panel.element);
+			const sash = this._sidePanelStore.add(new Sash(this.element, { getVerticalSashLeft: () => this._chatWidth }, { orientation: Orientation.VERTICAL }));
+			let startWidth = 0;
+			this._sidePanelStore.add(sash.onDidStart(() => startWidth = this._getSidePanelWidth(this._lastLayout?.width ?? 0)));
+			this._sidePanelStore.add(sash.onDidChange(e => {
+				this._sidePanelWidth = startWidth - (e.currentX - e.startX);
+				this._layoutChildren();
+				sash.layout();
+			}));
+			this._sidePanelStore.add(sash.onDidReset(() => {
+				this._sidePanelWidth = undefined;
+				this._layoutChildren();
+				sash.layout();
+			}));
+			this._layoutChildren();
+			sash.layout();
+			panel.setVisible(this._isGridVisible);
+		} else {
+			this._layoutChildren();
+		}
+	}
+
+	/**
+	 * Shows or hides this view's own header row. While the grid is split the
+	 * window's shared header row is hidden and every column carries its own
+	 * row (title, session toolbar), so the headers split along with the grid.
+	 */
+	setSplitHeaderVisible(visible: boolean): void {
+		if (visible) {
+			this._ensureSplitHeader().header.element.style.display = '';
+		} else if (this._splitHeader) {
+			this._splitHeader.header.element.style.display = 'none';
+		}
+		if (this._splitHeaderVisible !== visible) {
+			this._splitHeaderVisible = visible;
+			this._layoutChildren();
+		}
+	}
+
+	/** Slots in this view's own header row for chrome relocated from the window header. */
+	get splitHeaderSlots(): ISessionViewSplitHeaderSlots {
+		return this._ensureSplitHeader().slots;
+	}
+
+	/** Moves this view's session header and toolbar into its own header row. */
+	mountHeaderIntoSplitHeader(): void {
+		const { title, toolbar } = this._ensureSplitHeader();
+		this.mountHeaderIntoPanel(title, toolbar);
+	}
+
+	private _ensureSplitHeader() {
+		if (!this._splitHeader) {
+			// Same classes as the window header row so it inherits its look,
+			// height and window-drag behavior.
+			const header = this._register(this._scopedInstantiationService.createInstance(SessionsPanelHeader, this.element, {
+				classes: ['sessions-part-header', 'session-view-split-header'],
+			}));
+			header.element.style.display = 'none';
+			const chrome = header.createLeftSlot('session-view-split-header-chrome');
+			const navigation = this._register(this._scopedInstantiationService.createInstance(SessionViewNavigationToolbar));
+			navigation.setSession(this._currentSession);
+			header.createLeftSlot('session-view-split-header-navigation').appendChild(navigation.element);
+			const leading = header.createLeftSlot('session-view-split-header-leading');
+			const title = header.createCenterSlot('sessions-header-session-title-slot');
+			const toolbar = header.createRightSlot('sessions-header-session-toolbar-slot');
+			const trailing = header.createRightSlot('session-view-split-header-trailing');
+			this._splitHeader = { header, navigation, title, toolbar, slots: { chrome, leading, trailing } };
+		}
+		return this._splitHeader;
 	}
 
 	/**
@@ -654,6 +963,7 @@ export class SessionView extends Disposable implements ISerializableView {
 	private _updateBackboardAuthGate(): void {
 		const gated = this._isBackboardAuthRequired();
 		this.element.classList.toggle('backboard-auth-gate-active', gated);
+		this._scheduleRootClassSync();
 		if (this._backboardAuthGateOverlay) {
 			this._backboardAuthGateOverlay.style.display = gated ? '' : 'none';
 		}

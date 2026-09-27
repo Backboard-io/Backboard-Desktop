@@ -139,7 +139,7 @@ export interface ICommonNativeHostService {
 	openWindow(options?: IOpenEmptyWindowOptions): Promise<void>;
 	openWindow(toOpen: IWindowOpenable[], options?: IOpenWindowOptions): Promise<void>;
 
-	openAgentsWindow(options?: { folderUri?: UriComponents; sessionResource?: UriComponents }): Promise<void>;
+	openAgentsWindow(options?: { folderUri?: UriComponents; sessionResource?: UriComponents; canvasImageUrl?: string }): Promise<void>;
 	openOptimusWindow(): Promise<void>;
 	openEditorWindow(options?: { folderUri?: UriComponents }): Promise<void>;
 	preloadWindowModes(options?: { folderUri?: UriComponents }): Promise<void>;

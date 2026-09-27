@@ -10,7 +10,7 @@ import { CancellationToken } from '../../../../../../base/common/cancellation.js
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { DisposableStore, IReference, toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../../base/common/uri.js';
-import { observableValue } from '../../../../../../base/common/observable.js';
+import { autorun, observableValue } from '../../../../../../base/common/observable.js';
 import { mock } from '../../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { ILogService, NullLogService } from '../../../../../../platform/log/common/log.js';
@@ -269,11 +269,20 @@ suite('AgentHostClientTools', () => {
 
 	suite('client tools registration', () => {
 
-		function createMockToolsService(disposables: DisposableStore, tools: IToolData[], options?: { requireConfirmation?: boolean }) {
+		interface IMockToolsServiceOptions {
+			/** The tool asks for confirmation before it runs. */
+			readonly requireConfirmation?: boolean;
+			/** The tool's result is reviewed before it reaches the model (MCP `openWorldHint`). */
+			readonly confirmResults?: boolean;
+		}
+
+		function createMockToolsService(disposables: DisposableStore, tools: IToolData[], options?: IMockToolsServiceOptions) {
 			const onDidChangeTools = disposables.add(new Emitter<void>());
 			const pendingToolCalls = new Map<string, ChatToolInvocation>();
 			const begunToolCalls: ChatToolInvocation[] = [];
 			const invokedToolCalls: IToolInvocation[] = [];
+			/** Every state each begun invocation passed through, in order. */
+			const observedStates = new Map<string, IChatToolInvocation.StateKind[]>();
 			return {
 				onDidChangeTools: onDidChangeTools.event,
 				getToolByName: (name: string) => tools.find(t => t.toolReferenceName === name),
@@ -294,14 +303,31 @@ suite('AgentHostClientTools', () => {
 							confirmationMessages: {
 								title: 'Confirm tool execution',
 								message: 'Run the task?',
+								confirmResults: options.confirmResults,
 							},
 						}, invocation.parameters, undefined);
 						await IChatToolInvocation.awaitConfirmation(toolInvocation, CancellationToken.None);
+					} else if (options?.confirmResults && toolInvocation) {
+						// Read-only MCP tool with `openWorldHint`: no confirmation
+						// before running, but its result is reviewed afterwards.
+						toolInvocation.transitionFromStreaming({
+							invocationMessage: 'Run Task',
+							confirmationMessages: { confirmResults: true },
+						}, invocation.parameters, undefined);
 					} else {
 						toolInvocation?.transitionFromStreaming(undefined, invocation.parameters, { type: ToolConfirmKind.ConfirmationNotNeeded });
 					}
 					const result: IToolResult = { content: [{ kind: 'text', value: 'done' }] };
-					await toolInvocation?.didExecuteTool(result);
+					// Mirrors LanguageModelToolsService.invokeTool: no setting
+					// auto-approves the result, so an MCP result review parks
+					// the call until someone answers it.
+					const afterExecute = await toolInvocation?.didExecuteTool(result, undefined, async () => undefined);
+					if (toolInvocation && afterExecute?.type === IChatToolInvocation.StateKind.WaitingForPostApproval) {
+						const postConfirmed = await IChatToolInvocation.awaitPostConfirmation(toolInvocation, CancellationToken.None);
+						if (postConfirmed.type === ToolConfirmKind.Skipped || postConfirmed.type === ToolConfirmKind.Denied) {
+							return { content: [{ kind: 'text', value: 'The tool executed but the user chose not to share the results' }] };
+						}
+					}
 					return result;
 				},
 				beginToolCall: options => {
@@ -316,6 +342,11 @@ suite('AgentHostClientTools', () => {
 					});
 					pendingToolCalls.set(options.toolCallId, invocation);
 					begunToolCalls.push(invocation);
+					const states: IChatToolInvocation.StateKind[] = [];
+					observedStates.set(options.toolCallId, states);
+					disposables.add(autorun(reader => {
+						states.push(invocation.state.read(reader).type);
+					}));
 					return invocation;
 				},
 				updateToolStream: async () => { },
@@ -344,7 +375,8 @@ suite('AgentHostClientTools', () => {
 				fireOnDidChangeTools: () => onDidChangeTools.fire(),
 				begunToolCalls,
 				invokedToolCalls,
-			} satisfies ILanguageModelToolsService & { fireOnDidChangeTools: () => void; begunToolCalls: ChatToolInvocation[]; invokedToolCalls: IToolInvocation[] };
+				observedStates,
+			} satisfies ILanguageModelToolsService & { fireOnDidChangeTools: () => void; begunToolCalls: ChatToolInvocation[]; invokedToolCalls: IToolInvocation[]; observedStates: Map<string, IChatToolInvocation.StateKind[]> };
 		}
 
 		class MockAgentHostConnection extends mock<IAgentHostService>() {
@@ -438,7 +470,7 @@ suite('AgentHostClientTools', () => {
 			disposables: DisposableStore,
 			tools: IToolData[],
 			configOverrides?: { clientTools?: string[] },
-			toolServiceOptions?: { requireConfirmation?: boolean },
+			toolServiceOptions?: IMockToolsServiceOptions,
 		) {
 			const instantiationService = disposables.add(new TestInstantiationService());
 			const connection = new MockAgentHostConnection();
@@ -764,6 +796,111 @@ suite('AgentHostClientTools', () => {
 					success: true,
 				},
 			]);
+		});
+
+		/**
+		 * Seeds a turn whose client tool call is ready to run, the way
+		 * cliTsAgent's `client_tool:call` does (Full Access stamps
+		 * `autoApproveBySetting`).
+		 */
+		function seedReadyClientToolCall(connection: MockAgentHostConnection, backendSession: string, fullAccess: boolean): void {
+			connection.applySessionAction(URI.parse(backendSession), {
+				type: ActionType.ChatTurnStarted,
+				turnId: 'turn-1',
+				message: { text: 'search the hub', origin: { kind: MessageKind.User } },
+			} as ChatAction);
+			connection.applySessionAction(URI.parse(backendSession), {
+				type: ActionType.ChatToolCallStart,
+				turnId: 'turn-1',
+				toolCallId: 'tool-call-1',
+				toolName: 'runTask',
+				displayName: 'Run Task',
+				contributor: { kind: ToolCallContributorKind.Client, clientId: connection.clientId },
+			} as ChatAction);
+			connection.applySessionAction(URI.parse(backendSession), {
+				type: ActionType.ChatToolCallReady,
+				turnId: 'turn-1',
+				toolCallId: 'tool-call-1',
+				invocationMessage: 'Run Task',
+				toolInput: '{"task":"build"}',
+				confirmed: ToolCallConfirmationReason.NotNeeded,
+				...(fullAccess ? { _meta: { autoApproveBySetting: true } } : {}),
+			} as ChatAction);
+		}
+
+		function toolCallCompletions(connection: MockAgentHostConnection) {
+			return connection.dispatchedActions.flatMap(entry => isChatAction(entry.action)
+				&& entry.action.type === ActionType.ChatToolCallComplete
+				&& entry.action.toolCallId === 'tool-call-1'
+				? [entry.action.result]
+				: []);
+		}
+
+		test('Full Access: an MCP result review never parks the call and the result reaches the model', async () => {
+			const { handler, connection, toolsService } = createHandlerWithMocks(disposables, [testRunTaskTool], undefined, { confirmResults: true });
+			const backendSession = AgentSession.uri('copilot', 'session-1').toString();
+			seedReadyClientToolCall(connection, backendSession, true);
+
+			await handler.provideChatSessionContent(URI.parse('agent-host-copilot:/session-1'), CancellationToken.None);
+			await timeout(0);
+			await timeout(0);
+			await timeout(0);
+
+			const states = toolsService.observedStates.get('tool-call-1') ?? [];
+			assert.ok(!states.includes(IChatToolInvocation.StateKind.WaitingForPostApproval), 'no "Approve Tool Result" card may render under Full Access');
+			assert.ok(!states.includes(IChatToolInvocation.StateKind.WaitingForConfirmation), 'no confirmation card may render under Full Access');
+			assert.strictEqual(states.at(-1), IChatToolInvocation.StateKind.Completed);
+			assert.deepStrictEqual(toolCallCompletions(connection).map(result => ({ success: result.success, content: result.content })), [{
+				success: true,
+				content: [{ type: ToolResultContentType.Text, text: 'done' }],
+			}]);
+		});
+
+		test('Full Access: a tool that confirms before running and reviews its result runs with no gate', async () => {
+			// MCP tools without `readOnlyHint` but with `openWorldHint` carry both gates.
+			const { handler, connection, toolsService } = createHandlerWithMocks(disposables, [testRunTaskTool], undefined, { requireConfirmation: true, confirmResults: true });
+			const backendSession = AgentSession.uri('copilot', 'session-1').toString();
+			seedReadyClientToolCall(connection, backendSession, true);
+
+			await handler.provideChatSessionContent(URI.parse('agent-host-copilot:/session-1'), CancellationToken.None);
+			await timeout(0);
+			await timeout(0);
+			await timeout(0);
+
+			const states = toolsService.observedStates.get('tool-call-1') ?? [];
+			assert.deepStrictEqual(states.filter(state => state === IChatToolInvocation.StateKind.WaitingForConfirmation || state === IChatToolInvocation.StateKind.WaitingForPostApproval), []);
+			const invocation = toolsService.begunToolCalls[0];
+			const finalState = invocation.state.get();
+			assert.strictEqual(finalState.type, IChatToolInvocation.StateKind.Completed);
+			assert.deepStrictEqual(IChatToolInvocation.executionConfirmedOrDenied(invocation)?.type, ToolConfirmKind.Setting);
+			assert.deepStrictEqual(toolCallCompletions(connection).map(result => result.success), [true]);
+		});
+
+		test('without Full Access the MCP result review still gates the model', async () => {
+			const { handler, connection, toolsService } = createHandlerWithMocks(disposables, [testRunTaskTool], undefined, { confirmResults: true });
+			const backendSession = AgentSession.uri('copilot', 'session-1').toString();
+			seedReadyClientToolCall(connection, backendSession, false);
+
+			await handler.provideChatSessionContent(URI.parse('agent-host-copilot:/session-1'), CancellationToken.None);
+			await timeout(0);
+			await timeout(0);
+			await timeout(0);
+
+			const invocation = toolsService.begunToolCalls[0];
+			const parked = invocation.state.get();
+			assert.strictEqual(parked.type, IChatToolInvocation.StateKind.WaitingForPostApproval, 'the result review must still ask outside Full Access');
+			assert.deepStrictEqual(toolCallCompletions(connection), [], 'the result must not reach the model before the review');
+
+			if (parked.type === IChatToolInvocation.StateKind.WaitingForPostApproval) {
+				parked.confirm({ type: ToolConfirmKind.UserAction });
+			}
+			await timeout(0);
+			await timeout(0);
+
+			assert.deepStrictEqual(toolCallCompletions(connection).map(result => ({ success: result.success, content: result.content })), [{
+				success: true,
+				content: [{ type: ToolResultContentType.Text, text: 'done' }],
+			}]);
 		});
 
 		test('reconnecting to an active turn with owned client tool completes the initial snapshot invocation', async () => {

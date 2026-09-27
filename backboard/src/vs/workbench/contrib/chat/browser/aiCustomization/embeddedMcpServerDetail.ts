@@ -52,7 +52,7 @@ export class EmbeddedMcpServerDetail extends Disposable {
 		this.descriptionEl = DOM.append(this.root, $('.embedded-detail-description'));
 
 		this.emptyEl = DOM.append(this.root, $('.embedded-detail-empty'));
-		this.emptyEl.textContent = localize('mcpDetailEmpty', "No MCP server selected.");
+		this.emptyEl.textContent = localize('mcpDetailEmpty', "No connector selected.");
 
 		// Refresh when the underlying server changes (install state, enablement, etc.).
 		this._register(this.mcpWorkbenchService.onChange(server => {

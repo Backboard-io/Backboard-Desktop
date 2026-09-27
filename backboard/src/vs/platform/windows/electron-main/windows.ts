@@ -43,7 +43,7 @@ export interface IWindowsMainService {
 	openExtensionDevelopmentHostWindow(extensionDevelopmentPath: string[], openConfig: IOpenConfiguration): Promise<ICodeWindow[]>;
 	openExistingWindow(window: ICodeWindow, openConfig: IOpenConfiguration): void;
 
-	openAgentsWindow(openConfig: IOpenConfiguration, folderUri?: URI, sessionResource?: URI): Promise<ICodeWindow[]>;
+	openAgentsWindow(openConfig: IOpenConfiguration, folderUri?: URI, sessionResource?: URI, canvasImageUrl?: string): Promise<ICodeWindow[]>;
 	openOptimusWindow(openConfig: IOpenConfiguration): Promise<ICodeWindow[]>;
 	openEditorWindow(openConfig: IOpenConfiguration, folderUri?: URI): Promise<ICodeWindow[]>;
 

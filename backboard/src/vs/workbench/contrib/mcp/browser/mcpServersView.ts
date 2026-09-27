@@ -158,7 +158,7 @@ export class McpServersListView extends AbstractExtensionsListView<IWorkbenchMcp
 						return mcpServer?.label ?? '';
 					},
 					getWidgetAriaLabel(): string {
-						return localize('mcp servers', "MCP Servers");
+						return localize('mcp servers', "Connectors");
 					}
 				},
 				overrideStyles: getLocationBasedViewColors(this.viewDescriptorService.getViewLocationById(this.id)).listOverrideStyles,
@@ -268,13 +268,13 @@ export class McpServersListView extends AbstractExtensionsListView<IWorkbenchMcp
 		iconElement.className = ThemeIcon.asClassName(mcpServerIcon);
 
 		const title = dom.append(welcomeContent, dom.$('.mcp-welcome-title'));
-		title.textContent = localize('mcp.welcome.title', "MCP Servers");
+		title.textContent = localize('mcp.welcome.title', "Connectors");
 
 		const settingsCommandLink = createMarkdownCommandLink({ id: 'workbench.action.openSettings', arguments: [`@id:${mcpGalleryServiceEnablementConfig}`], text: mcpGalleryServiceEnablementConfig, tooltip: localize('mcp.welcome.settings.tooltip', "Open Settings") }).toString();
 		const description = dom.append(welcomeContent, dom.$('.mcp-welcome-description'));
 		const markdownResult = this._register(this.markdownRendererService.render(
 			new MarkdownString(
-				localize('mcp.welcome.descriptionWithLink', "Browse and install Model Context Protocol (MCP) servers directly from Backboard IDE to extend agent mode with extra tools for connecting to databases, invoking APIs and performing specialized tasks."),
+				localize('mcp.welcome.descriptionWithLink', "Browse and install Model Context Protocol (connector) servers directly from Backboard IDE to extend agent mode with extra tools for connecting to databases, invoking APIs and performing specialized tasks."),
 				{ isTrusted: { enabledCommands: ['workbench.action.openSettings'] } },
 			)
 				.appendMarkdown('\n\n')
@@ -284,16 +284,16 @@ export class McpServersListView extends AbstractExtensionsListView<IWorkbenchMcp
 
 		const buttonContainer = dom.append(welcomeContent, dom.$('.mcp-welcome-button-container'));
 		const button = this._register(new Button(buttonContainer, {
-			title: localize('mcp.welcome.enableGalleryButton', "Enable MCP Servers Marketplace"),
+			title: localize('mcp.welcome.enableGalleryButton', "Enable Connectors Marketplace"),
 			...defaultButtonStyles
 		}));
-		button.label = localize('mcp.welcome.enableGalleryButton', "Enable MCP Servers Marketplace");
+		button.label = localize('mcp.welcome.enableGalleryButton', "Enable Connectors Marketplace");
 
 		this._register(button.onDidClick(async () => {
 
 			const { result } = await this.dialogService.prompt({
 				type: 'info',
-				message: localize('mcp.gallery.enableDialog.title', "Enable MCP Servers Marketplace?"),
+				message: localize('mcp.gallery.enableDialog.title', "Enable Connectors Marketplace?"),
 				custom: {
 					markdownDetails: [{
 						markdown: new MarkdownString(localize('mcp.gallery.enableDialog.setting', "This feature is currently in preview. You can disable it anytime using the setting {0}.", settingsCommandLink), { isTrusted: true })
@@ -324,7 +324,7 @@ export class McpServersListView extends AbstractExtensionsListView<IWorkbenchMcp
 					this.bodyTemplate.messageBox.textContent = message.text;
 				} else if (count === 0) {
 					this.bodyTemplate.messageSeverityIcon.className = '';
-					this.bodyTemplate.messageBox.textContent = localize('no extensions found', "No MCP Servers found.");
+					this.bodyTemplate.messageBox.textContent = localize('no extensions found', "No connectors found.");
 				}
 				if (this.bodyTemplate.messageBox.textContent) {
 					alert(this.bodyTemplate.messageBox.textContent);
@@ -541,7 +541,7 @@ export class McpServersViewsContribution extends Disposable implements IWorkbenc
 		Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([
 			{
 				id: InstalledMcpServersViewId,
-				name: localize2('mcp-installed', "MCP Servers - Installed"),
+				name: localize2('mcp-installed', "Connectors - Installed"),
 				ctorDescriptor: new SyncDescriptor(McpServersListView, [{}]),
 				when: ContextKeyExpr.and(DefaultViewsContext, HasInstalledMcpServersContext, ChatContextKeys.Setup.hidden.negate(), ChatContextKeys.Setup.disabledInWorkspace.negate()),
 				weight: 40,
@@ -550,7 +550,7 @@ export class McpServersViewsContribution extends Disposable implements IWorkbenc
 			},
 			{
 				id: 'workbench.views.mcp.default.marketplace',
-				name: localize2('mcp', "MCP Servers"),
+				name: localize2('mcp', "Connectors"),
 				ctorDescriptor: new SyncDescriptor(DefaultBrowseMcpServersView, [{}]),
 				when: ContextKeyExpr.and(DefaultViewsContext, HasInstalledMcpServersContext.toNegated(), ChatContextKeys.Setup.hidden.negate(), ChatContextKeys.Setup.disabledInWorkspace.negate(), McpServersGalleryStatusContext.isEqualTo(McpGalleryManifestStatus.Available), ContextKeyExpr.or(ContextKeyDefinedExpr.create(`config.${mcpGalleryServiceUrlConfig}`), ProductQualityContext.notEqualsTo('stable'), ContextKeyDefinedExpr.create(`config.${mcpGalleryServiceEnablementConfig}`))),
 				weight: 40,
@@ -559,13 +559,13 @@ export class McpServersViewsContribution extends Disposable implements IWorkbenc
 			},
 			{
 				id: 'workbench.views.mcp.marketplace',
-				name: localize2('mcp', "MCP Servers"),
+				name: localize2('mcp', "Connectors"),
 				ctorDescriptor: new SyncDescriptor(McpServersListView, [{}]),
 				when: ContextKeyExpr.and(SearchMcpServersContext, ChatContextKeys.Setup.hidden.negate(), ChatContextKeys.Setup.disabledInWorkspace.negate(), McpServersGalleryStatusContext.isEqualTo(McpGalleryManifestStatus.Available), ContextKeyExpr.or(ContextKeyDefinedExpr.create(`config.${mcpGalleryServiceUrlConfig}`), ProductQualityContext.notEqualsTo('stable'), ContextKeyDefinedExpr.create(`config.${mcpGalleryServiceEnablementConfig}`))),
 			},
 			{
 				id: 'workbench.views.mcp.default.welcomeView',
-				name: localize2('mcp', "MCP Servers"),
+				name: localize2('mcp', "Connectors"),
 				ctorDescriptor: new SyncDescriptor(DefaultBrowseMcpServersView, [{ showWelcome: true }]),
 				when: ContextKeyExpr.and(DefaultViewsContext, HasInstalledMcpServersContext.toNegated(), ChatContextKeys.Setup.hidden.negate(), ChatContextKeys.Setup.disabledInWorkspace.negate(), McpServersGalleryStatusContext.isEqualTo(McpGalleryManifestStatus.Available), ContextKeyDefinedExpr.create(`config.${mcpGalleryServiceUrlConfig}`).negate(), ProductQualityContext.isEqualTo('stable'), ContextKeyDefinedExpr.create(`config.${mcpGalleryServiceEnablementConfig}`).negate()),
 				weight: 40,
@@ -574,7 +574,7 @@ export class McpServersViewsContribution extends Disposable implements IWorkbenc
 			},
 			{
 				id: 'workbench.views.mcp.welcomeView',
-				name: localize2('mcp', "MCP Servers"),
+				name: localize2('mcp', "Connectors"),
 				ctorDescriptor: new SyncDescriptor(McpServersListView, [{ showWelcome: true }]),
 				when: ContextKeyExpr.and(SearchMcpServersContext, ChatContextKeys.Setup.hidden.negate(), ChatContextKeys.Setup.disabledInWorkspace.negate(), McpServersGalleryStatusContext.isEqualTo(McpGalleryManifestStatus.Available), ContextKeyDefinedExpr.create(`config.${mcpGalleryServiceUrlConfig}`).negate(), ProductQualityContext.isEqualTo('stable'), ContextKeyDefinedExpr.create(`config.${mcpGalleryServiceEnablementConfig}`).negate()),
 			}

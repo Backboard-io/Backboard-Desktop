@@ -49,7 +49,8 @@ export class OpenInVSCodeTitleBarWidget extends BaseActionViewItem {
 		const modes = [
 			{ label: localize('openInVSCodeSwitcher.agentTab', "Simple"), active: !this.environmentService.isOptimusWindow, run: () => this.openSimpleCommandId ? this.commandService.executeCommand(this.openSimpleCommandId) : undefined },
 			{ label: localize('openInVSCodeSwitcher.editor', "Editor"), active: false, run: () => this.action.run() },
-			{ label: localize('openInVSCodeSwitcher.advanced', "Advanced"), active: this.environmentService.isOptimusWindow, run: () => this.openAdvancedCommandId ? this.commandService.executeCommand(this.openAdvancedCommandId) : undefined },
+			// Canvas is hidden for now; the button only shows inside the Canvas window itself.
+			...(this.environmentService.isOptimusWindow ? [{ label: localize('openInVSCodeSwitcher.canvas', "Canvas"), active: true, run: () => this.openAdvancedCommandId ? this.commandService.executeCommand(this.openAdvancedCommandId) : undefined }] : []),
 		];
 		for (const mode of modes) {
 			const button = append(segments, $('button.backboard-mode-segment'));

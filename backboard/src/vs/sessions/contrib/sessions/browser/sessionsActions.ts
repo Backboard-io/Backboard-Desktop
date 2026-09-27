@@ -20,7 +20,7 @@ import { IWorkbenchEnvironmentService } from '../../../../workbench/services/env
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { Menus } from '../../../browser/menus.js';
 import { SessionsCategories } from '../../../common/categories.js';
-import { CanGoBackContext, CanGoBackFromSubagentContext, CanGoForwardContext, ChatSessionProviderIdContext, MultipleSessionsVisibleContext, SessionIsCreatedContext, SessionIsMaximizedContext, SessionIsStickyContext, SessionsFocusContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
+import { CanGoBackContext, CanGoBackFromSubagentContext, CanGoForwardContext, ChatSessionProviderIdContext, MultipleSessionsVisibleContext, SessionIsCreatedContext, SessionIsMaximizedContext, SessionIsStickyContext, SessionPaneCanGoBackContext, SessionPaneCanGoForwardContext, SessionsFocusContext, SessionsWelcomeVisibleContext } from '../../../common/contextkeys.js';
 import { ANY_AGENT_HOST_PROVIDER_RE } from '../../../common/agentHostSessionsProvider.js';
 import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
@@ -201,7 +201,12 @@ registerAction2(class GoBackAction extends Action2 {
 			icon: Codicon.arrowLeft,
 			tooltip: localize('sessionsGoBackTooltip', "Go Back"),
 			category: SessionsCategories.Sessions,
-			precondition: ContextKeyExpr.or(CanGoBackContext, CanGoBackFromSubagentContext),
+			// A split grid navigates each cell's own history (evaluated in the
+			// cell's scoped context: its header arrows, or the focused cell).
+			precondition: ContextKeyExpr.or(
+				ContextKeyExpr.and(MultipleSessionsVisibleContext.toNegated(), ContextKeyExpr.or(CanGoBackContext, CanGoBackFromSubagentContext)),
+				ContextKeyExpr.and(MultipleSessionsVisibleContext, SessionPaneCanGoBackContext),
+			),
 			keybinding: {
 				// Higher than `WorkbenchContrib` so the `Ctrl+Shift+Tab` secondary wins over the
 				// editor quick-open actions (which bind the same chord at `WorkbenchContrib`).
@@ -243,7 +248,10 @@ registerAction2(class GoForwardAction extends Action2 {
 			icon: Codicon.arrowRight,
 			tooltip: localize('sessionsGoForwardTooltip', "Go Forward One Session"),
 			category: SessionsCategories.Sessions,
-			precondition: CanGoForwardContext,
+			precondition: ContextKeyExpr.or(
+				ContextKeyExpr.and(MultipleSessionsVisibleContext.toNegated(), CanGoForwardContext),
+				ContextKeyExpr.and(MultipleSessionsVisibleContext, SessionPaneCanGoForwardContext),
+			),
 			keybinding: {
 				// Higher than `WorkbenchContrib` so the `Ctrl+Tab` secondary wins over the
 				// editor quick-open actions (which bind the same chord at `WorkbenchContrib`).
@@ -455,6 +463,18 @@ registerAction2(class CloseSessionAction extends Action2 {
 				when: ContextKeyExpr.or(SessionIsCreatedContext, MultipleSessionsVisibleContext),
 				group: '1_view',
 				order: 2,
+			}, {
+				// Split grid: every column header closes its own column.
+				id: Menus.SessionBarToolbar,
+				when: MultipleSessionsVisibleContext,
+				group: '1_session',
+				order: 21,
+			}, {
+				// The new-session placeholder column (runs without a session).
+				id: Menus.NewSessionToolbar,
+				when: MultipleSessionsVisibleContext,
+				group: 'navigation',
+				order: 100,
 			}],
 		});
 	}
@@ -465,6 +485,23 @@ registerAction2(class CloseSessionAction extends Action2 {
 
 		sessionsService.closeSession(session);
 		sessionsPartService.focusSession(sessionsService.activeSession.get());
+	}
+});
+
+registerAction2(class ToggleSessionGridAction extends Action2 {
+	constructor() {
+		super({
+			id: 'sessions.toggleGrid',
+			title: localize2('toggleSessionGrid', "Toggle Chat Grid"),
+			category: SessionsCategories.Sessions,
+			icon: Codicon.table,
+			toggled: MultipleSessionsVisibleContext,
+			f1: true,
+		});
+	}
+
+	override run(accessor: ServicesAccessor): void {
+		accessor.get(ISessionsService).toggleSessionGrid();
 	}
 });
 

@@ -57,11 +57,11 @@ export interface ICodexActivity {
 	/** Terminal command + output for the expanded shell card. */
 	readonly shell?: { readonly command: string; readonly output?: string; readonly exitCode?: number };
 	/**
-	 * Image generation: while running, the generating-image placeholder card is
-	 * shown instead of a row; once done the row is dropped because the finished
-	 * image renders as a gallery in the response markdown.
+	 * Image or video generation: while running, the generating placeholder card
+	 * is shown instead of a row; once done the row is dropped because the
+	 * finished media renders as a gallery in the response markdown.
 	 */
-	readonly imageGeneration?: boolean;
+	readonly generatedMedia?: 'image' | 'video';
 	/** Header label while an edit row's diff is open (Codex hides the link and counts then). */
 	readonly expandedText?: string;
 }
@@ -128,12 +128,13 @@ export function describeCodexActivity(metadata: CodexActivityMetadata): ICodexAc
 	const running = !IChatToolInvocation.isComplete(metadata);
 	const data = metadata.toolSpecificData;
 
-	if (/generate[_-]?image/i.test(metadata.toolId)) {
+	const generated = /generate[_-]?(?<media>image|video)/i.exec(metadata.toolId)?.groups?.media?.toLowerCase();
+	if (generated === 'image' || generated === 'video') {
 		return {
 			kind: CodexActivityKind.Image, icon: 'photo', running, failed: false,
-			text: localize('codex.generatedImage', "Generated image"),
-			live: localize('codex.generatingImage', "Generating image"),
-			expandable: false, imageGeneration: true,
+			text: generated === 'video' ? localize('codex.generatedVideo', "Generated video") : localize('codex.generatedImage', "Generated image"),
+			live: generated === 'video' ? localize('codex.generatingVideo', "Generating video") : localize('codex.generatingImage', "Generating image"),
+			expandable: false, generatedMedia: generated,
 		};
 	}
 
@@ -200,8 +201,8 @@ export function describeCodexActivity(metadata: CodexActivityMetadata): ICodexAc
 			case 'generateVideo':
 				return {
 					kind: CodexActivityKind.Image, icon: 'photo', running, failed: vm.failed,
-					text: running ? localize('codex.generatingVideo', "Generating video") : localize('codex.generatedVideo', "Generated video"),
-					live: localize('codex.generatingVideo', "Generating video"), expandable: true,
+					text: localize('codex.generatedVideo', "Generated video"),
+					live: localize('codex.generatingVideo', "Generating video"), expandable: false, generatedMedia: 'video',
 				};
 			default:
 				return {

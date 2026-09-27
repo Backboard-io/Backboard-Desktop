@@ -8,8 +8,8 @@ import { Disposable } from '../../../base/common/lifecycle.js';
 import { InstantiationType, registerSingleton } from '../../../platform/instantiation/common/extensions.js';
 import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
 import { IProgressIndicator } from '../../../platform/progress/common/progress.js';
-import type { SessionView } from '../../../sessions/browser/parts/sessionView.js';
-import { ISessionsPartService, IToggleMaximizeSessionEvent } from '../../../sessions/services/sessions/browser/sessionsPartService.js';
+import type { ISessionSidePanel, SessionView } from '../../../sessions/browser/parts/sessionView.js';
+import { ISessionsGridChangeEvent, ISessionsPartService, IToggleMaximizeSessionEvent } from '../../../sessions/services/sessions/browser/sessionsPartService.js';
 import { IActiveSession } from '../../../sessions/services/sessions/common/sessionsManagement.js';
 import { OptimusGridPart } from './optimusGridPart.js';
 
@@ -27,6 +27,10 @@ export class OptimusSessionsParts extends Disposable implements ISessionsPartSer
 	private readonly _mainPart: OptimusGridPart;
 
 	readonly onDidToggleMaximizeSession: Event<IToggleMaximizeSessionEvent> = Event.None;
+
+	/** The card grid is not the Simple window's split grid. */
+	readonly isSplit = false;
+	readonly onDidUpdateGrid: Event<ISessionsGridChangeEvent> = Event.None;
 
 	get onDidFocusSession(): Event<string> {
 		return this._mainPart.onDidFocusSession;
@@ -58,6 +62,20 @@ export class OptimusSessionsParts extends Disposable implements ISessionsPartSer
 
 	getProgressIndicator(): IProgressIndicator {
 		return this._mainPart.getProgressIndicator();
+	}
+
+	// Cards have no per-session side panels.
+
+	getSidePanel(_sessionId: string | undefined): ISessionSidePanel | undefined {
+		return undefined;
+	}
+
+	setSidePanel(_sessionId: string | undefined, _panel: ISessionSidePanel): void { }
+
+	setSidePanelVisible(_panel: ISessionSidePanel, _visible: boolean): void { }
+
+	isSidePanelVisible(_panel: ISessionSidePanel): boolean {
+		return false;
 	}
 }
 

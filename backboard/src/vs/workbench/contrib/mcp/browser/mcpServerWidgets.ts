@@ -344,13 +344,13 @@ export class McpServerHoverWidget extends McpServerWidget {
 		let addSeparator = false;
 		if (this.mcpServer.local?.scope === LocalMcpServerScope.Workspace) {
 			markdown.appendMarkdown(`$(${mcpServerWorkspaceIcon.id})&nbsp;`);
-			markdown.appendMarkdown(localize('workspace extension', "Workspace MCP Server"));
+			markdown.appendMarkdown(localize('workspace extension', "Workspace Connector"));
 			addSeparator = true;
 		}
 
 		if (this.mcpServer.local?.scope === LocalMcpServerScope.RemoteUser) {
 			markdown.appendMarkdown(`$(${mcpServerRemoteIcon.id})&nbsp;`);
-			markdown.appendMarkdown(localize('remote user extension', "Remote MCP Server"));
+			markdown.appendMarkdown(localize('remote user extension', "Remote Connector"));
 			addSeparator = true;
 		}
 

@@ -54,13 +54,20 @@ export interface IAgentHostActiveClientService {
 
 	getCustomizations(sessionType: string): IObservable<readonly ClientPluginCustomization[]>;
 
+	/**
+	 * Like {@link getCustomizations}, but `undefined` until the refs for
+	 * `sessionType` have been resolved once, so callers never mistake "not
+	 * known yet" for "no customizations".
+	 */
+	getResolvedCustomizations(sessionType: string): IObservable<readonly ClientPluginCustomization[] | undefined>;
+
 	readonly clientTools: IObservable<readonly ToolDefinition[]>;
 }
 
 export class AgentHostActiveClientService extends Disposable implements IAgentHostActiveClientService {
 	declare readonly _serviceBrand: undefined;
 
-	private readonly _customizationsByType: ISettableObservable<ReadonlyMap<string, IObservable<readonly ClientPluginCustomization[]>>>;
+	private readonly _customizationsByType: ISettableObservable<ReadonlyMap<string, IObservable<readonly ClientPluginCustomization[] | undefined>>>;
 	readonly clientTools: IObservable<readonly ToolDefinition[]>;
 
 	constructor(
@@ -91,7 +98,10 @@ export class AgentHostActiveClientService extends Disposable implements IAgentHo
 		const store = new DisposableStore();
 		const syncProvider = store.add(new AgentCustomizationSyncProvider(sessionType, this._storageService));
 		const bundler = store.add(this._instantiationService.createInstance(SyncedCustomizationBundler, sessionType));
-		const customizations = observableValue<readonly ClientPluginCustomization[]>('agentCustomizations', []);
+		// `undefined` until the first resolution: a session created before then
+		// must not tell its agent "this client offers no customizations", which
+		// would disconnect MCP servers the agent already runs.
+		const customizations = observableValue<readonly ClientPluginCustomization[] | undefined>('agentCustomizations', undefined);
 		let updateSeq = 0;
 		const updateCustomizations = async () => {
 			const seq = ++updateSeq;
@@ -100,7 +110,8 @@ export class AgentHostActiveClientService extends Disposable implements IAgentHo
 				if (seq !== updateSeq) {
 					return;
 				}
-				if (equals(customizations.get(), refs)) {
+				const current = customizations.get();
+				if (current && equals(current, refs)) {
 					return;
 				}
 				customizations.set(refs, undefined);
@@ -138,7 +149,7 @@ export class AgentHostActiveClientService extends Disposable implements IAgentHo
 		};
 	}
 
-	private _setCustomizations(sessionType: string, customizations: IObservable<readonly ClientPluginCustomization[]>): IDisposable {
+	private _setCustomizations(sessionType: string, customizations: IObservable<readonly ClientPluginCustomization[] | undefined>): IDisposable {
 		const next = new Map(this._customizationsByType.get());
 		next.set(sessionType, customizations);
 		this._customizationsByType.set(next, undefined);
@@ -154,15 +165,20 @@ export class AgentHostActiveClientService extends Disposable implements IAgentHo
 	}
 
 	getActiveClient(sessionType: string, clientId: string): SessionActiveClient {
+		const customizations = this._customizationsByType.get().get(sessionType)?.get();
 		return {
 			clientId,
 			tools: [...this.clientTools.get()],
-			customizations: [...(this._customizationsByType.get().get(sessionType)?.get() ?? [])],
+			...(customizations ? { customizations: [...customizations] } : {}),
 		};
 	}
 
 	getCustomizations(sessionType: string): IObservable<readonly ClientPluginCustomization[]> {
 		return derived(reader => this._customizationsByType.read(reader).get(sessionType)?.read(reader) ?? EMPTY_CUSTOMIZATIONS);
+	}
+
+	getResolvedCustomizations(sessionType: string): IObservable<readonly ClientPluginCustomization[] | undefined> {
+		return derived(reader => this._customizationsByType.read(reader).get(sessionType)?.read(reader));
 	}
 }
 

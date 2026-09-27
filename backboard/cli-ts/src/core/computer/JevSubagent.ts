@@ -2,13 +2,12 @@ import type { EventBus } from "../bus/EventBus.ts";
 import type { JevTaskResult, JevTaskStep } from "./ComputerTypes.ts";
 
 /**
- * Presents a Jev computer-use run as a sub-agent of the tool call that started
- * it. A host keys a sub-agent on the parent tool-call id alone, so emitting the
+ * Presents a computer-use run as a sub-agent of the tool call that started it.
+ * A host keys a sub-agent on the parent tool-call id alone, so emitting the
  * same events a spawned worker does is enough for it to show a named agent with
  * each action nested beneath it, running and then done.
  *
- * The sub-agent's brain is Jev rather than a chat model: nothing here thinks,
- * it only reports what the loop decided.
+ * Nothing here thinks: it only reports what the loop's brain decided.
  */
 export class JevSubagent {
 	private readonly started = new Set<number>();
@@ -20,10 +19,11 @@ export class JevSubagent {
 		private readonly parentToolCallId: string,
 	) {}
 
-	start(appName: string, goal: string): void {
+	/** `brain` is the model id, as in `openrouter/deepseek/deepseek-v4.1-flash`. */
+	start(brain: string, appName: string, goal: string): void {
 		this.bus.emit({
 			type: "agent:child_start",
-			agentName: `Jev · ${appName}`,
+			agentName: `${brainLabel(brain)} · ${appName}`,
 			agentToolCallId: this.parentToolCallId,
 			childSessionId: this.childSessionId,
 			prompt: goal,
@@ -99,12 +99,18 @@ export class JevSubagent {
 	}
 }
 
-/** One line per action: `CLICK AXButton "Search"`, `TYPE_TEXT … "Justin Bieber"`. */
+/** `deepseek-v4.1-flash` for a routed model id, `Jev` for Jev. */
+function brainLabel(brain: string): string {
+	return brain === "jev" ? "Jev" : (brain.split("/").at(-1) ?? brain);
+}
+
+/** One line per action: `CLICK AXButton "Search"`, `TYPE_TEXT … "Justin Bieber" + Return`. */
 export function describeStep(step: JevTaskStep): string {
 	return [
 		step.operation,
 		step.target,
 		step.text ? JSON.stringify(step.text) : "",
+		step.submitted ? "+ Return" : "",
 	]
 		.filter(Boolean)
 		.join(" ");

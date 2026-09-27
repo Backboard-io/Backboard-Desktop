@@ -125,7 +125,7 @@ export class ChatToolPostExecuteConfirmationPart extends AbstractToolConfirmatio
 					options: {
 						hideToolbar: true,
 						reserveWidth: 19,
-						maxHeightInLines: 13,
+						maxHeightInLines: 6,
 						verticalPadding: 5,
 						editorOptions: { wordWrap: 'on', readOnly: true }
 					}
@@ -143,7 +143,7 @@ export class ChatToolPostExecuteConfirmationPart extends AbstractToolConfirmatio
 					options: {
 						hideToolbar: true,
 						reserveWidth: 19,
-						maxHeightInLines: 13,
+						maxHeightInLines: 6,
 						verticalPadding: 5,
 						editorOptions: { wordWrap: 'on', readOnly: true }
 					}
@@ -173,7 +173,7 @@ export class ChatToolPostExecuteConfirmationPart extends AbstractToolConfirmatio
 							options: {
 								hideToolbar: true,
 								reserveWidth: 19,
-								maxHeightInLines: 13,
+								maxHeightInLines: 6,
 								verticalPadding: 5,
 								editorOptions: { wordWrap: 'on', readOnly: true }
 							}
@@ -191,7 +191,7 @@ export class ChatToolPostExecuteConfirmationPart extends AbstractToolConfirmatio
 							options: {
 								hideToolbar: true,
 								reserveWidth: 19,
-								maxHeightInLines: 13,
+								maxHeightInLines: 6,
 								verticalPadding: 5,
 								editorOptions: { wordWrap: 'on', readOnly: true }
 							}

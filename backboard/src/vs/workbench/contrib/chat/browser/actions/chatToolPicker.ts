@@ -620,7 +620,7 @@ export async function showToolsPicker(
 
 	const addMcpServerButton = {
 		iconClass: ThemeIcon.asClassName(Codicon.mcp),
-		tooltip: localize('addMcpServer', 'Add MCP Server...')
+		tooltip: localize('addMcpServer', 'Add Connector...')
 	};
 	const installExtension = {
 		iconClass: ThemeIcon.asClassName(Codicon.extensions),

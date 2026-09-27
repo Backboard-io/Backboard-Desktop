@@ -246,7 +246,7 @@ export class MainThreadMcp extends Disposable implements MainThreadMcpShape {
 		if (authDetails.enterpriseManaged) {
 			const resource = authDetails.resourceMetadata?.resource;
 			if (!resource) {
-				throw new Error(nls.localize('mcp.enterpriseManaged.missingResource', "The enterprise-managed MCP server '{0}' did not advertise a protected-resource metadata document with a 'resource' identifier.", server.label));
+				throw new Error(nls.localize('mcp.enterpriseManaged.missingResource', "The enterprise-managed connector '{0}' did not advertise a protected-resource metadata document with a 'resource' identifier.", server.label));
 			}
 			// Per ID-JAG (draft-ietf-oauth-identity-assertion-authz-grant), the token exchange
 			// `audience` is the *authorization server* of the resource — i.e. the issuer that will
@@ -255,7 +255,7 @@ export class MainThreadMcp extends Disposable implements MainThreadMcpShape {
 			const resourceAuthServers = authDetails.resourceMetadata?.authorization_servers ?? [];
 			const audience = resourceAuthServers[0];
 			if (!audience) {
-				throw new Error(nls.localize('mcp.enterpriseManaged.missingAS', "The enterprise-managed MCP server '{0}' did not advertise an `authorization_servers` entry in its protected-resource metadata.", server.label));
+				throw new Error(nls.localize('mcp.enterpriseManaged.missingAS', "The enterprise-managed connector '{0}' did not advertise an `authorization_servers` entry in its protected-resource metadata.", server.label));
 			}
 			// For XAA the scopes sent to the IdP token-exchange step are the *resource* scopes
 			// (e.g. "todos.read mcp.access"), NOT the IdP login scopes (openid/offline_access/…).
@@ -337,16 +337,16 @@ export class MainThreadMcp extends Disposable implements MainThreadMcpShape {
 		const config = this._configurationService.getValue<IMcpEnterpriseManagedAuthIdpConfig | undefined>(mcpEnterpriseManagedAuthIdpSection) ?? {};
 		const configuredIssuer = config.issuer?.trim();
 		if (!configuredIssuer) {
-			throw new Error(nls.localize('mcp.enterpriseManaged.issuerMissing', "Enterprise-managed MCP authentication requires `mcp.enterpriseManagedAuth.idp.issuer` to be configured. Set it via enterprise policy (Windows Group Policy / macOS managed preferences / Linux `/etc/vscode/policy.json`) or, for local testing, by hand-editing `settings.json`."));
+			throw new Error(nls.localize('mcp.enterpriseManaged.issuerMissing', "Enterprise-managed connector authentication requires `mcp.enterpriseManagedAuth.idp.issuer` to be configured. Set it via enterprise policy (Windows Group Policy / macOS managed preferences / Linux `/etc/vscode/policy.json`) or, for local testing, by hand-editing `settings.json`."));
 		}
 		let parsed: URI;
 		try {
 			parsed = URI.parse(configuredIssuer);
 		} catch {
-			throw new Error(nls.localize('mcp.enterpriseManaged.issuerInvalid', "Enterprise-managed MCP authentication requires `mcp.enterpriseManagedAuth.idp.issuer` to be a valid URL; got '{0}'.", configuredIssuer));
+			throw new Error(nls.localize('mcp.enterpriseManaged.issuerInvalid', "Enterprise-managed connector authentication requires `mcp.enterpriseManagedAuth.idp.issuer` to be a valid URL; got '{0}'.", configuredIssuer));
 		}
 		if (parsed.scheme !== 'https' && parsed.scheme !== 'http') {
-			throw new Error(nls.localize('mcp.enterpriseManaged.issuerNotHttp', "Enterprise-managed MCP authentication requires `mcp.enterpriseManagedAuth.idp.issuer` to use the `https` or `http` scheme; got '{0}'.", configuredIssuer));
+			throw new Error(nls.localize('mcp.enterpriseManaged.issuerNotHttp', "Enterprise-managed connector authentication requires `mcp.enterpriseManagedAuth.idp.issuer` to use the `https` or `http` scheme; got '{0}'.", configuredIssuer));
 		}
 		return parsed;
 	}
@@ -545,8 +545,8 @@ export class MainThreadMcp extends Disposable implements MainThreadMcpShape {
 
 	private async loginPrompt(mcpLabel: string, providerLabel: string, recreatingSession: boolean): Promise<boolean> {
 		const message = recreatingSession
-			? nls.localize('confirmRelogin', "The MCP Server Definition '{0}' wants you to authenticate to {1}.", mcpLabel, providerLabel)
-			: nls.localize('confirmLogin', "The MCP Server Definition '{0}' wants to authenticate to {1}.", mcpLabel, providerLabel);
+			? nls.localize('confirmRelogin', "The Connector Definition '{0}' wants you to authenticate to {1}.", mcpLabel, providerLabel)
+			: nls.localize('confirmLogin', "The Connector Definition '{0}' wants to authenticate to {1}.", mcpLabel, providerLabel);
 
 		const buttons: IPromptButton<boolean | undefined>[] = [
 			{

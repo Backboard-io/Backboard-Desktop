@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import { arch, platform, release, type } from "node:os";
 import { basename } from "node:path";
 import { promisify } from "node:util";
+import { wouldPromptForDeveloperTools } from "../../core/platform/developerTools.ts";
 
 const execFileAsync = promisify(execFile);
 const MAX_ENTRIES = 30;
@@ -108,6 +109,9 @@ async function safeExec(
 	args: string[],
 	cwd: string,
 ): Promise<string | null> {
+	// Report a Command Line Tools stub as absent instead of running it: on a
+	// Mac without the tools it would pop the system install dialog.
+	if (await wouldPromptForDeveloperTools(command)) return null;
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), 750);
 	try {

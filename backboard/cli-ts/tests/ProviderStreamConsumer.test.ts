@@ -1061,6 +1061,77 @@ describe("ProviderStreamConsumer", () => {
 		}
 	});
 
+	it("streams a turn whose hosted image arrives inline, then shows the saved file", async () => {
+		const projectRoot = await mkdtemp(join(tmpdir(), "backboard-images-"));
+		const directory = join(projectRoot, "generated-images");
+		const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
+		let finalizedText = "";
+		const deltas: string[] = [];
+		const assistant = {
+			appendDelta: (text: string) => deltas.push(text),
+			appendReasoning: () => {},
+			flushAnswer: () => {},
+			flushReasoning: () => {},
+			finalize: (_calls: unknown[], text?: string) => {
+				finalizedText = text ?? "";
+			},
+			discardPartial: () => {},
+		} as unknown as AssistantAccumulator;
+		const bus = new EventBus();
+		const results: Array<{ id: string; detail?: string }> = [];
+		bus.on("tool:result", (event) =>
+			results.push({ id: event.toolCallId, detail: event.detail }),
+		);
+
+		try {
+			// Media generation is off: a ChatGPT subscription's image tool is
+			// always on, so the answer must still stream as it arrives.
+			const consumer = new ProviderStreamConsumer(
+				bus,
+				new Session("sess_test"),
+				{
+					generatedMediaDir: directory,
+				},
+			);
+			await consumer.consumeWithRetry(
+				() =>
+					streamOf([
+						{ kind: "tool_started", id: "ig_1", name: "generate_image" },
+						{
+							kind: "media",
+							payload: {
+								url: `data:image/png;base64,${png}`,
+								media_type: "image",
+								prompt: "A yellow star",
+							},
+						},
+						{ kind: "assistant_delta", text: "Here's the star." },
+						{ kind: "completed", finalText: "Here's the star." },
+					]),
+				assistant,
+				new AbortController().signal,
+			);
+
+			const files = await readdir(directory);
+			expect(files).toEqual([
+				expect.stringMatching(/^generated-[a-f0-9]{12}\.png$/),
+			]);
+			const saved = `generated-images/${files[0]}`;
+			expect(deltas).toEqual(["Here's the star."]);
+			expect(finalizedText).toBe(
+				`Here's the star.\n\n![A yellow star](${saved})\n\nSaved to \`${saved}\`.`,
+			);
+			expect(results).toEqual([
+				{
+					id: "ig_1",
+					detail: `![A yellow star](${saved})\n\nSaved to \`${saved}\`.`,
+				},
+			]);
+		} finally {
+			await rm(projectRoot, { recursive: true, force: true });
+		}
+	});
+
 	it("saves a generated image returned only in final markdown", async () => {
 		const projectRoot = await mkdtemp(join(tmpdir(), "backboard-images-"));
 		const directory = join(projectRoot, "generated-images");

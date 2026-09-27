@@ -50,6 +50,19 @@ type JsonObject = Record<string, unknown>;
 const IMAGE_PAYLOAD_BASE64_KEY = "__image_base64";
 const IMAGE_PAYLOAD_MEDIA_TYPE_KEY = "__image_media_type";
 
+/**
+ * OpenAI's hosted image tool. The ChatGPT plan serves it on the Codex endpoint
+ * (Codex CLI's `image_generation` feature), so a subscription turn makes images
+ * on the user's own plan; Backboard's media tools would bill a second account.
+ */
+const IMAGE_GENERATION_TOOL: JsonObject = {
+	type: "image_generation",
+	output_format: "png",
+};
+
+/** The hosted media card name the stream consumer already renders. */
+const GENERATED_IMAGE_TOOL_NAME = "generate_image";
+
 interface SubscriptionToolOutput {
 	responseOutput: string | JsonObject[];
 	storedOutput: string;
@@ -154,7 +167,7 @@ function responseRequest(
 			})),
 			...thread.input,
 		],
-		tools: thread.tools,
+		tools: [...thread.tools, IMAGE_GENERATION_TOOL],
 		tool_choice: "auto",
 		parallel_tool_calls: true,
 		reasoning: reasoningConfig(thinking),
@@ -199,6 +212,51 @@ function toolCallFromItem(item: JsonObject): ProviderToolCall | null {
 		);
 	}
 	return { id: item.call_id, name: item.name, input };
+}
+
+/**
+ * The media event for a finished hosted image call: its base64 PNG as a data
+ * URL, which the stream consumer saves under `generated-images/` and shows.
+ */
+function generatedImageMedia(item: JsonObject): JsonObject | null {
+	if (typeof item.result !== "string" || !item.result) return null;
+	const format =
+		typeof item.output_format === "string" && item.output_format
+			? item.output_format
+			: "png";
+	return {
+		url: `data:image/${format};base64,${item.result}`,
+		media_type: "image",
+		...(typeof item.revised_prompt === "string" && item.revised_prompt.trim()
+			? { prompt: item.revised_prompt.trim() }
+			: {}),
+	};
+}
+
+/**
+ * What the next request replays in place of a hosted image call. With
+ * `store: false` the endpoint cannot look the call up by id, and resending its
+ * base64 result would add megabytes to every later turn, so the model gets a
+ * short note of what it made instead.
+ */
+function generatedImageNote(item: JsonObject): JsonObject {
+	const prompt =
+		typeof item.revised_prompt === "string" && item.revised_prompt.trim()
+			? `: ${item.revised_prompt.trim()}`
+			: "";
+	const text =
+		typeof item.result === "string" && item.result
+			? `[Generated image${prompt}. It was shown to the user and saved in the project's generated-images/ folder.]`
+			: `[Image generation${prompt} returned no image.]`;
+	return {
+		type: "message",
+		role: "assistant",
+		content: [{ type: "output_text", text }],
+	};
+}
+
+function isGeneratedImageItem(item: JsonObject): boolean {
+	return item.type === "image_generation_call";
 }
 
 function callIdentity(call: ProviderToolCall): string {
@@ -767,6 +825,45 @@ export class CodexSubscriptionClient implements AgentClient {
 						yield { kind: "reasoning_delta", text: event.delta };
 					}
 					if (
+						event.type === "response.output_item.added" &&
+						isObject(event.item) &&
+						isGeneratedImageItem(event.item) &&
+						typeof event.item.id === "string"
+					) {
+						// The endpoint runs the image call itself; announce the same
+						// hosted card Backboard's generate_image uses so it can fill in.
+						observableOutput = true;
+						emitted = true;
+						yield {
+							kind: "tool_started",
+							id: event.item.id,
+							name: GENERATED_IMAGE_TOOL_NAME,
+						};
+					}
+					if (
+						event.type === "response.output_item.done" &&
+						isObject(event.item) &&
+						isGeneratedImageItem(event.item)
+					) {
+						observableOutput = true;
+						const key =
+							typeof event.item.id === "string"
+								? `item:${event.item.id}`
+								: undefined;
+						if (key && doneItems.has(key)) continue;
+						if (key) doneItems.set(key, GENERATED_IMAGE_TOOL_NAME);
+						thread.input.push(generatedImageNote(event.item));
+						const media = generatedImageMedia(event.item);
+						emitted = true;
+						yield media
+							? { kind: "media", payload: media }
+							: {
+									kind: "warning",
+									message: "ChatGPT image generation returned no image.",
+								};
+						continue;
+					}
+					if (
 						event.type === "response.output_item.done" &&
 						isObject(event.item)
 					) {
@@ -886,11 +983,25 @@ export class CodexSubscriptionClient implements AgentClient {
 								if (!calls.some((ready) => ready.id === call.id))
 									yield { kind: "tool_ready", call: structuredClone(call) };
 							}
+							// An image that only arrives in the final list still reaches
+							// the user once; replay always carries the short note.
+							for (const item of items) {
+								if (!isGeneratedImageItem(item)) continue;
+								if (
+									typeof item.id === "string" &&
+									doneItems.has(`item:${item.id}`)
+								)
+									continue;
+								const media = generatedImageMedia(item);
+								if (media) yield { kind: "media", payload: media };
+							}
 							calls.splice(0, calls.length, ...finalCalls);
 							thread.input.splice(
 								inputStart,
 								thread.input.length - inputStart,
-								...items,
+								...items.map((item) =>
+									isGeneratedImageItem(item) ? generatedImageNote(item) : item,
+								),
 							);
 						}
 						thread.messages.push({

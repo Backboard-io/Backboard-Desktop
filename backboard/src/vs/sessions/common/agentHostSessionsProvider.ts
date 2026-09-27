@@ -7,10 +7,10 @@ import { Event } from '../../base/common/event.js';
 import { IObservable } from '../../base/common/observable.js';
 import { equals } from '../../base/common/objects.js';
 import { URI } from '../../base/common/uri.js';
-import { IAgentConnection } from '../../platform/agentHost/common/agentService.js';
+import { IAgentConnection, MCP_AUTH_REQUIRED_ERROR_TYPE } from '../../platform/agentHost/common/agentService.js';
 import { RemoteAgentHostConnectionStatus } from '../../platform/agentHost/common/remoteAgentHostService.js';
 import { ResolveSessionConfigResult, SessionConfigValueItem } from '../../platform/agentHost/common/state/protocol/commands.js';
-import { AgentCustomization, Customization, McpServerStatus, RootConfigState } from '../../platform/agentHost/common/state/protocol/state.js';
+import { AgentCustomization, Customization, McpServerState, McpServerStatus, RootConfigState } from '../../platform/agentHost/common/state/protocol/state.js';
 import { ISessionsProvider } from '../services/sessions/common/sessionsProvider.js';
 import { ISessionAgentRef } from '../services/sessions/common/session.js';
 
@@ -32,8 +32,30 @@ export interface IAgentHostMcpServer {
 	readonly name: string;
 	readonly enabled: boolean;
 	readonly status: McpServerStatus;
+	/** Why the server is in {@link McpServerStatus.Error}, when the host said. */
+	readonly statusMessage?: string;
+	/**
+	 * The server is waiting for the user to sign in; `setEnabled(true)` starts
+	 * the sign-in (see `MCP_AUTH_REQUIRED_ERROR_TYPE`).
+	 */
+	readonly needsSignIn?: boolean;
 	readonly logOutputChannelId?: string;
 	setEnabled(enabled: boolean): void;
+}
+
+/** The {@link IAgentHostMcpServer} status fields derived from a server's protocol state. */
+export function mcpServerStatusDetail(state: McpServerState): Pick<IAgentHostMcpServer, 'statusMessage' | 'needsSignIn'> {
+	switch (state.kind) {
+		case McpServerStatus.Error:
+			return {
+				statusMessage: state.error.message,
+				needsSignIn: state.error.errorType === MCP_AUTH_REQUIRED_ERROR_TYPE,
+			};
+		case McpServerStatus.AuthRequired:
+			return { statusMessage: state.description, needsSignIn: true };
+		default:
+			return {};
+	}
 }
 
 /**

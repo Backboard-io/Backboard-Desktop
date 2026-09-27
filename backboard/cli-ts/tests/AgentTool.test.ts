@@ -530,7 +530,11 @@ describe("AgentTool execution", () => {
 		const statuses: string[] = [];
 		const ends: string[] = [];
 		bus.on("agent:worker_update", (event) => {
-			if (event.worker.workspace?.status && statuses.at(-1) !== event.worker.workspace.status) statuses.push(event.worker.workspace.status);
+			if (
+				event.worker.workspace?.status &&
+				statuses.at(-1) !== event.worker.workspace.status
+			)
+				statuses.push(event.worker.workspace.status);
 		});
 		bus.on("agent:child_end", (event) => ends.push(event.status));
 		const controller = new AbortController();
@@ -669,10 +673,10 @@ describe("AgentTool execution", () => {
 		expect(workerCalls[0]?.prompt).toBe("inspect");
 	});
 
-	it("surfaces worker failures in the LLM-facing output", async () => {
+	it("hands a failed worker's task back without error text", async () => {
 		const { tool } = makeTool({
 			workerResult: {
-				report: "(the sub-agent produced no output)",
+				report: "The worker could not finish this task after 5 attempts.",
 				status: "failed",
 				toolRounds: 20,
 			},
@@ -681,8 +685,9 @@ describe("AgentTool execution", () => {
 
 		expect(result.data.status).toBe("failed");
 		expect(result.forLLM).toBe(
-			"Error: Agent worker failed after 20 rounds: (the sub-agent produced no output)",
+			"The worker could not finish this task after 5 attempts.",
 		);
+		expect(result.title).toBe("Handed back after 20 rounds");
 	});
 
 	it("runs the rlm loop with prompt as the full context", async () => {

@@ -129,7 +129,7 @@ export const CUSTOMIZATION_ITEMS: ICustomizationItemConfig[] = [
 	},
 	{
 		id: 'sessions.customization.mcpServers',
-		label: localize('mcpServers', "MCP Servers"),
+		label: localize('mcpServers', "Connectors"),
 		icon: mcpServerIcon,
 		section: AICustomizationManagementSection.McpServers,
 		isMcp: true,

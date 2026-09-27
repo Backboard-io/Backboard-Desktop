@@ -3,7 +3,7 @@ import { EventBus } from "../src/core/bus/EventBus.ts";
 import type { AgentEvent } from "../src/core/bus/events.ts";
 import { ComputerRuntime } from "../src/core/computer/ComputerRuntime.ts";
 import { resolveAppName } from "../src/core/computer/CuaDriverSurface.ts";
-import type { JevDecider } from "../src/core/computer/JevUseLoop.ts";
+import { JevBrain, type JevDecider } from "../src/core/computer/JevBrain.ts";
 import type {
 	AccessibilitySnapshot,
 	ImagePayload,
@@ -74,7 +74,7 @@ describe("Jev computer-use sub-agent", () => {
 		const runtime = new ComputerRuntime({
 			platform: new OneButtonApp(),
 			resolveCuaDriver: () => undefined,
-			jevDecider: clickThenDone,
+			brain: () => new JevBrain(clickThenDone),
 			jevWriter: async (_packet, options) => {
 				routes.push(options.modelRoute);
 				return null;
@@ -150,7 +150,7 @@ describe("Jev computer-use sub-agent", () => {
 		await new ComputerRuntime({
 			platform: new OneButtonApp(),
 			resolveCuaDriver: () => undefined,
-			jevDecider: blocked,
+			brain: () => new JevBrain(blocked),
 			jevWriter: async () => null,
 		}).execute([{ action: "task", appName: "Notes", goal: "Draw a cat" }], {
 			...makeContext(new AbortController().signal, bus),
@@ -244,7 +244,7 @@ describe("Jev computer-use sub-agent", () => {
 		await new ComputerRuntime({
 			platform,
 			resolveCuaDriver: () => undefined,
-			jevDecider: typeOnce,
+			brain: () => new JevBrain(typeOnce),
 			jevWriter: async (_packet, options) => {
 				seen = options.modelRoute;
 				return null;

@@ -16,14 +16,14 @@ import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { localize } from '../../../../nls.js';
 import { ILogService } from '../../../log/common/log.js';
-import { AgentSession, AgentSignal, IAgent, IAgentCommandResult, IAgentCreateSessionConfig, IAgentCreateSessionResult, IAgentDescriptor, IAgentMaterializeSessionEvent, IAgentModelInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata } from '../../common/agentService.js';
+import { AgentSession, AgentSignal, IAgent, IAgentCommandResult, MCP_AUTH_REQUIRED_ERROR_TYPE, IAgentCreateSessionConfig, IAgentCreateSessionResult, IAgentDescriptor, IAgentMaterializeSessionEvent, IAgentModelInfo, IAgentResolveSessionConfigParams, IAgentSessionConfigCompletionsParams, IAgentSessionMetadata } from '../../common/agentService.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { ActionType, type ChatAction, type SessionAction } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import type { ModelSelection, ProtectedResourceMetadata, ToolDefinition } from '../../common/state/protocol/state.js';
 import { buildSubagentSessionUri, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, FileEditKind, MessageAttachmentKind, MessageKind, parseSubagentSessionUri, ResponsePartKind, SessionStatus, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallContributorKind, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputQuestion, type ClientPluginCustomization, type MessageAttachment, type PendingMessage, type SessionInputAnswer, type SessionInputResponseKind, type ToolCallResult, type ToolResultContent, type ToolResultFileEditContent, type Turn } from '../../common/state/sessionState.js';
 import { IAgentPluginManager, type ISyncedCustomization } from '../../common/agentPluginManager.js';
-import { McpServerStatus, type Customization, type McpServerState } from '../../common/state/protocol/channels-session/state.js';
+import { McpServerStatus, type Customization, type McpServerState, type SessionActiveClient } from '../../common/state/protocol/channels-session/state.js';
 import { McpCustomizationController } from '../shared/mcpCustomizationController.js';
 import { parsePlugin } from '../../../agentPlugins/common/pluginParsers.js';
 import { IFileService } from '../../../files/common/files.js';
@@ -42,8 +42,10 @@ import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_GENERATIVE_ME
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
 import { type CliTsCredentialSnapshot, CliTsServeProcess, runCliTsCommand } from './cliTsProcess.js';
-import type { CliTsRecord, CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsMcpListPayload, CliTsMcpServerEntry, CliTsMcpServerStatus, CliTsPermissionMode, CliTsTurnStatus, CliTsWorkerIntegrationChange, CliTsWorkerIntegrationSnapshot, CliTsWorkerState } from './cliTsProtocol.js';
+import type { CliTsRecord, CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsMcpListPayload, CliTsMcpServerEntry, CliTsMcpServerStatus, CliTsPermissionMode, CliTsReadyPayload, CliTsTurnStatus, CliTsWorkerIntegrationChange, CliTsWorkerIntegrationSnapshot, CliTsWorkerState } from './cliTsProtocol.js';
+import { CLI_TS_MCP_STATUS_EVENTS_CAPABILITY } from './cliTsProtocol.js';
 import { GenerativeModelCatalog, type GenerativeModelItem, type GenerativeModelProperty } from './generativeModelCatalog.js';
+import { describeVideoModel, videoModelCapabilities } from '../../common/generativeMediaCapabilities.js';
 
 /** Formats a selected generative model for the serve control, or `off`. */
 function generativeModelSelection(model: { provider: string; name: string } | undefined): string {
@@ -61,7 +63,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 function generativeModelCompletionItem(
 	model: Record<string, unknown>,
 	property: string,
-): { value: string; label: string } | undefined {
+): GenerativeModelItem | undefined {
 	const provider = typeof model.provider === 'string' ? model.provider.trim() : '';
 	const identifier = property === BACKBOARD_VIDEO_MODEL_CONFIG_KEY
 		? (typeof model.id === 'string' ? model.id : typeof model.name === 'string' ? model.name : '')
@@ -71,14 +73,19 @@ function generativeModelCompletionItem(
 		return undefined;
 	}
 	const display = typeof model.name === 'string' && model.name.trim() ? model.name.trim() : name;
-	return { value: `${provider}/${name}`, label: display };
+	// Video rows carry what the model accepts, so pickers (and Canvas's edit
+	// bar) can tell a video editor like Aleph from a text-to-video model.
+	return property === BACKBOARD_VIDEO_MODEL_CONFIG_KEY
+		? { value: `${provider}/${name}`, label: display, description: describeVideoModel(videoModelCapabilities(model)) }
+		: { value: `${provider}/${name}`, label: display };
 }
 
 /**
  * Maps a cli-ts MCP runtime status onto the protocol's server lifecycle
  * state. The runtime reports `needs_authentication` for remote servers that
- * require a token; without RFC 9728 metadata from the IDE-managed config the
- * state is surfaced as an error the user can act on from the server list.
+ * require a token; the runtime runs the OAuth flow itself, so instead of the
+ * RFC 9728 token hand-off the state is surfaced as an error tagged
+ * {@link MCP_AUTH_REQUIRED_ERROR_TYPE}, which the server list offers to sign in.
  */
 function mcpServerStateFromRuntime(status: CliTsMcpServerStatus): McpServerState {
 	switch (status.status) {
@@ -89,7 +96,7 @@ function mcpServerStateFromRuntime(status: CliTsMcpServerStatus): McpServerState
 		case 'needs_authentication':
 			return {
 				kind: McpServerStatus.Error,
-				error: { errorType: 'mcp-server-auth-required', message: status.message ?? 'MCP server requires authentication.' },
+				error: { errorType: MCP_AUTH_REQUIRED_ERROR_TYPE, message: status.message ?? localize('cliTsAgent.mcpAuthRequired', "Sign in to use this connector.") },
 			};
 		case 'error':
 			return {
@@ -590,8 +597,18 @@ interface CliTsSession {
 	mcpServers?: Record<string, CliTsMcpServerEntry>;
 	/** Server names the user disconnected for this session (composer toggle). */
 	mcpDisabled?: Set<string>;
-	/** Last runtime state reported by the serve process, keyed by server name. */
+	/**
+	 * Last runtime state reported by the serve process, keyed by server name.
+	 * Includes servers the IDE did not push (a project `.backboard/mcp.json`,
+	 * or one the agent added mid-chat with `find_mcp`), so every server the
+	 * model can use is visible in the composer.
+	 */
 	mcpRuntimeStates?: Map<string, McpServerState>;
+	/**
+	 * Whether the running serve process reports MCP status on its own and owns
+	 * the user-level config through authoritative pushes (`mcp-status-events`).
+	 */
+	mcpStatusEvents?: boolean;
 	/** Serializes MCP pushes so overlapping syncs cannot interleave. */
 	mcpPush?: Promise<void>;
 	/** Publishes MCP server customizations for this session. */
@@ -1201,7 +1218,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 			}
 			existing.model = config.model ?? existing.model;
 			existing.config = { ...(existing.config ?? {}), ...(config.config ?? {}) };
-			await this._ensureRestoredWorktree(existing);
+			await Promise.all([
+				this._ensureRestoredWorktree(existing),
+				this._adoptActiveClient(existing, config.activeClient),
+			]);
 			const workingDirectory = existing.materialized
 				? existing.workingDirectory
 				: existing.sourceWorkingDirectory ?? existing.workingDirectory;
@@ -1252,7 +1272,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 			session.worktree = undefined;
 		}
 		this._sessions.set(sessionId, session);
-		await this._ensureRestoredWorktree(session);
+		await Promise.all([
+			this._ensureRestoredWorktree(session),
+			this._adoptActiveClient(session, config.activeClient),
+		]);
 		if (forkedTurns) {
 			this._writeStore();
 		}
@@ -1323,9 +1346,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 				const schema = result.schema.properties[property];
 				result.schema.properties[property] = {
 					...schema,
-					enum: [BACKBOARD_GENERATIVE_MEDIA_OFF, ...cached.map(item => item.value)],
-					enumLabels: [localize('cliTsAgent.generativeMedia.off', "Off"), ...cached.map(item => item.label)],
-					enumDescriptions: undefined,
+					// Media is always available on Backboard models, so there is no Off entry.
+					enum: cached.map(item => item.value),
+					enumLabels: cached.map(item => item.label),
+					enumDescriptions: cached.some(item => item.description) ? cached.map(item => item.description ?? '') : undefined,
 				};
 			}
 			// Warm both catalogs without making composer configuration wait for the network.
@@ -1355,18 +1379,17 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	/**
-	 * Live image/video catalog for the composer pickers. Dynamic completions
-	 * replace the static enum, so the Off entry is supplied here.
+	 * Live image/video catalog for the composer pickers. Media is always
+	 * available on Backboard models, so the list has no Off entry.
 	 */
 	private async _generativeModelCompletions(property: GenerativeModelProperty, query: string | undefined, refresh?: boolean): Promise<SessionConfigCompletionsResult> {
-		const offItem = { value: BACKBOARD_GENERATIVE_MEDIA_OFF, label: localize('cliTsAgent.generativeMedia.off', "Off") };
 		const items = await this._generativeCatalog.get(property, refresh);
 		const filter = query?.trim().toLowerCase();
 		const filtered = filter
 			? items.filter(item => item.value.toLowerCase().includes(filter) || item.label.toLowerCase().includes(filter))
 			: items;
 		// The composer filters locally, so its unfiltered snapshot must match the cached schema.
-		return { items: [offItem, ...(filter ? filtered.slice(0, 200) : filtered)] };
+		return { items: filter ? filtered.slice(0, 200) : [...filtered] };
 	}
 
 	private async _fetchGenerativeCatalog(property: GenerativeModelProperty): Promise<readonly GenerativeModelItem[]> {
@@ -1387,7 +1410,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			const items = payload.models
 				.filter(isPlainRecord)
 				.map(model => generativeModelCompletionItem(model, property))
-				.filter((item): item is { value: string; label: string } => item !== undefined);
+				.filter((item): item is GenerativeModelItem => item !== undefined);
 			if (payload.models.length > 0 && items.length === 0) {
 				throw new Error('Invalid model catalog entries.');
 			}
@@ -1621,6 +1644,12 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const prepared = prepareSubmitAttachments(prompt, attachments);
 		const storedConfig = this._configurationService.getSessionConfigValues(session.sessionUri.toString());
 		const settings = createBackboardTurnSettings(storedConfig, session.config, session.model);
+		if (settings.videoGeneration || settings.imageGeneration) {
+			// Hosted generation reads its inputs from the message's files, so a
+			// clip or image attached from disk (Canvas edits, "replace the dog
+			// with a cat") must travel as bytes, not as a path to read.
+			await addLocalMediaFiles(prepared, attachments, this._logService);
+		}
 		const systemContext = [
 			backboardMultitaskSystemContext(settings.rawMode),
 			backboardAccessSystemContext(settings.accessMode),
@@ -1750,7 +1779,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				excludedTools,
 				// Advertise IDE-executed tools (integrated browser, tasks, …).
 				// Omitting the field clears previously registered client tools.
-				...(session.clientTools ? { clientTools: session.clientTools.tools.map(clientToolDefinitionToWire) } : {}),
+				...(session.clientTools ? { clientTools: this._clientToolsForTurn(session).map(clientToolDefinitionToWire) } : {}),
 				...(prepared.files.length ? { files: prepared.files } : {}),
 			});
 			const payload = record.payload as { status?: CliTsTurnStatus; threadId?: string | null } | undefined;
@@ -1764,11 +1793,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			if (status === 'failed' && !turn.error) {
 				turn.failed = true;
 				turn.error = { errorType: 'BackboardSendFailed', message: localize('cliTsAgent.turnFailed', "The Backboard agent reported a failed turn.") };
-				this._fire(session.sessionUri, {
-					type: ActionType.ChatError,
-					turnId: effectiveTurnId,
-					error: turn.error,
-				});
+				this._fireFailureNote(session, effectiveTurnId, turn.error);
 			}
 			this._refreshModelsOnce(session);
 		} catch (error) {
@@ -1778,11 +1803,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			// Keep that original failure in both the live row and durable history.
 			if (!turn.error) {
 				turn.error = { errorType: 'BackboardSendFailed', message: message.trim() ? message : localize('cliTsAgent.requestFailed', "Backboard request failed.") };
-				this._fire(session.sessionUri, {
-					type: ActionType.ChatError,
-					turnId: effectiveTurnId,
-					error: turn.error,
-				});
+				this._fireFailureNote(session, effectiveTurnId, turn.error);
 			}
 		} finally {
 			// A provider-turn boundary only closes blocking Agent children. Detached
@@ -1839,7 +1860,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					return part;
 				}
 				const status = cliTsWorkerCompletionStatus(worker);
-				return { ...part, worker, workspace: workspaceFromWorker(worker), ...(status ? { failed: status !== 'completed' } : {}) };
+				return { ...part, worker, workspace: workspaceFromWorker(worker), ...(status ? { failed: status === 'cancelled' } : {}) };
 			}) } : {}) }));
 		const storedChildTurns = parsedSubagent
 			? session?.storedSubagentTurns?.get(parsedSubagent.toolCallId) ?? stored?.subagents?.[parsedSubagent.toolCallId]
@@ -2282,22 +2303,74 @@ export class CliTsAgent extends Disposable implements IAgent {
 	 * Receives the IDE's customization refs and pushes the MCP servers they
 	 * carry into this session's serve process.
 	 *
-	 * Backboard sessions are configured from the IDE (marketplace installs,
-	 * the seeded Backboard docs server, and the user's `.backboard/mcp.json`),
-	 * so the runtime never reads MCP configuration on its own. The servers are
-	 * stored on the session and re-applied whenever a new serve process starts.
+	 * The IDE's MCP set (marketplace installs, the seeded Backboard docs
+	 * server, and the user's `~/.backboard/mcp.json`, which the IDE imports)
+	 * is the same in every window, so Simple and Editor chats see the same
+	 * servers. The push is authoritative for the user-level file; the runtime
+	 * still layers a project `.backboard/mcp.json` and servers the agent adds
+	 * mid-chat. The set is stored on the session and re-applied whenever a new
+	 * serve process starts.
 	 */
 	async setClientCustomizations(session: URI, clientId: string, customizations: ClientPluginCustomization[]): Promise<ISyncedCustomization[]> {
 		const entry = this._sessions.get(AgentSession.id(session));
 		if (!entry || entry.disposed) {
 			return [];
 		}
-		const synced = await this._pluginManager.syncCustomizations(clientId, customizations);
-		entry.mcpServers = await this._extractSyncedMcpServers(synced);
+		const synced = await this._syncClientCustomizations(entry, clientId, customizations);
+		await this._pushMcpServers(entry);
+		return synced;
+	}
+
+	/**
+	 * The IDE also offers tools of MCP servers it runs itself as client tools.
+	 * When the runtime already has the same server connected, the model would
+	 * see every tool twice, so those copies are dropped; they stay when the
+	 * runtime cannot connect the server (e.g. it needs a secret or sign-in the
+	 * IDE already has), which keeps the server usable either way.
+	 */
+	private _clientToolsForTurn(session: CliTsSession): readonly ToolDefinition[] {
+		const tools = session.clientTools?.tools ?? [];
+		const states = session.mcpRuntimeStates;
+		if (!states) {
+			return tools;
+		}
+		return tools.filter(tool => {
+			const meta = tool._meta;
+			const serverLabel = meta?.['source'] === 'mcp' ? meta['mcpServerLabel'] : undefined;
+			return typeof serverLabel !== 'string' || states.get(serverLabel)?.kind !== McpServerStatus.Ready;
+		});
+	}
+
+	/**
+	 * Honors an active client claimed at `createSession`, which the protocol
+	 * defines as equivalent to a `session/activeClientChanged` right after
+	 * creation. Without it a new chat has no MCP servers (and no client
+	 * tools) until the client's refs happen to change. The servers are
+	 * published before this returns so the session's first snapshot lists
+	 * them; connecting continues in the background.
+	 */
+	private async _adoptActiveClient(session: CliTsSession, activeClient: SessionActiveClient | undefined): Promise<void> {
+		if (!activeClient || session.disposed) {
+			return;
+		}
+		this.setClientTools(session.sessionUri, activeClient.clientId, activeClient.tools ?? []);
+		if (activeClient.customizations === undefined) {
+			return;
+		}
+		try {
+			await this._syncClientCustomizations(session, activeClient.clientId, activeClient.customizations);
+			void this._pushMcpServers(session);
+		} catch (error) {
+			this._logService.warn(`[cli-ts] Failed to apply the active client's customizations to session ${session.sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	private async _syncClientCustomizations(session: CliTsSession, clientId: string, customizations: readonly ClientPluginCustomization[]): Promise<ISyncedCustomization[]> {
+		const synced = await this._pluginManager.syncCustomizations(clientId, [...customizations]);
+		session.mcpServers = await this._extractSyncedMcpServers(synced);
 		// Publish before connecting so the composer lists every server (still
 		// starting) rather than only the ones that came up.
-		this._getOrCreateMcpController(entry).applyAll(this._mcpServerStates(entry));
-		await this._pushMcpServers(entry);
+		this._publishMcpServers(session);
 		return synced;
 	}
 
@@ -2342,25 +2415,42 @@ export class CliTsAgent extends Disposable implements IAgent {
 	 * server list dispatches this per session customization; disabling marks
 	 * the server as `disabled` in the pushed set (the runtime closes the
 	 * connection but keeps the configuration), enabling forces a reconnect.
+	 * Enabling a server that is waiting for sign-in runs the OAuth flow.
 	 */
 	setCustomizationEnabled(id: string, enabled: boolean): void {
 		for (const session of this._sessions.values()) {
-			const controller = session.mcpController;
-			const customization = controller?.topLevelCustomizations().find(candidate => candidate.id === id);
-			if (!customization || !session.mcpServers || !Object.hasOwn(session.mcpServers, customization.name)) {
+			const customization = session.mcpController?.topLevelCustomizations().find(candidate => candidate.id === id);
+			if (!customization) {
 				continue;
+			}
+			const name = customization.name;
+			const ideOwned = !!session.mcpServers && Object.hasOwn(session.mcpServers, name);
+			const state = session.mcpRuntimeStates?.get(name);
+			if (enabled && state?.kind === McpServerStatus.Error && state.error.errorType === MCP_AUTH_REQUIRED_ERROR_TYPE) {
+				session.mcpDisabled?.delete(name);
+				void this._authenticateMcpServer(session, name);
+				return;
+			}
+			if (!ideOwned) {
+				// Project-file and find_mcp servers are configured outside the
+				// IDE; they can be reconnected but not switched off here.
+				if (enabled) {
+					this._getOrCreateMcpController(session).applyOne({ name, state: { kind: McpServerStatus.Starting } });
+					void this._pushMcpServers(session, [name]);
+				}
+				return;
 			}
 			const disabled = session.mcpDisabled ??= new Set<string>();
 			if (enabled) {
-				disabled.delete(customization.name);
+				disabled.delete(name);
 			} else {
-				disabled.add(customization.name);
+				disabled.add(name);
 			}
 			this._getOrCreateMcpController(session).applyOne({
-				name: customization.name,
-				state: enabled ? { kind: McpServerStatus.Starting } : { kind: McpServerStatus.Stopped },
+				name,
+				state: enabled && session.proc?.isRunning ? { kind: McpServerStatus.Starting } : { kind: McpServerStatus.Stopped },
 			});
-			void this._pushMcpServers(session, enabled ? [customization.name] : []);
+			void this._pushMcpServers(session, enabled ? [name] : []);
 			return;
 		}
 	}
@@ -2760,11 +2850,24 @@ export class CliTsAgent extends Disposable implements IAgent {
 			onEvent: event => this._handleAgentEvent(session, event),
 			onExit: () => {
 				session.pendingInputs.clear();
+				// The connections died with the process; a respawn reconnects
+				// from scratch, so stop showing them as running.
+				if (session.proc === proc) {
+					session.mcpRuntimeStates = undefined;
+					this._publishMcpServers(session);
+				}
 			},
 			// A new process starts from disk only; re-push the IDE-owned MCP
 			// server set as soon as it can read control lines.
-			onReady: () => {
+			onReady: (payload: CliTsReadyPayload) => {
+				session.mcpStatusEvents = payload.capabilities?.includes(CLI_TS_MCP_STATUS_EVENTS_CAPABILITY) === true;
 				void this._pushMcpServers(session);
+			},
+			onMcpStatus: payload => {
+				if (session.proc === proc) {
+					this._applyMcpStatuses(session, payload.servers ?? [], { snapshot: true });
+					this._reportMcpWarnings(session, payload.warnings);
+				}
 			},
 			// Every spawn (first start, lazy request, crash respawn) completes the
 			// credential handshake, empty snapshot included, before its first
@@ -2790,19 +2893,37 @@ export class CliTsAgent extends Disposable implements IAgent {
 		return session.mcpController;
 	}
 
-	/** Current published state for every IDE-owned server on the session. */
+	/**
+	 * Current published state for every server the session can use: the
+	 * IDE-owned set plus servers the runtime runs on its own (a project
+	 * `.backboard/mcp.json`, or one the agent added with `find_mcp`).
+	 */
 	private _mcpServerStates(session: CliTsSession): { name: string; state: McpServerState }[] {
-		return Object.keys(session.mcpServers ?? {}).map(name => ({
+		const names = new Set<string>([...Object.keys(session.mcpServers ?? {}), ...(session.mcpRuntimeStates?.keys() ?? [])]);
+		// Without a runtime (a draft before its first message, or after the
+		// process exited) nothing is connecting yet: an enabled server that is
+		// `Stopped` connects when the chat starts.
+		const pending: McpServerState = session.proc?.isRunning ? { kind: McpServerStatus.Starting } : { kind: McpServerStatus.Stopped };
+		return [...names].map(name => ({
 			name,
 			state: session.mcpDisabled?.has(name)
 				? { kind: McpServerStatus.Stopped } as McpServerState
-				: session.mcpRuntimeStates?.get(name) ?? { kind: McpServerStatus.Starting },
+				: session.mcpRuntimeStates?.get(name) ?? pending,
 		}));
+	}
+
+	private _publishMcpServers(session: CliTsSession): void {
+		if (session.disposed) {
+			return;
+		}
+		this._getOrCreateMcpController(session).applyAll(this._mcpServerStates(session));
 	}
 
 	/**
 	 * Pushes the session's IDE-owned MCP servers to the serve process. No-op
-	 * while no process is running: the set is re-pushed on `serve:ready`.
+	 * while no process is running (the set is re-pushed on `serve:ready`) and
+	 * until the IDE has synced its set: an authoritative empty push would
+	 * disconnect the servers the runtime loaded from the user's config.
 	 * Pushes are serialized per session so overlapping syncs cannot apply a
 	 * stale set after a newer one.
 	 */
@@ -2810,11 +2931,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const previous = session.mcpPush ?? Promise.resolve();
 		const next = previous.catch(() => undefined).then(async () => {
 			const proc = session.proc;
-			if (!proc?.isRunning || session.disposed) {
+			if (!proc?.isRunning || session.disposed || !session.mcpServers) {
 				return;
 			}
 			const servers: Record<string, CliTsMcpServerEntry> = {};
-			for (const [name, entry] of Object.entries(session.mcpServers ?? {})) {
+			for (const [name, entry] of Object.entries(session.mcpServers)) {
 				servers[name] = session.mcpDisabled?.has(name) ? { ...entry, disabled: true } : entry;
 			}
 			try {
@@ -2823,14 +2944,16 @@ export class CliTsAgent extends Disposable implements IAgent {
 					requestId: proc.nextRequestId(),
 					servers,
 					...(forceNames.length > 0 ? { force: [...forceNames] } : {}),
+					...(session.mcpStatusEvents ? { authoritative: true } : {}),
 				});
 				const payload = record.payload as CliTsMcpListPayload | undefined;
-				this._applyMcpStatuses(session, payload?.servers ?? []);
+				this._applyMcpStatuses(session, payload?.servers ?? [], { snapshot: true, pushed: servers });
+				this._reportMcpWarnings(session, payload?.warnings);
 			} catch (error) {
 				this._logService.warn(`[cli-ts] Failed to push MCP servers to session ${session.sessionId}: ${error instanceof Error ? error.message : String(error)}`);
 				// Surface the failure in the composer instead of leaving the
 				// servers stuck in "starting".
-				this._applyMcpStatuses(session, Object.keys(session.mcpServers ?? {}).map(name => ({
+				this._applyMcpStatuses(session, Object.keys(servers).map(name => ({
 					name,
 					status: 'error' as const,
 					message: error instanceof Error ? error.message : String(error),
@@ -2841,20 +2964,66 @@ export class CliTsAgent extends Disposable implements IAgent {
 		await next;
 	}
 
-	/** Publishes the runtime's server states as session customizations. */
-	private _applyMcpStatuses(session: CliTsSession, statuses: readonly CliTsMcpServerStatus[]): void {
-		if (statuses.length === 0) {
+	/**
+	 * Runs the runtime's interactive OAuth sign-in for one server (the system
+	 * browser opens on the provider's consent page) and publishes the result.
+	 */
+	private async _authenticateMcpServer(session: CliTsSession, name: string): Promise<void> {
+		const proc = session.proc;
+		if (!proc?.isRunning || session.disposed) {
 			return;
 		}
-		const controller = this._getOrCreateMcpController(session);
-		const states = session.mcpRuntimeStates ??= new Map<string, McpServerState>();
+		if (!session.mcpStatusEvents) {
+			// Older runtimes cannot sign in from the IDE; a forced reconnect is
+			// the best we can do.
+			await this._pushMcpServers(session, [name]);
+			return;
+		}
+		this._getOrCreateMcpController(session).applyOne({ name, state: { kind: McpServerStatus.Starting } });
+		try {
+			const record = await proc.request({ op: 'authenticateMcpServer', requestId: proc.nextRequestId(), name });
+			const payload = record.payload as CliTsMcpListPayload | undefined;
+			this._applyMcpStatuses(session, payload?.servers ?? [], { snapshot: true });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._logService.warn(`[cli-ts] MCP sign-in for '${name}' failed in session ${session.sessionId}: ${message}`);
+			this._applyMcpStatuses(session, [{ name, status: 'needs_authentication', message }]);
+		}
+	}
+
+	/**
+	 * Publishes the runtime's server states as session customizations. A
+	 * `snapshot` lists every server the runtime knows, so servers missing from
+	 * it are gone; an IDE server missing from the reply to its own push was
+	 * rejected by the runtime (for example an unusable configuration).
+	 */
+	private _applyMcpStatuses(session: CliTsSession, statuses: readonly CliTsMcpServerStatus[], options: { readonly snapshot?: boolean; readonly pushed?: Readonly<Record<string, CliTsMcpServerEntry>> } = {}): void {
+		if (session.disposed || (!options.snapshot && statuses.length === 0)) {
+			return;
+		}
+		const states = options.snapshot || !session.mcpRuntimeStates
+			? new Map<string, McpServerState>()
+			: session.mcpRuntimeStates;
 		for (const status of statuses) {
 			states.set(status.name, mcpServerStateFromRuntime(status));
 		}
-		for (const [name, state] of states) {
-			if (session.mcpServers && Object.hasOwn(session.mcpServers, name)) {
-				controller.applyOne({ name, state });
+		if (options.pushed && session.mcpStatusEvents) {
+			for (const [name, entry] of Object.entries(options.pushed)) {
+				if (!entry.disabled && !states.has(name)) {
+					states.set(name, {
+						kind: McpServerStatus.Error,
+						error: { errorType: 'mcp-server-failed', message: localize('cliTsAgent.mcpRejected', "The Backboard runtime could not use this server's configuration.") },
+					});
+				}
 			}
+		}
+		session.mcpRuntimeStates = states;
+		this._publishMcpServers(session);
+	}
+
+	private _reportMcpWarnings(session: CliTsSession, warnings: readonly string[] | undefined): void {
+		for (const warning of warnings ?? []) {
+			this._logService.warn(`[cli-ts] MCP (session ${session.sessionId}): ${warning}`);
 		}
 	}
 
@@ -3083,13 +3252,12 @@ export class CliTsAgent extends Disposable implements IAgent {
 						type: ActionType.ChatTurnCancelled,
 						turnId: child.turn.turnId,
 					}, toolCallId);
-				} else if (status === 'failed') {
-					this._fire(session.sessionUri, {
-						type: ActionType.ChatError,
-						turnId: child.turn.turnId,
-						error: storedTurn.error ?? { errorType: 'BackboardSubagentFailed', message: localize('cliTsAgent.subagentFailed', "The Backboard subagent reported a failed turn.") },
-					}, toolCallId);
 				} else {
+					// A worker that could not finish hands its task back to the
+					// coordinator: its chat ends with a calm note, never an error.
+					if (status === 'failed') {
+						this._fireFailureNote(session, child.turn.turnId, storedTurn.error!, toolCallId);
+					}
 					this._fire(session.sessionUri, {
 						type: ActionType.ChatTurnComplete,
 						turnId: child.turn.turnId,
@@ -3322,7 +3490,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				const stored = session.storedTurns[index];
 				if (stored.parts?.some(part => part.kind === 'tool' && part.id === toolCallId)) {
 					session.storedTurns[index] = { ...stored, parts: stored.parts.map(part => part.kind === 'tool' && part.id === toolCallId
-						? { ...part, worker, workspace: workspaceFromWorker(worker), ...(status ? { failed: status !== 'completed' } : {}) } : part) };
+						? { ...part, worker, workspace: workspaceFromWorker(worker), ...(status ? { failed: status === 'cancelled' } : {}) } : part) };
 				}
 			}
 			if (status) {
@@ -3430,7 +3598,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 			toolCallId,
 			content: [{ type: ToolResultContentType.Text, text: activity.join('\n') }],
 			_meta: {
-				...cliTsToolMetadata('Agent', turn.toolInputs.get(toolCallId)?.input),
+				// Content changes replace the tool's `_meta`; keep AgentSpawn's detached flag.
+				...cliTsToolMetadata(cliTsLauncherToolName('Agent', turn.toolInputs.get(toolCallId)?.name), turn.toolInputs.get(toolCallId)?.input),
 				...workerWorkspaceMetadata(workspace),
 				...(turn.workerStates?.get(toolCallId) ? { subagentRevision: turn.workerStates.get(toolCallId)!.revision } : {}),
 			},
@@ -3648,7 +3817,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 						isCliTsTerminalTool(event.name) ? cliTsTerminalCommand(turn.toolInputs.get(event.toolCallId)?.input) : undefined,
 					),
 					confirmed: turn.confirmedToolCalls.has(event.toolCallId) ? ToolCallConfirmationReason.UserAction : ToolCallConfirmationReason.NotNeeded,
-					_meta: cliTsToolMetadata(event.name, turn.toolInputs.get(event.toolCallId)?.input, toolUiByCall?.get(event.toolCallId)?.kind, cliTsMutationBatches(turn).get(event.toolCallId)),
+					_meta: cliTsToolMetadata(cliTsLauncherToolName(event.name, turn.toolInputs.get(event.toolCallId)?.name), turn.toolInputs.get(event.toolCallId)?.input, toolUiByCall?.get(event.toolCallId)?.kind, cliTsMutationBatches(turn).get(event.toolCallId)),
 				});
 				return;
 			}
@@ -3768,7 +3937,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 				const toolCallId = event.toolCallId;
 				const name = event.name;
 				const failed = cliTsToolExecutionFailed(event);
-				const detachedSubagent = isCliTsDetachedSubagentTool(name);
+				const launcherName = cliTsLauncherToolName(name, turn.toolInputs.get(toolCallId)?.name);
+				const detachedSubagent = isCliTsDetachedSubagentTool(launcherName);
 				const child = isCliTsSubagentLauncherTool(name)
 					? this._ensureSubagentTurn(session, turn, toolCallId, subagentPrompt(turn, toolCallId, event.inputSummary))
 					: turn.subagentTurns.get(toolCallId);
@@ -3839,7 +4009,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 						toolCallId,
 						_meta: {
 							...cliTsToolCompletionMetadata(name, terminalOutput, toolUi?.kind, cliTsMutationBatches(turn).get(toolCallId)),
-							...(child ? cliTsToolMetadata(name, turn.toolInputs.get(toolCallId)?.input) : {}),
+							...(child ? cliTsToolMetadata(launcherName, turn.toolInputs.get(toolCallId)?.input) : {}),
 							...(turn.workerWorkspaces?.get(toolCallId) ? workerWorkspaceMetadata(turn.workerWorkspaces.get(toolCallId)!) : {}),
 							...(turn.workerStates?.get(toolCallId) ? { subagentRevision: turn.workerStates.get(toolCallId)!.revision } : {}),
 						},
@@ -3996,18 +4166,32 @@ export class CliTsAgent extends Disposable implements IAgent {
 				return;
 			}
 			case 'run:error': {
+				if (parentToolCallId) {
+					// A child's failure is finalized (with its note) when the child
+					// ends; see _completeSubagentTurn.
+					return;
+				}
 				turn.failed = true;
 				turn.error = { errorType: 'BackboardError', message: event.error?.trim() ? event.error : localize('cliTsAgent.requestFailed', "Backboard request failed.") };
-				fire({
-					type: ActionType.ChatError,
-					turnId,
-					error: turn.error,
-				});
+				this._fireFailureNote(session, turnId, turn.error);
 				return;
 			}
 			default:
 				return;
 		}
+	}
+
+	/**
+	 * A turn that could not finish (after the runtime's own silent retries and
+	 * model fallbacks) ends with a calm note instead of an error banner. The
+	 * note is derived from the stored error, so a reopened chat shows the same.
+	 */
+	private _fireFailureNote(session: CliTsSession, turnId: string, error: CliTsTurnError, parentToolCallId?: string): void {
+		this._fire(session.sessionUri, {
+			type: ActionType.ChatResponsePart,
+			turnId,
+			part: { kind: ResponsePartKind.Markdown, id: generateUuid(), content: cliTsFailureNote(error) },
+		}, parentToolCallId);
 	}
 
 	private _ensureMarkdownPart(session: CliTsSession, turn: CliTsTurnState, messageId: string, parentToolCallId?: string): string {
@@ -4051,7 +4235,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			toolName,
 			displayName: toolDisplayName(toolName),
 			...(isClientTool && clientTools ? { contributor: { kind: ToolCallContributorKind.Client, clientId: clientTools.clientId } } : {}),
-			_meta: cliTsToolMetadata(toolName, turn.toolInputs.get(toolCallId)?.input, (turn as { readonly toolUi?: Map<string, CliTsToolUiState> }).toolUi?.get(toolCallId)?.kind, cliTsMutationBatches(turn).get(toolCallId)),
+			_meta: cliTsToolMetadata(cliTsLauncherToolName(toolName, turn.toolInputs.get(toolCallId)?.name), turn.toolInputs.get(toolCallId)?.input, (turn as { readonly toolUi?: Map<string, CliTsToolUiState> }).toolUi?.get(toolCallId)?.kind, cliTsMutationBatches(turn).get(toolCallId)),
 		}, parentToolCallId);
 		this._fire(session.sessionUri, {
 			type: ActionType.ChatToolCallDelta,
@@ -4576,7 +4760,8 @@ function activeTurnToStoredTurn(turn: CliTsTurnState): CliTsStoredTurn {
 		id: turn.turnId,
 		usage: turn.usage,
 		prompt: turn.prompt,
-		response: turn.responseText || localize('cliTsAgent.interruptedTurn', "This response was interrupted when Backboard closed."),
+		// The failure note says it was interrupted; see cliTsFailureNote.
+		response: turn.responseText,
 		failed: true,
 		error: turn.error ?? { errorType: 'BackboardInterrupted', message: localize('cliTsAgent.interruptedTurn', "This response was interrupted when Backboard closed.") },
 		...(turn.toolSummaries.length ? { tools: [...turn.toolSummaries] } : {}),
@@ -5107,6 +5292,16 @@ function isCliTsSubagentLauncherTool(toolName: string): boolean {
 	return isCliTsSubagentTool(toolName) || isCliTsDetachedSubagentTool(toolName);
 }
 
+/**
+ * Lifecycle events name a launcher by its display name, and cli-ts displays
+ * both the blocking Agent and the detached AgentSpawn as `Subagent`. Only the
+ * provider call recorded from `tool:requested` (e.g. `agent_spawn`) says which
+ * one ran, so detached semantics must be resolved from that name.
+ */
+function cliTsLauncherToolName(eventName: string, requestedName: string | undefined): string {
+	return requestedName && isCliTsSubagentLauncherTool(eventName) && isCliTsDetachedSubagentTool(requestedName) ? requestedName : eventName;
+}
+
 function cliTsToolResultText(toolName: string, title: string | undefined, detail: string | undefined, inputSummary: string | undefined): string {
 	if (!isCliTsTerminalTool(toolName)) {
 		return [title, detail].filter(part => !!part).join('\n');
@@ -5446,6 +5641,54 @@ interface PreparedSubmitAttachments {
 	readonly files: CliTsFileAttachment[];
 }
 
+const LOCAL_MEDIA_MIME_TYPES: Readonly<Record<string, string>> = {
+	'.mp4': 'video/mp4',
+	'.m4v': 'video/mp4',
+	'.mov': 'video/quicktime',
+	'.webm': 'video/webm',
+	'.png': 'image/png',
+	'.jpg': 'image/jpeg',
+	'.jpeg': 'image/jpeg',
+	'.webp': 'image/webp',
+	'.gif': 'image/gif',
+};
+
+/** Larger clips stay path-only: the whole file crosses stdin as one base64 JSON line. */
+const LOCAL_MEDIA_MAX_BYTES = 96 * 1024 * 1024;
+
+/**
+ * Adds the bytes of images and videos attached by path, for turns whose hosted
+ * media tools take their inputs from the message's files. Files that are
+ * missing, too large or not media keep only their path mention.
+ */
+export async function addLocalMediaFiles(prepared: PreparedSubmitAttachments, attachments: readonly MessageAttachment[] | undefined, logService: ILogService): Promise<void> {
+	for (const attachment of attachments ?? []) {
+		if (attachment.type !== MessageAttachmentKind.Resource) {
+			continue;
+		}
+		let uri: URI;
+		try {
+			uri = URI.parse(attachment.uri);
+		} catch {
+			continue;
+		}
+		const mimeType = LOCAL_MEDIA_MIME_TYPES[path.extname(uri.path).toLowerCase()];
+		if (uri.scheme !== 'file' || !mimeType) {
+			continue;
+		}
+		try {
+			const stat = await fs.promises.stat(uri.fsPath);
+			if (!stat.isFile() || stat.size > LOCAL_MEDIA_MAX_BYTES) {
+				continue;
+			}
+			const data = await fs.promises.readFile(uri.fsPath);
+			prepared.files.push({ fileName: path.basename(uri.fsPath), mimeType, dataBase64: data.toString('base64') });
+		} catch (error) {
+			logService.info(`[cli-ts] Could not attach media ${uri.fsPath}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+}
+
 /**
  * Splits IDE message attachments into inline prompt context (text snippets and
  * on-disk file pointers) and binary payloads forwarded on the submit op, which
@@ -5464,7 +5707,11 @@ function prepareSubmitAttachments(prompt: string, attachments?: readonly Message
 			try {
 				const uri = URI.parse(attachment.uri);
 				if (uri.scheme === 'file') {
-					parts.push(`Attached file (read it with the Read tool): ${uri.fsPath}`);
+					// A clip is binary: reading it only floods the context. With a video
+					// model on it travels with the message as bytes (addLocalMediaFiles).
+					parts.push(LOCAL_MEDIA_MIME_TYPES[path.extname(uri.path).toLowerCase()]?.startsWith('video/')
+						? `Attached video (a binary clip; do not open it with Read): ${uri.fsPath}`
+						: `Attached file (read it with the Read tool): ${uri.fsPath}`);
 				}
 			} catch {
 				// Ignore unparseable attachment URIs.
@@ -5524,6 +5771,24 @@ function storedFileEditContent(sessionUri: string, edit: IFileEditRecord): ToolR
 			? { diff: { added: edit.addedLines, removed: edit.removedLines } }
 			: {}),
 	};
+}
+
+/**
+ * The note shown where a turn stopped early. Host-side problems (sign-in, a
+ * missing key) carry a message the user can act on; runtime failures have
+ * already been retried silently, so they only invite the user to continue.
+ */
+function cliTsFailureNote(error: CliTsTurnError | undefined): string {
+	if (error?.errorType === 'BackboardSubagentFailed') {
+		return localize('cliTsAgent.note.subagent', "_This subagent stopped early and handed its task back to the main agent._");
+	}
+	if (error?.errorType === 'BackboardInterrupted') {
+		return localize('cliTsAgent.note.interrupted', "_Backboard closed before this response finished. Send a message to continue from here._");
+	}
+	if (error?.errorType === 'BackboardSendFailed' && error.message.trim() && error.message !== localize('cliTsAgent.turnFailed', "The Backboard agent reported a failed turn.") && error.message !== localize('cliTsAgent.requestFailed', "Backboard request failed.")) {
+		return localize('cliTsAgent.note.actionable', "_This response couldn't start: {0}_", error.message.trim());
+	}
+	return localize('cliTsAgent.note.stopped', "_This response stopped before it finished. Send a message to continue from here._");
 }
 
 function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsStoredTurn): Turn {
@@ -5605,16 +5870,11 @@ function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsS
 			text: turn.prompt,
 			origin: { kind: MessageKind.User },
 		},
-		responseParts,
+		responseParts: turn.failed
+			? [...responseParts, { kind: ResponsePartKind.Markdown, id: `${sessionId}-${index}-note`, content: cliTsFailureNote(turn.error) }]
+			: responseParts,
 		usage: turn.usage,
-		state: turn.failed ? TurnState.Error : TurnState.Complete,
-		...(turn.failed ? {
-			error: {
-				errorType: typeof turn.error?.errorType === 'string' && turn.error.errorType.trim() ? turn.error.errorType : 'BackboardError',
-				message: typeof turn.error?.message === 'string' && turn.error.message.trim()
-					? turn.error.message
-					: localize('cliTsAgent.failedTurnMissingDetails', "This Backboard response failed. The original error details were not saved."),
-			},
-		} : {}),
+		// A failed turn renders as finished with a calm note, never an error banner.
+		state: TurnState.Complete,
 	};
 }

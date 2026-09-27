@@ -3,6 +3,7 @@ import {
 	type CanvasDrawing,
 	parseCanvasDrawing,
 } from "../src/core/computer/CanvasDrawing.ts";
+import { JevBrain } from "../src/core/computer/JevBrain.ts";
 import {
 	type JevSurface,
 	JevUseLoop,
@@ -56,7 +57,7 @@ describe("canvas drawing", () => {
 		let turn = 0;
 		const loop = new JevUseLoop(
 			surface,
-			async (request) => {
+			new JevBrain(async (request) => {
 				expect(request.questions.draw_target).toBeDefined();
 				const choice = (value: string) => ({
 					type: "choice" as const,
@@ -72,7 +73,7 @@ describe("canvas drawing", () => {
 						draw_target: choice("d1"),
 					},
 				};
-			},
+			}),
 			async (packet) => {
 				expect(packet.kind).toBe("drawing");
 				return JSON.stringify(plan);
@@ -115,7 +116,7 @@ describe("canvas drawing", () => {
 		};
 		const result = await new JevUseLoop(
 			surface,
-			async () => {
+			new JevBrain(async () => {
 				const choice = (value: string) => ({
 					type: "choice" as const,
 					choice: value,
@@ -130,7 +131,7 @@ describe("canvas drawing", () => {
 						draw_target: choice("d1"),
 					},
 				};
-			},
+			}),
 			async () => {
 				writerCalls++;
 				changed = true;

@@ -22,6 +22,8 @@ import { autorun } from '../../../../base/common/observable.js';
 import { INativeHostService } from '../../../../platform/native/common/native.js';
 import { IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { getSessionEditorFolderUri } from '../../../browser/openInVSCodeUtils.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { OPEN_CANVAS_COMMAND_ID } from '../../../../workbench/contrib/chat/browser/widget/chatGeneratedImageGallery.js';
 
 class SelectAgentsFolderContribution extends Disposable implements IWorkbenchContribution {
 
@@ -36,18 +38,27 @@ class SelectAgentsFolderContribution extends Disposable implements IWorkbenchCon
 		@ISessionsSetUpService private readonly sessionsSetUpService: ISessionsSetUpService,
 		@ILogService private readonly logService: ILogService,
 		@ISessionsPartService private readonly sessionsPartService: ISessionsPartService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super();
 		const handleSelectAgentsFolder = (_: unknown, ...args: unknown[]) => {
 			const folderUri = args[0] ? URI.revive(args[0] as UriComponents) : undefined;
 			const sessionResource = args[1] ? URI.revive(args[1] as UriComponents) : undefined;
+			const canvasImageUrl = typeof args[2] === 'string' ? args[2] : undefined;
 			this.logService.info(`[AgentsHandoff] IPC received: folderUri=${folderUri?.toString() ?? '(none)'} sessionResource=${sessionResource?.toString() ?? '(none)'}`);
 
 			this.handleOpenIntent(folderUri, sessionResource)
+				.then(() => canvasImageUrl ? this.openCanvas(canvasImageUrl) : undefined)
 				.catch(err => this.logService.error('[AgentsHandoff] handleOpenIntent failed', err));
 		};
 		ipcRenderer.on('vscode:selectAgentsFolder', handleSelectAgentsFolder);
 		this._register({ dispose: () => ipcRenderer.removeListener('vscode:selectAgentsFolder', handleSelectAgentsFolder) });
+	}
+
+	/** Opens Simple's Canvas on an image handed over by the Editor's "Canvas" button. */
+	private async openCanvas(imageUrl: string): Promise<void> {
+		await this.lifecycleService.when(LifecyclePhase.Eventually);
+		await this.commandService.executeCommand(OPEN_CANVAS_COMMAND_ID, { imageUrl, view: 'canvas' });
 	}
 
 	private async handleOpenIntent(folderUri: URI | undefined, sessionResource: URI | undefined): Promise<void> {

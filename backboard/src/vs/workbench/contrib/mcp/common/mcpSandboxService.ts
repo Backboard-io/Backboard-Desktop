@@ -151,7 +151,7 @@ export class McpSandboxService extends Disposable implements IMcpSandboxService 
 		return {
 			message: localize(
 				'mcpSandboxSuggestion.message',
-				"The MCP server {0} reported potential sandbox blocks. VS Code found possible sandbox configuration updates:\n{1}",
+				"The Connector {0} reported potential sandbox blocks. VS Code found possible sandbox configuration updates:\n{1}",
 				serverLabel,
 				suggestionLines.join('\n')
 			),

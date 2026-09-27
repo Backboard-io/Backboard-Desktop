@@ -31,7 +31,6 @@ import { IBackboardWorkspaceService } from '../backboardWorkspace/backboardWorks
 
 const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
 const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
-const OPEN_OPTIMUS_WINDOW_COMMAND_ID = 'workbench.action.openOptimusWindow';
 
 export class BackboardModeSwitcherAction extends Action2 {
 	constructor() {
@@ -125,14 +124,7 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 			}
 		}));
 
-		const advancedButton = append(segments, $('button.backboard-mode-segment'));
-		advancedButton.setAttribute('type', 'button');
-		advancedButton.textContent = localize('backboardModeSwitcher.advanced', "Advanced");
-		advancedButton.setAttribute('aria-pressed', 'false');
-		this._register(addDisposableListener(advancedButton, EventType.CLICK, e => {
-			EventHelper.stop(e, true);
-			this.openAdvanced();
-		}));
+		// The Advanced/Canvas window has no switcher segment (Canvas lives on the backboard-video-studio branch).
 
 		this._register(this.editorService.onDidActiveEditorChange(() => this.updateState()));
 		this._register(this.workspaceService.onDidChangeVisibility(() => this.updateState()));
@@ -207,18 +199,6 @@ class BackboardModeTitleBarWidget extends BaseActionViewItem {
 		if (!this.isPanelClosedByUser(Parts.PANEL_PART) && this.layoutService.isVisible(Parts.PANEL_PART)) {
 			void this.paneCompositeService.openPaneComposite(TERMINAL_VIEW_ID, ViewContainerLocation.Panel, false);
 		}
-	}
-
-	private openAdvanced(): void {
-		if (this.isWorkspaceActive()) {
-			this.workspaceService.hide();
-		}
-
-		if (this.isAgentsActive()) {
-			void this.commandService.executeCommand(CLOSE_ACTIVE_EDITOR_COMMAND_ID);
-		}
-
-		void this.commandService.executeCommand(OPEN_OPTIMUS_WINDOW_COMMAND_ID);
 	}
 
 	private isAgentsActive(): boolean {

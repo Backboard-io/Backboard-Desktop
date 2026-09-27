@@ -199,6 +199,14 @@ function shouldAutoApproveClientToolCall(toolCall: ToolCallState): boolean {
 }
 
 /**
+ * The approval a client tool call gets when the agent host stamped it
+ * `autoApproveBySetting` (Backboard Full Access). It covers the result review
+ * too: MCP tools with `openWorldHint` otherwise park in `WaitingForPostApproval`
+ * behind an "Approve Tool Result" card after they already ran.
+ */
+const clientToolAutoApproval: ConfirmedReason = { type: ToolConfirmKind.Setting, id: SessionConfigKey.AutoApprove };
+
+/**
  * Converts carousel answers (IChatQuestionAnswers) to protocol
  * ChatInputAnswer records, handling text, single-select,
  * and multi-select answer shapes.
@@ -787,6 +795,15 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 
 		if (!isNewSession) {
 			this._ensurePendingMessageSubscription(sessionResource, resolvedSession);
+
+			// A reopened chat that no client drives (e.g. restored after a
+			// restart) gets this window's MCP servers and client tools now, so
+			// the composer lists them before the next message. A chat another
+			// window already drives is left alone.
+			const openedState = this._getSessionState(resolvedSession.toString());
+			if (openedState && !openedState.activeClient) {
+				this._ensureActiveClientForMessage(resolvedSession);
+			}
 
 			// Eagerly create the snapshot controller once the ChatModel for
 			// this session is available so that "Restore Checkpoint" works
@@ -2049,8 +2066,11 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		store.add(autorun(reader => {
 			const state = invocation.state.read(reader);
 			const tc = part$.read(reader).toolCall;
-			if (state.type === IChatToolInvocation.StateKind.WaitingForConfirmation && shouldAutoApproveClientToolCall(tc)) {
-				state.confirm({ type: ToolConfirmKind.Setting, id: SessionConfigKey.AutoApprove });
+			if (shouldAutoApproveClientToolCall(tc)
+				&& (state.type === IChatToolInvocation.StateKind.WaitingForConfirmation || state.type === IChatToolInvocation.StateKind.WaitingForPostApproval)) {
+				// Normally unreachable: the call is pre-approved before
+				// `invokeTool`. Kept so no gate can outlive a Full Access stamp.
+				invocation.preApprove(clientToolAutoApproval);
 				return;
 			}
 			if (confirmationDispatched) {
@@ -2121,8 +2141,12 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			if (tc.status === ToolCallStatus.Streaming && state.type === IChatToolInvocation.StateKind.Streaming) {
 				invocation.updatePartialInput(tc.partialInput ?? '');
 			}
-			if (state.type === IChatToolInvocation.StateKind.WaitingForConfirmation && shouldAutoApproveClientToolCall(tc)) {
-				state.confirm({ type: ToolConfirmKind.Setting, id: SessionConfigKey.AutoApprove });
+			if (shouldAutoApproveClientToolCall(tc)) {
+				// Before `invokeTool` runs: the invocation then moves straight
+				// from streaming to executing and from executed to completed,
+				// so neither the confirmation card nor the "Approve Tool
+				// Result" card is ever rendered.
+				invocation.preApprove(clientToolAutoApproval);
 			}
 			if (tc.status === ToolCallStatus.Cancelled) {
 				if (cts.token.isCancellationRequested) {

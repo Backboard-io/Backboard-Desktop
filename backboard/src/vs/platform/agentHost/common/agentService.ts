@@ -51,6 +51,14 @@ export function isAgentHostEnabled(configurationService: IConfigurationService):
 	return !isWeb && !!configurationService.getValue<boolean>(AgentHostEnabledSettingId);
 }
 
+/**
+ * `ErrorInfo.errorType` of an MCP server customization whose runtime needs the
+ * user to sign in. Providers that run the OAuth flow themselves (the Backboard
+ * runtime) report this instead of `McpServerStatus.AuthRequired`; re-enabling
+ * the server starts the sign-in.
+ */
+export const MCP_AUTH_REQUIRED_ERROR_TYPE = 'mcp-server-auth-required';
+
 /** Configuration key that controls whether AHP JSONL logs are written for agent host transports. */
 export const AgentHostAhpJsonlLoggingSettingId = 'chat.agentHost.ahpJsonlLoggingEnabled';
 

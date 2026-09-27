@@ -134,8 +134,8 @@ export class McpSamplingService extends Disposable implements IMcpSamplingServic
 			}
 			const retry = await this._showContextual(
 				opts.isDuringToolCall,
-				localize('mcp.sampling.allowDuringChat.title', 'Allow MCP tools from "{0}" to make LLM requests?', opts.server.definition.label),
-				localize('mcp.sampling.allowDuringChat.desc', 'The MCP server "{0}" has issued a request to make a language model call. Do you want to allow it to make requests during chat?', opts.server.definition.label),
+				localize('mcp.sampling.allowDuringChat.title', 'Allow connector tools from "{0}" to make LLM requests?', opts.server.definition.label),
+				localize('mcp.sampling.allowDuringChat.desc', 'The Connector "{0}" has issued a request to make a language model call. Do you want to allow it to make requests during chat?', opts.server.definition.label),
 				this.allowButtons(opts.server, 'allowedDuringChat')
 			);
 			if (retry) {
@@ -150,8 +150,8 @@ export class McpSamplingService extends Disposable implements IMcpSamplingServic
 			}
 			const retry = await this._showContextual(
 				opts.isDuringToolCall,
-				localize('mcp.sampling.allowOutsideChat.title', 'Allow MCP server "{0}" to make LLM requests?', opts.server.definition.label),
-				localize('mcp.sampling.allowOutsideChat.desc', 'The MCP server "{0}" has issued a request to make a language model call. Do you want to allow it to make requests, outside of tool calls during chat?', opts.server.definition.label),
+				localize('mcp.sampling.allowOutsideChat.title', 'Allow Connector "{0}" to make LLM requests?', opts.server.definition.label),
+				localize('mcp.sampling.allowOutsideChat.desc', 'The Connector "{0}" has issued a request to make a language model call. Do you want to allow it to make requests, outside of tool calls during chat?', opts.server.definition.label),
 				this.allowButtons(opts.server, 'allowedOutsideChat')
 			);
 			if (retry) {
@@ -164,7 +164,7 @@ export class McpSamplingService extends Disposable implements IMcpSamplingServic
 			const newlyPickedModels = opts.isDuringToolCall
 				? await this._commandService.executeCommand<number>(McpCommandIds.ConfigureSamplingModels, opts.server)
 				: await this._notify(
-					localize('mcp.sampling.needsModels', 'MCP server "{0}" triggered a language model request, but it has no allowlisted models.', opts.server.definition.label),
+					localize('mcp.sampling.needsModels', 'Connector "{0}" triggered a language model request, but it has no allowlisted models.', opts.server.definition.label),
 					{
 						[localize('configure', 'Configure')]: () => this._commandService.executeCommand<number>(McpCommandIds.ConfigureSamplingModels, opts.server),
 						[localize('cancel', 'Cancel')]: () => Promise.resolve(undefined),

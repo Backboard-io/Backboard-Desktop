@@ -135,7 +135,7 @@ export class ChatContextUsageWidget extends Disposable {
 	) {
 		super();
 
-		this.domNode = $('.chat-context-usage-widget');
+		this.domNode = $('.chat-context-usage-widget.is-hidden');
 		this.domNode.style.display = 'none';
 		this.domNode.setAttribute('tabindex', '0');
 		this.domNode.setAttribute('role', 'button');
@@ -407,6 +407,7 @@ export class ChatContextUsageWidget extends Disposable {
 		}
 		if (this.domNode.style.display === 'none') {
 			this.domNode.style.display = '';
+			this.domNode.classList.remove('is-hidden');
 			this._isVisible.set(true, undefined);
 			this._onDidChangeVisibility.fire();
 		}
@@ -415,6 +416,7 @@ export class ChatContextUsageWidget extends Disposable {
 	private hide(): void {
 		if (this.domNode.style.display !== 'none') {
 			this.domNode.style.display = 'none';
+			this.domNode.classList.add('is-hidden');
 			this._isVisible.set(false, undefined);
 			this._onDidChangeVisibility.fire();
 		}

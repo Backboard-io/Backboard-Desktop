@@ -12,11 +12,10 @@ import { RunOnceScheduler, Sequencer } from '../../../../base/common/async.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Color } from '../../../../base/common/color.js';
 import { Codicon } from '../../../../base/common/codicons.js';
-import { Event } from '../../../../base/common/event.js';
-import { DisposableMap, DisposableStore, IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
-import { isDefined } from '../../../../base/common/types.js';
-import { autorun, IReader } from '../../../../base/common/observable.js';
-import { basename, dirname } from '../../../../base/common/resources.js';
+import { Emitter, Event } from '../../../../base/common/event.js';
+import { DisposableMap, DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
+import { autorun, IObservable, IReader } from '../../../../base/common/observable.js';
+import { basename, dirname, isEqual } from '../../../../base/common/resources.js';
 import { Schemas } from '../../../../base/common/network.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -54,7 +53,7 @@ import { ExtensionState, IExtension, IExtensionsWorkbenchService } from '../../.
 import { ExtensionsViewPaneContainer } from '../../../../workbench/contrib/extensions/browser/extensionsViewlet.js';
 import { IViewDescriptorService } from '../../../../workbench/common/views.js';
 import { MODAL_GROUP, PreferredGroup } from '../../../../workbench/services/editor/common/editorService.js';
-import { IModalEditorPart } from '../../../../workbench/services/editor/common/editorGroupsService.js';
+import { IEditorGroup, IModalEditorPart } from '../../../../workbench/services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { IWorkbenchEnvironmentService } from '../../../../workbench/services/environment/common/environmentService.js';
@@ -65,8 +64,6 @@ import { TerminalLocation } from '../../../../platform/terminal/common/terminal.
 import { ITerminalEditorService, ITerminalInstance, ITerminalService, IXtermColorProvider } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import { IAgentHostCustomizationService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostCustomizationService.js';
 import { isIChatSessionFileChange2 } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
-import { IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
-import { IChatWidgetService } from '../../../../workbench/contrib/chat/browser/chat.js';
 import { BACKBOARD_LAST_EDITOR_FOLDER_STORAGE_KEY } from '../../../../workbench/contrib/chat/common/constants.js';
 import { agentsBackground, agentsPanelBackground } from '../../../common/theme.js';
 import { ISessionsService } from '../../../services/sessions/browser/sessionsService.js';
@@ -76,9 +73,8 @@ import { SESSIONS_FILES_EMPTY_VIEW_ID, SESSIONS_FILES_VIEW_ID, SessionsExplorerE
 import { createFileIconThemableTreeContainerScope } from '../../../../workbench/contrib/files/browser/views/explorerView.js';
 import { WorkbenchCompressibleObjectTree } from '../../../../platform/list/browser/listService.js';
 import { OptimusChatViewPane } from '../../../../optimus/contrib/chat/browser/optimusChatViewPane.js';
-import { CanvasView, extractCanvasImageGroups, ICanvasComment, ICanvasImage, RightWorkbenchCanvas } from './rightWorkbenchCanvas.js';
 import { buildReviewTreeChildren, IReviewResource, isReviewResource, ReviewTreeDelegate, ReviewTreeElement, ReviewTreeRenderer, ReviewTreeSorter } from './reviewTree.js';
-import { onDidRequestModeEmitter, pendingModeRequest, setPendingModeRequest, type RightWorkbenchMode, type IRightWorkbenchModeRequest, type IRightWorkbenchModeEntry } from './rightWorkbench.js';
+import { onDidRequestModeEmitter, pendingModeRequest, setPendingModeRequest, type RightWorkbenchMode, type IRightWorkbenchModeRequest, type IRightWorkbenchModeEntry, type IRightWorkbenchSplitHost } from './rightWorkbench.js';
 import { createRightWorkbenchReviewContextKey, RightWorkbenchReviewContext } from './rightWorkbenchReviewContext.js';
 import { RightWorkbenchReviewSource } from './rightWorkbenchReviewSource.js';
 import { RightWorkbenchBrowserSuggestions, normalizeRightWorkbenchUrl } from './rightWorkbenchBrowserSuggestions.js';
@@ -123,8 +119,67 @@ interface IRightWorkbenchTabState {
 	activeEditor?: EditorInput;
 }
 
+export interface IRightWorkbenchViewPaneOptions extends IViewPaneOptions {
+	/** Set when the pane is a split grid column's side panel instead of the auxiliary bar view. */
+	readonly splitHost?: IRightWorkbenchSplitHost;
+}
+
+/**
+ * Module-level so the decorated class's static initializers never reference
+ * the class binding itself (still in its temporal dead zone at that point).
+ */
+const onDidChangeBrowserOwnershipEmitter = new Emitter<void>();
+
 export class RightWorkbenchViewPane extends ViewPane {
+	/** Every live pane: the auxiliary bar view plus one per split-grid side panel. */
+	private static readonly liveInstances = new Set<RightWorkbenchViewPane>();
+
+	/** Fires when any pane's visibility, active tab or mode may change which browser view it shows. */
+	static readonly onDidChangeBrowserOwnership: Event<void> = onDidChangeBrowserOwnershipEmitter.event;
+
+	/**
+	 * Whether `viewId` may paint: only a visible pane whose active tab is the
+	 * Browser tab showing that view owns it. A native view paints above all
+	 * workbench DOM, so anything else (launcher, other tabs, hidden panel)
+	 * must keep it hidden.
+	 */
+	static showsBrowserView(viewId: string): boolean {
+		for (const pane of RightWorkbenchViewPane.liveInstances) {
+			if (pane.isRightWorkbenchVisible && pane.activeMode === 'browser' && pane.activeTab?.browserInput?.id === viewId) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Whether a live right panel has `input` open in one of its embedded
+	 * editor groups, so closing it anywhere else cannot dispose the page.
+	 */
+	static holdsBrowserInput(input: BrowserEditorInput): boolean {
+		for (const pane of RightWorkbenchViewPane.liveInstances) {
+			if (pane.editorPool.containsEditor(input)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Whether `group` is one of a live right panel's embedded editor groups
+	 * (including warm, currently hidden ones kept in its editor pool).
+	 */
+	static ownsEditorGroup(group: IEditorGroup): boolean {
+		for (const pane of RightWorkbenchViewPane.liveInstances) {
+			if (pane.editorPool.ownsGroup(group)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	private readonly reviewSource: RightWorkbenchReviewSource;
+	private readonly splitHost: IRightWorkbenchSplitHost | undefined;
 
 	private readonly tabOpenSequencer = new Sequencer();
 	private readonly domStore = this._register(new DisposableStore());
@@ -188,13 +243,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private reviewWordWrap = false;
 	private reviewSideBySide = false;
 	private reviewDiffsCollapsed = false;
-	/** Composer attachment ids the Canvas added, replaced as its selection changes. */
-	private canvasAttachmentIds: string[] = [];
-	/** Whether Canvas (rather than the user) maximized the panel. */
-	private canvasMaximizedPanel = false;
-	private canvas: RightWorkbenchCanvas | undefined;
-	/** A chat image to select once Canvas has loaded the thread's images. */
-	private pendingCanvasReveal: { readonly imageKey: string | undefined; readonly view: CanvasView | undefined } | undefined;
 	private appliedReviewOptions: { pane: IEditorPane; input: EditorInput | undefined; viewModel: MultiDiffEditorViewModel | undefined; key: string } | undefined;
 	private reviewLoadFullFiles = true;
 	private reviewRichPreview = false;
@@ -220,6 +268,21 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private editorSidebarFolderUri: URI | undefined;
 	private compactPanelPreviousWidth: number | undefined;
 
+	/** The session this pane works against: its split column's, or the window's active one. */
+	private get activeSessionObs(): IObservable<IActiveSession | undefined> {
+		return this.splitHost?.session ?? this.sessionsService.activeSession;
+	}
+
+	/** The mode of the active tab (`launcher` when no tab is active). */
+	get currentMode(): RightWorkbenchMode {
+		return this.activeMode;
+	}
+
+	/** Applies a mode request routed directly to this pane (split-grid side panels). */
+	openModeRequest(request: IRightWorkbenchModeRequest): Promise<void> {
+		return this.openMode(request);
+	}
+
 	private get activeTab(): IRightWorkbenchTabState | undefined {
 		return this.tabs.find(tab => tab.id === this.activeTabId);
 	}
@@ -239,7 +302,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	constructor(
-		options: IViewPaneOptions,
+		options: IRightWorkbenchViewPaneOptions,
 		@IKeybindingService keybindingService: IKeybindingService,
 		@IContextMenuService contextMenuService: IContextMenuService,
 		@IFileDialogService private readonly fileDialogService: IFileDialogService,
@@ -265,10 +328,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 		@IAgentHostCustomizationService private readonly agentHostCustomizationService: IAgentHostCustomizationService,
 		@IExtensionsWorkbenchService private readonly extensionsWorkbenchService: IExtensionsWorkbenchService,
 		@IStorageService private readonly storageService: IStorageService,
-		@IChatService private readonly chatService: IChatService,
-		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
 	) {
 		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
+		this.splitHost = options.splitHost;
+		RightWorkbenchViewPane.liveInstances.add(this);
 		this.editorPool = this._register(this.instantiationService.createInstance(RightWorkbenchEditorPool));
 		this.reviewSource = this._register(instantiationService.createInstance(RightWorkbenchReviewSource));
 		this.editorSidebarFolderUri = this.readStoredEditorSidebarFolder();
@@ -277,7 +340,9 @@ export class RightWorkbenchViewPane extends ViewPane {
 		// Simple's panel is narrow, so it opens unified like Codex; the editor
 		// sidebar keeps split view whenever there is room for it.
 		this.reviewSideBySide = !this.useSimpleRightWorkbench;
-		this._register(onDidRequestModeEmitter.event(request => { void this.openMode(request); }));
+		if (!this.splitHost) {
+			this._register(onDidRequestModeEmitter.event(request => { void this.openMode(request); }));
+		}
 		this._register(this.layoutService.onDidChangePartVisibility(e => {
 			if (e.partId === Parts.EDITOR_PART && e.visible) {
 				this.enforceSingleSurfaceLayout();
@@ -289,7 +354,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		// edited files change — they pinpoint repositories nested below the
 		// session root.
 		this._register(autorun(reader => {
-			const activeSession = this.sessionsService.activeSession.read(reader);
+			const activeSession = this.activeSessionObs.read(reader);
 			const activeChat = this.useSimpleRightWorkbench ? activeSession?.activeChat.read(reader) : undefined;
 			activeChat?.changes.read(reader);
 			const sessionKey = activeSession?.resource.toString();
@@ -322,7 +387,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		// still discovered.
 		this._register(this.agentHostCustomizationService.onDidChangeCustomizations(() => {
 			if (!this.useSimpleRightWorkbench) {
-				this.requestGitReviewRefresh(this.sessionsService.activeSession.read(undefined));
+				this.requestGitReviewRefresh(this.activeSessionObs.read(undefined));
 			}
 		}));
 	}
@@ -331,7 +396,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		super.renderBody(container);
 		this.root = append(container, $('.sessions-right-workbench-shell'));
 		this.activateSingleSurface();
-		if (pendingModeRequest) {
+		if (pendingModeRequest && !this.splitHost) {
 			const initialRequest = pendingModeRequest;
 			this.applyModeRequest(initialRequest);
 			setPendingModeRequest(undefined);
@@ -350,6 +415,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 		this.isRightWorkbenchVisible = visible;
+		onDidChangeBrowserOwnershipEmitter.fire();
 		const activeInputMatches = !!this.activeTab?.activeEditor && this.embeddedEditorPart?.activeGroup.activeEditor === this.activeTab.activeEditor;
 		this.editorPool.setVisible(this.embeddedEditorHost, visible && activeInputMatches);
 		this.filesExplorer?.setVisible(visible);
@@ -386,6 +452,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	override dispose(): void {
+		RightWorkbenchViewPane.liveInstances.delete(this);
+		onDidChangeBrowserOwnershipEmitter.fire();
 		this.invalidateReviewSurface();
 		this.suspendRenderedTab();
 		this.hideBrowserViews();
@@ -420,8 +488,10 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private expandHiddenPaneWrappers(height: number): void {
 		let ancestor = this.root?.parentElement;
-		const auxiliaryContent = this.getAuxiliaryContentElement();
-		while (ancestor && ancestor !== auxiliaryContent) {
+		// Outside the auxiliary bar (a split column's side panel) stop at the
+		// pane's host, never touching the sessions grid around it.
+		const boundary = this.getAuxiliaryContentElement() ?? this.element.parentElement;
+		while (ancestor && ancestor !== boundary) {
 			if (ancestor.classList.contains('pane-body') || ancestor.classList.contains('pane') || ancestor.classList.contains('split-view-view')) {
 				ancestor.style.height = `${height}px`;
 				if (ancestor.classList.contains('split-view-view')) {
@@ -433,12 +503,16 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private activateSingleSurface(): void {
+		if (this.splitHost) {
+			this.splitHost.reveal();
+			return;
+		}
 		this.layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART);
 		this.layoutService.setPartHidden(true, Parts.EDITOR_PART);
 	}
 
 	private enforceSingleSurfaceLayout(): void {
-		if (!this.root || !this.isRightWorkbenchVisible || !this.layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
+		if (this.splitHost || !this.root || !this.isRightWorkbenchVisible || !this.layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
 			return;
 		}
 		this.activateSingleSurface();
@@ -466,7 +540,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 		// a rebuild hides and re-shows the native page, which reads as a flicker.
 		const reshowsActiveView = !!modeRequest.browserViewId && existing?.browserInput?.id === modeRequest.browserViewId
 			&& !existing.browserInput.isDisposed();
-		const addsContent = !!modeRequest.browserUrl || !!modeRequest.browserViewId;
+		const selectsReviewFile = !!modeRequest.reviewResource && !isEqual(existing?.selectedReviewSourceUri, modeRequest.reviewResource);
+		const addsContent = !!modeRequest.browserUrl || !!modeRequest.browserViewId || selectsReviewFile;
 		if (!willChangeTab && (!addsContent || reshowsActiveView) && !modeRequest.newChat && (modeRequest.mode === 'launcher' || existing !== undefined)) {
 			return;
 		}
@@ -515,14 +590,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 		const tab = this.findTabForRequest(request) ?? this.createTab(request.mode);
-		if (request.mode === 'canvas' && (request.canvasImage || request.canvasView)) {
-			if (this.canvas && this.activeTabId === tab.id) {
-				this.canvas.reveal(request.canvasImage, request.canvasView);
-			} else {
-				// Applied once the new Canvas surface has loaded the thread's images.
-				this.pendingCanvasReveal = { imageKey: request.canvasImage, view: request.canvasView };
-			}
-		}
 		// A live view already owns its URL; a request's URL for it (the browser
 		// tools pass the URL they opened) is informational. Treating it as a
 		// navigation target reloads pages that redirected (e.g. a login
@@ -545,6 +612,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 				this.browserEditorPane = undefined;
 				this.tabStores.get(tab.id)?.clear();
 			}
+		}
+		if (request.reviewResource && tab.mode === 'review') {
+			// Keys encode the data source, so select by URI (see getSelectedReviewResource).
+			tab.selectedReviewResourceKey = undefined;
+			tab.selectedReviewSourceUri = request.reviewResource;
 		}
 		this.activeTabId = tab.id;
 	}
@@ -579,6 +651,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 	}
 
 	private renderShell(): void {
+		onDidChangeBrowserOwnershipEmitter.fire();
 		if (!this.root) {
 			return;
 		}
@@ -686,9 +759,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 			case 'review':
 				this.renderReview(body);
 				break;
-			case 'canvas':
-				this.renderCanvas(body);
-				break;
 			case 'browser':
 				this.renderBrowser(body);
 				break;
@@ -795,7 +865,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		for (const folder of this.workspaceContextService.getWorkspace().folders) {
 			add(folder.uri);
 		}
-		const activeWorkspace = this.sessionsService.activeSession.get()?.workspace.get();
+		const activeWorkspace = this.activeSessionObs.get()?.workspace.get();
 		for (const folder of activeWorkspace?.folders ?? []) {
 			add(folder.workingDirectory ?? folder.root);
 		}
@@ -913,7 +983,8 @@ export class RightWorkbenchViewPane extends ViewPane {
 		activeTabElement?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 
 		const controls = append(header, $('.sessions-right-workbench-frame-controls'));
-		if (this.useSimpleRightWorkbench) {
+		// Expand/compact resize the auxiliary bar; a split column's panel is sized by its sash.
+		if (this.useSimpleRightWorkbench && !this.splitHost) {
 			const maximize = this.renderIconButton(controls, Codicon.screenFull, localize('rightWorkbench.expand', "Expand panel"));
 			const updateMaximize = () => {
 				const expanded = this.layoutService.isAuxiliaryBarMaximized();
@@ -1044,7 +1115,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 	private renderPanelCloseButton(container: HTMLElement, store = this.domStore): void {
 		const close = this.renderIconButton(container, Codicon.layoutSidebarRight, localize('rightWorkbench.hidePanel', "Hide Right Panel"));
 		store.add(addDisposableListener(close, EventType.CLICK, () => {
-			this.layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
+			if (this.splitHost) {
+				this.splitHost.hide();
+			} else {
+				this.layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
+			}
 			this.layoutService.focusPart(Parts.SESSIONS_PART);
 		}));
 	}
@@ -1197,7 +1272,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 			{ mode: 'review', icon: Codicon.diffMultiple, label: localize('rightWorkbench.review', "Review"), shortcut: 'D' },
 			{ mode: 'terminal', icon: Codicon.terminal, label: localize('rightWorkbench.terminal', "Terminal"), shortcut: 'T' },
 			{ mode: 'files', icon: Codicon.folder, label: localize('rightWorkbench.files', "Files"), shortcut: 'F' },
-			{ mode: 'canvas', icon: Codicon.fileMedia, label: localize('rightWorkbench.canvas', "Canvas"), shortcut: 'C' },
 			{ mode: 'browser', icon: Codicon.globe, label: localize('rightWorkbench.browser', "Browser"), shortcut: 'B' },
 		];
 	}
@@ -1212,8 +1286,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 				return localize('rightWorkbench.filesDescription', "Browse and read workspace files.");
 			case 'review':
 				return localize('rightWorkbench.diffDescription', "Review changes in this thread.");
-			case 'canvas':
-				return localize('rightWorkbench.canvasDescription', "See images generated in this thread.");
 			default:
 				return '';
 		}
@@ -1241,8 +1313,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 				return localize('rightWorkbench.search', "Search");
 			case 'review':
 				return localize('rightWorkbench.sourceControl', "Source Control");
-			case 'canvas':
-				return localize('rightWorkbench.canvas', "Canvas");
 			case 'extensions':
 				return localize('rightWorkbench.extensions', "Extensions");
 			case 'marketplace':
@@ -1258,8 +1328,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private getModePickerEntries(): readonly IRightWorkbenchModeEntry[] {
 		const entries = this.getModeEntries();
-		// Review and Canvas each describe the whole thread, so one tab of each is enough.
-		return entries.filter(entry => (entry.mode !== 'review' && entry.mode !== 'canvas') || !this.tabs.some(tab => tab.mode === entry.mode));
+		return entries.filter(entry => entry.mode !== 'review' || !this.tabs.some(tab => tab.mode === entry.mode));
 	}
 
 	private getModeIcon(mode: RightWorkbenchMode): ThemeIcon {
@@ -1268,8 +1337,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 				return Codicon.commentDiscussionSparkle;
 			case 'review':
 				return Codicon.diffMultiple;
-			case 'canvas':
-				return Codicon.fileMedia;
 			case 'browser':
 				return Codicon.globe;
 			case 'files':
@@ -1293,8 +1360,6 @@ export class RightWorkbenchViewPane extends ViewPane {
 				return localize('rightWorkbench.editor', "Editor");
 			case 'review':
 				return localize('rightWorkbench.review', "Review");
-			case 'canvas':
-				return localize('rightWorkbench.canvas', "Canvas");
 			case 'browser':
 				return localize('rightWorkbench.newTab', "New tab");
 			case 'files':
@@ -1452,162 +1517,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 		this.domStore.add(autorun(reader => this.refreshReviewRail(reader)));
 	}
 
-	/**
-	 * Canvas: every image the active chat generated, as Codex's image
-	 * playground. Selecting images makes them the composer's attachments.
-	 */
-	private renderCanvas(container: HTMLElement): void {
-		const store = this.domStore.add(new DisposableStore());
-		const blobUrls: string[] = [];
-		store.add(toDisposable(() => blobUrls.forEach(url => URL.revokeObjectURL(url))));
-		let chatResource: URI | undefined;
-		const canvas = store.add(this.instantiationService.createInstance(RightWorkbenchCanvas, container, {
-			toDisplayUrl: async image => {
-				if (image.src.scheme !== Schemas.file) {
-					return image.key;
-				}
-				try {
-					const content = await this.fileService.readFile(image.src);
-					const url = URL.createObjectURL(new Blob([content.value.buffer.slice()]));
-					blobUrls.push(url);
-					return url;
-				} catch {
-					return undefined;
-				}
-			},
-			setComposerImages: images => {
-				if (chatResource) {
-					void this.setCanvasComposerImages(chatResource, images);
-				}
-			},
-			setFullScreen: fullScreen => this.setCanvasFullScreen(fullScreen),
-			sendComments: comments => {
-				if (chatResource) {
-					void this.sendCanvasComments(chatResource, comments);
-				}
-			},
-		}));
-		this.canvas = canvas;
-		store.add(toDisposable(() => {
-			if (this.canvas === canvas) {
-				this.canvas = undefined;
-			}
-		}));
-		// The shell re-renders on every tab switch; only give the window back
-		// once the user has actually left Canvas, so staying on it never flickers.
-		store.add(toDisposable(() => setTimeout(() => {
-			if (this.activeMode !== 'canvas') {
-				this.setCanvasFullScreen(false);
-			}
-		}, 0)));
-
-		store.add(this.layoutService.onDidChangeAuxiliaryBarMaximized(() => {
-			if (!this.layoutService.isAuxiliaryBarMaximized()) {
-				this.canvasMaximizedPanel = false;
-			}
-		}));
-
-		const modelStore = store.add(new DisposableStore());
-		const responseListeners = store.add(new DisposableMap<object>());
-		let refresh = () => { };
-		const refreshScheduler = store.add(new RunOnceScheduler(() => refresh(), 150));
-		store.add(autorun(reader => {
-			const session = this.sessionsService.activeSession.read(reader);
-			const chat = session?.activeChat.read(reader);
-			chat?.lastTurnEnd.read(reader);
-			const workingDirectory = session?.workspace.read(reader)?.folders[0]?.workingDirectory;
-			modelStore.clear();
-			responseListeners.clearAndDisposeAll();
-			chatResource = chat?.resource;
-			const model = (chat && this.chatService.getSession(chat.resource)) ?? (session && this.chatService.getSession(session.resource));
-			refresh = () => {
-				const requests = model?.getRequests() ?? [];
-				for (const request of requests) {
-					const response = request.response;
-					if (response && !responseListeners.has(response)) {
-						// Generated images stream into a response after it was added.
-						responseListeners.set(response, response.onDidChange(() => refreshScheduler.schedule()));
-					}
-				}
-				canvas.setGroups(extractCanvasImageGroups(requests, workingDirectory), chatResource?.toString());
-				const pending = this.pendingCanvasReveal;
-				if (pending) {
-					this.pendingCanvasReveal = undefined;
-					canvas.reveal(pending.imageKey, pending.view);
-				}
-			};
-			if (model) {
-				modelStore.add(model.onDidChange(() => refreshScheduler.schedule()));
-			}
-			refresh();
-		}));
-	}
-
-	/**
-	 * Codex's comment "Send": one message that attaches every commented image
-	 * and spells out each numbered note with where it was pinned.
-	 */
-	private async sendCanvasComments(chatResource: URI, comments: ReadonlyMap<ICanvasImage, readonly ICanvasComment[]>): Promise<void> {
-		const widget = this.chatWidgetService.getWidgetBySessionResource(chatResource) ?? this.chatWidgetService.lastFocusedWidget;
-		if (!widget) {
-			return;
-		}
-		await this.setCanvasComposerImages(chatResource, [...comments.keys()]);
-		const lines: string[] = [localize('rightWorkbench.canvas.batchEditIntro', "Edit these images based on my comments:")];
-		let number = 0;
-		for (const [image, notes] of comments) {
-			lines.push('', image.label);
-			for (const note of notes) {
-				number++;
-				lines.push(localize('rightWorkbench.canvas.batchEditNote', "{0}. At {1}% across, {2}% down: {3}", number, Math.round(note.x * 100), Math.round(note.y * 100), note.text));
-			}
-		}
-		await widget.acceptInput(lines.join('\n'));
-		this.canvasAttachmentIds = [];
-	}
-
-	/**
-	 * Canvas view takes the whole window like Codex's image playground. The
-	 * panel is only restored if Canvas was what maximized it, so a panel the
-	 * user expanded themselves stays expanded.
-	 */
-	private setCanvasFullScreen(fullScreen: boolean): void {
-		if (fullScreen) {
-			// A hidden panel must never take the window over the chat.
-			if (this.isRightWorkbenchVisible && !this.layoutService.isAuxiliaryBarMaximized()) {
-				this.canvasMaximizedPanel = this.layoutService.setAuxiliaryBarMaximized(true);
-			}
-		} else if (this.canvasMaximizedPanel) {
-			this.canvasMaximizedPanel = false;
-			this.layoutService.setAuxiliaryBarMaximized(false);
-		}
-	}
-
-	/**
-	 * Replaces the images the canvas previously attached to the chat's composer
-	 * with the current selection, leaving the user's own attachments alone.
-	 */
-	private async setCanvasComposerImages(chatResource: URI, images: readonly ICanvasImage[]): Promise<void> {
-		const widget = this.chatWidgetService.getWidgetBySessionResource(chatResource) ?? this.chatWidgetService.lastFocusedWidget;
-		if (!widget) {
-			return;
-		}
-		const previous = this.canvasAttachmentIds.filter(id => widget.attachmentModel.attachments.some(entry => entry.id === id));
-		if (previous.length) {
-			widget.attachmentModel.delete(...previous);
-		}
-		const files = images.map(image => image.localFile).filter(isDefined);
-		this.canvasAttachmentIds = files.map(file => file.toString());
-		for (const file of files) {
-			await widget.attachmentModel.addFile(file);
-		}
-	}
-
 	private renderReviewToolbar(container: HTMLElement): void {
 		// Simple Review is scoped to the selected chat, not the workspace's Git
 		// repository. Repository actions here can otherwise keep pointing at the
 		// chat/session we just left and make the panel behave like a workbench.
-		const activeSession = this.useSimpleRightWorkbench ? undefined : this.sessionsService.activeSession.read(undefined);
+		const activeSession = this.useSimpleRightWorkbench ? undefined : this.activeSessionObs.read(undefined);
 		const repository = activeSession ? this.getGitReviewRepositories(activeSession)[0] : undefined;
 		const state = repository?.state.read(undefined);
 		const branchName = state?.HEAD?.name;
@@ -1695,7 +1609,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			commit.appendChild(renderIcon(Codicon.chevronDown));
 			commit.setAttribute('aria-haspopup', 'menu');
 			const getRoot = () => {
-				const folder = this.sessionsService.activeSession.get()?.workspace.get()?.folders[0];
+				const folder = this.activeSessionObs.get()?.workspace.get()?.folders[0];
 				return folder?.gitRepository ? folder.workingDirectory : undefined;
 			};
 			commit.disabled = !getRoot();
@@ -2008,7 +1922,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			return;
 		}
 
-		const activeSession = this.sessionsService.activeSession.read(reader);
+		const activeSession = this.activeSessionObs.read(reader);
 		const changes = this.getSessionReviewChanges(activeSession, reader);
 		const generation = this.reviewContext.captureGeneration();
 		if (!this.isRightWorkbenchVisible) {
@@ -3358,7 +3272,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 			this.root?.classList.toggle('sessions-right-workbench-has-file', this.activeMode === 'files');
 			if (this.filePathElement) {
 				const folder = this.workspaceContextService.getWorkspaceFolder(resource)?.uri
-					?? this.sessionsService.activeSession.get()?.workspace.get()?.folders[0]?.workingDirectory;
+					?? this.activeSessionObs.get()?.workspace.get()?.folders[0]?.workingDirectory;
 				this.filePathElement.textContent = folder && resource.path.startsWith(`${folder.path}/`)
 					? resource.path.slice(folder.path.length + 1).replaceAll('/', ' › ')
 					: basename(resource);
@@ -3649,8 +3563,22 @@ export class RightWorkbenchViewPane extends ViewPane {
 	 * chat once the panel closes.
 	 */
 	private hideBrowserViews(keep?: BrowserEditorInput): void {
+		// With a split grid several panes are live at once; never hide a view
+		// another pane's tab still shows.
+		const ownedElsewhere = new Set<string>();
+		for (const other of RightWorkbenchViewPane.liveInstances) {
+			if (other !== this) {
+				for (const tab of other.tabs) {
+					for (const id of [tab.browserInput?.id, tab.browserViewId]) {
+						if (id) {
+							ownedElsewhere.add(id);
+						}
+					}
+				}
+			}
+		}
 		for (const input of this.browserViewWorkbenchService.getKnownBrowserViews().values()) {
-			if (input !== keep && input.model?.visible) {
+			if (input !== keep && input.model?.visible && !ownedElsewhere.has(input.id)) {
 				void input.model.setVisible(false);
 			}
 		}
@@ -3763,7 +3691,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}
 		if (!tab.terminalInstance || tab.terminalInstance.isDisposed) {
 			tab.terminalPending ??= this.terminalService.createTerminal({
-				cwd: this.useEditorSidebar ? this.getEditorSidebarFolderUri() : this.sessionsService.activeSession.get()?.workspace.get()?.folders[0]?.workingDirectory,
+				cwd: this.useEditorSidebar ? this.getEditorSidebarFolderUri() : this.activeSessionObs.get()?.workspace.get()?.folders[0]?.workingDirectory,
 				location: { viewColumn: MODAL_GROUP, modal: { embeddedHost } },
 				colorProvider: this.terminalColorProvider,
 			}).then(instance => {

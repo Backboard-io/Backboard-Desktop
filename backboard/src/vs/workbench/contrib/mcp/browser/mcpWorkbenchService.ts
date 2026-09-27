@@ -472,7 +472,7 @@ export class McpWorkbenchService extends Disposable implements IMcpWorkbenchServ
 		}
 
 
-		return new MarkdownString().appendText(localize('cannot be installed', "Cannot install the '{0}' MCP Server because it is not available in this setup.", mcpServer.label));
+		return new MarkdownString().appendText(localize('cannot be installed', "Cannot install the '{0}' connector because it is not available in this setup.", mcpServer.label));
 	}
 
 	async install(server: IWorkbenchMcpServer, installOptions?: IWorkbencMcpServerInstallOptions): Promise<IWorkbenchMcpServer> {
@@ -783,7 +783,7 @@ export class McpWorkbenchService extends Disposable implements IMcpWorkbenchServ
 				state: McpServerEnablementState.DisabledProfile,
 				message: {
 					severity: Severity.Info,
-					text: new MarkdownString(localize('disabled globally', "This MCP server is disabled."))
+					text: new MarkdownString(localize('disabled globally', "This connector is disabled."))
 				}
 			};
 		}
@@ -792,7 +792,7 @@ export class McpWorkbenchService extends Disposable implements IMcpWorkbenchServ
 				state: McpServerEnablementState.DisabledWorkspace,
 				message: {
 					severity: Severity.Info,
-					text: new MarkdownString(localize('disabled in workspace', "This MCP server is disabled for this workspace."))
+					text: new MarkdownString(localize('disabled in workspace', "This connector is disabled for this workspace."))
 				}
 			};
 		}
@@ -813,7 +813,7 @@ export class McpWorkbenchService extends Disposable implements IMcpWorkbenchServ
 				state: McpServerEnablementState.DisabledByAccess,
 				message: {
 					severity: Severity.Warning,
-					text: new MarkdownString(localize('disabled - all not allowed', "This MCP Server is disabled because MCP servers are configured to be disabled in the Editor. Please check your [settings]({0}).", settingsCommandLink))
+					text: new MarkdownString(localize('disabled - all not allowed', "This connector is disabled because connectors are configured to be disabled in the Editor. Please check your [settings]({0}).", settingsCommandLink))
 				}
 			};
 
@@ -825,7 +825,7 @@ export class McpWorkbenchService extends Disposable implements IMcpWorkbenchServ
 					state: McpServerEnablementState.DisabledByAccess,
 					message: {
 						severity: Severity.Warning,
-						text: new MarkdownString(localize('disabled - some not allowed', "This MCP Server is disabled because it is configured to be disabled in the Editor. Please check your [settings]({0}).", settingsCommandLink))
+						text: new MarkdownString(localize('disabled - some not allowed', "This connector is disabled because it is configured to be disabled in the Editor. Please check your [settings]({0}).", settingsCommandLink))
 					}
 				};
 			}
@@ -836,7 +836,7 @@ export class McpWorkbenchService extends Disposable implements IMcpWorkbenchServ
 					state: McpServerEnablementState.DisabledByAccess,
 					message: {
 						severity: Severity.Warning,
-						text: new MarkdownString(localize('disabled - some not allowed', "This MCP Server is disabled because it is configured to be disabled in the Editor. Please check your [settings]({0}).", settingsCommandLink))
+						text: new MarkdownString(localize('disabled - some not allowed', "This connector is disabled because it is configured to be disabled in the Editor. Please check your [settings]({0}).", settingsCommandLink))
 					}
 				};
 			}

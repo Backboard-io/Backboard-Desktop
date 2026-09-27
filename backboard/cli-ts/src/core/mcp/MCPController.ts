@@ -1,9 +1,11 @@
 import { errorMessage } from "../../utils/errors.ts";
 import {
 	disableConfiguredMcpServer,
+	type McpConfigSource,
 	type McpServerFileEntry,
 	removeConfiguredMcpServer,
 	saveProjectMcpServer,
+	saveUserMcpServer,
 } from "./config.ts";
 import type { McpPromptResult } from "./MCPPromptDefinitions.ts";
 import type { McpReadResourceResult } from "./MCPResourceDefinitions.ts";
@@ -29,12 +31,20 @@ export interface McpControllerDeps {
 	listRegistryServers?: typeof listMcpRegistryServers;
 	parseManualInput?: typeof parseManualMcpInput;
 	saveProjectServer?: typeof saveProjectMcpServer;
+	saveUserServer?: typeof saveUserMcpServer;
+	/**
+	 * `~/.backboard/mcp.json`. Required for `target: "user"` adds; without it
+	 * those adds fall back to the project file.
+	 */
+	userConfigPath?: string;
 	disableConfigServer?: typeof disableConfiguredMcpServer;
 	removeConfigServer?: typeof removeConfiguredMcpServer;
+	/** Connects a just-saved server; `source` is the file it was saved to. */
 	activateServer?: (
 		name: string,
 		config: McpServerFileEntry,
 		signal?: AbortSignal,
+		source?: McpConfigSource,
 	) => Promise<McpServerMutationResult>;
 	authenticateServer?: (
 		name: string,
@@ -110,17 +120,30 @@ export interface McpAddResult extends McpServerMutationResult {
 	name: string;
 	title: string;
 	requiredEnv: string[];
+	/** The config file already had an entry with this name; nothing was written. */
+	alreadyInstalled?: boolean;
+}
+
+export interface McpAddOptions {
+	/**
+	 * Config file to save to. `user` (`~/.backboard/mcp.json`) is shared by
+	 * every window and worktree; `project` (the default) is the repo's
+	 * `.backboard/mcp.json`.
+	 */
+	target?: "project" | "user";
 }
 
 /**
- * Owns MCP manager actions used by the UI: curated server selection, manual
- * input parsing, project config writes, and source-aware server mutations.
+ * Owns MCP manager actions used by the UI and find_mcp: curated server
+ * selection, manual input parsing, project/user config writes, and
+ * source-aware server mutations.
  */
 export class McpController {
 	private readonly registryServers = new Map<string, McpRegistryServer>();
 	private readonly listRegistryServersFn: typeof listMcpRegistryServers;
 	private readonly parseManualInputFn: typeof parseManualMcpInput;
 	private readonly saveProjectServerFn: typeof saveProjectMcpServer;
+	private readonly saveUserServerFn: typeof saveUserMcpServer;
 	private readonly disableConfigServerFn: typeof disableConfiguredMcpServer;
 	private readonly removeConfigServerFn: typeof removeConfiguredMcpServer;
 	private readonly activateServerFn:
@@ -167,6 +190,7 @@ export class McpController {
 			deps.listRegistryServers ?? listMcpRegistryServers;
 		this.parseManualInputFn = deps.parseManualInput ?? parseManualMcpInput;
 		this.saveProjectServerFn = deps.saveProjectServer ?? saveProjectMcpServer;
+		this.saveUserServerFn = deps.saveUserServer ?? saveUserMcpServer;
 		this.disableConfigServerFn =
 			deps.disableConfigServer ?? disableConfiguredMcpServer;
 		this.removeConfigServerFn =
@@ -203,12 +227,13 @@ export class McpController {
 	async addRegistryServer(
 		item: McpRegistryItem,
 		signal?: AbortSignal,
+		options: McpAddOptions = {},
 	): Promise<McpAddResult> {
 		throwIfAborted(signal);
 		const server = this.registryServers.get(item.id);
 		if (!server) throw new Error(`Unknown curated MCP server: ${item.title}`);
 		if (server.disabledReason) throw new Error(server.disabledReason);
-		return this.saveServer(server, signal);
+		return this.saveServer(server, signal, options);
 	}
 
 	async addManualServer(
@@ -238,11 +263,14 @@ export class McpController {
 		signal?: AbortSignal,
 	): Promise<McpServerMutationResult> {
 		throwIfAborted(signal);
-		await this.disableConfigServerFn(
-			this.deps.cwd,
-			server.name,
-			server.configSources,
-		);
+		// IDE-owned servers have no config file here; the IDE persists them.
+		if (server.source !== "ide") {
+			await this.disableConfigServerFn(
+				this.deps.cwd,
+				server.name,
+				server.configSources,
+			);
+		}
 		throwIfAborted(signal);
 		if (!this.disableServerFn) {
 			return {
@@ -258,11 +286,13 @@ export class McpController {
 		signal?: AbortSignal,
 	): Promise<McpServerMutationResult> {
 		throwIfAborted(signal);
-		await this.removeConfigServerFn(
-			this.deps.cwd,
-			server.name,
-			server.configSources,
-		);
+		if (server.source !== "ide") {
+			await this.removeConfigServerFn(
+				this.deps.cwd,
+				server.name,
+				server.configSources,
+			);
+		}
 		throwIfAborted(signal);
 		if (!this.removeServerFn) {
 			return {
@@ -457,12 +487,36 @@ export class McpController {
 			requiredEnv: string[];
 		},
 		signal?: AbortSignal,
+		options: McpAddOptions = {},
 	): Promise<McpAddResult> {
 		throwIfAborted(signal);
-		await this.saveProjectServerFn(this.deps.cwd, server.name, server.config);
+		const userPath =
+			options.target === "user" ? this.deps.userConfigPath : undefined;
+		let source: McpConfigSource;
+		if (userPath) {
+			source = { scope: "user", path: userPath };
+			const saved = await this.saveUserServerFn(
+				userPath,
+				server.name,
+				server.config,
+			);
+			if (!saved.created) {
+				throwIfAborted(signal);
+				return this.alreadyInstalled(server);
+			}
+		} else {
+			source = {
+				scope: "project",
+				path: await this.saveProjectServerFn(
+					this.deps.cwd,
+					server.name,
+					server.config,
+				),
+			};
+		}
 		throwIfAborted(signal);
 		const activation = this.activateServerFn
-			? await this.activateServerFn(server.name, server.config, signal)
+			? await this.activateServerFn(server.name, server.config, signal, source)
 			: { toolNames: [], warnings: [] };
 		throwIfAborted(signal);
 		return {
@@ -471,6 +525,29 @@ export class McpController {
 			requiredEnv: [...server.requiredEnv],
 			toolNames: activation.toolNames,
 			warnings: activation.warnings,
+		};
+	}
+
+	/**
+	 * The user file already lists the server. Nothing is written or
+	 * reconnected: its live status (connected, needs auth, disabled, …) is the
+	 * answer, reported by the caller from `listServerStatuses`.
+	 */
+	private alreadyInstalled(server: {
+		name: string;
+		title: string;
+		requiredEnv: string[];
+	}): McpAddResult {
+		const status = this.listServerStatuses().find(
+			(entry) => entry.name === server.name,
+		);
+		return {
+			name: server.name,
+			title: server.title,
+			requiredEnv: [...server.requiredEnv],
+			toolNames: status?.status === "connected" ? [...status.toolNames] : [],
+			warnings: [],
+			alreadyInstalled: true,
 		};
 	}
 

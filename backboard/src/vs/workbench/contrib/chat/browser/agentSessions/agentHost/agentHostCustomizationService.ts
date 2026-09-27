@@ -20,7 +20,7 @@ import { createDecorator } from '../../../../../../platform/instantiation/common
 import { IChatService } from '../../../common/chatService/chatService.js';
 import { isUntitledChatSession } from '../../../common/model/chatUri.js';
 import { IAgentHostUntitledProvisionalSessionService } from './agentHostUntitledProvisionalSessionService.js';
-import { IAgentHostMcpServer } from '../../../../../../sessions/common/agentHostSessionsProvider.js';
+import { IAgentHostMcpServer, mcpServerStatusDetail } from '../../../../../../sessions/common/agentHostSessionsProvider.js';
 
 const AGENT_HOST_SESSION_SCHEME_PREFIX = 'agent-host-';
 
@@ -144,6 +144,7 @@ class WorkbenchAgentHostCustomizationService extends Disposable implements IAgen
 				name: c.name,
 				enabled: c.enabled,
 				status: c.state.kind,
+				...mcpServerStatusDetail(c.state),
 				logOutputChannelId,
 				setEnabled: (enabled: boolean) => {
 					this._agentHostService.dispatch(channel, {

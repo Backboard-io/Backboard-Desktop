@@ -198,7 +198,7 @@ export class CodexActivityGroup extends Disposable {
 
 	private render(): void {
 		this.renderImagePlaceholders();
-		const listed = this.rows.filter(r => !r.activity.imageGeneration);
+		const listed = this.rows.filter(r => !r.activity.generatedMedia);
 		const finished = listed.filter(r => !r.activity.running);
 		const running = this.complete ? undefined : this.runningRow();
 		const live = !this.complete && (!!running || !!this.thinkingLabel);
@@ -214,7 +214,7 @@ export class CodexActivityGroup extends Disposable {
 		} else {
 			clearNode(this.singleSlot);
 			for (const row of this.rows) {
-				if (row.activity.running || row.activity.imageGeneration) {
+				if (row.activity.running || row.activity.generatedMedia) {
 					row.element.remove();
 					continue;
 				}
@@ -240,6 +240,7 @@ export class CodexActivityGroup extends Disposable {
 			this.setHeader(summary.icon, summary.text);
 		}
 		this.element.toggleAttribute('data-empty', !live && finished.length === 0);
+		this.element.toggleAttribute('data-live', live);
 		this.headerButton.disabled = finished.length === 0;
 		this.chevron.style.display = finished.length === 0 ? 'none' : '';
 		this._onDidChangeHeight.fire();
@@ -249,10 +250,10 @@ export class CodexActivityGroup extends Disposable {
 	private renderImagePlaceholders(): void {
 		for (const row of this.rows) {
 			const placeholder = this.imagePlaceholders.get(row.id);
-			const wanted = row.activity.imageGeneration && row.activity.running;
+			const wanted = !!row.activity.generatedMedia && row.activity.running;
 			if (wanted && !placeholder) {
 				const holder = cxEl('div');
-				renderGeneratedImagePlaceholder(holder);
+				renderGeneratedImagePlaceholder(holder, row.activity.generatedMedia);
 				this.imageSlot.appendChild(holder);
 				this.imagePlaceholders.set(row.id, holder);
 			} else if (!wanted && placeholder) {

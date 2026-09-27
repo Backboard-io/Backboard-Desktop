@@ -4,7 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Emitter } from '../../../../base/common/event.js';
+import { IObservable } from '../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
+import { URI } from '../../../../base/common/uri.js';
+import { IActiveSession } from '../../../services/sessions/common/sessionsManagement.js';
 
 export const SESSIONS_RIGHT_WORKBENCH_CONTAINER_ID = 'workbench.sessions.auxiliaryBar.rightWorkbenchContainer';
 export const SESSIONS_RIGHT_WORKBENCH_LAUNCHER_VIEW_ID = 'sessions.rightWorkbench.launcherView';
@@ -25,9 +28,9 @@ export const enum RightWorkbenchCommandId {
 	OpenMarketplace = 'workbench.action.sessions.rightWorkbench.openMarketplace',
 }
 
-export type RightWorkbenchMode = 'launcher' | 'editor' | 'review' | 'canvas' | 'browser' | 'files' | 'terminal' | 'search' | 'extensions' | 'marketplace';
+export type RightWorkbenchMode = 'launcher' | 'editor' | 'review' | 'browser' | 'files' | 'terminal' | 'search' | 'extensions' | 'marketplace';
 
-export const orderedTabModes: readonly RightWorkbenchMode[] = ['editor', 'files', 'search', 'review', 'canvas', 'extensions', 'marketplace', 'browser', 'terminal'];
+export const orderedTabModes: readonly RightWorkbenchMode[] = ['editor', 'files', 'search', 'review', 'extensions', 'marketplace', 'browser', 'terminal'];
 
 export interface IRightWorkbenchModeRequest {
 	readonly mode: RightWorkbenchMode;
@@ -41,10 +44,8 @@ export interface IRightWorkbenchModeRequest {
 	 * active instead of switching it back to the launcher.
 	 */
 	readonly preserveActiveTab?: boolean;
-	/** For `canvas` requests: the image (its URL) to select, e.g. one clicked in chat. */
-	readonly canvasImage?: string;
-	/** For `canvas` requests: open the grid or the single focused image. */
-	readonly canvasView?: 'canvas' | 'focused';
+	/** For `review` requests: the changed file whose diff to select. */
+	readonly reviewResource?: URI;
 }
 
 export interface IRightWorkbenchModeEntry {
@@ -52,6 +53,19 @@ export interface IRightWorkbenchModeEntry {
 	readonly icon: ThemeIcon;
 	readonly label: string;
 	readonly shortcut: string;
+}
+
+/**
+ * Hosts a right workbench pane outside the auxiliary bar, as the side panel
+ * of one column of a split sessions grid. Such a pane works against its
+ * column's session instead of the window's active session, never listens to
+ * {@link onDidRequestModeEmitter} (requests are routed to it directly), and
+ * shows/hides itself through the host instead of the auxiliary bar.
+ */
+export interface IRightWorkbenchSplitHost {
+	readonly session: IObservable<IActiveSession | undefined>;
+	reveal(): void;
+	hide(): void;
 }
 
 export const onDidRequestModeEmitter = new Emitter<IRightWorkbenchModeRequest>();

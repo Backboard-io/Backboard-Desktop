@@ -64,6 +64,13 @@
 	order: -1;
 }
 
+/* The user asked for no chat title header: the session tab strip (chat icon +
+   title) is hidden. The +/history cluster lives in its own toolbar and stays,
+   and both of its actions re-activate chat (see `openNewChat`). */
+.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .chat-view-title-container {
+	display: none;
+}
+
 .monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs {
 	align-items: center;
 	padding-inline: var(--bb-agent-tab-inset);
@@ -342,15 +349,16 @@
 	flex-shrink: 0;
 }
 
-/* ‹ back chevron at the head of the strip, shown while a delegated session
-   owns the surface and a parent session waits behind it. */
+/* ‹ back chevron, rendered right before a subagent tab that owns the surface
+   when its parent's tab has been closed (otherwise the parent tab, directly
+   before the nested child, is the way back). */
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-back {
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	flex: 0 0 auto;
-	width: 22px;
-	height: 24px;
+	width: 24px;
+	height: 100%;
 	padding: 0;
 	border: none;
 	border-radius: var(--bb-agent-tab-radius);
@@ -418,8 +426,8 @@
  * Defined on `.part.auxiliarybar` so both the composite title and the pane body
  * (which are separate DOM subtrees) can read them.
  */
-.monaco-workbench .part.auxiliarybar:has(> .composite.title.has-chat-tabs),
-.monaco-workbench.optimus-window .part.auxiliarybar:has(.optimus-chat-view) {
+.monaco-workbench .part.auxiliarybar.part-has-chat-tabs,
+.monaco-workbench.optimus-window .part.auxiliarybar.part-has-optimus-chat-view {
 	/* Semantic workbench tokens keep the entire right panel native to the
 	   selected VS Code theme, including light and high-contrast themes. */
 	--bb-panel-surface: var(--vscode-sideBar-background, var(--vscode-editor-background));
@@ -2146,6 +2154,15 @@
 .monaco-workbench .backboard-composer-model-choice.selected .backboard-composer-model-choice-label {
 	font-weight: 500;
 }
+/* What a video model accepts ("Edits video · 4–30s · 720p"). */
+.monaco-workbench .backboard-composer-model-choice-detail {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11px;
+	line-height: 14px;
+	color: var(--vscode-descriptionForeground);
+}
 .monaco-workbench .backboard-composer-model-check {
 	display: flex;
 	align-items: center;
@@ -2328,7 +2345,7 @@
 /* Editor-panel treatment measured against Devin's local chat. Keep these
  * overrides on this host: full-page chat and the model picker retain their
  * own presentation. The prompt dots occupy the outside gutter. */
-.monaco-workbench .part.auxiliarybar:has(> .composite.title.has-chat-tabs) {
+.monaco-workbench .part.auxiliarybar.part-has-chat-tabs {
 	--bb-editor-panel-gutter: 16px;
 	--bb-devin-card-surface: color-mix(in srgb, var(--vscode-foreground) 4%, var(--bb-panel-surface));
 	--bb-devin-card-border: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
@@ -2477,41 +2494,36 @@
 }
 
 
-/* A delegated conversation is a compact child chip beside its parent tab. */
+/* A delegated (subagent) conversation nests directly after its parent tab:
+   a flat tab like its siblings, hung off the parent by a tree connector, with
+   no divider inside the group so parent and children read as one unit. */
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab.chat-view-title-tab-subagent {
 	flex: 0 0 auto;
 	min-width: 0;
-	max-width: 160px;
-	height: 24px;
-	margin: 0 6px;
-	padding: 0 8px;
+	max-width: 168px;
+	padding: 0 10px 0 8px;
 	gap: 6px;
-	border: 1px solid transparent;
-	border-radius: 6px;
-	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
-	box-shadow: none;
 }
 
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab.chat-view-title-tab-subagent.chat-view-title-tab-active {
-	border-color: color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
-	background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
-	color: var(--vscode-foreground);
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab.chat-view-title-tab-has-nested {
+	border-right-color: transparent;
 }
 
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-subagent .chat-view-title-tab-icon {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	flex: 0 0 14px;
-	width: 14px;
-	height: 14px;
-	font-size: 13px;
-	color: var(--vscode-descriptionForeground);
+	display: block;
+	flex: 0 0 auto;
+	box-sizing: border-box;
+	width: 7px;
+	height: 9px;
+	margin-top: -7px;
+	border-left: 1px solid var(--vscode-descriptionForeground);
+	border-bottom: 1px solid var(--vscode-descriptionForeground);
+	border-bottom-left-radius: 3px;
+	opacity: 0.5;
 }
 
 .monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab-subagent .chat-view-title-tab-label {
 	font-size: 12px;
-	line-height: 16px;
 }
 
 /* Sparse logo-inspired contours leave the welcome content unobstructed. */

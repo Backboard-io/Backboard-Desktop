@@ -108,13 +108,13 @@ const mcpDevModeProps = (stdio: boolean): IJSONSchemaMap => ({
 		examples: [{ watch: 'src/**/*.ts', debug: { type: 'node' } }],
 		properties: {
 			watch: {
-				description: localize('app.mcp.dev.watch', 'A glob pattern or list of glob patterns relative to the workspace folder to watch. The MCP server will be restarted when these files change.'),
+				description: localize('app.mcp.dev.watch', 'A glob pattern or list of glob patterns relative to the workspace folder to watch. The connector will be restarted when these files change.'),
 				examples: ['src/**/*.ts'],
 				oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
 			},
 			...(stdio && {
 				debug: {
-					markdownDescription: localize('app.mcp.dev.debug', 'If set, debugs the MCP server using the given runtime as it\'s started.'),
+					markdownDescription: localize('app.mcp.dev.debug', 'If set, debugs the connector using the given runtime as it\'s started.'),
 					oneOf: [
 						{
 							type: 'object',
@@ -123,7 +123,7 @@ const mcpDevModeProps = (stdio: boolean): IJSONSchemaMap => ({
 								type: {
 									type: 'string',
 									enum: ['node'],
-									description: localize('app.mcp.dev.debug.type.node', "Debug the MCP server using Node.js.")
+									description: localize('app.mcp.dev.debug.type.node', "Debug the connector using Node.js.")
 								}
 							},
 							additionalProperties: false
@@ -135,7 +135,7 @@ const mcpDevModeProps = (stdio: boolean): IJSONSchemaMap => ({
 								type: {
 									type: 'string',
 									enum: ['debugpy'],
-									description: localize('app.mcp.dev.debug.type.python', "Debug the MCP server using Python and debugpy.")
+									description: localize('app.mcp.dev.debug.type.python', "Debug the connector using Python and debugpy.")
 								},
 								debugpyPath: {
 									type: 'string',
@@ -304,7 +304,7 @@ export const mcpServerSchema: IJSONSchema = {
 									enterpriseManaged: {
 										type: 'boolean',
 										default: false,
-										markdownDescription: localize('app.mcp.json.oauth.enterpriseManaged', "(Preview) When set to `true`, this MCP server authenticates through the SSO issuer configured by `#mcp.enterpriseManagedAuth.idp#` using OAuth Identity Assertion Authorization Grant (ID-JAG). After a one-time sign-in, subsequent enterprise-managed servers connect silently. The IdP issuer and client credentials are read from the `#mcp.enterpriseManagedAuth.idp#` setting; the `clientId` on this server entry is passed to the resource authorization server.")
+										markdownDescription: localize('app.mcp.json.oauth.enterpriseManaged', "(Preview) When set to `true`, this connector authenticates through the SSO issuer configured by `#mcp.enterpriseManagedAuth.idp#` using OAuth Identity Assertion Authorization Grant (ID-JAG). After a one-time sign-in, subsequent enterprise-managed servers connect silently. The IdP issuer and client credentials are read from the `#mcp.enterpriseManagedAuth.idp#` setting; the `clientId` on this server entry is passed to the resource authorization server.")
 									}
 								}
 							},
@@ -384,7 +384,7 @@ class McpServerDefinitionsProviderRenderer extends Disposable implements IExtens
 
 Registry.as<IExtensionFeaturesRegistry>(Extensions.ExtensionFeaturesRegistry).registerExtensionFeature({
 	id: mcpConfigurationSection,
-	label: localize('mcpServerDefinitionProviders', "MCP Servers"),
+	label: localize('mcpServerDefinitionProviders', "Connectors"),
 	access: {
 		canToggle: false
 	},

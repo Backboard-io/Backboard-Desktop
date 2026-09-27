@@ -6,6 +6,7 @@
 import { disposableTimeout, SequencerByKey } from '../../../base/common/async.js';
 import { toErrorMessage } from '../../../base/common/errorMessage.js';
 import { Disposable, DisposableMap } from '../../../base/common/lifecycle.js';
+import { extUriBiasedIgnorePathCase } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
 import { ILogService } from '../../log/common/log.js';
 import {
@@ -742,6 +743,24 @@ export class AgentHostChangesetService extends Disposable implements IAgentHostC
 	 * with {@link META_DIFF_BASE_BRANCH} when one is set; without a base
 	 * branch git falls back to `HEAD`.
 	 */
+	/**
+	 * Whether `workingDirectory` lives in a linked git worktree (the kind the
+	 * agent host creates per session) rather than the repository's main
+	 * checkout, which is shared with other chats and the user.
+	 */
+	private async _isDedicatedWorktree(workingDirectory: URI): Promise<boolean> {
+		try {
+			const [root, worktrees] = await Promise.all([
+				this._gitService.getRepositoryRoot(workingDirectory),
+				this._gitService.getWorktreeRoots(workingDirectory),
+			]);
+			const main = worktrees[0];
+			return !!root && !!main && !extUriBiasedIgnorePathCase.isEqual(root, main);
+		} catch {
+			return false;
+		}
+	}
+
 	private async _tryComputeGitDiffs(session: ProtocolURI, db: ISessionDatabase, kind: StaticChangesetKind): Promise<readonly ISessionFileDiff[] | undefined> {
 		const workingDirectory = this._stateManager.getSessionState(session)?.summary.workingDirectory;
 		if (!workingDirectory) {
@@ -757,6 +776,14 @@ export class AgentHostChangesetService extends Disposable implements IAgentHostC
 
 		// Session
 		if (kind === 'session') {
+			// Checkpoints snapshot the whole working tree, so in a checkout other
+			// chats (or the user) edit too, the diff between them credits this
+			// chat with everyone's changes. Only a session's own worktree is
+			// attributable to it; elsewhere use the chat's tracked edits.
+			if (!await this._isDedicatedWorktree(workingDirectoryUri)) {
+				return undefined;
+			}
+
 			// Get session checkpoints
 			const latestTurnId = this._stateManager.getSessionState(session)?.turns.at(-1)?.id;
 			if (!latestTurnId) {

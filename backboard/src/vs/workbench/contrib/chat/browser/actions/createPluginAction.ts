@@ -206,7 +206,7 @@ class CreatePluginAction extends Action2 {
 			}
 			if (mcpChildren.length > 0) {
 				groups.push({
-					label: localize('mcpServers', "MCP Servers"),
+					label: localize('mcpServers', "Connectors"),
 					iconClass: ThemeIcon.asClassName(Codicon.mcp),
 					checked: undefined,
 					collapsed: false,

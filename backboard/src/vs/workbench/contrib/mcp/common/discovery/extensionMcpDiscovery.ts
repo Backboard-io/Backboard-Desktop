@@ -179,7 +179,7 @@ export class ExtensionMcpDiscovery extends Disposable implements IMcpDiscovery {
 	private static _validate(user: extensionsRegistry.IExtensionPointUser<IMcpCollectionContribution[]>): boolean {
 
 		if (!Array.isArray(user.value)) {
-			user.collector.error(localize('invalidData', "Expected an array of MCP collections"));
+			user.collector.error(localize('invalidData', "Expected an array of connector collections"));
 			return false;
 		}
 

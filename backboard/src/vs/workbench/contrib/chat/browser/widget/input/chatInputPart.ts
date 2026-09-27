@@ -72,11 +72,11 @@ import { IActionWidgetService } from '../../../../../../platform/actionWidget/br
 import { IActionWidgetDropdownAction, IActionWidgetDropdownActionProvider, IActionWidgetDropdownOptions } from '../../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
 import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../../platform/contextkey/common/contextkey.js';
-import { AnchorPosition } from '../../../../../../base/browser/ui/contextview/contextview.js';
 import { IContextViewService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../../../platform/files/common/files.js';
 import { registerAndCreateHistoryNavigationContext } from '../../../../../../platform/history/browser/contextScopedHistoryWidget.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
+import { McpServerStatus } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { ServiceCollection } from '../../../../../../platform/instantiation/common/serviceCollection.js';
 import { IKeybindingService } from '../../../../../../platform/keybinding/common/keybinding.js';
 import { WorkbenchList } from '../../../../../../platform/list/browser/listService.js';
@@ -85,6 +85,8 @@ import { ObservableMemento, observableMemento } from '../../../../../../platform
 import { bindContextKey } from '../../../../../../platform/observable/common/platformObservableUtils.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
 import { IThemeService } from '../../../../../../platform/theme/common/themeService.js';
+import { isDark } from '../../../../../../platform/theme/common/theme.js';
+import { codexAvatarImage, CodexAvatarName } from '../chatContentParts/codex/codexAvatars.js';
 import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
 import { ISharedWebContentExtractorService } from '../../../../../../platform/webContentExtractor/common/webContentExtractor.js';
 import { IWorkspaceContextService, WorkbenchState } from '../../../../../../platform/workspace/common/workspace.js';
@@ -95,7 +97,7 @@ import { IPathService } from '../../../../../services/path/common/pathService.js
 import { IViewDescriptorService, ViewContainerLocation } from '../../../../../common/views.js';
 import { ResourceLabels } from '../../../../../browser/labels.js';
 import { IChatEntitlementService } from '../../../../../services/chat/common/chatEntitlementService.js';
-import { ACTIVE_GROUP, IEditorService, SIDE_GROUP } from '../../../../../services/editor/common/editorService.js';
+import { ACTIVE_GROUP, IEditorService, MODAL_GROUP, SIDE_GROUP } from '../../../../../services/editor/common/editorService.js';
 import { AccessibilityVerbositySettingId } from '../../../../accessibility/browser/accessibilityConfiguration.js';
 import { AccessibilityCommandId } from '../../../../accessibility/common/accessibilityCommands.js';
 import { getSimpleCodeEditorWidgetOptions, getSimpleEditorOptions, setupSimpleEditorSelectionStyling } from '../../../../codeEditor/browser/simpleEditorOptions.js';
@@ -170,6 +172,8 @@ import { Target } from '../../../common/promptSyntax/promptTypes.js';
 import { findLast } from '../../../../../../base/common/arraysFind.js';
 import { ConfigureToolsAction } from '../../actions/chatToolActions.js';
 import { InlineCompletionsController } from '../../../../../../editor/contrib/inlineCompletions/browser/controller/inlineCompletionsController.js';
+import { IAgentHostCustomizationService } from '../../agentSessions/agentHost/agentHostCustomizationService.js';
+import { SkillsLibraryController } from './skillsLibrary.js';
 
 const $ = dom.$;
 
@@ -219,6 +223,8 @@ export interface IChatInputPartOptions {
 	 * When true, the secondary toolbar (permissions picker) is hidden.
 	 */
 	isSessionsWindow?: boolean;
+	/** Host override for opening a file from the changed-files strip; see `IChatWidgetViewOptions.openChangedFile`. */
+	openChangedFile?(resource: URI): Promise<boolean>;
 }
 
 /**
@@ -401,69 +407,31 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	private chatInputNotificationContainer!: HTMLElement;
 	private chatGoalBannerContainer!: HTMLElement;
 	private inputContainer!: HTMLElement;
-	private composerLocationLabel: HTMLElement | undefined;
-	private composerFolderLabel: HTMLElement | undefined;
-
-	private showComposerLocationMenu(anchor: HTMLElement): void {
-		if (anchor.getAttribute('aria-expanded') === 'true') {
-			this.composerContextViewService.hideContextView();
-			return;
-		}
-		anchor.setAttribute('aria-expanded', 'true');
-		this.composerContextViewService.showContextView({
-			getAnchor: () => anchor,
-			anchorPosition: AnchorPosition.ABOVE,
-			onHide: () => anchor.setAttribute('aria-expanded', 'false'),
-			render: container => {
-				const store = new DisposableStore();
-				const menu = dom.append(container, dom.$('.backboard-location-menu', { role: 'menu', 'aria-label': localize('composer.location', "Session location") }));
-				const addRow = (icon: ThemeIcon, label: string, disabled = false) => {
-					const row = dom.append(menu, dom.$('button.backboard-location-menu-row', { type: 'button', role: 'menuitem', disabled }));
-					dom.append(row, dom.$(ThemeIcon.asCSSSelector(icon))).setAttribute('aria-hidden', 'true');
-					dom.append(row, dom.$('span', undefined, label));
-					return row;
-				};
-				const local = addRow(Codicon.deviceDesktop, localize('composer.local', "Local"));
-				local.setAttribute('role', 'menuitemradio');
-				local.setAttribute('aria-checked', 'true');
-				dom.append(local, dom.$('.backboard-location-check' + ThemeIcon.asCSSSelector(Codicon.check))).setAttribute('aria-hidden', 'true');
-				store.add(dom.addDisposableListener(local, dom.EventType.CLICK, () => { this.composerContextViewService.hideContextView(); anchor.focus(); }));
-				const cloud = addRow(Codicon.cloud, localize('composer.cloud', "Cloud"), true);
-				dom.append(cloud, dom.$('span.backboard-location-coming-soon', undefined, localize('composer.comingSoon', "Coming soon")));
-				const sshCommand = 'workbench.action.sessions.connectViaSSH';
-				if (CommandsRegistry.getCommand(sshCommand)) {
-					dom.append(menu, dom.$('.backboard-location-menu-divider', { role: 'separator' }));
-					dom.append(menu, dom.$('.backboard-location-menu-heading', undefined, localize('composer.remoteHosts', "Remote agent hosts")));
-					const ssh = addRow(Codicon.add, localize('composer.connectSSH', "Connect to SSH host…"));
-					store.add(dom.addDisposableListener(ssh, dom.EventType.CLICK, () => { this.composerContextViewService.hideContextView(); void this.commandService.executeCommand(sshCommand); }));
-				}
-				store.add(dom.addDisposableListener(menu, dom.EventType.KEY_DOWN, (event: KeyboardEvent) => {
-					if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.composerContextViewService.hideContextView(); anchor.focus(); }
-					if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-						event.preventDefault();
-						const rows = Array.from(menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
-						const index = rows.indexOf(dom.getActiveElement() as HTMLButtonElement);
-						rows[(index + (event.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length]?.focus();
-					}
-				}));
-				local.focus();
-				return store;
-			}
-		});
+	/**
+	 * Where this composer's session runs, for the "+" menu's Location row: the
+	 * machine (local or a remote authority) and the working folder.
+	 */
+	/** The chat session the composer currently sends to, if any. */
+	public getComposerSessionResource(): URI | undefined {
+		return this.getCurrentSessionResource();
 	}
 
-	private updateComposerLocation(): void {
-		if (!this.composerLocationLabel || !this.composerFolderLabel) {
-			return;
-		}
+	public getComposerLocation(): { readonly remote: string | undefined; readonly folderName: string; readonly folderPath: string | undefined; readonly canConnectRemote: boolean } {
 		const workspace = this.workspaceContextService.getWorkspace();
 		const directory = this._widget?.viewModel?.model.workingDirectory ?? workspace.folders[0]?.uri;
 		const remote = directory?.scheme === 'vscode-remote' ? directory.authority : this.environmentService.remoteAuthority;
-		this.composerLocationLabel.textContent = remote ? localize('composer.remote', "Remote") : localize('composer.local', "Local");
-		this.composerLocationLabel.parentElement!.title = remote ?? localize('composer.localComputer', "Local computer");
-		this.composerFolderLabel.textContent = directory ? (this.workspaceContextService.getWorkspaceFolder(directory)?.uri.toString() === directory.toString() ? this.workspaceContextService.getWorkspaceFolder(directory)!.name : basename(directory)) : localize('composer.noFolder', "No folder open");
-		this.composerFolderLabel.parentElement!.title = directory?.fsPath ?? this.composerFolderLabel.textContent;
+		const folder = directory ? this.workspaceContextService.getWorkspaceFolder(directory) : undefined;
+		const folderName = directory
+			? (folder?.uri.toString() === directory.toString() ? folder.name : basename(directory))
+			: localize('composer.noFolder', "No folder open");
+		return { remote, folderName, folderPath: directory?.fsPath, canConnectRemote: !!CommandsRegistry.getCommand(ChatInputPart.connectSSHCommand) };
 	}
+
+	public connectComposerToRemoteHost(): void {
+		void this.commandService.executeCommand(ChatInputPart.connectSSHCommand);
+	}
+
+	private static readonly connectSSHCommand = 'workbench.action.sessions.connectViaSSH';
 	private editorContainer!: HTMLElement;
 	private readonly _notificationWidget = this._register(new MutableDisposable<ChatInputNotificationWidget>());
 	private readonly _goalBannerWidget = this._register(new MutableDisposable<ChatGoalBannerWidget>());
@@ -737,7 +705,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		@IFileService private readonly fileService: IFileService,
 		@IEditorService private readonly editorService: IEditorService,
 		@ICommandService private readonly commandService: ICommandService,
-		@IContextViewService private readonly composerContextViewService: IContextViewService,
 		@IThemeService private readonly themeService: IThemeService,
 		@ITextModelService private readonly textModelResolverService: ITextModelService,
 		@IStorageService private readonly storageService: IStorageService,
@@ -1117,6 +1084,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		}
 	}
 
+	/** The models this input can switch to (as its model picker lists them), sorted by name. */
+	public getSelectableLanguageModels(): readonly ILanguageModelChatMetadataAndIdentifier[] {
+		return this.getModels();
+	}
+
 	/**
 	 * Switch to a model by its identifier. Returns true if a matching model
 	 * was found and applied.
@@ -1419,22 +1391,47 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this.capabilityChipDisposables.clear();
 		if (!this.capabilityChips) {
 			this.capabilityChips = dom.$('.backboard-capability-chips');
-			this.inputContainer.insertBefore(this.capabilityChips, this.editorContainer);
+			// Active capabilities share one row with attached files and skills, so
+			// every chip above the input lines up on the same baseline and inset.
+			if (this.inputContainer.contains(this.attachmentsContainer)) {
+				this.attachmentsContainer.prepend(this.capabilityChips);
+			} else {
+				this.inputContainer.insertBefore(this.capabilityChips, this.editorContainer);
+			}
 		}
 		dom.clearNode(this.capabilityChips);
-		const selected = this.getBackboardGenericConfigOptions().filter(option => option.composerSelected && option.id !== 'notifications' && option.id !== 'notify');
+		// Image and video generation are always available on Backboard models
+		// (their models are picked in the + menu), so they are not chips.
+		const selected = this.getBackboardGenericConfigOptions().filter(option => option.composerSelected && !isBackboardUnchippedOption(option.id));
 		this.capabilityChips.style.display = selected.length ? '' : 'none';
+		this.hasCapabilityChips = selected.length > 0;
+		this.updateAttachmentsRowVisibility();
+		const lightTheme = !isDark(this.themeService.getColorTheme().type);
 		for (const option of selected) {
 			const label = getBackboardActiveOptionLabel(option);
-			const chip = dom.append(this.capabilityChips, dom.$('button.backboard-capability-chip', { type: 'button', 'aria-label': localize('backboardCapability.remove', "Remove {0}", label) })) as HTMLButtonElement;
-			dom.append(chip, dom.$('span.codicon.codicon-add', { 'aria-hidden': 'true' }));
-			dom.append(chip, dom.$('span', undefined, label));
+			const chip = dom.append(this.capabilityChips, dom.$('button.backboard-capability-chip', { type: 'button', 'aria-label': localize('backboardCapability.remove', "Remove {0}", label), title: label })) as HTMLButtonElement;
+			// Chips wear the subagent avatar glyphs, one fixed glyph per capability.
+			dom.append(chip, codexAvatarImage(getBackboardCapabilityAvatar(option.id), lightTheme, 'backboard-capability-chip-avatar'));
+			dom.append(chip, dom.$('span.backboard-capability-chip-label', undefined, label));
+			dom.append(chip, dom.$(`span.backboard-capability-chip-remove${ThemeIcon.asCSSSelector(Codicon.close)}`, { 'aria-hidden': 'true' }));
 			chip.disabled = option.deactivationValue === undefined;
 			this.capabilityChipDisposables.add(dom.addDisposableListener(chip, 'click', event => {
 				event.stopPropagation();
 				if (option.deactivationValue !== undefined) { option.setValue(option.deactivationValue); }
 			}));
 		}
+	}
+
+	private hasCapabilityChips = false;
+	private hasAttachedContextChips = false;
+
+	/** The chip row above the input is shown while it holds any chip, of either kind. */
+	private updateAttachmentsRowVisibility(): void {
+		if (!this.attachmentsContainer) {
+			return;
+		}
+		const chipsInRow = !!this.capabilityChips && this.attachmentsContainer.contains(this.capabilityChips) && this.hasCapabilityChips;
+		dom.setVisibility(Boolean(this.options.renderInputToolbarBelowInput || this.hasAttachedContextChips || chipsInRow), this.attachmentsContainer);
 	}
 
 	private removeBackboardCapabilityToken(range: IRange): void {
@@ -3368,26 +3365,12 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		const inputAndSideToolbar = elements.inputAndSideToolbar; // The chat input and toolbar to the right
 		const inputContainer = elements.inputContainer; // The chat editor, attachments, and toolbars
 		this.inputContainer = inputContainer;
-		const locationFooter = dom.$('.backboard-composer-location');
-		const host = dom.append(locationFooter, dom.$('button.backboard-composer-location-item.backboard-composer-host', { type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false' }));
-		this._register(dom.addDisposableListener(host, dom.EventType.CLICK, () => this.showComposerLocationMenu(host)));
-		dom.append(host, dom.$(ThemeIcon.asCSSSelector(Codicon.deviceDesktop))).setAttribute('aria-hidden', 'true');
-		this.composerLocationLabel = dom.append(host, dom.$('span'));
-		const folder = dom.append(locationFooter, dom.$('.backboard-composer-location-item.backboard-composer-folder'));
-		dom.append(folder, dom.$(ThemeIcon.asCSSSelector(Codicon.folderOpened))).setAttribute('aria-hidden', 'true');
-		this.composerFolderLabel = dom.append(folder, dom.$('span'));
-		inputAndSideToolbar.after(locationFooter);
 		if (this.options.renderStyle !== 'compact') {
-			// Keep review/diff widgets in the measured input area, above the composer shell.
-			// Pending questions and approvals are bands inside the shell, above the editor,
-			// so the prompt and the input that answers it read as one surface.
-			const shell = dom.$('.backboard-composer-shell');
-			inputAndSideToolbar.before(shell);
-			shell.append(elements.chatQuestionCarouselContainer, elements.chatToolConfirmationCarouselContainer, inputAndSideToolbar, locationFooter);
+			// Pending questions and approvals pop out of the top edge of the input
+			// box (below review/diff widgets), so the prompt and the input that
+			// answers it read as one attached unit.
+			inputAndSideToolbar.before(elements.chatQuestionCarouselContainer, elements.chatToolConfirmationCarouselContainer);
 		}
-		this.updateComposerLocation();
-		this._register(this.workspaceContextService.onDidChangeWorkspaceFolders(() => this.updateComposerLocation()));
-		this._register(widget.onDidChangeViewModel(() => this.updateComposerLocation()));
 		const editorContainer = this.editorContainer = elements.editorContainer;
 		this.chatInputOverlay = this.container.appendChild(dom.$('.chat-input-overlay'));
 		this.attachmentsContainer = elements.attachmentsContainer;
@@ -4035,6 +4018,11 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this._register(this.themeService.onDidFileIconThemeChange(() => {
 			this.renderAttachedContext();
 		}));
+		// Chip avatars ship a light and a dark variant.
+		this._register(this.themeService.onDidColorThemeChange(() => {
+			this.renderAttachedContext();
+			this.renderBackboardActiveOptions();
+		}));
 
 		this.renderAttachedContext();
 
@@ -4140,7 +4128,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			hasImplicitContext = implicitContextWidget.hasRenderedContexts;
 		}
 
-		dom.setVisibility(Boolean(this.options.renderInputToolbarBelowInput || hasAttachments || hasImplicitContext), this.attachmentsContainer);
+		this.hasAttachedContextChips = hasAttachments || hasImplicitContext;
+		this.updateAttachmentsRowVisibility();
 		dom.setVisibility(hasAttachments || hasImplicitContext, this.attachedContextContainer);
 		if (!attachments.length) {
 			this._indexOfLastAttachedContextDeletedWithKeyboard = -1;
@@ -5055,10 +5044,18 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					const modifiedFileUri = e.element.reference;
 					const originalUri = e.element.options?.originalUri;
 
+					if (!e.sideBySide && await this.options.openChangedFile?.(modifiedFileUri)) {
+						return;
+					}
+
+					// The sessions window keeps its main editor area hidden; editors open
+					// there as modal overlays.
+					const group = e.sideBySide ? SIDE_GROUP : this.options.isSessionsWindow ? MODAL_GROUP : ACTIVE_GROUP;
 					if (originalUri || e.element.options?.modifiedUri) {
+						// This strip lists what changed, so open the change, not the bare file.
 						await openChatEdit(this.editorService, this.commandService, this.fileService, modifiedFileUri,
 							originalUri, e.element.options?.isDeletion ? undefined : e.element.options?.modifiedUri ?? modifiedFileUri,
-							!!e.element.options?.isDeletion, { editorOptions: e.editorOptions, openToSide: e.sideBySide });
+							!!e.element.options?.isDeletion, { editorOptions: e.editorOptions, openToSide: e.sideBySide }, 'change', group);
 						return;
 					}
 
@@ -5067,7 +5064,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					const pane = await this.editorService.openEditor({
 						resource: modifiedFileUri,
 						options: e.editorOptions
-					}, e.sideBySide ? SIDE_GROUP : ACTIVE_GROUP);
+					}, group);
 
 					if (pane) {
 						entry?.getEditorIntegration(pane).reveal(true, e.editorOptions.preserveFocus);
@@ -5160,7 +5157,6 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	 * and detected via ResizeObserver, which updates `inputPartHeight` for the parent to observe.
 	 */
 	layout(width: number) {
-		this.updateComposerLocation();
 		this.cachedWidth = width;
 		this._stableInputPartWidth.set(width, undefined);
 		this._updateWorkingProgressAnimationDuration(width);
@@ -5257,7 +5253,12 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		// Measure wrapped placeholder text independently of Monaco's one-line decoration box.
 		let placeholderHeight = 0;
 		const placeholderText = this._widget?.viewModel?.inputPlaceholder ?? this._inputEditor.getRawOptions().placeholder;
-		if (!this._inputEditor.getValue() && placeholderText && this.options.renderStyle !== 'compact') {
+		// Hosts that render the placeholder on one line (ellipsized) mark an
+		// ancestor with `chat-input-single-line-placeholder` so the input is not
+		// sized for wrapped text it never shows (e.g. narrow side-by-side session
+		// panes). A class lookup, unlike computed style, forces no style recalc.
+		const placeholderWraps = !this.editorContainer.closest('.chat-input-single-line-placeholder');
+		if (!this._inputEditor.getValue() && placeholderText && placeholderWraps && this.options.renderStyle !== 'compact') {
 			const font = this._inputEditor.getOption(EditorOption.fontInfo);
 			const padding = this._inputEditor.getOption(EditorOption.padding);
 			const measure = dom.$('div');
@@ -5515,8 +5516,58 @@ function getBackboardGenericOptionIcon(property: string): ThemeIcon {
 	}
 }
 
+/** Options that never render as chips above the input: always-on media and notifications. */
+function isBackboardUnchippedOption(id: string): boolean {
+	switch (id) {
+		case 'notifications':
+		case 'notify':
+		case 'imageGeneration':
+		case 'images':
+		case 'imageModel':
+		case 'videoGeneration':
+		case 'videoModel':
+			return true;
+		default:
+			return false;
+	}
+}
+
 function isBackboardReasoningOption(option: IAgentHostGenericConfigOption): boolean {
 	return option.id === 'intensity' || option.id === 'reasoning' || option.id === 'reasoningIntensity';
+}
+
+function getBackboardCapabilityAvatar(property: string): CodexAvatarName {
+	switch (property) {
+		case 'mode':
+			return '09-violet';
+		case 'intensity':
+		case 'reasoning':
+		case 'reasoningIntensity':
+			return '05-lavender';
+		case 'webSearch':
+		case 'web':
+			return '15-clear-sky-2';
+		case 'memory':
+		case 'memoryMode':
+			return '13-bloom-rosette';
+		case 'computerUse':
+		case 'cua':
+			return '04-teal';
+		case 'browserUse':
+		case 'browser':
+			return '02-clear-sky';
+		case 'notifications':
+		case 'notify':
+			return '08-sunbeam';
+		case 'imageGeneration':
+		case 'images':
+		case 'imageModel':
+			return '20-coral-pop-clover';
+		case 'videoModel':
+			return '12-coral-pop-knot';
+		default:
+			return '24-sprout-bud';
+	}
 }
 
 function getBackboardActiveOptionLabel(option: IAgentHostGenericConfigOption): string {
@@ -5538,6 +5589,87 @@ function getBackboardActiveOptionLabel(option: IAgentHostGenericConfigOption): s
 			return localize('backboardActiveOption.video', "Video");
 		default:
 			return option.label;
+	}
+}
+
+/** An MCP server of an agent-host chat, as listed by {@link IAgentHostCustomizationService}. */
+type IAgentHostMcpServerEntry = ReturnType<IAgentHostCustomizationService['getMcpServers']>[number];
+
+function describeMcpServers(servers: readonly IAgentHostMcpServerEntry[]): string {
+	const enabled = servers.filter(server => server.enabled);
+	const signIn = enabled.filter(server => server.needsSignIn).length;
+	if (signIn) {
+		return localize('composer.mcpServers.signInCount', "{0} need sign-in", signIn);
+	}
+	const failed = enabled.filter(server => server.status === McpServerStatus.Error).length;
+	if (failed) {
+		return localize('composer.mcpServers.errorCount', "{0} failed", failed);
+	}
+	const ready = enabled.filter(server => server.status === McpServerStatus.Ready).length;
+	if (ready) {
+		return localize('composer.mcpServers.readyCount', "{0} connected", ready);
+	}
+	if (enabled.some(server => server.status === McpServerStatus.Starting)) {
+		return localize('composer.mcpServers.connecting', "Connecting…");
+	}
+	return enabled.length ? localize('composer.mcpServers.availableCount', "{0} available", enabled.length) : '';
+}
+
+function mcpServerRowValue(server: IAgentHostMcpServerEntry): string {
+	if (!server.enabled) {
+		return localize('composer.mcpServer.off', "Off");
+	}
+	if (server.needsSignIn) {
+		return localize('composer.mcpServer.signIn', "Sign in");
+	}
+	switch (server.status) {
+		case McpServerStatus.Ready: return localize('composer.mcpServer.connected', "Connected");
+		case McpServerStatus.Starting: return localize('composer.mcpServer.connecting', "Connecting…");
+		case McpServerStatus.Error: return localize('composer.mcpServer.retry', "Failed · Retry");
+		case McpServerStatus.AuthRequired: return localize('composer.mcpServer.signIn', "Sign in");
+		// Enabled but no runtime yet: the server connects with the chat.
+		default: return localize('composer.mcpServer.onSend', "Connects on send");
+	}
+}
+
+function mcpServerRowTooltip(server: IAgentHostMcpServerEntry): string {
+	if (!server.enabled) {
+		return localize('composer.mcpServer.tooltip.connect', "Connect {0} for this chat", server.name);
+	}
+	if (server.needsSignIn) {
+		return server.statusMessage ?? localize('composer.mcpServer.tooltip.signIn', "Sign in to {0} in your browser", server.name);
+	}
+	if (server.status === McpServerStatus.Error) {
+		return server.statusMessage ?? localize('composer.mcpServer.tooltip.retry', "{0} could not connect. Click to try again.", server.name);
+	}
+	if (server.status === McpServerStatus.Stopped) {
+		return localize('composer.mcpServer.tooltip.onSend', "{0} connects when this chat starts. Click to turn it off for this chat.", server.name);
+	}
+	return localize('composer.mcpServer.tooltip.disconnect', "Disconnect {0} for this chat", server.name);
+}
+
+function mcpServerRowIcon(server: IAgentHostMcpServerEntry): ThemeIcon {
+	if (!server.enabled) {
+		return Codicon.circleSlash;
+	}
+	if (server.needsSignIn) {
+		return Codicon.account;
+	}
+	switch (server.status) {
+		case McpServerStatus.Ready: return Codicon.passFilled;
+		case McpServerStatus.Starting: return ThemeIcon.modify(Codicon.loading, 'spin');
+		case McpServerStatus.Error: return Codicon.warning;
+		default: return Codicon.circleLargeOutline;
+	}
+}
+
+function runMcpServerRowAction(server: IAgentHostMcpServerEntry): void {
+	if (!server.enabled || server.needsSignIn || server.status === McpServerStatus.Error) {
+		// Enabling an enabled server reconnects it; a server waiting for
+		// sign-in starts the sign-in.
+		server.setEnabled(true);
+	} else if (server.status !== McpServerStatus.Starting) {
+		server.setEnabled(false);
 	}
 }
 
@@ -5624,6 +5756,8 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 		@ITerminalService private readonly terminalService: ITerminalService,
 		@IChatSlashCommandService private readonly slashCommandService: IChatSlashCommandService,
 		@IChatWidgetService private readonly composerWidgetService: IChatWidgetService,
+		@IAgentHostCustomizationService private readonly agentHostCustomizations: IAgentHostCustomizationService,
+		@IInstantiationService private readonly composerInstantiationService: IInstantiationService,
 	) {
 		const isAddMenu = menuKind === 'add';
 		const actionProvider: IActionWidgetDropdownActionProvider = {
@@ -5670,6 +5804,18 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 					run: () => this.openNestedPicker(() => this.showResourceList(plugin.label, plugin.commands.get())),
 				});
 			}
+			const mcpServers = this.getSessionMcpServers();
+			actions.push({
+				id: 'backboardComposerAdd.mcp',
+				label: localize('composer.mcpServers', "Connectors"),
+				description: describeMcpServers(mcpServers),
+				icon: Codicon.server,
+				class: undefined,
+				tooltip: localize('composer.mcpServers.tooltip', "See and turn on the connectors this chat can use"),
+				category: pluginsCategory,
+				enabled: true,
+				run: () => this.openNestedPicker(() => this.showMcpServers()),
+			});
 		}
 
 		const featuresCategory = this.menuKind === 'add'
@@ -5724,7 +5870,126 @@ class BackboardComposerOptionsActionViewItem extends ActionWidgetDropdownActionV
 			});
 		}
 
+		if (this.menuKind === 'add') {
+			// Where the session runs used to be a footer under the composer.
+			const location = this.inputPart.getComposerLocation();
+			actions.push({
+				id: 'backboardComposerAdd.location',
+				label: location.remote ? localize('composer.remote', "Remote") : localize('composer.local', "Local"),
+				description: location.folderName,
+				class: undefined,
+				tooltip: location.folderPath ?? location.folderName,
+				icon: location.remote ? Codicon.remote : Codicon.deviceDesktop,
+				category: { label: localize('composer.locationCategory', "Location"), order: 3, showHeader: false },
+				enabled: true,
+				run: () => this.openNestedPicker(() => this.showLocation()),
+			});
+		}
+
 		return actions;
+	}
+
+	private getSessionMcpServers(): readonly IAgentHostMcpServerEntry[] {
+		const sessionResource = this.inputPart.getComposerSessionResource();
+		if (!sessionResource) {
+			return [];
+		}
+		try {
+			return this.agentHostCustomizations.getMcpServers(sessionResource);
+		} catch {
+			return [];
+		}
+	}
+
+	/**
+	 * Lists the MCP servers this chat's agent can use, with live status. A
+	 * row does the obvious next thing: sign in, reconnect a failed server, or
+	 * connect/disconnect it for this chat. The list is the same in the Simple
+	 * and Editor windows because both push one shared server set.
+	 */
+	private showMcpServers(): void {
+		const body = this.openFlow(localize('composer.mcpServers', "Connectors"));
+		const render = () => {
+			dom.clearNode(body);
+			this.flowButton(body, localize('composer.back', "Back"), () => this.showDrawer('backboardComposerAdd.mcp'));
+			const servers = this.getSessionMcpServers();
+			if (!servers.length) {
+				dom.append(body, dom.$('p.backboard-composer-flow-status', { role: 'status' }, this.inputPart.getComposerSessionResource()
+					? localize('composer.mcpServers.empty', "No connectors yet. Add one to give the agent new tools.")
+					: localize('composer.mcpServers.noSession', "Connectors appear here once the chat is ready.")));
+			}
+			for (const server of [...servers].sort((a, b) => a.name.localeCompare(b.name))) {
+				const button = this.flowButton(body, '', () => runMcpServerRowAction(server));
+				button.classList.add('backboard-composer-drawer-option');
+				button.dataset.actionId = server.id;
+				dom.append(button, dom.$(`span${ThemeIcon.asCSSSelector(mcpServerRowIcon(server))}`, { 'aria-hidden': 'true' }));
+				dom.append(button, dom.$('span', undefined, server.name));
+				dom.append(button, dom.$('span.backboard-composer-drawer-value', undefined, mcpServerRowValue(server)));
+				button.title = mcpServerRowTooltip(server);
+				button.setAttribute('aria-label', localize('composer.mcpServer.aria', "{0}, {1}. {2}", server.name, mcpServerRowValue(server), mcpServerRowTooltip(server)));
+				this.flowDisposables.add(dom.addDisposableListener(button, 'mousedown', event => event.preventDefault()));
+			}
+			dom.append(body, dom.$('.backboard-composer-menu-separator', { role: 'separator' }));
+			const browse = this.flowButton(body, '', () => {
+				this.flowDisposables.clear();
+				this.composerInstantiationService.createInstance(SkillsLibraryController).showMarketplace(this.inputPart.element, 'mcp');
+			});
+			browse.classList.add('backboard-composer-drawer-option');
+			dom.append(browse, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.add)}`, { 'aria-hidden': 'true' }));
+			dom.append(browse, dom.$('span', undefined, localize('composer.mcpServers.browse', "Add Connectors…")));
+			this.flowDisposables.add(dom.addDisposableListener(browse, 'mousedown', event => event.preventDefault()));
+		};
+		render();
+		this.flowDisposables.add(this.agentHostCustomizations.onDidChangeCustomizations(() => {
+			if (!body.isConnected) {
+				return;
+			}
+			const focused = body.ownerDocument.activeElement instanceof HTMLElement ? body.ownerDocument.activeElement.dataset.actionId : undefined;
+			render();
+			(focused ? body.querySelector<HTMLButtonElement>(`button[data-action-id="${CSS.escape(focused)}"]`) : undefined)?.focus();
+		}));
+		body.querySelector<HTMLButtonElement>('button.backboard-composer-drawer-option')?.focus();
+	}
+
+	private showLocation(): void {
+		const location = this.inputPart.getComposerLocation();
+		const body = this.openFlow(localize('composer.location', "Session location"));
+		// A compact sub-view of the "+" menu: a back chevron beside the title
+		// replaces the Close/Back buttons (Escape and outside clicks still close).
+		body.parentElement?.classList.add('backboard-composer-location-flow');
+		const header = body.previousElementSibling;
+		if (header instanceof HTMLElement) {
+			header.querySelector('button')?.remove();
+			const back = this.flowButton(header, '', () => this.showDrawer('backboardComposerAdd.location'));
+			back.classList.add('backboard-composer-flow-back');
+			back.setAttribute('aria-label', localize('composer.back', "Back"));
+			back.title = localize('composer.back', "Back");
+			dom.append(back, dom.$(`span${ThemeIcon.asCSSSelector(Codicon.chevronLeft)}`, { 'aria-hidden': 'true' }));
+			header.prepend(back);
+			this.flowDisposables.add(dom.addDisposableListener(back, 'mousedown', event => event.preventDefault()));
+		}
+		const row = (icon: ThemeIcon, label: string, value: string | undefined, run: () => void) => {
+			const button = this.flowButton(body, '', run);
+			button.classList.add('backboard-composer-drawer-option');
+			dom.append(button, dom.$(`span${ThemeIcon.asCSSSelector(icon)}`, { 'aria-hidden': 'true' }));
+			dom.append(button, dom.$('span', undefined, label));
+			dom.append(button, dom.$('span.backboard-composer-drawer-value', undefined, value ?? ''));
+			// Keep the composer from reclaiming focus and tearing the flow down mid-click.
+			this.flowDisposables.add(dom.addDisposableListener(button, 'mousedown', event => event.preventDefault()));
+			return button;
+		};
+		const close = () => { this.flowDisposables.clear(); this.inputPart.focus(); };
+		const current = row(location.remote ? Codicon.remote : Codicon.deviceDesktop, location.remote ?? localize('composer.local', "Local"), location.folderName, close);
+		current.setAttribute('aria-pressed', 'true');
+		current.title = location.folderPath ?? location.folderName;
+		dom.append(current, dom.$(`span.backboard-composer-location-check${ThemeIcon.asCSSSelector(Codicon.check)}`, { 'aria-hidden': 'true' }));
+		const cloud = row(Codicon.cloud, localize('composer.cloud', "Cloud"), localize('composer.comingSoon', "Coming soon"), () => undefined);
+		cloud.disabled = true;
+		if (location.canConnectRemote) {
+			dom.append(body, dom.$('.backboard-composer-menu-separator', { role: 'separator' }));
+			row(Codicon.add, localize('composer.connectSSH', "Connect to SSH host…"), undefined, () => { close(); this.inputPart.connectComposerToRemoteHost(); });
+		}
+		current.focus();
 	}
 
 	private showEnumOption(option: IAgentHostGenericConfigOption): void {

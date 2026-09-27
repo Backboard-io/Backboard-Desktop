@@ -183,10 +183,12 @@ export class ChatContextUsageDetails extends Disposable {
 			// Clamp so the reserve never overflows the bar
 			this.outputBufferFill.style.width = `${Math.max(0, Math.min(100 - usageBarWidth, outputBufferPercentage))}%`;
 			this.outputBufferFill.style.display = '';
+			this.outputBufferFill.classList.remove('is-hidden');
 			this.outputBufferLegend.style.display = '';
 		} else {
 			this.outputBufferFill.style.width = '0';
 			this.outputBufferFill.style.display = 'none';
+			this.outputBufferFill.classList.add('is-hidden');
 			this.outputBufferLegend.style.display = 'none';
 		}
 

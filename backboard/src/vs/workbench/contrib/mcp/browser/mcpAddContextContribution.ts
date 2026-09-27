@@ -51,7 +51,7 @@ export class McpAddContextContribution extends Disposable implements IWorkbenchC
 	private _registerAddContextMenu() {
 		this._addContextMenu.value = this._chatContextPickService.registerChatContextItem({
 			type: 'pickerPick',
-			label: localize('mcp.addContext', "MCP Resources..."),
+			label: localize('mcp.addContext', "Connector Resources..."),
 			icon: Codicon.mcp,
 			isEnabled(widget) {
 				return !!widget.attachmentCapabilities.supportsMCPAttachments;
@@ -59,7 +59,7 @@ export class McpAddContextContribution extends Disposable implements IWorkbenchC
 			asPicker: () => {
 				const helper = this._instantiationService.createInstance(McpResourcePickHelper);
 				return {
-					placeholder: localize('mcp.addContext.placeholder', "Select MCP Resource..."),
+					placeholder: localize('mcp.addContext.placeholder', "Select Connector Resource..."),
 					picks: (_query, token) => this._getResourcePicks(token, helper),
 					goBack: () => {
 						return helper.navigateBack();
