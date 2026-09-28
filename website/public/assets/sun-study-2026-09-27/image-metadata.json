@@ -1,0 +1,101 @@
+[
+  {
+    "file": "01-first-light.png",
+    "size": [
+      2172,
+      724
+    ],
+    "mode": "RGB",
+    "alpha_range": null
+  },
+  {
+    "file": "02-solar-tide.png",
+    "size": [
+      2172,
+      724
+    ],
+    "mode": "RGB",
+    "alpha_range": null
+  },
+  {
+    "file": "03-golden-drift.png",
+    "size": [
+      2172,
+      724
+    ],
+    "mode": "RGB",
+    "alpha_range": null
+  },
+  {
+    "file": "04-sun-walk.png",
+    "size": [
+      2172,
+      724
+    ],
+    "mode": "RGB",
+    "alpha_range": null
+  },
+  {
+    "file": "05-vermilion-horizon.png",
+    "size": [
+      2172,
+      724
+    ],
+    "mode": "RGB",
+    "alpha_range": null
+  },
+  {
+    "file": "06-afternoon-court.png",
+    "size": [
+      2172,
+      724
+    ],
+    "mode": "RGB",
+    "alpha_range": null
+  },
+  {
+    "file": "07-afterglow.png",
+    "size": [
+      2172,
+      724
+    ],
+    "mode": "RGB",
+    "alpha_range": null
+  },
+  {
+    "file": "08-painted-sun.png",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "alpha_range": [
+      0,
+      255
+    ]
+  },
+  {
+    "file": "09-sunray-sweep.png",
+    "size": [
+      2172,
+      724
+    ],
+    "mode": "RGBA",
+    "alpha_range": [
+      0,
+      255
+    ]
+  },
+  {
+    "file": "10-warm-paint-edge.png",
+    "size": [
+      2172,
+      724
+    ],
+    "mode": "RGBA",
+    "alpha_range": [
+      0,
+      255
+    ]
+  }
+]

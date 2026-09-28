@@ -1,0 +1,464 @@
+/* Full-screen photographed scene; live HTML replaces only the laptop display. */
+body:has(.hero-landscape) {
+  border: 0;
+}
+body:has(.hero-landscape) > .site-header {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 20;
+  height: 106px;
+  color: #fff8e8;
+  text-shadow: 0 1px 8px #0006;
+}
+.hero-landscape {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  height: 100svh;
+  min-height: 680px;
+  background: #426c72;
+}
+.hero-landscape:before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background: url("assets/laptop-meadow-hero.png") center/cover no-repeat;
+}
+.hero-landscape:after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, #122014ad 0%, #16221683 25%, transparent 48%),
+    linear-gradient(180deg, #08223055, transparent 19%);
+}
+.hero-landscape .hero {
+  position: static;
+  display: block;
+  margin: 0;
+  width: 100%;
+  max-width: none;
+  padding: 0;
+}
+.hero-landscape .hero-copy {
+  position: absolute;
+  left: 4%;
+  top: 23%;
+  width: 29%;
+  z-index: 3;
+}
+.hero-landscape h1 {
+  font: 600 clamp(62px, 6.5vw, 112px) / 0.94 var(--display);
+  letter-spacing: -2px;
+  margin: 24px 0;
+  color: #fff6df;
+  text-shadow: 0 2px 18px #17221455;
+}
+.hero-landscape .hero-copy > p {
+  color: #fff4df;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.hero-landscape .eyebrow {
+  color: #fff2de;
+  font-size: 8px;
+  letter-spacing: 0.8px;
+}
+.hero-landscape .hero-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 24px;
+}
+.hero-landscape .primary {
+  background: #ff6600;
+  color: #fff7eb;
+}
+.hero-landscape .secondary {
+  background: #18231c75;
+  border: 1px solid #fff3d885;
+}
+.hero-landscape .button {
+  font-size: 15px;
+  padding: 12px 15px;
+}
+.hero-landscape .terminal-install {
+  display: none;
+}
+.hero-laptop-scene {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.laptop {
+  position: absolute;
+  inset: 0;
+}
+.laptop-lid {
+  display: contents;
+}
+.laptop-camera,
+.laptop-wordmark,
+.laptop-deck,
+.laptop-lip {
+  display: none;
+}
+.laptop-display {
+  position: absolute;
+  overflow: hidden;
+  background: #191a1e;
+  pointer-events: auto;
+}
+.laptop-display iframe {
+  display: block;
+  width: 1100px;
+  height: 720px;
+  max-width: none;
+  border: 0;
+  transform-origin: top left;
+}
+.laptop-mode-controls {
+  position: absolute;
+  left: 4%;
+  bottom: 8%;
+  display: flex;
+  gap: 6px;
+  pointer-events: auto;
+  z-index: 4;
+}
+.laptop-mode-controls button {
+  border: 1px solid #fff5d970;
+  background: #14261dbb;
+  color: #fff2df;
+  border-radius: 3px;
+  font: 9px var(--mono);
+  padding: 9px 12px;
+  cursor: pointer;
+}
+.laptop-mode-controls button[aria-pressed="true"] {
+  background: #f0efe4;
+  color: #242328;
+}
+.laptop-caption {
+  position: absolute;
+  left: 4%;
+  bottom: 4%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 7px var(--mono);
+  letter-spacing: 0.6px;
+  color: #fff4df;
+  pointer-events: auto;
+}
+.laptop-live-dot {
+  width: 5px;
+  height: 5px;
+  background: #d4f5a2;
+  border-radius: 50%;
+}
+@media (max-width: 1000px) and (min-width: 701px) {
+  .hero-landscape .hero-copy {
+    left: 4%;
+    width: 28%;
+    top: 22%;
+  }
+  .hero-landscape h1 {
+    font-size: 64px;
+  }
+  .hero-landscape .hero-copy > p {
+    font-size: 11px;
+  }
+  .hero-landscape .button {
+    font-size: 13px;
+    padding: 10px;
+  }
+}
+@media (max-width: 700px) {
+  body:has(.hero-landscape) > .site-header {
+    height: 90px;
+  }
+  .hero-landscape {
+    height: 100svh;
+    min-height: 800px;
+  }
+  .hero-landscape:before {
+    background-size: auto 58%;
+    background-position: 61% bottom;
+    background-repeat: no-repeat;
+    background-color: #193b37;
+  }
+  .hero-landscape:after {
+    background: linear-gradient(
+      180deg,
+      #193b3700 30%,
+      #193b37 41%,
+      #193b3700 63%
+    );
+  }
+  .hero-landscape .hero-copy {
+    left: 6%;
+    top: 100px;
+    width: 88%;
+  }
+  .hero-landscape h1 {
+    font-size: clamp(64px, 16vw, 94px);
+    margin: 16px 0;
+  }
+  .hero-landscape .hero-copy > p {
+    font-size: 12px;
+    margin: 12px 0;
+  }
+  .hero-landscape .hero-actions {
+    margin-top: 14px;
+  }
+  .hero-landscape .button {
+    font-size: 14px;
+    padding: 10px 13px;
+  }
+  .laptop-mode-controls {
+    left: 6%;
+    bottom: 6%;
+  }
+  .laptop-caption {
+    left: 6%;
+    bottom: 2.5%;
+    font-size: 6px;
+  }
+}
+.hero-landscape {
+  overflow: clip;
+}
+/* Reference-inspired sentence-case typography and uncropped responsive scene. */
+.hero-landscape .hero-copy {
+  top: 24%;
+  width: 30%;
+  max-width: 530px;
+}
+.hero-landscape h1 {
+  font:
+    400 clamp(36px, 3.55vw, 62px) / 1.08 Inter,
+    Arial,
+    sans-serif;
+  letter-spacing: -0.035em;
+  text-transform: none;
+  margin: 20px 0 24px;
+}
+.hero-landscape .hero-copy > p {
+  font:
+    400 15px/1.55 Inter,
+    Arial,
+    sans-serif;
+  letter-spacing: 0.1px;
+}
+.hero-landscape .hero-copy > p br {
+  display: none;
+}
+.hero-landscape .button {
+  font:
+    500 13px/1.4 Inter,
+    Arial,
+    sans-serif;
+  text-transform: none;
+  border-radius: 5px;
+  padding: 12px 16px;
+}
+body:has(.hero-landscape) > .site-header nav {
+  font:
+    400 13px/1.4 Inter,
+    Arial,
+    sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+  gap: 20px;
+}
+body:has(.hero-landscape) > .site-header .header-cta {
+  border-radius: 5px;
+}
+.laptop-mode-controls {
+  position: static;
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 28px;
+  gap: 5px;
+}
+.laptop-mode-controls button {
+  font:
+    400 11px/1.3 Inter,
+    Arial,
+    sans-serif;
+  padding: 8px 12px;
+  border-radius: 4px;
+  min-height: 34px;
+}
+.laptop-caption {
+  display: none;
+}
+.laptop-film {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #101214;
+  display: block;
+}
+.laptop-display [hidden] {
+  display: none !important;
+}
+@media (max-width: 1100px), (max-aspect-ratio: 159/100) {
+  .hero-landscape {
+    height: calc(440px + 56.28vw);
+    min-height: 100svh;
+    background: #193b37;
+  }
+  .hero-landscape:before {
+    background-size: 100% auto;
+    background-position: center bottom;
+    background-color: #193b37;
+  }
+  .hero-landscape:after {
+    background: linear-gradient(180deg, #193b37 0%, #193b37 35%, #193b3700 62%);
+  }
+  .hero-landscape .hero-copy {
+    top: 120px;
+    left: 6%;
+    width: 88%;
+    max-width: 650px;
+  }
+  .hero-landscape h1 {
+    font-size: clamp(34px, 5vw, 52px);
+    max-width: 590px;
+  }
+  .hero-landscape .hero-copy > p {
+    max-width: 530px;
+    font-size: 14px;
+  }
+  .hero-landscape .hero-actions {
+    margin-top: 18px;
+  }
+  .laptop-mode-controls {
+    margin-top: 18px;
+  }
+  body:has(.hero-landscape) > .site-header {
+    height: 95px;
+  }
+}
+@media (max-width: 700px) {
+  .hero-landscape {
+    height: calc(440px + 56.28vw);
+    min-height: 0;
+  }
+  .hero-landscape .hero-copy {
+    top: 108px;
+  }
+  .hero-landscape h1 {
+    font-size: clamp(32px, 8.6vw, 48px);
+    margin: 16px 0 18px;
+  }
+  .hero-landscape .hero-copy > p {
+    font-size: 13px;
+  }
+  .hero-landscape .button {
+    font-size: 12px;
+    padding: 11px 13px;
+  }
+  .hero-landscape .hero-actions {
+    gap: 7px;
+  }
+  .laptop-mode-controls button {
+    font-size: 11px;
+    padding: 8px 12px;
+  }
+  body:has(.hero-landscape) > .site-header nav {
+    font-size: 11px;
+    gap: 12px;
+  }
+}
+@media (max-height: 650px) and (min-width: 1101px) and (min-aspect-ratio: 159/100) {
+  .hero-landscape {
+    min-height: 600px;
+  }
+  .hero-landscape .hero-copy {
+    top: 20%;
+  }
+  .hero-landscape h1 {
+    font-size: 42px;
+  }
+}
+
+@media(min-width:1101px) and (min-aspect-ratio:159/100){.hero-landscape:before{background-position:85% center;}.hero-landscape .hero-copy{width:28%;}}
+
+/* A compact scroll tour, with no wheel interception or scroll locking. */
+.hero-scroll { --tour-distance: 480px; position: relative; height: calc(var(--scene-height, 100svh) + var(--tour-distance)); }
+.hero-scroll .hero-landscape { position: sticky; top: var(--tour-top, 0px); }
+.laptop-display.is-switching { animation: screen-reveal 180ms ease-out; }
+@keyframes screen-reveal { from { opacity: .65; } to { opacity: 1; } }
+@media (max-width: 700px) { .hero-scroll { --tour-distance: 360px; } }
+@media (prefers-reduced-motion: reduce) {
+ .hero-scroll { --tour-distance: 0px; }
+ .hero-scroll .hero-landscape { position: relative; top: 0; }
+ .laptop-display.is-switching { animation: none; }
+}
+
+/* Matching camera geometry lets scenery dissolve without moving the live screen. */
+.hero-landscape::before { background-image: none; }
+.hero-scenery { position:absolute; inset:0; z-index:-2; pointer-events:none; overflow:hidden; }
+:where(.hero-scenery) > div { position:absolute; inset:0; background:center/cover no-repeat; }
+.scenery-meadow { background-image:url("assets/laptop-meadow-hero.png"); }
+.hero-scenery > div:not(.scenery-meadow) { opacity:0; transition:opacity 1400ms ease-in-out; }
+.scenery-surf { background-image:url("assets/laptop-surf-hero.png"); }
+.scenery-alpine { background-image:url("assets/laptop-alpine-hero.png"); }
+.scenery-desert { background-image:url("assets/laptop-desert-hero.png"); }
+.hero-landscape[data-scenery="surf"] .scenery-surf,
+.hero-landscape[data-scenery="alpine"] .scenery-alpine,
+.hero-landscape[data-scenery="desert"] .scenery-desert { opacity:1; }
+.scenery-controls { position:absolute; right:3%; bottom:18px; z-index:5; display:flex; gap:5px; padding:5px; border-radius:7px; background:#10221dbb; }
+.scenery-controls button { border:0; border-radius:4px; background:transparent; color:#fff7e7; padding:9px 10px; font:11px Inter,Arial,sans-serif; cursor:pointer; }
+.scenery-controls button[aria-pressed="true"] { background:#fff2dd; color:#172a26; }
+.scenery-controls button:focus-visible { outline:2px solid #ff6600; outline-offset:2px; }
+@media(min-width:1101px) and (min-aspect-ratio:159/100) { .hero-scenery > div { background-position:85% center; } }
+@media(max-width:1100px),(max-aspect-ratio:159/100) { .hero-scenery > div { background-size:100% auto; background-position:center bottom; } }
+@media(max-width:700px) { .scenery-controls { bottom:8px; right:3%; padding:3px; } .scenery-controls button { font-size:10px; padding:7px; } }
+@media(prefers-reduced-motion:reduce) { .hero-scenery > div { transition:none; } }
+
+@media(max-width:420px) { .scenery-controls { gap:2px; max-width:94%; } .scenery-controls button { padding:7px 6px; font-size:9px; } }
+
+/* Pixel worlds, composed around the same live screen. */
+.scenery-pixelsurf { background-image:url("assets/laptop-pixelsurf-hero.png"); }
+.scenery-pixellake { background-image:url("assets/laptop-pixellake-hero.png"); }
+.hero-landscape[data-scenery="pixelsurf"] .scenery-pixelsurf,
+.hero-landscape[data-scenery="pixellake"] .scenery-pixellake { opacity:1; }
+.hero-landscape { --hero-ink:#193b37; }
+.hero-landscape[data-scenery="surf"] { --hero-ink:#243637; }
+.hero-landscape[data-scenery="alpine"] { --hero-ink:#26394c; }
+.hero-landscape[data-scenery="desert"] { --hero-ink:#452c26; }
+.hero-landscape[data-scenery="pixelsurf"] { --hero-ink:#24243e; }
+.hero-landscape[data-scenery="pixellake"] { --hero-ink:#191d36; }
+.hero-landscape .hero-copy > p { text-wrap:pretty; max-width:34ch; }
+.hero-landscape h1 { text-wrap:balance; }
+.hero-landscape .eyebrow { font-size:9px; letter-spacing:1.1px; }
+.hero-landscape .secondary { background:#111c248c; }
+.scenery-controls { align-items:center; gap:10px; padding:5px 5px 5px 14px; border:1px solid #fff3; background:#101a23e6; box-shadow:0 4px 18px #0002; }
+.scenery-controls label { font:10px var(--mono); text-transform:uppercase; letter-spacing:1px; color:#fff9; }
+.scenery-controls select { max-width:180px; min-height:40px; border:0; background:transparent; color:#fff5df; font:12px Inter,Arial,sans-serif; cursor:pointer; }
+.scenery-controls option { background:#17232b; color:#fff5df; }
+.scenery-controls .scenery-pause { width:40px; min-height:40px; font-size:14px; border-left:1px solid #fff3; border-radius:0 3px 3px 0; }
+.scenery-controls select:focus-visible { outline:2px solid #ff6600; outline-offset:2px; }
+@media(min-width:1101px) and (min-aspect-ratio:159/100) {
+ .hero-landscape .hero-copy { top:22%; width:29%; }
+ .hero-landscape h1 { font-size:clamp(42px,4.2vw,72px); line-height:1.04; letter-spacing:-.045em; }
+ .hero-landscape::after { background:linear-gradient(90deg,#101b25cf 0%,#101b2599 26%,#101b2533 39%,transparent 54%),linear-gradient(180deg,#07172466,transparent 24%); }
+}
+@media(max-width:1100px),(max-aspect-ratio:159/100) {
+ .hero-landscape,.hero-landscape::before { background-color:var(--hero-ink); transition:background-color 1400ms; }
+ .hero-landscape::after { background:linear-gradient(180deg,var(--hero-ink) 0%,var(--hero-ink) 35%,transparent 62%); }
+}
+@media(max-width:700px) {
+ .scenery-controls { right:12px; bottom:8px; gap:7px; padding:3px 3px 3px 10px; }
+ .scenery-controls label { font-size:8px; letter-spacing:.5px; }
+ .scenery-controls select { font-size:11px; max-width:145px; }
+}
+@media(prefers-reduced-motion:reduce) { .hero-landscape,.hero-landscape::before { transition:none; } }
+/* Keep the following photo divider behind the hero controls. */
+.hero-scroll { z-index:2; }

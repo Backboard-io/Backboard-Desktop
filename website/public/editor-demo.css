@@ -1,0 +1,808 @@
+.ide-demo[data-mode="editor"] > .ide-sidebar {
+  display: none;
+}
+.ide-demo[data-mode="editor"] {
+  background: #191a1d;
+}
+.editor-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  font:
+    11px/1.55 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: #cccdd2;
+  background: #191a1d;
+}
+.editor-shell button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.editor-shell button:hover {
+  background: #ffffff0c;
+}
+.editor-shell button:focus-visible,
+.editor-shell input:focus-visible,
+.editor-shell textarea:focus-visible {
+  outline: 1px solid #92b8d5;
+  outline-offset: -1px;
+}
+.editor-windowbar {
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 3px 8px;
+  border-bottom: 1px solid #303137;
+}
+.editor-mode-switch {
+  display: flex;
+  background: #25262b;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+.editor-mode-switch button {
+  padding: 2px 8px;
+  font-size: 10px;
+  color: #94959c;
+}
+.editor-mode-switch button.selected {
+  background: #33353c;
+  color: #d5d5da;
+}
+.editor-command {
+  margin: auto;
+  max-width: 420px;
+  flex: 1;
+  text-align: center;
+  background: #202125;
+  border: 1px solid #34353b;
+  border-radius: 5px;
+  font-size: 10px;
+  color: #a4a5ab;
+}
+.editor-command .ide-icon {
+  font-size: 10px;
+}
+.editor-nav-arrows {
+  color: #74757b;
+}
+.editor-workbench {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.editor-activity {
+  width: 37px;
+  border-right: 1px solid #2b2c31;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 0;
+  flex-shrink: 0;
+  color: #98999f;
+}
+.editor-activity button,
+.editor-activity > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 29px;
+  height: 29px;
+}
+.editor-activity .ide-icon {
+  font-size: 20px;
+}
+.editor-activity .selected {
+  background: #2d2e34;
+  border-radius: 5px;
+  color: #dedfe4;
+}
+.activity-spacer {
+  flex: 1;
+}
+.editor-explorer {
+  width: 177px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #303137;
+  background: #191a1d;
+  overflow: hidden;
+}
+.explorer-heading {
+  height: 34px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 13px;
+  font-size: 11px;
+}
+.explorer-heading strong {
+  font-weight: 600;
+}
+.editor-files {
+  overflow: auto;
+  flex: 1;
+}
+.editor-files details {
+  margin: 0;
+}
+.editor-files details details {
+  padding-left: 13px;
+}
+.editor-files summary,
+.editor-outlines summary {
+  font: inherit;
+  padding: 3px 9px;
+  line-height: 18px;
+  list-style: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.editor-files summary:after,
+.editor-outlines summary:after {
+  display: none;
+}
+.editor-files summary:before,
+.editor-outlines summary:before {
+  content: "›";
+  display: inline-block;
+  margin-right: 6px;
+  color: #b0b1b8;
+}
+.editor-files details[open] > summary:before,
+.editor-outlines details[open] > summary:before {
+  transform: rotate(90deg);
+}
+.editor-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 11px;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 10px !important;
+}
+.editor-file small {
+  margin-left: auto;
+  color: #a5b59b;
+}
+.editor-file.selected {
+  background: #2a2b31;
+  color: #eee;
+}
+.file-type {
+  font:
+    9px ui-monospace,
+    monospace;
+  color: #74adc3;
+}
+.editor-file:nth-of-type(2) .file-type {
+  color: #c3a167;
+}
+.file-note {
+  display: block;
+  font-size: 10px;
+  padding: 3px 15px;
+  color: #bcbcc4;
+  line-height: 2;
+}
+.editor-outlines {
+  border-top: 1px solid #303137;
+}
+.editor-outlines details > span {
+  font-size: 9px;
+  padding: 10px;
+}
+.editor-search-box {
+  padding: 6px 10px;
+}
+.editor-search-box label {
+  font-size: 9px;
+  color: #999;
+}
+.editor-search-box input {
+  width: 100%;
+  background: #27282e;
+  color: #ddd;
+  border: 1px solid #42434b;
+  margin: 6px 0;
+  padding: 5px;
+  font-size: 10px;
+}
+.editor-center {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  background: #191a1d;
+  overflow: hidden;
+}
+.editor-tabs {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #292a30;
+  height: 32px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.editor-tabs button {
+  padding: 7px 9px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-right: 1px solid #292a30;
+  font-size: 10px;
+}
+.editor-tabs button.selected {
+  border-bottom: 1px solid #97b8cd;
+  background: #202126;
+}
+.editor-tabs button > span:last-child {
+  color: #9899a2;
+}
+.editor-tab-actions {
+  margin-left: auto;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+.editor-breadcrumb {
+  font-size: 10px;
+  padding: 4px 12px;
+  color: #9697a0;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.editor-breadcrumb .ide-icon {
+  font-size: 10px;
+}
+.editor-code-viewport {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.editor-code-scroll {
+  min-width: 0;
+  scrollbar-width: thin;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  padding-top: 2px;
+}
+#editor-source {
+  min-width: max-content;
+  padding: 0 16px 16px 0;
+}
+.editor-code-line {
+  display: flex;
+  font:
+    11px/1.8 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: pre;
+  min-height: 20px;
+}
+.editor-code-line > span {
+  width: 40px;
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: 16px;
+  color: #8e8f99;
+  user-select: none;
+}
+.editor-code-line code {
+  font: inherit;
+  color: #a8c7d2;
+}
+.editor-code-line b {
+  font-weight: 400;
+  color: #c797ca;
+}
+.editor-code-line em {
+  font-style: normal;
+  color: #caa890;
+}
+.editor-minimap {
+  position: relative;
+  flex: 0 0 40px;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 3px;
+  overflow: hidden;
+  background: #191a1d;
+  border-left: 1px solid #ffffff04;
+  pointer-events: none;
+}
+.editor-minimap i {
+  flex-shrink: 0;
+  opacity: 0.35;
+  height: 2px;
+  background: #a8c7d2;
+}
+.editor-minimap i:nth-child(3n) {
+  background: #c797ca;
+}
+.editor-bottom-panel {
+  height: 142px;
+  flex-shrink: 0;
+  border-top: 1px solid #34353b;
+}
+.editor-panel-tabs {
+  font-size: 8px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.editor-panel-tabs strong {
+  font-weight: 400;
+  border-bottom: 1px solid #b8bbc5;
+}
+.editor-panel-tabs button {
+  margin-left: auto;
+}
+.editor-terminal-output {
+  font:
+    10px/1.7 ui-monospace,
+    monospace;
+  padding: 5px 12px;
+}
+.editor-terminal-output > span {
+  color: #babdc7;
+}
+.editor-terminal-output > .diff-add {
+  color: #8fbd98;
+}
+.editor-chat {
+  width: 32%;
+  min-width: 240px;
+  max-width: 365px;
+  border-left: 1px solid #303137;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: #191a1d;
+}
+.editor-chat-tabs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #303137;
+  height: 32px;
+  padding: 0 9px;
+  flex-shrink: 0;
+}
+.editor-chat-tabs > span:first-child {
+  flex: 1;
+  color: #c4c4ce;
+}
+.editor-chat-history {
+  position: relative;
+  overflow: auto;
+  flex: 1;
+  padding: 12px 15px 26px;
+  min-height: 0;
+}
+.editor-welcome {
+  height: 100%;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.editor-welcome img {
+  filter: none;
+  margin-bottom: 19px;
+  width: 42px;
+  height: 58px;
+}
+.editor-welcome h3 {
+  font:
+    400 14px -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  margin: 0 0 6px;
+}
+.editor-welcome p {
+  font-size: 11px;
+  margin: 0;
+}
+.editor-chat-form {
+  margin: 0 12px 10px;
+  background: #222327;
+  border-radius: 16px;
+  border: 0;
+  padding: 7px 7px 0;
+  flex-shrink: 0;
+  box-shadow: none;
+}
+.editor-input-surface {
+  background: #2b2c31;
+  border: 1px solid #404148;
+  border-radius: 11px;
+  padding: 10px 10px 7px;
+  overflow: hidden;
+}
+.editor-input-surface:focus-within {
+  border-color: #6b7787;
+}
+.editor-context {
+  display: flex;
+  gap: 5px;
+  font-size: 9px;
+  color: #a5a5af;
+  font-style: italic;
+}
+.editor-chat-form textarea {
+  display: block;
+  resize: none;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #d6d6dc;
+  padding: 10px 0;
+  font:
+    11px/1.7 -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  height: 66px;
+  min-height: 66px;
+  max-height: 140px;
+}
+.editor-chat-form textarea::placeholder {
+  color: #90909b;
+}
+.editor-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #92939d;
+  padding: 6px 0;
+}
+.editor-composer-actions > span:first-child {
+  margin-right: auto;
+}
+.editor-composer-actions .ide-icon {
+  font-size: 13px;
+}
+.editor-model {
+  font-size: 7px;
+  max-width: 95px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.editor-composer-actions button {
+  border-radius: 50%;
+  border: 1px solid #4b4c53;
+  padding: 2px;
+  display: flex;
+}
+.editor-chat-location {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  margin: 0;
+  padding: 8px 6px 9px;
+  background: transparent;
+  color: #aaaab2;
+}
+.editor-statusbar {
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid #303137;
+  font-size: 9px;
+  gap: 10px;
+  padding: 0 9px;
+  flex-shrink: 0;
+  color: #adaeb6;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.editor-statusbar .ide-icon {
+  font-size: 11px;
+}
+.editor-user {
+  font-size: 11px;
+  background: #292a31;
+  padding: 10px;
+  border-radius: 7px;
+  margin: 0 0 15px;
+  overflow-wrap: anywhere;
+}
+.editor-reply {
+  font-size: 11px;
+  line-height: 1.8;
+  animation: reply-in 0.16s ease-out;
+}
+.editor-reply small {
+  font-size: 7px;
+  letter-spacing: 1px;
+  color: #999eae;
+}
+.editor-reply > span {
+  font-size: 10px;
+  color: #a9c5af;
+}
+.hide-explorer .editor-explorer {
+  display: none;
+}
+.hide-chat .editor-chat {
+  display: none;
+}
+[hidden] {
+  display: none !important;
+}
+@keyframes reply-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.demo-step {
+  transition-duration: 0.16s;
+}
+@media (max-width: 1100px) {
+  .editor-explorer {
+    width: 145px;
+  }
+  .editor-chat {
+    min-width: 215px;
+  }
+  .editor-code-line {
+    font-size: 10px;
+  }
+  .editor-tabs button {
+    font-size: 9px;
+  }
+  .editor-model {
+    display: none;
+  }
+}
+@media (max-width: 700px) {
+  .editor-explorer {
+    width: 116px;
+  }
+  .editor-activity {
+    width: 30px;
+  }
+  .editor-activity .ide-icon {
+    font-size: 17px;
+  }
+  .editor-chat {
+    display: none;
+  }
+  .editor-shell:not(.hide-chat).mobile-chat .editor-chat {
+    display: flex;
+    position: absolute;
+    right: 0;
+    top: 30px;
+    bottom: 20px;
+    width: 78%;
+    max-width: none;
+    z-index: 3;
+  }
+  .editor-command {
+    font-size: 8px;
+    min-width: 25px;
+  }
+  .editor-nav-arrows {
+    display: none;
+  }
+  .editor-mode-switch button {
+    padding: 2px 5px;
+    font-size: 9px;
+  }
+  .editor-windowbar {
+    gap: 3px;
+    padding-inline: 4px;
+  }
+  .editor-windowbar > .editor-command {
+    margin: 0 2px;
+  }
+  .editor-code-line {
+    font-size: 9px;
+  }
+  .editor-code-line > span {
+    width: 27px;
+    padding-right: 8px;
+  }
+  .editor-tabs button {
+    font-size: 8px;
+    padding: 8px 6px;
+    gap: 5px;
+  }
+  .editor-tab-actions {
+    display: none;
+  }
+  .editor-statusbar {
+    font-size: 7px;
+  }
+  .editor-statusbar > span:last-child {
+    max-width: 60%;
+    overflow: hidden;
+  }
+  .editor-file {
+    font-size: 9px !important;
+    padding-inline: 6px;
+  }
+  .editor-breadcrumb {
+    font-size: 8px;
+  }
+  .explorer-heading {
+    padding-inline: 8px;
+    font-size: 10px;
+  }
+  .editor-minimap {
+    display: none;
+  }
+  #editor-source {
+    padding-right: 12px;
+  }
+  .editor-files summary {
+    font-size: 10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .editor-reply {
+    animation: none;
+  }
+  .demo-step {
+    transition: none;
+  }
+}
+.demo-playing .editor-code-line {
+  animation: editor-line-in 0.14s both;
+  animation-delay: calc(var(--line) * 18ms);
+}
+@keyframes editor-line-in {
+  from {
+    opacity: 0.2;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo-playing .editor-code-line {
+    animation: none;
+  }
+}
+.editor-tab {
+  display: flex;
+  align-items: center;
+  border-right: 1px solid #292a30;
+  flex-shrink: 0;
+}
+.editor-tab > button {
+  border-right: 0;
+}
+.editor-tab .editor-tab-close {
+  padding: 6px 5px;
+  color: #93949f;
+  font-size: 13px;
+}
+.editor-tab:has(.selected) {
+  background: #202126;
+  border-bottom: 1px solid #97b8cd;
+}
+.editor-tab > button.selected {
+  border-bottom: 0;
+}
+.editor-empty {
+  padding: 50px 25px;
+  color: #9798a4;
+  font-size: 11px;
+}
+.editor-tabs {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+/* Keep the actual IDE surface crisp; the website grain sits behind it. */
+.ide-demo {
+  z-index: 10;
+}
+.editor-welcome h3 {
+  font-size: 14px;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+.editor-welcome p {
+  font-size: 11px;
+  color: #c2c2c8;
+  line-height: 1.5;
+}
+.editor-chat-form textarea:focus-visible {
+  outline: none;
+}
+.editor-composer-actions {
+  padding: 3px 0 0;
+  min-height: 24px;
+}
+.editor-context {
+  align-items: center;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.editor-context .file-type {
+  font-style: normal;
+}
+.editor-composer-actions > span:first-child {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.editor-composer-actions button {
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+}
+.editor-chat-location .ide-icon {
+  font-size: 13px;
+}
+.editor-chat-form textarea {
+  scrollbar-width: thin;
+}
+.demo-step {
+  transition-duration: 0.28s;
+}
+.demo-playing .editor-code-line {
+  animation-duration: 0.25s;
+  animation-delay: calc(var(--line) * 30ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo-step {
+    transition: none;
+  }
+  .demo-playing .editor-code-line {
+    animation: none;
+  }
+}
+.ide-demo {
+  width: 100%;
+  min-width: 0;
+}
+.editor-model {
+  font-size: 8px;
+  max-width: 110px;
+}
+.editor-chat-form {
+  max-width: calc(100% - 24px);
+}
+.editor-center {
+  container-type: inline-size;
+}
+@container (max-width:320px) {
+  .editor-minimap {
+    display: none;
+  }
+}

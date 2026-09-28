@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      name="description"
+      content="Connect Backboard Desktop to a cloud agent host. Prepare your remote workspace with an interactive setup guide."
+    />
+    <meta name="theme-color" content="#ff6600" />
+    <title>Backboard Cloud — Your workspace, beyond your computer.</title>
+    <link rel="icon" href="../logo.svg" />
+    <link rel="stylesheet" href="../style.css?v=solid-orange-final" />
+    <link rel="stylesheet" href="/cloud/cloud.css?v=blue-photo" />
+    <script src="/cloud/cloud.js" defer></script>
+  <link rel="stylesheet" href="/shared-nav.css?v=1">
+</head>
+  <body class="cloud-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header shared-header">
+  <nav class="nav-left" aria-label="Product navigation">
+    <a href="/kevin#workspace">Workspace</a>
+    <a href="/kevin#models">Models</a>
+    <a href="https://github.com/Backboard-io/Backboard-Desktop#documentation">Docs ↗</a>
+  </nav>
+  <a class="brand" href="/" aria-label="Backboard Studio home"><img src="/logo.svg" width="25" height="34" alt=""><span>BACKBOARD<br>STUDIO</span></a>
+  <nav class="nav-right" aria-label="Community navigation">
+    <a href="https://github.com/Backboard-io/Backboard-Desktop">GitHub ↗</a>
+    <a href="/cloud/">Cloud ↗</a>
+    <a class="header-cta" href="/kevin#downloads">Download ↗</a>
+  </nav>
+</header>
+    <main id="main">
+      <section class="cloud-hero">
+        <div class="cloud-photo cloud-photo-left" aria-hidden="true"></div>
+        <div class="cloud-photo cloud-photo-right" aria-hidden="true"></div>
+        <div class="cloud-hero-copy">
+          <span class="eyebrow">YOUR WORKSPACE. A DIFFERENT HORIZON.</span>
+          <h1>YOUR AGENTS.<br />IN THE CLOUD.</h1>
+          <p>
+            Keep your tools close. Give your agents room to work.<br />Connect a
+            remote host to your Backboard workspace.
+          </p>
+          <div class="cloud-actions">
+            <a class="button primary" href="#deploy"
+              >Set up your cloud host ↗</a
+            ><a class="button secondary" href="#features">Learn more ↓</a>
+          </div>
+          <span class="cloud-note"
+            >BRING YOUR OWN HOST · CONNECT FROM BACKBOARD DESKTOP</span
+          >
+        </div>
+      </section>
+      <section id="features" class="cloud-features wrap">
+        <h2>Same workspace.<br />A little more room.</h2>
+        <div class="cloud-feature-grid">
+          <article>
+            <span>CONNECT</span>
+            <h3>Local or remote.</h3>
+            <p>
+              Choose your computer or a saved cloud host from the location
+              picker. Start each new task where it belongs.
+            </p>
+          </article>
+          <article>
+            <span>WORKSPACE</span>
+            <h3>Your project, on your host.</h3>
+            <p>
+              Clone your repository on the remote machine, then choose its
+              folder in Backboard. Keep a clear separation between environments.
+            </p>
+          </article>
+          <article>
+            <span>AGENTS</span>
+            <h3>Bring your runtime.</h3>
+            <p>
+              Run a compatible Backboard agent server with your provider
+              credentials configured on the host.
+            </p>
+          </article>
+          <article>
+            <span>CONNECTION</span>
+            <h3>A private path in.</h3>
+            <p>
+              Connect through an SSH or Systems Manager tunnel, or use an
+              authenticated secure WebSocket endpoint.
+            </p>
+          </article>
+          <article>
+            <span>CONTEXT</span>
+            <h3>Stay with the work.</h3>
+            <p>
+              Existing conversations keep their original host. Choose a
+              different location when you start a new task.
+            </p>
+          </article>
+          <article>
+            <span>CONTROL</span>
+            <h3>Infrastructure you choose.</h3>
+            <p>
+              Use an existing EC2 machine. You control the server, repository,
+              credentials, and cloud provider account.
+            </p>
+          </article>
+        </div>
+      </section>
+      <section id="deploy" class="cloud-setup wrap">
+        <div class="setup-intro">
+          <span class="eyebrow">CONNECT YOUR CLOUD WORKSPACE</span>
+          <h2>From your host<br />to your IDE.</h2>
+          <p>
+            Prepare a connection for an existing Backboard agent server. This
+            guide generates your setup steps locally.
+          </p>
+          <p class="setup-disclosure">
+            This page does not create cloud infrastructure. Your host must
+            already run a compatible Backboard agent server.
+          </p>
+          <a
+            class="text-link"
+            href="https://github.com/Backboard-io/Backboard-Desktop/blob/main/docs/cloud-agent-locations.md"
+            >READ THE SERVER SETUP GUIDE ↗</a
+          >
+        </div>
+        <form id="host-form">
+          <div class="form-heading">
+            <span>HOST CONNECTION</span><span>01 / 02</span>
+          </div>
+          <label
+            >Workspace name<input
+              name="name"
+              value="My cloud workspace"
+              maxlength="60"
+              required
+              autocomplete="off"
+          /></label>
+          <fieldset>
+            <legend>How will you connect?</legend>
+            <label class="connection-option"
+              ><input
+                type="radio"
+                name="connection"
+                value="tunnel"
+                checked
+              /><span
+                >SSH tunnel<small
+                  >Connect privately through an existing SSH alias.</small
+                ></span
+              ></label
+            ><label class="connection-option"
+              ><input type="radio" name="connection" value="direct" /><span
+                >Secure endpoint<small
+                  >Use your host’s authenticated wss:// endpoint.</small
+                ></span
+              ></label
+            >
+          </fieldset>
+          <label id="alias-field"
+            >SSH host alias<input
+              name="alias"
+              value="backboard-ec2"
+              pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,62}"
+              title="Use letters, numbers, dots, dashes, or underscores; begin with a letter or number."
+              required
+              autocomplete="off" /></label
+          ><label id="endpoint-field" hidden
+            >Secure WebSocket endpoint<input
+              name="endpoint"
+              type="url"
+              placeholder="wss://agent.example.com"
+              autocomplete="off" /></label
+          ><label
+            >Remote project folder<input
+              name="folder"
+              value="/home/ubuntu/projects/orbit"
+              pattern="/.*"
+              title="Enter an absolute folder path starting with /."
+              required
+              autocomplete="off" /></label
+          ><button class="button primary" type="submit">
+            Prepare connection <span>↗</span></button
+          ><span class="form-note">No credentials are collected or sent.</span>
+        </form>
+        <div
+          id="connection-result"
+          class="connection-result"
+          hidden
+          tabindex="-1"
+        >
+          <div class="form-heading">
+            <span>YOUR CONNECTION IS READY TO CONFIGURE</span
+            ><span>02 / 02</span>
+          </div>
+          <h3 id="result-name"></h3>
+          <ol>
+            <li id="tunnel-step">
+              <strong>Open the tunnel</strong>
+              <p>Run this in a terminal and leave it open.</p>
+              <div class="cloud-command">
+                <code id="ssh-command"></code
+                ><button
+                  type="button"
+                  id="copy-tunnel"
+                  aria-label="Copy SSH tunnel command"
+                >
+                  Copy
+                </button>
+              </div>
+            </li>
+            <li>
+              <strong>Open Backboard Desktop</strong>
+              <p>Choose <b>New chat → Local → Connect EC2…</b> and enter:</p>
+              <dl>
+                <dt>Display name</dt>
+                <dd id="result-display-name"></dd>
+                <dt>Endpoint</dt>
+                <dd id="result-endpoint"></dd>
+                <dt>Project folder</dt>
+                <dd id="result-folder"></dd>
+              </dl>
+            </li>
+            <li>
+              <strong>Add your token in the IDE</strong>
+              <p>
+                Enter your server’s connection token in Backboard, then select
+                your remote project folder. A new task will use that host.
+              </p>
+            </li>
+          </ol>
+          <p class="result-note">
+            These are configuration instructions. No connection has been made or
+            verified by this website.
+          </p>
+          <button type="button" class="button secondary" id="edit-connection">
+            ← Edit connection</button
+          ><span id="cloud-status" role="status"></span>
+        </div>
+      </section>
+      <section id="faq" class="faq wrap">
+        <div>
+          <h2>FAQs</h2>
+          <a
+            class="text-link"
+            href="https://github.com/Backboard-io/Backboard-Desktop/blob/main/docs/cloud-agent-locations.md"
+            >VIEW DOCUMENTATION ↗</a
+          >
+        </div>
+        <div class="faq-items">
+          <details>
+            <summary>Does this page deploy an EC2 instance?</summary>
+            <p>
+              No. Backboard currently connects to an existing compatible agent
+              server. Provision the machine, build the runtime, and configure
+              provider credentials on the host before connecting.
+            </p>
+          </details>
+          <details>
+            <summary>Do my local files move to the cloud?</summary>
+            <p>
+              No. Clone or copy your project onto the remote machine first.
+              Choose that remote folder when you create the new task.
+            </p>
+          </details>
+          <details>
+            <summary>What do I pay for?</summary>
+            <p>
+              Your cloud provider bills for your infrastructure. Model providers
+              bill according to your accounts and usage. This website does not
+              sell hosting or collect payment.
+            </p>
+          </details>
+          <details>
+            <summary>Can I switch between local and cloud?</summary>
+            <p>
+              Yes, for new tasks. Select Local or a saved host from the location
+              chip. Existing conversations keep the host they started on.
+            </p>
+          </details>
+          <details>
+            <summary>Will tasks survive a disconnection?</summary>
+            <p>
+              That depends on the remote server configuration and process
+              supervision. Test your host’s behavior before relying on
+              unattended execution.
+            </p>
+          </details>
+        </div>
+      </section>
+      <section class="closing wrap">
+        <p>YOUR CODE. YOUR AGENTS. YOUR INFRASTRUCTURE.</p>
+        <a href="../">BACKBOARD<span>↗</span></a>
+      </section>
+    </main>
+    <footer class="wrap">
+      <a class="brand" href="../"
+        ><img src="../logo.svg" width="20" height="28" alt="" />backboard</a
+      >
+      <p>An independent, open-source IDE built on Microsoft’s Code – OSS.</p>
+      <div>
+        <a href="../">Desktop ↗</a
+        ><a href="https://github.com/Backboard-io/Backboard-Desktop"
+          >GitHub ↗</a
+        >
+      </div>
+    </footer>
+  </body>
+</html>

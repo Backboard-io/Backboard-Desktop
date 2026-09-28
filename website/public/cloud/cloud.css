@@ -1,0 +1,354 @@
+.cloud-hero {
+  position: relative;
+  min-height: 640px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  text-align: center;
+  padding: 55px 25px 95px;
+}
+.cloud-hero-copy {
+  position: relative;
+  z-index: 1;
+}
+.cloud-hero h1 {
+  font-size: clamp(75px, 8vw, 112px);
+  line-height: 0.98;
+  letter-spacing: -3px;
+  margin: 24px 0 30px;
+}
+.cloud-hero .eyebrow {
+  font-size: 9px;
+}
+.cloud-hero p {
+  font-size: 15px;
+  line-height: 1.85;
+  margin: 0 auto 28px;
+  max-width: 530px;
+}
+.cloud-actions {
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+}
+.cloud-note {
+  display: block;
+  font: 8px/1.8 var(--mono);
+  max-width: 290px;
+  margin: 26px auto 0;
+  letter-spacing: 0.6px;
+}
+.cloud-photo {
+  position: absolute;
+  width: 610px;
+  height: 430px;
+  background: url("../assets/golden-hour.jpeg") center 10%/180% auto;
+  filter: grayscale(1) contrast(1.6);
+  mix-blend-mode: screen;
+  opacity: 0.22;
+  mask-image: radial-gradient(ellipse, black 10%, transparent 70%);
+  pointer-events: none;
+}
+.cloud-photo-left {
+  left: -140px;
+  bottom: -10px;
+  transform: rotate(-12deg);
+}
+.cloud-photo-right {
+  right: -100px;
+  top: 0;
+  transform: rotate(10deg);
+}
+.cloud-features {
+  padding: 70px 0 90px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.cloud-features > h2 {
+  text-align: center;
+  font-size: 60px;
+  margin-bottom: 50px;
+}
+.cloud-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 45px 50px;
+}
+.cloud-feature-grid article > span {
+  font: 9px var(--mono);
+  color: #beb9ff;
+  letter-spacing: 1px;
+}
+.cloud-feature-grid h3 {
+  font: 400 31px var(--display);
+  margin: 17px 0 12px;
+}
+.cloud-feature-grid p {
+  font-size: 12px;
+  line-height: 1.9;
+  color: #cbc7ff;
+  margin: 0;
+}
+.cloud-setup {
+  padding: 95px 0;
+  display: grid;
+  grid-template-columns: 1fr 1.12fr;
+  gap: 85px;
+  border-bottom: 1px solid var(--line);
+}
+.setup-intro h2 {
+  margin: 22px 0;
+}
+.setup-intro > p {
+  font-size: 13px;
+  line-height: 1.9;
+  color: #cbc7ff;
+  max-width: 330px;
+}
+.setup-intro .setup-disclosure {
+  font: 10px/1.9 var(--mono);
+  margin: 27px 0;
+}
+.cloud-setup form,
+.connection-result {
+  border: 1px solid #ffffff65;
+  background: #09009855;
+  padding: 27px;
+  min-width: 0;
+}
+.form-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  font: 8px/1.6 var(--mono);
+  letter-spacing: 0.6px;
+  margin-bottom: 27px;
+}
+.cloud-setup form > label {
+  display: block;
+  font-size: 12px;
+  margin: 18px 0;
+}
+.cloud-setup input:not([type="radio"]) {
+  display: block;
+  background: #090073;
+  color: #fff;
+  border: 1px solid #8b83ff;
+  width: 100%;
+  padding: 12px;
+  margin-top: 9px;
+  border-radius: 0;
+  font: 12px var(--mono);
+}
+.cloud-setup input::placeholder {
+  color: #a59cde;
+}
+.cloud-setup input:focus-visible {
+  outline: 2px solid #efeee5;
+  outline-offset: 2px;
+}
+.cloud-setup fieldset {
+  padding: 0;
+  border: 0;
+  margin: 22px 0;
+}
+.cloud-setup legend {
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.connection-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid #ffffff30;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.connection-option:has(input:checked) {
+  background: #ffffff14;
+  border-color: #dfdcff;
+}
+.connection-option input {
+  accent-color: #dfdcff;
+  margin: 3px 0 0;
+}
+.connection-option span {
+  font-size: 12px;
+}
+.connection-option small {
+  display: block;
+  font-size: 10px;
+  line-height: 1.6;
+  color: #cbc7ff;
+  margin-top: 5px;
+}
+.cloud-setup form > .button {
+  border: 0;
+  width: 100%;
+  margin-top: 12px;
+  cursor: pointer;
+}
+.form-note {
+  display: block;
+  font: 8px var(--mono);
+  text-align: center;
+  color: #cbc7ff;
+  margin-top: 14px;
+}
+.connection-result {
+  grid-column: 2;
+  grid-row: 1;
+}
+.connection-result h3 {
+  font: 400 35px var(--display);
+  margin: 0 0 25px;
+  overflow-wrap: anywhere;
+}
+.connection-result ol {
+  padding-left: 20px;
+  margin: 0;
+}
+.connection-result li {
+  font-size: 12px;
+  margin-bottom: 25px;
+  padding-left: 5px;
+}
+.connection-result li p {
+  font-size: 11px;
+  line-height: 1.8;
+  color: #d5d0ff;
+  margin: 7px 0 12px;
+}
+.cloud-command {
+  display: flex;
+  border: 1px solid #8b83ff;
+  background: #090073;
+  padding: 10px;
+  gap: 10px;
+  align-items: center;
+}
+.cloud-command code {
+  font: 9px/1.8 var(--mono);
+  overflow-wrap: anywhere;
+  flex: 1;
+}
+.cloud-command button {
+  font: 9px var(--mono);
+  color: #fff;
+  background: #ffffff20;
+  border: 1px solid #ffffff40;
+  padding: 6px;
+  cursor: pointer;
+}
+.connection-result dl {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 10px;
+  font-size: 10px;
+}
+.connection-result dd {
+  margin: 0;
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+.connection-result dt {
+  color: #cbc7ff;
+}
+.result-note {
+  font: 9px/1.8 var(--mono);
+  color: #cbc7ff;
+}
+.connection-result > .button {
+  border: 0;
+  cursor: pointer;
+}
+#cloud-status {
+  display: block;
+  font-size: 10px;
+  margin-top: 12px;
+}
+[hidden] {
+  display: none !important;
+}
+.cloud-setup:has(.connection-result:not([hidden])) .setup-intro {
+  grid-column: 1;
+  grid-row: 1;
+}
+@media (max-width: 900px) {
+  .cloud-setup {
+    gap: 35px;
+  }
+  .cloud-feature-grid {
+    gap: 35px;
+  }
+  .cloud-setup form,
+  .connection-result {
+    padding: 20px;
+  }
+}
+@media (max-width: 700px) {
+  .cloud-hero {
+    padding: 35px 18px 70px;
+    min-height: 580px;
+  }
+  .cloud-hero h1 {
+    font-size: 70px;
+    letter-spacing: -2px;
+  }
+  .cloud-hero p {
+    font-size: 12px;
+  }
+  .cloud-note {
+    font-size: 7px;
+  }
+  .cloud-photo {
+    width: 450px;
+    height: 350px;
+  }
+  .cloud-photo-right {
+    right: -240px;
+    top: 0;
+  }
+  .cloud-photo-left {
+    left: -240px;
+    bottom: -50px;
+  }
+  .cloud-features {
+    padding: 50px 0;
+  }
+  .cloud-features > h2 {
+    font-size: 47px;
+  }
+  .cloud-feature-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 30px 25px;
+  }
+  .cloud-feature-grid h3 {
+    font-size: 28px;
+  }
+  .cloud-feature-grid p {
+    font-size: 11px;
+  }
+  .cloud-setup {
+    display: block;
+    padding: 55px 0;
+  }
+  .setup-intro {
+    margin-bottom: 30px;
+  }
+  .cloud-setup form,
+  .connection-result {
+    padding: 22px;
+  }
+  .cloud-actions .button {
+    font-size: 13px;
+  }
+  .cloud-hero .eyebrow {
+    font-size: 7px;
+  }
+  .setup-intro > p {
+    max-width: none;
+  }
+}

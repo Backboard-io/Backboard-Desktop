@@ -1,0 +1,50 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@200&display=swap');
+/* Hero-only treatment: keeps the scene and live screen geometry independent. */
+.hero-landscape .hero-copy { top:18%; }
+.hero-landscape h1 {
+  font:200 clamp(52px,5.1vw,88px)/.96 'Barlow Condensed','Arial Narrow',sans-serif;
+  text-transform:uppercase;
+  letter-spacing:-.035em;
+  margin:18px 0 20px;
+  text-shadow:none;
+}
+.hero-landscape h1 span { display:block; white-space:nowrap; }
+.hero-landscape .hero-copy > p { font:400 12px/1.65 var(--mono); max-width:390px; margin:0 0 20px; }
+.hero-landscape .eyebrow { font:400 9px/1.5 var(--mono); letter-spacing:.1em; }
+.hero-landscape .hero-actions { display:flex; flex-wrap:nowrap; gap:0; margin-top:0; }
+.hero-landscape .hero-actions .button {
+  border-radius:0; border:0; min-height:44px; padding:11px 13px;
+  font:400 clamp(13px,1.3vw,20px)/1.1 var(--display); text-transform:uppercase;
+  justify-content:center; gap:9px; white-space:nowrap;
+}
+.hero-landscape .hero-actions .primary { background:#f0efe4; color:#172a26; }
+.hero-landscape .hero-actions .secondary { background:#f0efe429; color:#f0efe4; }
+.hero-landscape .laptop-mode-controls { margin-top:18px; gap:0; }
+.hero-landscape .laptop-mode-controls button {
+  border-radius:0; border:0; border-bottom:1px solid #f0efe466;
+  padding:7px 12px; font:400 10px/1.2 var(--mono); text-transform:uppercase;
+  background:transparent; min-height:34px;
+}
+.hero-landscape .laptop-mode-controls button[aria-pressed='true'] { background:#f0efe41c; color:#fff9e8; border-bottom:2px solid #fff9e8; }
+.hero-landscape .terminal-install { display:block; margin-top:24px; max-width:100%; }
+.hero-landscape .terminal-label { font:400 9px/1.5 var(--mono); color:#f0efe4; margin-bottom:8px; flex-wrap:wrap; gap:3px 12px; }
+.hero-landscape .terminal-command { background:#091914bd; border:1px solid #f0efe42e; box-shadow:none; border-radius:3px; padding:10px 12px; }
+.hero-landscape .terminal-command code { font:400 9px/1.65 var(--mono); min-width:0; }
+.hero-landscape .terminal-command button { min-width:36px; min-height:36px; }
+.hero-landscape .terminal-install > p { color:#f0efe4b8; font-size:8px; min-height:0; margin:7px 0 0; }
+.hero-landscape .button:focus-visible, .hero-landscape button:focus-visible { outline:2px solid #fff9e8; outline-offset:4px; }
+@media (max-width:1100px),(max-aspect-ratio:159/100) {
+  .hero-landscape { height:calc(610px + 56.28vw); }
+  .hero-landscape .hero-copy { top:110px; }
+  .hero-landscape h1 { font-size:clamp(56px,9vw,82px); }
+  .hero-landscape .hero-copy > p { max-width:450px; }
+  .hero-landscape .terminal-install { max-width:450px; }
+  .hero-landscape .hero-actions .button { font-size:19px; }
+}
+@media (max-width:700px) {
+  .hero-landscape h1 { font-size:clamp(49px,14.4vw,76px); margin:16px 0 18px; }
+  .hero-landscape .hero-copy > p { font-size:10px; margin-bottom:18px; }
+  .hero-landscape .hero-actions .button { font-size:16px; padding:11px 12px; }
+  .hero-landscape .terminal-install { margin-top:20px; }
+  .hero-landscape .terminal-label { font-size:8px; }
+}

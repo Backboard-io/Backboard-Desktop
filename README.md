@@ -4,7 +4,7 @@ An open-source desktop IDE for working with coding agents, reviewing their chang
 
 Backboard Desktop is built on **[Visual Studio Code — Code - OSS](https://github.com/microsoft/vscode)**, created by Microsoft and the VS Code community. It extends that foundation with agent workflows, multiple work modes, and the Backboard runtime. This is an independently maintained fork.
 
-[Getting started](#getting-started) · [Documentation](#documentation) · [Contributing](#contributing) · [Credits](#credits) · [License](#license)
+[Getting started](#getting-started) · [Website](#website) · [Documentation](#documentation) · [Contributing](#contributing) · [Credits](#credits) · [License](#license)
 
 ## Work your way
 
@@ -45,6 +45,18 @@ Agent integrations require the credentials or accounts for the services you choo
   adding or removing a key never silently changes what an existing session bills to.
 - Every Backboard credential can be overridden via environment variables for CI or local
   development. Provider keys deliberately cannot.
+
+## Website
+
+The Backboard Studio product hub and Kevin landing page live in [`website/`](website/README.md). The Next.js app includes the shared artwork, model icons, videos, cloud page, and interactive IDE demo.
+
+```sh
+cd website
+npm ci
+npm run dev
+```
+
+Open http://127.0.0.1:4173/ for the product hub or http://127.0.0.1:4173/kevin for Kevin. Run `npm run build` for a production build. Use `website` as the Vercel project root.
 
 ## Getting started
 

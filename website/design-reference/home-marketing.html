@@ -1,0 +1,1815 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Backboard Desktop is an open-source IDE for coding with agents. Chat, edit, and supervise your work in one workspace."
+    />
+    <meta name="theme-color" content="#ff6600" />
+    <title>Backboard Desktop — The IDE for your next idea.</title>
+    <link rel="icon" href="logo.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="style.css?v=laptop-hero" />
+    <link rel="stylesheet" href="demo.css" />
+    <link rel="stylesheet" href="editor-demo.css" />
+    <script src="app.js" defer></script>
+    <script src="editor-demo.js" defer></script>
+    <script src="demo.js" defer></script>
+    <link rel="stylesheet" href="hero-laptop.css?v=scenery-3" />
+    <script src="hero-laptop.js?v=scenery-3" defer></script>
+    <script src="hero-scenery.js?v=3" defer></script>
+    <link rel="stylesheet" href="hero-hermes.css" />
+    <link rel="stylesheet" href="editorial-images.css?v=1" />
+  <link rel="stylesheet" href="/shared-nav.css?v=1">
+</head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header shared-header">
+  <nav class="nav-left" aria-label="Product navigation">
+    <a href="/kevin#workspace">Workspace</a>
+    <a href="/kevin#models">Models</a>
+    <a href="https://github.com/Backboard-io/Backboard-Desktop#documentation">Docs ↗</a>
+  </nav>
+  <a class="brand" href="/" aria-label="Backboard Studio home"><img src="/logo.svg" width="25" height="34" alt=""><span>BACKBOARD<br>STUDIO</span></a>
+  <nav class="nav-right" aria-label="Community navigation">
+    <a href="https://github.com/Backboard-io/Backboard-Desktop">GitHub ↗</a>
+    <a href="/cloud/">Cloud ↗</a>
+    <a class="header-cta" href="/kevin#downloads">Download ↗</a>
+  </nav>
+</header>
+    <main id="main">
+      <div class="hero-scroll"><div class="hero-landscape">
+        <div class="hero-scenery" aria-hidden="true">
+          <div class="scenery-meadow"></div>
+          <div class="scenery-surf"></div>
+          <div class="scenery-alpine"></div>
+          <div class="scenery-desert"></div>
+          <div class="scenery-pixelsurf"></div>
+          <div class="scenery-pixellake"></div>
+        </div>
+        <div class="scenery-controls" role="group" aria-label="Hero scenery">
+          <label for="hero-scenery-picker">Your backdrop</label>
+          <select id="hero-scenery-picker" aria-label="Choose hero scenery">
+            <option value="meadow">Meadow</option>
+            <option value="surf">Coast</option>
+            <option value="alpine">Alpine</option>
+            <option value="desert">Desert</option>
+            <option value="pixelsurf">Pixel surf · 4-bit</option>
+            <option value="pixellake">Moonlit lake · 4-bit</option>
+          </select>
+          <button type="button" class="scenery-pause" aria-label="Pause scenery animation" aria-pressed="false">Ⅱ</button>
+        </div>
+        <section class="hero wrap">
+          <div class="hero-copy">
+            <span class="eyebrow">OPEN SOURCE · BUILT ON CODE – OSS</span>
+            <h1><span>The IDE for</span> <span>your next</span> <span>big idea.</span></h1>
+            <p>
+              Your agents. Your code. One workspace. Build, edit, and
+              review without breaking your flow.
+            </p>
+            <div class="hero-actions">
+              <a class="button primary" href="#get-started"
+                >Get Backboard <span aria-hidden="true">↗</span></a
+              ><a class="button secondary" href="https://backboard.io"
+                >Deploy in the cloud <span aria-hidden="true">↗</span></a
+              >
+            </div>
+            <div
+              class="laptop-mode-controls"
+              aria-label="Laptop screen content"
+            >
+              <button type="button" data-laptop-mode="film" aria-pressed="true">
+                Film</button
+              ><button
+                type="button"
+                data-laptop-mode="simple"
+                aria-pressed="false"
+              >
+                Simple</button
+              ><button
+                type="button"
+                data-laptop-mode="editor"
+                aria-pressed="false"
+              >
+                Editor</button
+              ><button
+                type="button"
+                data-laptop-mode="advanced"
+                aria-pressed="false"
+              >
+                Advanced
+              </button>
+            </div>
+            <div class="terminal-install">
+              <div class="terminal-label">
+                <span>START FROM SOURCE</span
+                ><span>macOS / Windows / Linux</span>
+              </div>
+              <div class="terminal-command">
+                <code
+                  >git clone
+                  https://github.com/Backboard-io/Backboard-Desktop.git</code
+                ><button
+                  id="copy-command"
+                  aria-label="Copy clone command"
+                  title="Copy clone command"
+                >
+                  ⧉
+                </button>
+              </div>
+              <p id="copy-status" role="status">
+                Clone the project, then follow your platform’s setup guide.
+              </p>
+            </div>
+          </div>
+          <div class="hero-laptop-scene">
+            <div class="laptop">
+              <div class="laptop-lid">
+                <span class="laptop-camera" aria-hidden="true"></span>
+                <div class="laptop-display">
+                  <video
+                    class="laptop-film"
+                    controls
+                    autoplay
+                    muted
+                    loop
+                    playsinline
+                    preload="metadata"
+                    poster="assets/film/backboard-studio-poster.jpg?v=scenes9"
+                    aria-label="Backboard Studio brand film"
+                  >
+                    <source
+                      src="assets/film/backboard-studio.mp4?v=scenes9"
+                      type="video/mp4"
+                    />
+                  </video>
+                  <iframe
+                    hidden
+                    src="laptop-demo.html"
+                    title="Interactive Backboard IDE demo on a laptop"
+                    loading="eager"
+                  ></iframe>
+                </div>
+                <span class="laptop-wordmark" aria-hidden="true"
+                  >BACKBOARD STUDIO</span
+                >
+              </div>
+              <div class="laptop-deck" aria-hidden="true">
+                <div class="laptop-keyboard"></div>
+                <div class="laptop-trackpad"></div>
+              </div>
+              <div class="laptop-lip" aria-hidden="true"></div>
+            </div>
+            <a class="laptop-caption" href="#workspace"
+              ><span class="laptop-live-dot" aria-hidden="true"></span> LIVE
+              DEMO · TRY THE WORKSPACE <span>↘</span></a
+            >
+          </div>
+        </section>
+      </div>
+      </div>
+      <div class="photo-seam wrap seam-1">
+        <figure class="brand-print transition-print">
+          <img
+            src="assets/new-york.jpeg"
+            alt="Empire State Building above the New York skyline"
+            loading="lazy"
+          />
+        </figure>
+      </div>
+      <section
+        id="workspace"
+        class="workspace-section wrap"
+        aria-labelledby="workspace-title"
+      >
+        <div class="workspace-heading">
+          <h2 id="workspace-title">One workspace. Your kind of flow.</h2>
+          <div
+            class="mode-switch"
+            role="tablist"
+            aria-label="Preview workspace modes"
+          >
+            <button
+              id="tab-simple"
+              role="tab"
+              aria-selected="true"
+              aria-controls="mode-panel"
+              data-mode="simple"
+            >
+              Simple</button
+            ><button
+              id="tab-editor"
+              role="tab"
+              aria-selected="false"
+              aria-controls="mode-panel"
+              tabindex="-1"
+              data-mode="editor"
+            >
+              Editor</button
+            ><button
+              id="tab-advanced"
+              role="tab"
+              aria-selected="false"
+              aria-controls="mode-panel"
+              tabindex="-1"
+              data-mode="advanced"
+            >
+              Advanced
+            </button>
+          </div>
+        </div>
+        <div class="provider-cloud">
+          <div class="provider-cloud-heading">
+            <span class="eyebrow">YOUR MODELS. YOUR WORKSPACE.</span
+            ><label class="provider-motion"
+              ><input type="checkbox" checked /> Animate icons</label
+            >
+          </div>
+
+          <div class="provider-stage">
+            <ul
+              class="provider-orbit"
+              aria-label="Providers and model families"
+            >
+              <li
+                style="
+                  --x: 2%;
+                  --y: 2.8%;
+                  --phase: -0s;
+                  --duration: 6s;
+                  --tilt: -8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Backboard"
+                  ><img
+                    src="assets/providers/ai_backboard.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Backboard</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 10.05%;
+                  --y: 4%;
+                  --phase: -1s;
+                  --duration: 7s;
+                  --tilt: -4deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="OpenAI · GPT"
+                  ><img
+                    src="assets/providers/ai_open_ai.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">OpenAI · GPT</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 18.1%;
+                  --y: 5.2%;
+                  --phase: -2s;
+                  --duration: 8s;
+                  --tilt: 0deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Claude"
+                  ><img
+                    src="assets/providers/ai_claude.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Claude</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 26.150000000000002%;
+                  --y: 2.8%;
+                  --phase: -3s;
+                  --duration: 9s;
+                  --tilt: 4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Gemini"
+                  ><img
+                    src="assets/providers/ai_gemini.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Gemini</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 34.2%;
+                  --y: 4%;
+                  --phase: -4s;
+                  --duration: 10s;
+                  --tilt: 8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="DeepSeek"
+                  ><img
+                    src="assets/providers/ai_deep_seek.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">DeepSeek</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 42.25%;
+                  --y: 5.2%;
+                  --phase: -5s;
+                  --duration: 6s;
+                  --tilt: -8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Qwen"
+                  ><img
+                    src="assets/providers/brand_qwen-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Qwen</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 50.300000000000004%;
+                  --y: 2.8%;
+                  --phase: -6s;
+                  --duration: 7s;
+                  --tilt: -4deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Moonshot · Kimi"
+                  ><img
+                    src="assets/providers/brand_kimi-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Moonshot · Kimi</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 58.35000000000001%;
+                  --y: 4%;
+                  --phase: -7s;
+                  --duration: 8s;
+                  --tilt: 0deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Meta · Llama"
+                  ><img
+                    src="assets/providers/brand_meta-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Meta · Llama</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 66.4%;
+                  --y: 5.2%;
+                  --phase: -8s;
+                  --duration: 9s;
+                  --tilt: 4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="xAI · Grok"
+                  ><img
+                    src="assets/providers/ai_x_ai.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">xAI · Grok</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 74.45%;
+                  --y: 2.8%;
+                  --phase: -9s;
+                  --duration: 10s;
+                  --tilt: 8deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="GitHub Copilot"
+                  ><img
+                    src="assets/providers/copilot.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">GitHub Copilot</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 82.5%;
+                  --y: 4%;
+                  --phase: -10s;
+                  --duration: 6s;
+                  --tilt: -8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Anthropic"
+                  ><img
+                    src="assets/providers/ai_anthropic.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Anthropic</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 90.55000000000001%;
+                  --y: 5.2%;
+                  --phase: -0s;
+                  --duration: 7s;
+                  --tilt: -4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="AWS Bedrock"
+                  ><img
+                    src="assets/providers/ai_bedrock.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">AWS Bedrock</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 2%;
+                  --y: 11.8%;
+                  --phase: -1s;
+                  --duration: 8s;
+                  --tilt: 0deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Cerebras"
+                  ><img
+                    src="assets/providers/ai_cerebras.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Cerebras</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 10.05%;
+                  --y: 13%;
+                  --phase: -2s;
+                  --duration: 9s;
+                  --tilt: 4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Cohere"
+                  ><img
+                    src="assets/providers/ai_cohere.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Cohere</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 18.1%;
+                  --y: 14.2%;
+                  --phase: -3s;
+                  --duration: 10s;
+                  --tilt: 8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Google"
+                  ><img
+                    src="assets/providers/ai_google.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Google</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 26.150000000000002%;
+                  --y: 11.8%;
+                  --phase: -4s;
+                  --duration: 6s;
+                  --tilt: -8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="LM Studio"
+                  ><img
+                    src="assets/providers/ai_lm_studio.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">LM Studio</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 34.2%;
+                  --y: 13%;
+                  --phase: -5s;
+                  --duration: 7s;
+                  --tilt: -4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Mistral"
+                  ><img
+                    src="assets/providers/ai_mistral.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Mistral</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 42.25%;
+                  --y: 14.2%;
+                  --phase: -6s;
+                  --duration: 8s;
+                  --tilt: 0deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Ollama"
+                  ><img
+                    src="assets/providers/ai_ollama.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Ollama</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 50.300000000000004%;
+                  --y: 11.8%;
+                  --phase: -7s;
+                  --duration: 9s;
+                  --tilt: 4deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="OpenAI Compatible"
+                  ><img
+                    src="assets/providers/ai_open_ai_compat.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">OpenAI Compatible</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 58.35000000000001%;
+                  --y: 13%;
+                  --phase: -8s;
+                  --duration: 10s;
+                  --tilt: 8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="OpenCode"
+                  ><img
+                    src="assets/providers/ai_open_code.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">OpenCode</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 66.4%;
+                  --y: 14.2%;
+                  --phase: -9s;
+                  --duration: 6s;
+                  --tilt: -8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="OpenRouter"
+                  ><img
+                    src="assets/providers/ai_open_router.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">OpenRouter</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 74.45%;
+                  --y: 11.8%;
+                  --phase: -10s;
+                  --duration: 7s;
+                  --tilt: -4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Vercel"
+                  ><img
+                    src="assets/providers/ai_vercel.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Vercel</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 82.5%;
+                  --y: 13%;
+                  --phase: -0s;
+                  --duration: 8s;
+                  --tilt: 0deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="AI21 · Jamba"
+                  ><img
+                    src="assets/providers/brand_ai21-brand-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">AI21 · Jamba</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 90.55000000000001%;
+                  --y: 14.2%;
+                  --phase: -1s;
+                  --duration: 9s;
+                  --tilt: 4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Aion Labs"
+                  ><img
+                    src="assets/providers/brand_aionlabs-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Aion Labs</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 2%;
+                  --y: 85.8%;
+                  --phase: -2s;
+                  --duration: 10s;
+                  --tilt: 8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Anthracite"
+                  ><img
+                    src="assets/providers/brand_anthracite.png"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Anthracite</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 10.05%;
+                  --y: 87%;
+                  --phase: -3s;
+                  --duration: 6s;
+                  --tilt: -8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Arcee"
+                  ><img
+                    src="assets/providers/brand_arcee-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Arcee</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 18.1%;
+                  --y: 88.2%;
+                  --phase: -4s;
+                  --duration: 7s;
+                  --tilt: -4deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Baidu · ERNIE"
+                  ><img
+                    src="assets/providers/brand_baidu-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Baidu · ERNIE</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 26.150000000000002%;
+                  --y: 85.8%;
+                  --phase: -5s;
+                  --duration: 8s;
+                  --tilt: 0deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="ByteDance · Seed"
+                  ><img
+                    src="assets/providers/brand_bytedance-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">ByteDance · Seed</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 34.2%;
+                  --y: 87%;
+                  --phase: -6s;
+                  --duration: 9s;
+                  --tilt: 4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Dots"
+                  ><img
+                    src="assets/providers/brand_dotsstudio.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Dots</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 42.25%;
+                  --y: 88.2%;
+                  --phase: -7s;
+                  --duration: 10s;
+                  --tilt: 8deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Essential AI"
+                  ><img
+                    src="assets/providers/brand_essentialai-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Essential AI</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 50.300000000000004%;
+                  --y: 85.8%;
+                  --phase: -8s;
+                  --duration: 6s;
+                  --tilt: -8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Gryphe"
+                  ><img
+                    src="assets/providers/brand_gryphe.png"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Gryphe</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 58.35000000000001%;
+                  --y: 87%;
+                  --phase: -9s;
+                  --duration: 7s;
+                  --tilt: -4deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="IBM · Granite"
+                  ><img
+                    src="assets/providers/brand_ibm.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">IBM · Granite</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 66.4%;
+                  --y: 88.2%;
+                  --phase: -10s;
+                  --duration: 8s;
+                  --tilt: 0deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Inception · Mercury"
+                  ><img
+                    src="assets/providers/brand_inception.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Inception · Mercury</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 74.45%;
+                  --y: 85.8%;
+                  --phase: -0s;
+                  --duration: 9s;
+                  --tilt: 4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="InclusionAI"
+                  ><img
+                    src="assets/providers/brand_inclusionai.png"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">InclusionAI</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 82.5%;
+                  --y: 87%;
+                  --phase: -1s;
+                  --duration: 10s;
+                  --tilt: 8deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Inference.net"
+                  ><img
+                    src="assets/providers/brand_inference.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Inference.net</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 90.55000000000001%;
+                  --y: 88.2%;
+                  --phase: -2s;
+                  --duration: 6s;
+                  --tilt: -8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="KwaiPilot"
+                  ><img
+                    src="assets/providers/brand_kwaipilot-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">KwaiPilot</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 2%;
+                  --y: 94.8%;
+                  --phase: -3s;
+                  --duration: 7s;
+                  --tilt: -4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Liquid AI"
+                  ><img
+                    src="assets/providers/brand_liquid.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Liquid AI</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 10.05%;
+                  --y: 96%;
+                  --phase: -4s;
+                  --duration: 8s;
+                  --tilt: 0deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="LongCat"
+                  ><img
+                    src="assets/providers/brand_longcat-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">LongCat</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 18.1%;
+                  --y: 97.2%;
+                  --phase: -5s;
+                  --duration: 9s;
+                  --tilt: 4deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Microsoft · Phi"
+                  ><img
+                    src="assets/providers/brand_microsoft-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Microsoft · Phi</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 26.150000000000002%;
+                  --y: 94.8%;
+                  --phase: -6s;
+                  --duration: 10s;
+                  --tilt: 8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="MiniMax"
+                  ><img
+                    src="assets/providers/brand_minimax-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">MiniMax</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 34.2%;
+                  --y: 96%;
+                  --phase: -7s;
+                  --duration: 6s;
+                  --tilt: -8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Morph"
+                  ><img
+                    src="assets/providers/brand_morph-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Morph</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 42.25%;
+                  --y: 97.2%;
+                  --phase: -8s;
+                  --duration: 7s;
+                  --tilt: -4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Nex AGI"
+                  ><img
+                    src="assets/providers/brand_nexagi.png"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Nex AGI</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 50.300000000000004%;
+                  --y: 94.8%;
+                  --phase: -9s;
+                  --duration: 8s;
+                  --tilt: 0deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Nous Research · Hermes"
+                  ><img
+                    src="assets/providers/brand_nousresearch.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name"
+                    >Nous Research · Hermes</span
+                  ></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 58.35000000000001%;
+                  --y: 96%;
+                  --phase: -10s;
+                  --duration: 9s;
+                  --tilt: 4deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="NVIDIA · Nemotron"
+                  ><img
+                    src="assets/providers/brand_nvidia-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">NVIDIA · Nemotron</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 66.4%;
+                  --y: 97.2%;
+                  --phase: -0s;
+                  --duration: 10s;
+                  --tilt: 8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Perceptron"
+                  ><img
+                    src="assets/providers/brand_perceptron.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Perceptron</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 74.45%;
+                  --y: 94.8%;
+                  --phase: -1s;
+                  --duration: 6s;
+                  --tilt: -8deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Perplexity · Sonar"
+                  ><img
+                    src="assets/providers/brand_perplexity-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Perplexity · Sonar</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 82.5%;
+                  --y: 96%;
+                  --phase: -2s;
+                  --duration: 7s;
+                  --tilt: -4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Poolside"
+                  ><img
+                    src="assets/providers/brand_poolside-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Poolside</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 90.55000000000001%;
+                  --y: 97.2%;
+                  --phase: -3s;
+                  --duration: 8s;
+                  --tilt: 0deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Reka"
+                  ><img
+                    src="assets/providers/brand_reka.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Reka</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 1%;
+                  --y: 27%;
+                  --phase: -4s;
+                  --duration: 9s;
+                  --tilt: 4deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Relace"
+                  ><img
+                    src="assets/providers/brand_relace.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Relace</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 94%;
+                  --y: 28%;
+                  --phase: -5s;
+                  --duration: 10s;
+                  --tilt: 8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Sakana AI"
+                  ><img
+                    src="assets/providers/brand_sakana-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Sakana AI</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 2%;
+                  --y: 44%;
+                  --phase: -6s;
+                  --duration: 6s;
+                  --tilt: -8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="StepFun"
+                  ><img
+                    src="assets/providers/brand_stepfun-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">StepFun</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 93%;
+                  --y: 45%;
+                  --phase: -7s;
+                  --duration: 7s;
+                  --tilt: -4deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Tencent · Hunyuan"
+                  ><img
+                    src="assets/providers/brand_tencent-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Tencent · Hunyuan</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 1%;
+                  --y: 64%;
+                  --phase: -8s;
+                  --duration: 8s;
+                  --tilt: 0deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="TheDrummer"
+                  ><img
+                    src="assets/providers/brand_thedrummer.webp"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">TheDrummer</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 94%;
+                  --y: 65%;
+                  --phase: -9s;
+                  --duration: 9s;
+                  --tilt: 4deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Thinking Machines"
+                  ><img
+                    src="assets/providers/brand_thinkingmachines.png"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Thinking Machines</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 17%;
+                  --y: 34%;
+                  --phase: -10s;
+                  --duration: 10s;
+                  --tilt: 8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Undi"
+                  ><img
+                    src="assets/providers/brand_undi.png"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Undi</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 77%;
+                  --y: 35%;
+                  --phase: -0s;
+                  --duration: 6s;
+                  --tilt: -8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Union Alpha"
+                  ><img
+                    src="assets/providers/brand_unionalpha-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Union Alpha</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 25%;
+                  --y: 61%;
+                  --phase: -1s;
+                  --duration: 7s;
+                  --tilt: -4deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Upstage · Solar"
+                  ><img
+                    src="assets/providers/brand_upstage-color.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Upstage · Solar</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 68%;
+                  --y: 64%;
+                  --phase: -2s;
+                  --duration: 8s;
+                  --tilt: 0deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Writer · Palmyra"
+                  ><img
+                    src="assets/providers/brand_writer.png"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Writer · Palmyra</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 40%;
+                  --y: 23%;
+                  --phase: -3s;
+                  --duration: 9s;
+                  --tilt: 4deg;
+                "
+              >
+                <span
+                  class="provider-token"
+                  role="img"
+                  aria-label="Xiaomi · MiMo"
+                  ><img
+                    src="assets/providers/brand_xiaomimimo.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Xiaomi · MiMo</span></span
+                >
+              </li>
+              <li
+                style="
+                  --x: 54%;
+                  --y: 76%;
+                  --phase: -4s;
+                  --duration: 10s;
+                  --tilt: 8deg;
+                "
+              >
+                <span class="provider-token" role="img" aria-label="Z.ai · GLM"
+                  ><img
+                    src="assets/providers/brand_zai.svg"
+                    alt=""
+                    width="28"
+                    height="28"
+                    loading="lazy"
+                  /><span class="provider-name">Z.ai · GLM</span></span
+                >
+              </li>
+            </ul>
+            <div
+              class="ide-demo"
+              id="mode-panel"
+              role="tabpanel"
+              aria-labelledby="tab-simple"
+              tabindex="0"
+            >
+              <aside
+                class="ide-sidebar"
+                aria-label="Illustrative project sessions"
+              >
+                <div class="ide-modebar">
+                  <button
+                    type="button"
+                    class="mode-pill"
+                    data-mini-mode="simple"
+                    aria-label="Show simple mode"
+                  >
+                    Simple</button
+                  ><button
+                    type="button"
+                    class="mode-pill"
+                    data-mini-mode="editor"
+                    aria-label="Show editor mode"
+                  >
+                    Editor</button
+                  ><button
+                    type="button"
+                    class="mode-pill"
+                    data-mini-mode="advanced"
+                    aria-label="Show advanced mode"
+                  >
+                    Advanced</button
+                  ><span class="ide-icon" aria-hidden="true">&#xebf3;</span>
+                </div>
+                <div class="ide-tools">
+                  <span class="ide-search"
+                    ><span>Type to search</span><i class="ide-icon">&#xeaf1;</i
+                    ><i class="ide-icon">&#xea6d;</i></span
+                  ><span
+                    ><i class="ide-icon" aria-hidden="true">&#xea73;</i> New
+                    chat</span
+                  ><span
+                    ><i class="ide-icon" aria-hidden="true">&#xeb2d;</i>
+                    MCPs</span
+                  ><span
+                    ><i class="ide-icon" aria-hidden="true">&#xeb03;</i>
+                    Usage</span
+                  ><span
+                    ><i class="ide-icon" aria-hidden="true">&#xeb51;</i>
+                    Settings</span
+                  >
+                </div>
+                <div class="ide-project-label">
+                  <i class="ide-icon" aria-hidden="true">&#xeaf7;</i> All
+                  folders
+                  <span
+                    ><i class="ide-icon" aria-hidden="true">&#xeab4;</i>
+                    <i class="ide-icon" aria-hidden="true">&#xea60;</i></span
+                  >
+                </div>
+                <div class="ide-session selected">
+                  <span
+                    ><i class="ide-icon" aria-hidden="true">&#xeaf7;</i> orbit
+                    <small>now</small></span
+                  ><strong>Build the settings page</strong
+                  ><small>⑂ feat/settings</small>
+                </div>
+                <div class="ide-session">
+                  <span
+                    ><i class="ide-icon" aria-hidden="true">&#xeaf7;</i> orbit
+                    <small>2m</small></span
+                  ><strong>Add keyboard shortcuts</strong
+                  ><small>⑂ feat/shortcuts</small>
+                </div>
+                <div class="ide-session">
+                  <span
+                    ><i class="ide-icon" aria-hidden="true">&#xeaf7;</i> orbit
+                    <small>5m</small></span
+                  ><strong>Review the navigation</strong
+                  ><small>⑂ fix/navigation</small>
+                </div>
+                <div class="ide-sidebar-brand">
+                  <img src="logo.svg" alt="" width="14" height="19" />Backboard
+                  Studio <span>▧</span>
+                </div>
+              </aside>
+              <div id="ide-scene" class="ide-scene"></div>
+            </div>
+          </div>
+          <p class="provider-availability">
+            Providers & model families from the Backboard picker. Available
+            models depend on your connected provider.
+          </p>
+        </div>
+        <div class="demo-player">
+          <button id="demo-play" type="button" aria-label="Pause walkthrough">
+            Ⅱ <span>Pause</span></button
+          ><button
+            id="demo-replay"
+            type="button"
+            aria-label="Replay walkthrough"
+          >
+            ↺ <span>Replay</span>
+          </button>
+          <div class="demo-timeline" aria-hidden="true"><span></span></div>
+          <span id="demo-chapter">01 / 03 · Simple</span>
+        </div>
+        <div class="preview-caption">
+          <span id="mode-description"
+            >Start a conversation. Let your agent work. Review what
+            changed.</span
+          ><span>INTERACTIVE DEMO · CLICK FILES, TABS & TOOLS</span>
+        </div>
+      </section>
+      <section class="brand-story wrap" aria-label="Go all in">
+        <div class="brand-story-copy">
+          <span class="eyebrow">BACKBOARD / FIELD NOTES — 01</span>
+          <h2>Go all in.<br />Make your move.</h2>
+          <p>A place for the ideas that won’t leave you alone.</p>
+          <a class="text-link" href="#workspace">FIND YOUR FLOW ↗</a>
+        </div>
+        <div class="print-pair print-trio">
+          <figure class="brand-print print-third">
+            <img
+              src="assets/diablo.jpeg"
+              alt="Gold vintage Lamborghini at a car gathering"
+              loading="lazy"
+              width="736"
+              height="1308"
+            />
+            <figcaption>BUILT DIFFERENT.</figcaption>
+          </figure>
+          <figure class="brand-print print-back">
+            <img
+              src="assets/flight.jpeg"
+              alt="Aircraft banking through smoke, with the words be the last standing always"
+              loading="lazy"
+            />
+            <figcaption>01 / A DIFFERENT PERSPECTIVE</figcaption>
+          </figure>
+          <figure class="brand-print print-front">
+            <img
+              src="assets/racing.jpeg"
+              alt="Vintage racing poster with an airborne race car and a Mario Andretti quote"
+              loading="lazy"
+            />
+            <figcaption>02 / MOMENTUM</figcaption>
+          </figure>
+        </div>
+      </section>
+      <section id="features" class="features wrap">
+        <div class="section-intro">
+          <span class="eyebrow">BUILT AROUND THE WAY YOU WORK</span>
+          <h2>Stay in the flow.<br />Keep the whole picture.</h2>
+          <p>
+            Space to think, tools to build, and a clear view of what your agents
+            are doing.
+          </p>
+          <div class="note-stack">
+            <figure class="brand-print print-note">
+              <img
+                src="assets/create-more.jpeg"
+                alt="Blue and white printed poster reading Create more. Consume less."
+                loading="lazy"
+              />
+              <figcaption>A NOTE TO SELF.</figcaption>
+            </figure>
+            <figure class="brand-print print-move">
+              <img
+                src="assets/move.jpeg"
+                alt="Climber in a snowstorm with the word move"
+                loading="lazy"
+                width="736"
+                height="1308"
+              />
+              <figcaption>KEEP MOVING.</figcaption>
+            </figure>
+          </div>
+        </div>
+        <div class="feature-grid">
+          <article>
+            <figure class="feature-photo"><img src="assets/motion-surf.jpeg" alt="Surfer carving a turquoise wave beneath an orange sky" loading="lazy" decoding="async" width="736" height="920" /><figcaption>FIND YOUR FLOW.</figcaption></figure>
+            <h3>A real editor, right here.</h3>
+            <p>
+              Your files, terminal, debugging, and extensions, on the familiar
+              Code – OSS foundation. Go hands-on whenever you need to.
+            </p>
+            <a href="#workspace" data-show-mode="editor"
+              >Explore Editor mode <span>↗</span></a
+            >
+          </article>
+          <article>
+            <figure class="feature-photo"><img src="assets/ocean.jpeg" alt="Two surfers heading into turquoise water" loading="lazy" decoding="async" width="736" height="920" /><figcaption>MAKE ROOM FOR THE NEXT IDEA.</figcaption></figure>
+            <h3>More ideas in motion.</h3>
+            <p>
+              Organize concurrent agent sessions by project and branch. Switch
+              to a grid or kanban view to see how the work fits together.
+            </p>
+            <a href="#workspace" data-show-mode="advanced"
+              >Explore Advanced mode <span>↗</span></a
+            >
+          </article>
+          <article>
+            <figure class="feature-photo"><img src="assets/rodeo.jpeg" alt="Black and white rodeo rider lifting a hat" loading="lazy" decoding="async" width="736" height="920" /><figcaption>TAKE THE REINS.</figcaption></figure>
+            <h3>Every change, in context.</h3>
+            <p>
+              Read the conversation alongside changed files and diffs.
+              Understand the work before deciding what comes next.
+            </p>
+          </article>
+          <article>
+            <figure class="feature-photo"><img src="assets/never-too-late.jpeg" alt="Orange sunset above a cobalt blue ocean" loading="lazy" decoding="async" width="736" height="920" /><figcaption>START SOMETHING.</figcaption></figure>
+            <h3>Bring your own way of working.</h3>
+            <p>
+              Connect your preferred agent providers. Add reusable skills and
+              MCP tools to make the workspace your own.
+            </p>
+          </article>
+        </div>
+      </section>
+      <div class="photo-seam wrap seam-2">
+        <figure class="brand-print transition-print">
+          <img
+            src="assets/adventure-collage.jpeg"
+            alt="A colorful collage of mountains, waves and open roads"
+            loading="lazy"
+          />
+        </figure>
+      </div>
+      <section id="get-started" class="downloads wrap">
+        <div class="section-heading">
+          <h2>Your next idea won’t build itself.</h2>
+          <p>Backboard Desktop. Build from source on your computer.</p>
+        </div>
+        <div class="build-contact-sheet" aria-label="A little inspiration for what comes next">
+          <figure><img src="assets/new-york.jpeg" alt="New York skyline stretching toward the horizon" loading="lazy" decoding="async" /><figcaption>THINK BIGGER.</figcaption></figure>
+          <figure><img src="assets/adventure-collage.jpeg" alt="Collage of mountains, waves, and open roads" loading="lazy" decoding="async" /><figcaption>FOLLOW THE IDEA.</figcaption></figure>
+          <figure><img src="assets/no-limits.jpeg" alt="Ocean wave and soaring bird with the words no limits" loading="lazy" decoding="async" /><figcaption>SEE WHERE IT GOES.</figcaption></figure>
+          <p>Less watching. <br />More making.<a href="https://github.com/Backboard-io/Backboard-Desktop#documentation">Start building ↗</a></p>
+        </div>
+        <div class="download-grid">
+          <article>
+            <span class="eyebrow">APPLE SILICON / INTEL</span>
+            <h3>macOS</h3>
+            <p>Node.js, Bun, and Xcode Command Line Tools.</p>
+            <a
+              class="button primary"
+              href="https://github.com/Backboard-io/Backboard-Desktop#run-from-source-on-macos"
+              >macOS setup guide ↗</a
+            >
+          </article>
+          <article>
+            <span class="eyebrow">NATIVE WINDOWS</span>
+            <h3>Windows</h3>
+            <p>Node.js, Bun, Python, and Visual Studio Build Tools.</p>
+            <a
+              class="button primary"
+              href="https://github.com/Backboard-io/Backboard-Desktop#run-from-source-on-windows"
+              >Windows setup guide ↗</a
+            >
+          </article>
+          <article>
+            <span class="eyebrow">LINUX DESKTOP</span>
+            <h3>Linux</h3>
+            <p>Node.js, Bun, and your platform’s native build tools.</p>
+            <a
+              class="button primary"
+              href="https://github.com/Backboard-io/Backboard-Desktop#run-from-source-on-linux"
+              >Linux setup guide ↗</a
+            >
+          </article>
+        </div>
+      </section>
+      <div class="photo-seam wrap seam-3">
+        <figure class="brand-print transition-print">
+          <img
+            src="assets/no-limits.jpeg"
+            alt="Ocean and soaring bird artwork reading no limits"
+            loading="lazy"
+          />
+        </figure>
+      </div>
+      <section id="faq" class="faq wrap">
+        <div>
+          <h2>FAQs</h2>
+          <a
+            class="text-link"
+            href="https://github.com/Backboard-io/Backboard-Desktop#documentation"
+            >VIEW DOCUMENTATION ↗</a
+          >
+          <figure class="brand-print print-summit">
+            <img
+              src="assets/summit.jpeg"
+              alt="Mountain expedition collage with blue paint and an orange motivational poster"
+              loading="lazy"
+            />
+            <figcaption>ONE MORE STEP.</figcaption>
+          </figure>
+        </div>
+        <div class="faq-items">
+          <details>
+            <summary>Is Backboard Desktop free?</summary>
+            <p>
+              The desktop source is open source under the MIT license. Agent
+              providers and hosted services have their own accounts,
+              credentials, and pricing.
+            </p>
+          </details>
+          <details>
+            <summary>Which agents can I use?</summary>
+            <p>
+              Backboard Desktop includes integrations for Backboard, Claude,
+              Codex, and Copilot. Availability depends on your provider setup
+              and authentication.
+            </p>
+          </details>
+          <details>
+            <summary>What are the three workspace modes?</summary>
+            <p>
+              Simple focuses on agent conversations and reviewing changes.
+              Editor brings files, terminals, debugging, and extensions
+              together. Advanced helps you supervise concurrent sessions in grid
+              or kanban views.
+            </p>
+          </details>
+          <details>
+            <summary>Can I use my existing tools?</summary>
+            <p>
+              Backboard builds on Code – OSS and includes an editor, terminal,
+              browser, and extension support. Skills and MCP integrations let
+              you extend agent workflows with your own instructions and tools.
+            </p>
+          </details>
+          <details>
+            <summary>How do I get started?</summary>
+            <p>
+              Clone the repository and follow the setup guide for your platform.
+              Build and launch the app, connect your chosen provider, and start
+              a session with your project.
+            </p>
+          </details>
+        </div>
+      </section>
+      <div class="photo-seam wrap seam-4">
+        <figure class="brand-print transition-print">
+          <img
+            src="assets/no-risk.jpeg"
+            alt="Mr Bean atop a yellow Mini with the words No risk, no story"
+            loading="lazy"
+          />
+        </figure>
+      </div>
+      <section class="closing wrap">
+        <p>YOU’VE GOT THE IDEA. MAKE IT REAL.</p>
+        <a href="https://github.com/Backboard-io/Backboard-Desktop"
+          >BACKBOARD<span aria-hidden="true">↗</span></a
+        >
+      </section>
+    </main>
+    <footer class="wrap">
+      <a class="brand" href="#"
+        ><img src="logo.svg" width="20" height="28" alt="" />backboard</a
+      >
+      <p>An independent, open-source IDE built on Microsoft’s Code – OSS.</p>
+      <div>
+        <a href="https://github.com/Backboard-io/Backboard-Desktop">GitHub ↗</a
+        ><a
+          href="https://github.com/Backboard-io/Backboard-Desktop/blob/main/backboard/LICENSE.txt"
+          >MIT License ↗</a
+        >
+      </div>
+    </footer>
+  </body>
+</html>

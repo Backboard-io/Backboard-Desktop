@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Backboard interactive laptop demo</title>
+    <link rel="stylesheet" href="style.css?v=laptop" />
+    <link rel="stylesheet" href="demo.css" />
+    <link rel="stylesheet" href="editor-demo.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        border: 0;
+        background: #191a1e;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+      .workspace-section.wrap {
+        width: 100%;
+        max-width: none;
+        padding: 0;
+        margin: 0;
+        border: 0;
+      }
+      .provider-cloud-heading,
+      .workspace-heading,
+      .provider-availability,
+      .demo-player,
+      .preview-caption {
+        display: none;
+      }
+      .provider-cloud,
+      .provider-stage {
+        padding: 0;
+        margin: 0;
+      }
+      .ide-demo {
+        width: 100%;
+        height: 720px !important;
+        min-height: 0 !important;
+        aspect-ratio: auto !important;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+      .ide-scene {
+        min-width: 0;
+      }
+      body:before {
+        display: none;
+      }
+    </style>
+    <script src="editor-demo.js" defer></script>
+    <script src="demo.js" defer></script>
+  <script src="laptop-mode.js" defer></script></head>
+  <body>
+    <section
+      id="workspace"
+      class="workspace-section wrap"
+      aria-labelledby="workspace-title"
+    >
+      <div class="workspace-heading">
+        <h2 id="workspace-title">One workspace. Your kind of flow.</h2>
+        <div
+          class="mode-switch"
+          role="tablist"
+          aria-label="Preview workspace modes"
+        >
+          <button
+            id="tab-simple"
+            role="tab"
+            aria-selected="true"
+            aria-controls="mode-panel"
+            data-mode="simple"
+          >
+            Simple</button
+          ><button
+            id="tab-editor"
+            role="tab"
+            aria-selected="false"
+            aria-controls="mode-panel"
+            tabindex="-1"
+            data-mode="editor"
+          >
+            Editor</button
+          ><button
+            id="tab-advanced"
+            role="tab"
+            aria-selected="false"
+            aria-controls="mode-panel"
+            tabindex="-1"
+            data-mode="advanced"
+          >
+            Advanced
+          </button>
+        </div>
+      </div>
+      <div class="provider-cloud">
+        <div class="provider-cloud-heading">
+          <span class="eyebrow">YOUR MODELS. YOUR WORKSPACE.</span
+          ><label class="provider-motion"
+            ><input type="checkbox" checked /> Animate icons</label
+          >
+        </div>
+
+        <div class="provider-stage">
+          <div
+            class="ide-demo"
+            id="mode-panel"
+            role="tabpanel"
+            aria-labelledby="tab-simple"
+            tabindex="0"
+          >
+            <aside
+              class="ide-sidebar"
+              aria-label="Illustrative project sessions"
+            >
+              <div class="ide-modebar">
+                <button
+                  type="button"
+                  class="mode-pill"
+                  data-mini-mode="simple"
+                  aria-label="Show simple mode"
+                >
+                  Simple</button
+                ><button
+                  type="button"
+                  class="mode-pill"
+                  data-mini-mode="editor"
+                  aria-label="Show editor mode"
+                >
+                  Editor</button
+                ><button
+                  type="button"
+                  class="mode-pill"
+                  data-mini-mode="advanced"
+                  aria-label="Show advanced mode"
+                >
+                  Advanced</button
+                ><span class="ide-icon" aria-hidden="true">&#xebf3;</span>
+              </div>
+              <div class="ide-tools">
+                <span class="ide-search"
+                  ><span>Type to search</span><i class="ide-icon">&#xeaf1;</i
+                  ><i class="ide-icon">&#xea6d;</i></span
+                ><span
+                  ><i class="ide-icon" aria-hidden="true">&#xea73;</i> New
+                  chat</span
+                ><span
+                  ><i class="ide-icon" aria-hidden="true">&#xeb2d;</i>
+                  MCPs</span
+                ><span
+                  ><i class="ide-icon" aria-hidden="true">&#xeb03;</i>
+                  Usage</span
+                ><span
+                  ><i class="ide-icon" aria-hidden="true">&#xeb51;</i>
+                  Settings</span
+                >
+              </div>
+              <div class="ide-project-label">
+                <i class="ide-icon" aria-hidden="true">&#xeaf7;</i> All folders
+                <span
+                  ><i class="ide-icon" aria-hidden="true">&#xeab4;</i>
+                  <i class="ide-icon" aria-hidden="true">&#xea60;</i></span
+                >
+              </div>
+              <div class="ide-session selected">
+                <span
+                  ><i class="ide-icon" aria-hidden="true">&#xeaf7;</i> orbit
+                  <small>now</small></span
+                ><strong>Build the settings page</strong
+                ><small>⑂ feat/settings</small>
+              </div>
+              <div class="ide-session">
+                <span
+                  ><i class="ide-icon" aria-hidden="true">&#xeaf7;</i> orbit
+                  <small>2m</small></span
+                ><strong>Add keyboard shortcuts</strong
+                ><small>⑂ feat/shortcuts</small>
+              </div>
+              <div class="ide-session">
+                <span
+                  ><i class="ide-icon" aria-hidden="true">&#xeaf7;</i> orbit
+                  <small>5m</small></span
+                ><strong>Review the navigation</strong
+                ><small>⑂ fix/navigation</small>
+              </div>
+              <div class="ide-sidebar-brand">
+                <img src="logo.svg" alt="" width="14" height="19" />Backboard
+                Studio <span>▧</span>
+              </div>
+            </aside>
+            <div id="ide-scene" class="ide-scene"></div>
+          </div>
+        </div>
+        <p class="provider-availability">
+          Providers & model families from the Backboard picker. Available models
+          depend on your connected provider.
+        </p>
+      </div>
+      <div class="demo-player">
+        <button id="demo-play" type="button" aria-label="Pause walkthrough">
+          Ⅱ <span>Pause</span></button
+        ><button id="demo-replay" type="button" aria-label="Replay walkthrough">
+          ↺ <span>Replay</span>
+        </button>
+        <div class="demo-timeline" aria-hidden="true"><span></span></div>
+        <span id="demo-chapter">01 / 03 · Simple</span>
+      </div>
+      <div class="preview-caption">
+        <span id="mode-description"
+          >Start a conversation. Let your agent work. Review what changed.</span
+        ><span>INTERACTIVE DEMO · CLICK FILES, TABS & TOOLS</span>
+      </div>
+    </section>
+  </body>
+</html>

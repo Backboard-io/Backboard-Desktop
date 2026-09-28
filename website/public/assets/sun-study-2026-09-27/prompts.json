@@ -1,0 +1,85 @@
+[
+  {
+    "slug": "01-first-light",
+    "title": "First light",
+    "use": "Wide hero-to-content transition; crop vertically, keep sun proportions.",
+    "prompt": "Use case: stylized-concept. Asset for Kevin, a polished creative IDE website. Original contemporary fine-art composition: thick sculptural acrylic impasto and palette-knife ridges, tactile off-white canvas, miniature hyperreal painted details only where specified. Sophisticated quiet gallery aesthetic, sun-themed, warm vermilion #ee542b, saffron, pale peach, chalk-white #f6f6f2, rare cobalt and charcoal details. Soft raking natural sunlight. Not a UI mockup. No text, typography, logo, border, signature or watermark. Extremely wide 3:1 landscape. A low saffron sun at far right rises from thick white acrylic snowlike ridges. Upper two-thirds almost white with subtle sculptural texture; bottom third warm pale peach ridge sweeping gently across all edges. Tiny vermilion skier on right, almost invisible at first glance. Calm empty left half. Emphasize expansive negative space. Edges continue texture naturally, suitable for a shallow full-width section transition.",
+    "file": "01-first-light.png",
+    "source": "/Users/erintomorri/.codex/generated_images/01a0e534-485e-7742-a062-04cf3d3b2e28/exec-ef6ee4e9-8077-4547-80d3-449fd83e1ded.png"
+  },
+  {
+    "slug": "02-solar-tide",
+    "title": "Solar tide",
+    "use": "Wide ocean divider; center crop with a stable horizon.",
+    "prompt": "Use case: stylized-concept. Asset for Kevin, a polished creative IDE website. Original contemporary fine-art composition: thick sculptural acrylic impasto and palette-knife ridges, tactile off-white canvas, miniature hyperreal painted details only where specified. Sophisticated quiet gallery aesthetic, sun-themed, warm vermilion #ee542b, saffron, pale peach, chalk-white #f6f6f2, rare cobalt and charcoal details. Soft raking natural sunlight. Not a UI mockup. No text, typography, logo, border, signature or watermark. Extremely wide 3:1 panoramic canvas. A thick textured cobalt and pale turquoise horizontal ocean band through bottom quarter, chalk-white impasto foam, small burnt-orange half-sun low at right, one tiny surfer at right third. Vast ivory sky, no photoreal landscape: all surfaces sculptural acrylic. Crisp sculptural paint wave quietly sweeps left to right and continues past both edges. Can crop upper and lower whitespace to a short ribbon.",
+    "file": "02-solar-tide.png",
+    "source": "/Users/erintomorri/.codex/generated_images/01a0e534-485e-7742-a062-04cf3d3b2e28/exec-b6f4129d-5978-4fa2-a24c-021127a0aba3.png"
+  },
+  {
+    "slug": "03-golden-drift",
+    "title": "Golden drift",
+    "use": "Abstract divider that tolerates horizontal stretching; no recognizable objects.",
+    "prompt": "Use case: stylized-concept. Asset for Kevin, a polished creative IDE website. Original contemporary fine-art composition: thick sculptural acrylic impasto and palette-knife ridges, tactile off-white canvas, miniature hyperreal painted details only where specified. Sophisticated quiet gallery aesthetic, sun-themed, warm vermilion #ee542b, saffron, pale peach, chalk-white #f6f6f2, rare cobalt and charcoal details. Soft raking natural sunlight. Not a UI mockup. No text, typography, logo, border, signature or watermark. Extremely wide 3:1 abstract sunlit dune ribbon. No people, no literal sun disc, no objects. Smooth broad saffron and pale apricot palette-knife sweeps transition from pure chalk-white at top to a vermilion-orange pigment vein through the lower middle, then return to off-white at bottom. Thick physical acrylic paint with horizontal ridges. Organic irregular edges, calm broad shapes, no visual focal point. Designed to be stretched horizontally as a website section transition.",
+    "file": "03-golden-drift.png",
+    "source": "/Users/erintomorri/.codex/generated_images/01a0e534-485e-7742-a062-04cf3d3b2e28/exec-9c62efbd-c46a-45d2-9714-1272bd2df204.png"
+  },
+  {
+    "slug": "04-sun-walk",
+    "title": "Sun walk",
+    "use": "Editorial strip; preserve aspect ratio to keep miniature figures intact.",
+    "prompt": "Use case: stylized-concept. Asset for Kevin, a polished creative IDE website. Original contemporary fine-art composition: thick sculptural acrylic impasto and palette-knife ridges, tactile off-white canvas, miniature hyperreal painted details only where specified. Sophisticated quiet gallery aesthetic, sun-themed, warm vermilion #ee542b, saffron, pale peach, chalk-white #f6f6f2, rare cobalt and charcoal details. Soft raking natural sunlight. Not a UI mockup. No text, typography, logo, border, signature or watermark. Extremely wide 3:1 top-down sunlit white plaster landscape. Exactly four very tiny painted people walking separately along a gently curving pale orange sand path across the lower third, long delicate blue-grey shadows reaching diagonally. Tiny warm orange parasol near far right. No visible sky, no horizon, no literal sun. Thick acrylic relief with warm sunlight touching ridges. People each under 2 percent of image height. Open minimal upper half. A sparse, human, inviting transition canvas.",
+    "file": "04-sun-walk.png",
+    "source": "/Users/erintomorri/.codex/generated_images/01a0e534-485e-7742-a062-04cf3d3b2e28/exec-a5e38dbf-068a-455e-8c39-4622c5b9e7fc.png"
+  },
+  {
+    "slug": "05-vermilion-horizon",
+    "title": "Vermilion horizon",
+    "use": "Bold white-to-orange transition; abstract image can stretch horizontally.",
+    "prompt": "Use case: stylized-concept. Asset for Kevin, a polished creative IDE website. Original contemporary fine-art composition: thick sculptural acrylic impasto and palette-knife ridges, tactile off-white canvas, miniature hyperreal painted details only where specified. Sophisticated quiet gallery aesthetic, sun-themed, warm vermilion #ee542b, saffron, pale peach, chalk-white #f6f6f2, rare cobalt and charcoal details. Soft raking natural sunlight. Not a UI mockup. No text, typography, logo, border, signature or watermark. Extremely wide 3:1 nonfigurative acrylic canvas, a single bold irregular vermilion-orange horizontal painted horizon grows from white impasto at top to orange across bottom half. Thick knife marks and tiny saffron sunlit edges. Absolutely no sun disc, people or symbols. Graphic, confident and tactile with subtle real surface shadows. White top edge blends into #f6f6f2 page, orange bottom edge blends into #ee542b section. Designed as a stretchable horizontal transition between website sections.",
+    "file": "05-vermilion-horizon.png",
+    "source": "/Users/erintomorri/.codex/generated_images/01a0e534-485e-7742-a062-04cf3d3b2e28/exec-a07c0130-8172-496d-847f-af7d7f8bc694.png"
+  },
+  {
+    "slug": "06-afternoon-court",
+    "title": "Afternoon court",
+    "use": "Compact feature-section artwork; use cover cropping without stretching people.",
+    "prompt": "Use case: stylized-concept. Asset for Kevin, a polished creative IDE website. Original contemporary fine-art composition: thick sculptural acrylic impasto and palette-knife ridges, tactile off-white canvas, miniature hyperreal painted details only where specified. Sophisticated quiet gallery aesthetic, sun-themed, warm vermilion #ee542b, saffron, pale peach, chalk-white #f6f6f2, rare cobalt and charcoal details. Soft raking natural sunlight. Not a UI mockup. No text, typography, logo, border, signature or watermark. Extremely wide 3:1 panoramic top-down painting. Vast pale cream sculptural acrylic plane bathed in afternoon sunlight. In right third a tiny terracotta-orange tennis court, with two minuscule human players casting long shadows, delicate white court markings. A small soft orange circular parasol near court. No text or architecture. Left two-thirds mostly tactile white negative space. Thick white paint ridges contrast with extremely fine miniature court and people. Sunlight theme, contemporary gallery canvas.",
+    "file": "06-afternoon-court.png",
+    "source": "/Users/erintomorri/.codex/generated_images/01a0e534-485e-7742-a062-04cf3d3b2e28/exec-1ce70434-449a-44ce-8677-c843c1c49951.png"
+  },
+  {
+    "slug": "07-afterglow",
+    "title": "Afterglow",
+    "use": "Warm closing-section divider; keep the sun near the right third.",
+    "prompt": "Use case: stylized-concept. Asset for Kevin, a polished creative IDE website. Original contemporary fine-art composition: thick sculptural acrylic impasto and palette-knife ridges, tactile off-white canvas, miniature hyperreal painted details only where specified. Sophisticated quiet gallery aesthetic, sun-themed, warm vermilion #ee542b, saffron, pale peach, chalk-white #f6f6f2, rare cobalt and charcoal details. Soft raking natural sunlight. Not a UI mockup. No text, typography, logo, border, signature or watermark. Extremely wide 3:1 acrylic impasto seascape reduced to spare abstract horizontal paint bands. Large but understated warm orange half-sun at right third sinking into thin charcoal-blue sea, white and pale peach sky taking most of canvas. Two tiny dark swimmers near far right lower band. The sun is flat thick pigment with visible palette-knife texture. White top and bottom edges for easy integration into a white webpage. Quiet warm sunset, hopeful, expansive, not a conventional photographic sunset.",
+    "file": "07-afterglow.png",
+    "source": "/Users/erintomorri/.codex/generated_images/01a0e534-485e-7742-a062-04cf3d3b2e28/exec-9db7542a-ef24-4f5a-aa76-d00843c16ebb.png"
+  },
+  {
+    "slug": "08-painted-sun",
+    "title": "Painted sun",
+    "transparent": true,
+    "use": "Transparent solar accent; scale uniformly, never stretch the circle.",
+    "prompt": "Use case: stylized-concept. Asset for Kevin, a polished creative IDE website. Original contemporary fine-art composition: thick sculptural acrylic impasto and palette-knife ridges, tactile off-white canvas, miniature hyperreal painted details only where specified. Sophisticated quiet gallery aesthetic, sun-themed, warm vermilion #ee542b, saffron, pale peach, chalk-white #f6f6f2, rare cobalt and charcoal details. Soft raking natural sunlight. Not a UI mockup. No text, typography, logo, border, signature or watermark. Square isolated solar disc cutout on a genuinely transparent background. One imperfect hand-painted saffron and vermilion sun made of very thick acrylic impasto, sculptural radial palette-knife ridges and natural irregular edges. No face, no rays, no text, no other objects, no frame. Flat front view, subtly lit raised paint texture. Transparent exterior, no white square and no checkerboard drawn into image. A refined physical paint mark for overlaying website sections.",
+    "file": "08-painted-sun.png",
+    "source": "/Users/erintomorri/.codex/generated_images/01a0e534-485e-7742-a062-04cf3d3b2e28/exec-c2f5cfcb-cafe-4979-ab4c-f25bddc545c3.png"
+  },
+  {
+    "slug": "09-sunray-sweep",
+    "title": "Sunray sweep",
+    "transparent": true,
+    "use": "Transparent abstract overlay that can stretch horizontally at section seams.",
+    "prompt": "Use case: stylized-concept. Asset for Kevin, a polished creative IDE website. Original contemporary fine-art composition: thick sculptural acrylic impasto and palette-knife ridges, tactile off-white canvas, miniature hyperreal painted details only where specified. Sophisticated quiet gallery aesthetic, sun-themed, warm vermilion #ee542b, saffron, pale peach, chalk-white #f6f6f2, rare cobalt and charcoal details. Soft raking natural sunlight. Not a UI mockup. No text, typography, logo, border, signature or watermark. Extremely wide 3:1 isolated abstract painted sunray sweep on genuinely transparent background. Five broad gently curved horizontal bands of thick saffron, orange and pale peach acrylic paint sweep from left edge toward right, thinning into organic dry-brush edges. A single connected low horizontal composition, no sun circle, no text, no people. Raised physical impasto texture, subtle natural self-shadow, no cast shadow on a background. Lots of transparent space above and below. Designed to stretch as a webpage transition overlay.",
+    "file": "09-sunray-sweep.png",
+    "source": "/Users/erintomorri/.codex/generated_images/01a0e534-485e-7742-a062-04cf3d3b2e28/exec-2c719db2-80a4-4270-9ec4-22b8c675fecf.png"
+  },
+  {
+    "slug": "10-warm-paint-edge",
+    "title": "Warm paint edge",
+    "transparent": true,
+    "use": "Transparent brush-edge transition; stretch width or crop sides as needed.",
+    "prompt": "Use case: stylized-concept. Asset for Kevin, a polished creative IDE website. Original contemporary fine-art composition: thick sculptural acrylic impasto and palette-knife ridges, tactile off-white canvas, miniature hyperreal painted details only where specified. Sophisticated quiet gallery aesthetic, sun-themed, warm vermilion #ee542b, saffron, pale peach, chalk-white #f6f6f2, rare cobalt and charcoal details. Soft raking natural sunlight. Not a UI mockup. No text, typography, logo, border, signature or watermark. Extremely wide 3:1 isolated low horizontal ridge of thick white and pale apricot acrylic paint with a vivid vermilion-orange underside, on genuine transparent background. Irregular sculptural knife-edge flowing across full width, a subtle sunlit golden glint on upper ridges. No objects, figures, literal sun, letters, patterns or frame. A tactile paint swipe suitable for overlay at a website section boundary, upper and lower edges ragged and natural, transparent exterior. No background or drawn checkerboard.",
+    "file": "10-warm-paint-edge.png",
+    "source": "/Users/erintomorri/.codex/generated_images/01a0e534-485e-7742-a062-04cf3d3b2e28/exec-5ccca756-ec76-48d5-a528-86a0852bbfd3.png"
+  }
+]
