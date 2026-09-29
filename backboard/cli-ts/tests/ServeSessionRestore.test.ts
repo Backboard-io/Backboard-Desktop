@@ -133,6 +133,32 @@ describe("Studio compactor restoration", () => {
 		await restore.prepare("sub_new", { ...model, model: "unknown" });
 		expect(second.reportedContextLimit).toBeNull();
 	});
+	it("starts a new chat without waiting for the model catalog, then applies its limit", async () => {
+		const session = new Session("test");
+		const api = client();
+		let releaseCatalog!: () => void;
+		const catalogGate = new Promise<void>((resolve) => {
+			releaseCatalog = resolve;
+		});
+		const listModels = api.listModels;
+		api.listModels = async (options) => {
+			await catalogGate;
+			return listModels(options);
+		};
+		await new ServeSessionRestore(
+			session,
+			controller(session),
+			api,
+			await root(),
+		).prepare(undefined, model);
+		const beforeCatalog = session.reportedContextLimit;
+		releaseCatalog();
+		for (let i = 0; i < 10; i++) await Promise.resolve();
+		expect({ beforeCatalog, after: session.reportedContextLimit }).toEqual({
+			beforeCatalog: null,
+			after: 272000,
+		});
+	});
 	it("does not use a different thread's snapshot and does not adopt a failed restore", async () => {
 		const path = await root();
 		const first = new Session("test");

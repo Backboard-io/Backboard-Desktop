@@ -6,6 +6,7 @@ import {
 	extractHandoff,
 } from "../../prompts/context/compaction.ts";
 import type { AgentClient } from "../../providers/AgentClient.ts";
+import { openRouterRouting } from "../agent/RunMessageRequestBuilder.ts";
 import type { EventBus } from "../bus/EventBus.ts";
 import type { Session } from "../session/Session.ts";
 import { estimateTokens } from "./tokens.ts";
@@ -103,6 +104,9 @@ export class Compactor {
 				// way for compression to change the world it is describing.
 				tools: [],
 				memory: "off",
+				...(route.provider === "openrouter"
+					? { openrouter: openRouterRouting(config.selectedOpenRouterProvider) }
+					: {}),
 			},
 			options.signal === undefined ? {} : { signal: options.signal },
 		);

@@ -725,8 +725,8 @@ body > .shared-header .brand {
   color: inherit;
 }
 body > .shared-header .brand img {
-  width: 25px;
-  height: 34px;
+  width: 40px;
+  height: 28px;
   filter: invert(1);
 }
 body > .shared-header--ocean .brand img {

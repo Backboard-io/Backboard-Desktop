@@ -16,6 +16,7 @@ import {
 	type McpConnectResult,
 	McpServerConnector,
 } from "./MCPServerConnector.ts";
+import type { McpCachedTool, McpToolCache } from "./MCPToolCache.ts";
 import {
 	listMcpServerToolDefinitions,
 	mcpToolDefinitionChanged,
@@ -60,6 +61,30 @@ export interface McpSetServersOptions {
 	 * aggregate repeats the same changes; apply one or the other.
 	 */
 	onUpdate?: (update: McpToolRefreshResult) => void;
+	/** See {@link McpInitializeOptions.onToolsAdvertised}. */
+	onToolsAdvertised?: () => void;
+}
+
+export interface McpInitializeOptions {
+	/**
+	 * Receives each server's tools as they become usable. With a tool cache a
+	 * server reports twice: its remembered tools at once, then its live list
+	 * (`removedToolNames` names the remembered ones that list replaces).
+	 */
+	onUpdate?: (
+		update: McpInitializeResult & { removedToolNames?: string[] },
+	) => void;
+	/**
+	 * Fired once every server has either advertised remembered tools or
+	 * finished connecting: from then on a turn's tool list is complete, even
+	 * while remembered servers are still connecting.
+	 */
+	onToolsAdvertised?: () => void;
+}
+
+export interface McpClientManagerOptions {
+	/** Lets a new process advertise each server's last known tools at once. */
+	toolCache?: McpToolCache;
 }
 
 export class McpClientManager {
@@ -73,13 +98,20 @@ export class McpClientManager {
 	private readonly connector: McpServerConnector;
 	private readonly statusListeners = new Set<() => void>();
 	private readonly lostToolListeners = new Set<(toolNames: string[]) => void>();
+	/** Registered names of remembered tools whose server is still connecting. */
+	private readonly provisionalToolNames = new Map<string, string[]>();
+	/** Settles when a server's in-flight connect has been applied or dropped. */
+	private readonly connectWaits = new Map<string, Promise<void>>();
+	private readonly toolCache?: McpToolCache;
 	private closed = false;
 
 	constructor(
 		private readonly config: McpConfig,
 		private readonly cwd: string,
 		private readonly closeTimeoutMs = MCP_CLOSE_TIMEOUT_MS,
+		options: McpClientManagerOptions = {},
 	) {
+		this.toolCache = options.toolCache;
 		this.primitives = new McpPrimitiveManager({
 			connections: this.connections,
 			serverStatuses: this.serverStatuses,
@@ -136,11 +168,12 @@ export class McpClientManager {
 	 */
 	async initialize(
 		signal: AbortSignal,
-		options: { onUpdate?: (update: McpInitializeResult) => void } = {},
+		options: McpInitializeOptions = {},
 	): Promise<McpInitializeResult> {
 		this.registeredToolNames.clear();
 		this.connections.clear();
 		this.dirtyToolServers.clear();
+		this.provisionalToolNames.clear();
 		this.primitives.clear();
 		const activeServers = this.config.servers.filter(
 			(server) => !server.disabled,
@@ -149,23 +182,17 @@ export class McpClientManager {
 			this.setStatus(statusOf(server, "connecting", "Connecting…"));
 		}
 		const seenToolNames = new Set<string>();
+		const advertised = advertiseLatch(
+			activeServers.length,
+			options.onToolsAdvertised,
+		);
 		const perServer = await Promise.all(
-			activeServers.map(async (server) => {
-				const result = await this.connector.connect(server, signal, {
-					interactiveAuth: false,
-				});
-				const warnings = [...result.warnings];
-				if (!(await this.acceptConnectResult(server, result))) {
-					return { tools: [], warnings };
-				}
-				const tools = this.withRegisteredNames(
-					result.tools,
-					seenToolNames,
-					warnings,
-				);
-				options.onUpdate?.({ tools, warnings });
-				return { tools, warnings };
-			}),
+			activeServers.map((server) =>
+				this.connectAndRegister(server, signal, seenToolNames, {
+					onUpdate: options.onUpdate,
+					onAdvertised: advertised,
+				}),
+			),
 		);
 
 		return {
@@ -268,27 +295,17 @@ export class McpClientManager {
 			this.setStatus(statusOf(server, "connecting", "Connecting…"));
 		}
 
+		const advertised = advertiseLatch(
+			connectPlans.length,
+			options.onToolsAdvertised,
+		);
 		const perServer = await Promise.all(
-			connectPlans.map(async (server) => {
-				const result = await this.connector.connect(server, signal, {
-					interactiveAuth: false,
-				});
-				const serverWarnings = [...result.warnings];
-				if (!(await this.acceptConnectResult(server, result))) {
-					return { tools: [], warnings: serverWarnings };
-				}
-				const tools = this.withRegisteredNames(
-					result.tools,
-					this.registeredToolNames,
-					serverWarnings,
-				);
-				options.onUpdate?.({
-					tools,
-					removedToolNames: [],
-					warnings: serverWarnings,
-				});
-				return { tools, warnings: serverWarnings };
-			}),
+			connectPlans.map((server) =>
+				this.connectAndRegister(server, signal, this.registeredToolNames, {
+					onUpdate: options.onUpdate,
+					onAdvertised: advertised,
+				}),
+			),
 		);
 
 		return {
@@ -589,6 +606,7 @@ export class McpClientManager {
 		const connections = [...this.connections.values()];
 		this.connections.clear();
 		this.registeredToolNames.clear();
+		this.provisionalToolNames.clear();
 		this.dirtyToolServers.clear();
 		this.primitives.clear();
 		await Promise.allSettled(
@@ -600,7 +618,10 @@ export class McpClientManager {
 
 	private async closeServerConnection(name: string): Promise<string[]> {
 		const status = this.serverStatuses.get(name);
-		const toolNames = [...(status?.toolNames ?? [])];
+		const toolNames = [
+			...(status?.toolNames ?? []),
+			...this.releaseProvisionalTools(name, this.registeredToolNames),
+		];
 		for (const toolName of toolNames) {
 			this.registeredToolNames.delete(toolName);
 		}
@@ -629,6 +650,150 @@ export class McpClientManager {
 			);
 		}
 		return existing.registeredName;
+	}
+
+	/**
+	 * Connects one server and reports its tools. With a tool cache, the tools
+	 * the server listed last time are reported first, under the names they
+	 * will keep, and a call made before the connection is up waits for it.
+	 */
+	private async connectAndRegister(
+		server: McpServerConfig,
+		signal: AbortSignal,
+		seenToolNames: Set<string>,
+		hooks: {
+			onUpdate?: (update: McpToolRefreshResult) => void;
+			onAdvertised: () => void;
+		},
+	): Promise<McpToolRefreshResult> {
+		let settle = () => {};
+		const wait = new Promise<void>((resolve) => {
+			settle = resolve;
+		});
+		this.connectWaits.set(server.name, wait);
+		let advertised = false;
+		const advertise = () => {
+			if (advertised) return;
+			advertised = true;
+			hooks.onAdvertised();
+		};
+		try {
+			const connecting = this.connector.connect(server, signal, {
+				interactiveAuth: false,
+			});
+			const remembered = await this.toolCache?.read(server);
+			if (remembered && this.serverConfigs.get(server.name) === server) {
+				const provisional = this.withRegisteredNames(
+					remembered.map((tool) => this.provisionalTool(server, tool)),
+					seenToolNames,
+					[],
+				);
+				this.provisionalToolNames.set(
+					server.name,
+					provisional.map((tool) => tool.registeredName),
+				);
+				if (provisional.length > 0) {
+					hooks.onUpdate?.({
+						tools: provisional,
+						removedToolNames: [],
+						warnings: [],
+					});
+				}
+				advertise();
+			}
+
+			const result = await connecting;
+			const warnings = [...result.warnings];
+			const current = this.serverConfigs.get(server.name) === server;
+			// A replaced or removed server already had its remembered tools
+			// released by whoever replaced it.
+			const removedToolNames = current
+				? this.releaseProvisionalTools(server.name, seenToolNames)
+				: [];
+			if (!(await this.acceptConnectResult(server, result))) {
+				if (removedToolNames.length > 0) {
+					hooks.onUpdate?.({ tools: [], removedToolNames, warnings: [] });
+				}
+				return { tools: [], removedToolNames, warnings };
+			}
+			const tools = this.withRegisteredNames(
+				result.tools,
+				seenToolNames,
+				warnings,
+			);
+			if (tools.length > 0 || removedToolNames.length > 0) {
+				hooks.onUpdate?.({ tools, removedToolNames, warnings });
+			}
+			// After the tools are usable, so the disk never delays them. A connect
+			// cut short by shutdown says nothing about the server, so its
+			// remembered tools stay.
+			if (result.connection) {
+				await this.toolCache?.write(server, result.tools);
+			} else if (!signal.aborted && !this.closed) {
+				await this.toolCache?.delete(server);
+			}
+			return { tools, removedToolNames, warnings };
+		} finally {
+			if (this.connectWaits.get(server.name) === wait) {
+				this.connectWaits.delete(server.name);
+			}
+			settle();
+			advertise();
+		}
+	}
+
+	private provisionalTool(
+		server: McpServerConfig,
+		tool: McpCachedTool,
+	): McpListedToolDefinition {
+		return {
+			serverName: server.name,
+			toolName: tool.toolName,
+			description: tool.description,
+			inputSchema: tool.inputSchema,
+			annotations: tool.annotations,
+			trustAnnotations: server.trustToolAnnotations,
+			timeoutMs: server.timeoutMs,
+			call: async (input, ctx) => {
+				const client = await this.clientWhenConnected(server, ctx.signal);
+				return client.callTool(
+					{ name: tool.toolName, arguments: input },
+					undefined,
+					{ signal: ctx.signal, timeout: server.timeoutMs },
+				);
+			},
+		};
+	}
+
+	private async clientWhenConnected(
+		server: McpServerConfig,
+		signal: AbortSignal,
+	): Promise<Client> {
+		const wait = this.connectWaits.get(server.name);
+		if (wait && !this.connections.has(server.name)) {
+			await abortable(wait, signal);
+		}
+		const connection = this.connections.get(server.name);
+		if (!connection) {
+			const reason = this.serverStatuses.get(server.name)?.message;
+			throw new Error(
+				`MCP server '${server.name}' is not connected${reason ? `: ${reason}` : "."}`,
+			);
+		}
+		return connection.client;
+	}
+
+	private releaseProvisionalTools(
+		serverName: string,
+		seenToolNames: Set<string>,
+	): string[] {
+		const names = this.provisionalToolNames.get(serverName) ?? [];
+		this.provisionalToolNames.delete(serverName);
+		for (const name of names) {
+			seenToolNames.delete(name);
+			this.registeredToolNames.delete(name);
+		}
+		return names;
 	}
 
 	/**
@@ -728,6 +893,35 @@ export class McpClientManager {
 		}
 		if (registered.length > 0) this.notifyStatus();
 		return registered;
+	}
+}
+
+/** Calls `done` once `count` servers have reported; at once when there are none. */
+function advertiseLatch(count: number, done?: () => void): () => void {
+	let remaining = count;
+	if (remaining === 0) done?.();
+	return () => {
+		remaining--;
+		if (remaining === 0) done?.();
+	};
+}
+
+async function abortable(
+	work: Promise<void>,
+	signal: AbortSignal,
+): Promise<void> {
+	signal.throwIfAborted();
+	let onAbort: (() => void) | undefined;
+	try {
+		await Promise.race([
+			work,
+			new Promise<never>((_, reject) => {
+				onAbort = () => reject(signal.reason);
+				signal.addEventListener("abort", onAbort, { once: true });
+			}),
+		]);
+	} finally {
+		if (onAbort) signal.removeEventListener("abort", onAbort);
 	}
 }
 

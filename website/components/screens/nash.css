@@ -1,0 +1,326 @@
+@import url("https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@300;500&family=Instrument+Sans:wght@400;500&family=JetBrains+Mono:wght@500;700&display=swap");
+
+/* Nash: a fluorescent risograph zine. Paper, three spot inks, halftone. */
+body:has(.ns.is-page) {
+  margin: 0;
+  background: #fbf6ea;
+  color: #16225e;
+  font-family: "Instrument Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.ns {
+  --paper: #fbf6ea;
+  --blue: #1d3fd8;
+  --pink: #ff4fa0;
+  --yellow: #ffd61a;
+  --text: #16225e;
+  --gutter: clamp(18px, 4vw, 48px);
+  position: relative;
+  overflow-x: clip;
+  /* Own colours, so the screen looks the same embedded in the home page. */
+  background: var(--paper);
+  color: var(--text);
+  font-family: "Instrument Sans", system-ui, sans-serif;
+}
+.ns,
+.ns * {
+  box-sizing: border-box;
+}
+/* paper grain */
+.ns::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0.22;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .55  0 0 0 0 .5  0 0 0 0 .4  0 0 0 .55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+:where(.ns) a {
+  color: inherit;
+  text-decoration: none;
+}
+.ns a:focus-visible {
+  outline: 2px solid var(--pink);
+  outline-offset: 4px;
+}
+.ns .ns-title,
+.ns h2 {
+  margin: 0;
+  font-family: "Big Shoulders Display", "Arial Narrow", sans-serif;
+  font-weight: 300;
+  text-transform: uppercase;
+  color: var(--blue);
+  line-height: 0.84;
+}
+
+
+/* hero */
+.ns-hero {
+  position: relative;
+  height: clamp(620px, 100svh, 960px);
+  overflow: hidden;
+}
+.riso-sun {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.ns-hero-copy {
+  position: absolute;
+  left: var(--gutter);
+  top: 48%;
+  translate: 0 -58%;
+  z-index: 3;
+}
+.ns-kicker {
+  display: flex;
+  gap: 18px;
+  margin: 0 0 18px;
+  font: 700 11px "JetBrains Mono", monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--blue);
+}
+.ns-kicker span:first-child {
+  background: var(--pink);
+  color: #fff;
+  padding: 3px 8px;
+}
+.ns-kicker span:last-child {
+  padding: 3px 0;
+}
+.ns-hero .ns-title {
+  font-size: clamp(160px, 28vw, 440px);
+  letter-spacing: -0.01em;
+  mix-blend-mode: multiply;
+  animation: ns-print 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes ns-print {
+  from {
+    opacity: 0;
+    translate: -6px 4px;
+    filter: blur(3px);
+  }
+}
+.ns-cta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 22px;
+}
+.ns-btn {
+  display: inline-block;
+  padding: 16px 22px;
+  background: var(--blue);
+  color: var(--paper);
+  font: 700 12px "JetBrains Mono", monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: 5px 5px 0 var(--pink);
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
+}
+.ns-btn:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 8px 8px 0 var(--pink);
+}
+.ns-url {
+  padding: 6px 10px;
+  background: var(--paper);
+  font: 500 12px "JetBrains Mono", monospace;
+  color: var(--blue);
+}
+
+/* strip */
+.ns-strip {
+  overflow: hidden;
+  background: var(--blue);
+  color: var(--paper);
+  padding: 12px 0 10px;
+  transform: rotate(-1.2deg);
+  margin: -14px -10px 0;
+  position: relative;
+  z-index: 4;
+}
+.ns-strip-track {
+  display: flex;
+  gap: 40px;
+  width: max-content;
+  animation: ns-slide 40s linear infinite;
+  font: 500 28px/1 "Big Shoulders Display", sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ns-strip-track span {
+  white-space: nowrap;
+}
+@keyframes ns-slide {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* body */
+.ns-body {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(24px, 5vw, 80px);
+  padding: clamp(80px, 10vw, 140px) var(--gutter) clamp(220px, 26vw, 380px);
+  overflow: hidden;
+}
+.ns-col {
+  position: relative;
+  z-index: 2;
+  border-top: 1px solid var(--blue);
+  padding-top: 22px;
+}
+.ns-label {
+  margin: 0;
+  font: 700 11px "JetBrains Mono", monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--blue);
+}
+.ns-label span {
+  color: var(--pink);
+  margin-right: 6px;
+}
+.ns-col h2 {
+  margin: 18px 0 16px;
+  font-size: clamp(48px, 6vw, 92px);
+}
+.ns-col p:not(.ns-label) {
+  max-width: 420px;
+  margin: 0 0 18px;
+  font-size: 16px;
+  line-height: 1.55;
+}
+.ns-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ns-links a {
+  padding: 12px 16px;
+  border: 1px solid var(--blue);
+  font: 700 11px "JetBrains Mono", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--blue);
+  transition: background 0.15s;
+}
+.ns-links a:hover {
+  background: var(--yellow);
+}
+.ns-shore {
+  position: absolute;
+  left: 50%;
+  bottom: -30px;
+  translate: -50% 0;
+  width: min(1200px, 110%);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.ns-foot {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 26px var(--gutter);
+  background: var(--blue);
+  color: var(--paper);
+  font: 700 11px "JetBrains Mono", monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.ns-foot a:hover {
+  color: var(--yellow);
+}
+
+@media (max-width: 760px) {
+  .ns-hero-copy {
+    top: 110px;
+    translate: none;
+    right: var(--gutter);
+  }
+  .ns-hero .ns-title {
+    font-size: 48vw;
+  }
+  .ns-body {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ns-hero .ns-title,
+  .ns-strip-track {
+    animation: none;
+  }
+}
+
+/* single screen: the hero is the whole page */
+.ns {
+  height: 100svh;
+  min-height: 620px;
+  overflow: hidden;
+}
+.ns-hero {
+  height: 100%;
+}
+.ns-foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+}
+
+.ns > .ns-main {
+  height: 100%;
+}
+
+/* Product tour, on the right of the hero */
+.ns-tour {
+  position: absolute;
+  z-index: 3;
+  right: var(--gutter);
+  top: 50%;
+  translate: 0 -46%;
+  width: min(54vw, 820px);
+}
+.ns-tour .tv {
+  box-shadow:
+    0 0 0 1px rgba(22, 34, 94, 0.14),
+    8px 8px 0 var(--yellow),
+    -8px -8px 0 var(--pink),
+    0 40px 80px -40px rgba(29, 63, 216, 0.5);
+}
+@media (max-width: 900px) {
+  .ns-hero {
+    height: auto;
+    min-height: 100svh;
+    padding-bottom: 48px;
+  }
+  .ns-tour {
+    position: relative;
+    inset: auto;
+    translate: none;
+    width: auto;
+    margin: 0 var(--gutter);
+    padding-top: 62svh;
+  }
+}
+.ns-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

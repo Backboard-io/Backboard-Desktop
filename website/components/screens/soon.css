@@ -1,0 +1,123 @@
+@import url("https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@300&family=Instrument+Sans:wght@400;500&family=JetBrains+Mono:wght@500;700&display=swap");
+
+/* "Coming soon" one-pagers (Giggsfields, Backboard Apps). */
+.soon {
+  --navy: #1c1861;
+  --paper: #f6f1e7;
+  position: relative;
+  min-height: 100svh;
+  display: grid;
+  grid-template-columns: minmax(300px, 5fr) 7fr;
+  align-items: center;
+  gap: clamp(24px, 5vw, 80px);
+  padding: calc(var(--site-header-h, 0px) + 40px) clamp(20px, 5vw, 80px) 56px;
+  background: var(--paper);
+  color: var(--navy);
+  font-family: "Instrument Sans", system-ui, sans-serif;
+  overflow: hidden;
+}
+.soon *,
+.soon *::before {
+  box-sizing: border-box;
+}
+.soon.is-apps {
+  grid-template-columns: 7fr minmax(300px, 5fr);
+}
+.soon.is-apps .soon-copy {
+  order: 2;
+}
+.soon-kicker {
+  display: flex;
+  gap: 14px;
+  margin: 0 0 18px;
+  font: 700 11px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.soon-kicker span:first-child {
+  padding: 5px 8px;
+  margin: -5px 0;
+  background: #f0592a;
+  color: #fff;
+}
+.soon-title {
+  margin: 0;
+  font: 300 clamp(72px, 10vw, 170px) / 0.84 "Big Shoulders Display", "Arial Narrow", sans-serif;
+  text-transform: uppercase;
+}
+.soon-line {
+  max-width: 34ch;
+  margin: 24px 0 28px;
+  font-size: clamp(16px, 1.3vw, 19px);
+  line-height: 1.5;
+  color: rgba(28, 24, 97, 0.72);
+}
+.soon-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 16px;
+  background: var(--navy);
+  color: var(--paper);
+  text-decoration: none;
+  font: 700 12px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.soon-btn:hover {
+  background: #2b2690;
+}
+.soon-art {
+  min-width: 0;
+}
+.soon-plate {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  background: var(--navy);
+  overflow: hidden;
+  box-shadow: 10px 10px 0 rgba(28, 24, 97, 0.12);
+}
+.soon-plate img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.soon-pixel {
+  image-rendering: pixelated;
+  mix-blend-mode: screen;
+}
+/* Drift between pixel and colour on a slow loop. */
+.soon-color {
+  animation: soon-bloom 9s ease-in-out infinite;
+}
+@keyframes soon-bloom {
+  0%,
+  38% {
+    opacity: 0;
+  }
+  55%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (max-width: 860px) {
+  .soon,
+  .soon.is-apps {
+    grid-template-columns: 1fr;
+  }
+  .soon.is-apps .soon-copy {
+    order: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .soon-color {
+    animation: none;
+    opacity: 0;
+  }
+}

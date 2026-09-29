@@ -27,6 +27,7 @@ import { CodeWindow, mainWindow } from '../../../base/browser/window.js';
 import { TitlebarPart, TitleService } from '../../browser/parts/titlebarPart.js';
 import { isMacintosh, isWindows } from '../../../base/common/platform.js';
 import { localize } from '../../../nls.js';
+import { SessionsPanelHeader } from '../../browser/parts/panelHeader.js';
 
 export class NativeTitlebarPart extends TitlebarPart {
 
@@ -113,6 +114,25 @@ export class NativeTitlebarPart extends TitlebarPart {
 					this.onDidChangeWindowMaximized(maximized);
 				}
 			}, { windowId: targetWindowId, maximized: this.layoutService.isWindowMaximized(targetWindow) }));
+		}
+
+		// macOS: centre the traffic lights on the header strips (the sidebar,
+		// chat and right panel headers are all SessionsPanelHeader.HEIGHT). The
+		// main process centres the buttons in the given height and then nudges
+		// them 2px down, so pass 4px less. The Editor mode shares the native
+		// window and positions them for its own title bar, so reapply whenever
+		// this page is shown again.
+		if (isMacintosh && useWindowControlsOverlay(this.configurationService)) {
+			const applyWindowControls = () => this.nativeHostService.updateWindowControls({
+				targetWindowId,
+				height: Math.round((SessionsPanelHeader.HEIGHT - 4) * getZoomFactor(targetWindow))
+			});
+			applyWindowControls();
+			this._register(addDisposableListener(targetWindow.document, 'visibilitychange', () => {
+				if (targetWindow.document.visibilityState === 'visible') {
+					applyWindowControls();
+				}
+			}));
 		}
 
 		// Window System Context Menu

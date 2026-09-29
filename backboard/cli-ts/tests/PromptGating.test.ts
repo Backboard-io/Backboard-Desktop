@@ -22,7 +22,7 @@ describe("prompt tool gating", () => {
 			});
 			expect(prompt).toContain("WHOLE request");
 			expect(prompt).toContain('use appName "Browser"');
-			expect(prompt).toContain("Do not choose Safari or Firefox");
+			expect(prompt).toContain("When the user names Safari or Firefox");
 			expect(prompt).toContain("Do not change drawing into AI generation");
 			expect(prompt).toContain('"action":"task"');
 			expect(prompt).toContain('"action":"screenshot","appName":"Brave"');

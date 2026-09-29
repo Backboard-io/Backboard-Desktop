@@ -115,6 +115,11 @@ export interface AskUserResponse {
 }
 
 export type PerformanceTimingPhase =
+	| "prepare_tools"
+	| "prepare_skills"
+	| "prepare_assistant"
+	| "prepare_thinking"
+	| "prepare_baseline"
 	| "provider_first_event"
 	| "provider_first_visible"
 	| "provider_stream_total"
@@ -299,6 +304,11 @@ export type AgentEvent =
 			model: string;
 			provider: string;
 	  }
-	| { type: "run:error"; error: string };
+	| {
+			type: "run:error";
+			error: string;
+			/** The user must act (e.g. add credit); the host shows the message. */
+			actionable?: boolean;
+	  };
 
 export type AgentEventType = AgentEvent["type"];

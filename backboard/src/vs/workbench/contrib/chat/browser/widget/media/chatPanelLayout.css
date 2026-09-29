@@ -64,13 +64,6 @@
 	order: -1;
 }
 
-/* The user asked for no chat title header: the session tab strip (chat icon +
-   title) is hidden. The +/history cluster lives in its own toolbar and stays,
-   and both of its actions re-activate chat (see `openNewChat`). */
-.monaco-workbench .part.auxiliarybar .composite.title.has-chat-tabs .chat-view-title-container {
-	display: none;
-}
-
 .monaco-workbench .part.auxiliarybar > .composite.title.has-chat-tabs {
 	align-items: center;
 	padding-inline: var(--bb-agent-tab-inset);
@@ -221,7 +214,9 @@
 	color: var(--vscode-panelTitle-activeForeground, var(--vscode-foreground));
 }
 
-.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab {
+/* Inactive only: this sits after the active rule at equal specificity, so an
+   unqualified selector would dim the selected tab's label too. */
+.monaco-workbench .composite.title.has-chat-tabs .chat-view-title-tab:not(.chat-view-title-tab-active) {
 	color: var(--vscode-panelTitle-inactiveForeground, var(--vscode-descriptionForeground));
 }
 
@@ -492,7 +487,7 @@
  * after clicking into the list/row. Fixing the real layer above removes that
  * dependency on focus state entirely.
  *
- * ListWidget (listWidget.ts `style()`) ALSO injects its own <style> tag at
+ * ListWidget (listWidget.ts `style()`) ALSO injects its own \3c style> tag at
  * runtime with rules like `.monaco-list.monaco-list-id-N:focus
  * .monaco-list-row.focused { background-color: ... }`, added to the document
  * AFTER our stylesheet. That always wins on cascade order regardless of

@@ -2683,10 +2683,11 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 				// Codex's fold header (`Bw`): muted "Worked for …" + 14px chevron over a hairline.
 				foldButton = applyCodexRoot(cxEl('button', 'chat-backboard-turn-fold cx-fold no-drag cursor-interaction items-center select-none focus:outline-hidden border gap-1 whitespace-nowrap flex rounded-md hover:text-default border-transparent border-0 p-0 inline-flex max-w-full flex-wrap text-size-chat text-secondary')) as HTMLButtonElement;
 				foldButton.type = 'button';
-				const foldLabel = cxEl('span', 'chat-backboard-turn-fold-label text-text/60 tabular-nums');
+				// No text-text/60: its colour resolves against an absent data-theme scope and renders black.
+				const foldLabel = cxEl('span', 'chat-backboard-turn-fold-label tabular-nums');
 				const labelWrap = cxEl('span');
 				labelWrap.appendChild(foldLabel);
-				const chevron = codexIcon('foldChevron', 'chat-backboard-turn-fold-chevron icon-2xs text-text/40 transition-transform duration-basic');
+				const chevron = codexIcon('foldChevron', 'chat-backboard-turn-fold-chevron icon-2xs transition-transform duration-basic');
 				foldButton.append(labelWrap, chevron);
 				const rule = applyCodexRoot(cxEl('div', 'cx-fold-rule pt-1 text-size-chat text-secondary'));
 				rule.appendChild(cxEl('div', 'w-full border-t border-default'));

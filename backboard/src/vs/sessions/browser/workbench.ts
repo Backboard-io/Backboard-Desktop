@@ -87,6 +87,8 @@ const SESSIONS_FILES_CONTAINER_ID = 'workbench.sessions.auxiliaryBar.filesContai
 const SESSIONS_BROWSER_VIEW_CONTAINER_ID = 'workbench.sessions.auxiliaryBar.browserContainer';
 const SIMPLE_SESSIONS_MINIMUM_WIDTH = 300;
 const SIMPLE_AUXILIARY_BAR_MINIMUM_WIDTH = 120;
+/** Smallest terminal panel height restored from saved layout state. */
+const PANEL_MINIMUM_RESTORED_HEIGHT = 160;
 
 //#region Workbench Options
 
@@ -1133,7 +1135,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		} else {
 			// Safety net for the simple window: the main editor area must
 			// never be visible while it holds no editors, or the empty-editor
-			// watermark ("Welcome to Backboard Studio") shows next to the chat.
+			// watermark ("Backboard Desktop") shows next to the chat.
 			// This catches any path that reveals it empty (restored state, a
 			// transient layout reveal) as well as closing the last editor after
 			// an explicit "Open in Editor Area".
@@ -1373,8 +1375,11 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 		const sideBarSize = !this._isOptimusWindow
 			? Math.min(restoredSideBarSize, 310)
 			: restoredSideBarSize;
-		const panelSize = this._savedPartSizes.panel
+		// A stale saved height would open the terminal as a sliver or bury the
+		// chat above it; keep it between a usable minimum and 60% of the window.
+		const restoredPanelSize = this._savedPartSizes.panel
 			?? (this.partVisibility.panel ? sizes.panelSize : Math.max(sizes.panelSize, 250));
+		const panelSize = Math.min(Math.max(restoredPanelSize, PANEL_MINIMUM_RESTORED_HEIGHT), Math.max(PANEL_MINIMUM_RESTORED_HEIGHT, Math.floor(height * 0.6)));
 		const contentHeight = Math.max(0, height);
 
 		// Calculate right section width — when sidebar is hidden it takes no space.
@@ -2093,7 +2098,7 @@ export class Workbench extends Disposable implements IAgentWorkbenchLayoutServic
 	/**
 	 * Keeps the invariant that, in the simple Sessions window, the main editor
 	 * area is never visible while it holds no editors. An empty visible editor
-	 * part renders the workbench watermark ("Welcome to Backboard Studio") next
+	 * part renders the workbench watermark ("Backboard Desktop") next
 	 * to the chat, which must never appear in simple mode. The advanced
 	 * (Optimus) window is a full workbench and is exempt.
 	 */

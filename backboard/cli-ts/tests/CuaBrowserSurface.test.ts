@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { elementsFromRefs } from "../src/core/computer/CuaBrowserSurface.ts";
+import {
+	CuaBrowserSurface,
+	elementsFromRefs,
+} from "../src/core/computer/CuaBrowserSurface.ts";
 import { isBrowserApp } from "../src/core/computer/CuaDriverSurface.ts";
 import { describeElement } from "../src/core/computer/JevUseLoop.ts";
 
@@ -213,7 +216,73 @@ describe("browser execution", () => {
 				value: undefined,
 				selected: false,
 				editable: false,
+				clickable: false,
 			},
+		]);
+	});
+});
+
+describe("typing into a page field", () => {
+	it("types at the caret, then clicks and types, when the driver cannot replace the text", async () => {
+		const calls: string[] = [];
+		const driver = {
+			async call<T>(name: string, args: Record<string, unknown>) {
+				calls.push(
+					`${name} ${JSON.stringify({ ref: args.ref, text: args.text, replace: args.replace, input_route: args.input_route })}`,
+				);
+				if (name === "launch_app") return { pid: 1 } as T;
+				if (name === "browser_prepare") return { prepared_pid: 1 } as T;
+				if (name === "list_windows")
+					return {
+						windows: [
+							{
+								pid: 1,
+								window_id: 2,
+								is_on_screen: true,
+								bounds: { width: 900, height: 600 },
+							},
+						],
+					} as T;
+				return {} as T;
+			},
+			async tryCall<T>(name: string, args: Record<string, unknown>) {
+				if (name === "get_browser_state")
+					return {
+						ok: true,
+						data: {
+							target_id: "t",
+							tabs: [{ tab_id: "a", active: true }],
+						} as T,
+					};
+				if (name === "browser_type") {
+					calls.push(`try ${name} replace=${args.replace}`);
+					return {
+						ok: false,
+						data: {} as T,
+						error:
+							"browser_input_trust_unavailable: the exact editable ref did not become focus-ready",
+					};
+				}
+				return { ok: true, data: {} as T };
+			},
+			async close() {},
+		};
+		const surface = new CuaBrowserSurface("/driver", "Browser", driver);
+		await surface.type(
+			{
+				handle: "p1:0",
+				role: "searchbox",
+				label: "Search Wikipedia",
+				clickable: true,
+			},
+			"Alan Turing",
+			new AbortController().signal,
+		);
+		expect(calls.filter((call) => /browser_(type|click)/.test(call))).toEqual([
+			"try browser_type replace=true",
+			"try browser_type replace=undefined",
+			'browser_click {"ref":"p1:0","input_route":"dom_event"}',
+			'browser_type {"ref":"p1:0","text":"Alan Turing"}',
 		]);
 	});
 });

@@ -276,6 +276,8 @@ export interface CliTsAgentEvent {
 	};
 	readonly fileEdits?: readonly { readonly path: string; readonly before: string; readonly after: string }[];
 	readonly error?: string;
+	/** On `run:error`: the user must act (e.g. add credit), so the note shows `error`. */
+	readonly actionable?: boolean;
 	readonly message?: string;
 	readonly status?: CliTsTurnStatus | 'done' | 'error';
 	readonly durationMs?: number;

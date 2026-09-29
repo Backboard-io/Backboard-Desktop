@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 @import url('./codexTheme.css');
+@import url('./sessionsShell.css');
 @import url('../../../workbench/contrib/chat/browser/widget/media/chatDevinPresentation.css');
 
 /* T3 Code's chat treatment, applied to the Simple-mode transcript.

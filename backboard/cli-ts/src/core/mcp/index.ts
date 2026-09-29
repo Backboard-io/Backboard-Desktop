@@ -58,6 +58,7 @@ export {
 	filterMcpListedToolDefinitions,
 	isMcpToolEnabled,
 } from "./MCPToolDefinitions.ts";
+export { McpToolCache } from "./MCPToolCache.ts";
 export { McpToolRegistrar } from "./MCPToolRegistrar.ts";
 export type {
 	McpCallResult,

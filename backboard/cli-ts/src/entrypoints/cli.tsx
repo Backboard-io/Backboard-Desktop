@@ -530,7 +530,7 @@ async function main(): Promise<void> {
 				attachments={attachmentManager}
 				startupWarnings={startupWarnings}
 				onLogin={(onDeviceCode) => loginWithBackboardSso({ onDeviceCode })}
-				onLogout={logoutSavedCredentials}
+				onLogout={() => logoutSavedCredentials()}
 				onNewSession={() => sessionLifecycle.startNew()}
 				onResumeLocalSession={(sessionId) => sessionLifecycle.resume(sessionId)}
 				onResumeRemoteSession={() => sessionLifecycle.startNew()}

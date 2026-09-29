@@ -1,0 +1,355 @@
+/* Backboard R-CLI terminal replica. Colours follow cli-ts/src/ui/theme:
+   ANSI cyan accent, green success, gray secondary, on the #05070B default bg. */
+.rt-win {
+  --rt-bg: #05070b;
+  --rt-tx: #e6edf3;
+  --rt-dim: #7d8590;
+  --rt-cyan: #39c5cf;
+  --rt-green: #3fb950;
+  --rt-blue: #58a6ff;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 14px;
+  background:
+    radial-gradient(120% 70% at 80% 0%, rgba(57, 197, 207, 0.08), transparent 60%),
+    var(--rt-bg);
+  color: var(--rt-tx);
+  font: 500 13px/1.55 "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  text-align: left;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 30px 60px -18px rgba(5, 20, 30, 0.55),
+    0 60px 120px -30px rgba(10, 60, 80, 0.4);
+}
+.rt-win *,
+.rt-win *::before {
+  box-sizing: border-box;
+}
+.rt-bar {
+  flex: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 12px;
+  background: linear-gradient(#1b1e24, #15181d);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.rt-lights {
+  display: flex;
+  gap: 7px;
+}
+.rt-lights i {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #ff5f57;
+}
+.rt-lights i:nth-child(2) {
+  background: #febc2e;
+}
+.rt-lights i:nth-child(3) {
+  background: #28c840;
+}
+.rt-title {
+  position: absolute;
+  left: 50%;
+  translate: -50% 0;
+  font: 500 12px -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  color: #9aa1ab;
+  white-space: nowrap;
+}
+.rt-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px 18px 6px;
+  scroll-behavior: smooth;
+}
+.rt-body > * {
+  animation: rt-in 0.28s ease both;
+}
+@keyframes rt-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.rt-cyan {
+  color: var(--rt-cyan);
+}
+.rt-green {
+  color: var(--rt-green);
+}
+.rt-blue {
+  color: var(--rt-blue);
+}
+.rt-dim {
+  color: var(--rt-dim);
+}
+.rt-win b {
+  font-weight: 700;
+}
+.rt-caret {
+  display: inline-block;
+  width: 8px;
+  height: 15px;
+  margin-left: 1px;
+  vertical-align: -3px;
+  background: var(--rt-tx);
+  animation: rt-blink 1s steps(1) infinite;
+}
+@keyframes rt-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* session card */
+.rt-card {
+  width: min(100%, 520px);
+  margin: 12px 0 4px;
+  padding: 12px 18px 12px;
+  border: 1.5px solid var(--rt-cyan);
+  border-radius: 12px;
+}
+.rt-card-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.rt-mascot {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+}
+.rt-mrow {
+  display: flex;
+  height: 18px;
+}
+.rt-mrow.is-half {
+  height: 9px;
+}
+.rt-mrow i {
+  width: 5.5px;
+  height: 100%;
+}
+.rt-mrow i.is-on {
+  background: var(--rt-cyan);
+}
+.rt-card-h {
+  display: block;
+  margin-top: 12px;
+}
+.rt-row {
+  display: flex;
+  gap: 0;
+}
+.rt-row > span:first-child,
+.rt-row > b:first-child {
+  width: 12ch;
+  flex: none;
+}
+.rt-row:nth-of-type(1) {
+  margin-top: 6px;
+}
+.rt-row.is-gap {
+  margin-top: 10px;
+}
+
+/* prompt */
+.rt-segs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-weight: 700;
+}
+.rt-seg {
+  padding: 0 7px;
+  border-radius: 3px;
+  background: var(--rt-cyan);
+  color: #05070b;
+}
+.rt-seg.is-plain {
+  padding: 0;
+  background: none;
+  color: var(--rt-tx);
+}
+.rt-ask {
+  margin-top: 6px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* tools */
+.rt-tool {
+  margin-top: 12px;
+}
+.rt-in {
+  padding-left: 3ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rt-result {
+  padding-left: 1ch;
+}
+.rt-pulse {
+  animation: rt-blink 0.9s ease-in-out infinite;
+}
+.rt-shadow {
+  background: linear-gradient(90deg, var(--rt-cyan) 0%, #b9f6fb 50%, var(--rt-cyan) 100%) 0 0 / 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: rt-shadow 1.2s linear infinite;
+}
+@keyframes rt-shadow {
+  to {
+    background-position: -200% 0;
+  }
+}
+.rt-diff {
+  margin: 4px 0 0 3ch;
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 12px;
+}
+.rt-diff > div {
+  display: flex;
+  gap: 10px;
+  padding: 0 8px;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rt-diff .is-add {
+  background: rgba(46, 160, 67, 0.22);
+  color: #d2f4d9;
+}
+.rt-diff span {
+  width: 2ch;
+  flex: none;
+  text-align: right;
+  color: rgba(210, 244, 217, 0.5);
+}
+.rt-reply {
+  margin-top: 14px;
+  max-width: 62ch;
+}
+
+/* footer: input + status bar */
+.rt-foot {
+  flex: none;
+  padding: 6px 18px 14px;
+}
+.rt-input {
+  display: flex;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.rt-status {
+  margin-top: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rt-win *,
+  .rt-win *::before {
+    animation: none !important;
+  }
+}
+
+/* Compact: fills a small block (the CLI grid). One-row session header,
+   tighter spacing, older lines fade out at the top as the session scrolls. */
+.rt-win.is-compact {
+  border-radius: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  box-shadow: none;
+  background:
+    radial-gradient(120% 80% at 90% 0%, rgba(57, 197, 207, 0.1), transparent 60%),
+    var(--rt-bg);
+}
+.rt-win.is-compact .rt-bar {
+  height: 28px;
+}
+.rt-win.is-compact .rt-lights i {
+  width: 9px;
+  height: 9px;
+}
+.rt-win.is-compact .rt-title {
+  font-size: 11px;
+}
+.rt-win.is-compact .rt-body {
+  padding: 10px 14px 4px;
+  -webkit-mask-image: linear-gradient(transparent, #000 36px);
+  mask-image: linear-gradient(transparent, #000 36px);
+}
+.rt-card.is-compact {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin: 10px 0 2px;
+  padding: 8px 12px;
+  border-width: 1px;
+  border-radius: 8px;
+}
+.rt-card.is-compact .rt-mrow {
+  height: 8px;
+}
+.rt-card.is-compact .rt-mrow.is-half {
+  height: 4px;
+}
+.rt-card.is-compact .rt-mrow i {
+  width: 2.5px;
+}
+.rt-card.is-compact > div {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rt-synced {
+  flex: none;
+  font-size: 10.5px;
+}
+.rt-win.is-compact .rt-segs {
+  margin-top: 10px;
+  font-size: 10.5px;
+}
+.rt-win.is-compact .rt-ask {
+  padding: 5px 10px;
+}
+.rt-win.is-compact .rt-tool {
+  margin-top: 8px;
+}
+.rt-win.is-compact .rt-diff {
+  font-size: 10.5px;
+}
+.rt-win.is-compact .rt-reply {
+  margin-top: 10px;
+}
+.rt-win.is-compact .rt-foot {
+  padding: 4px 14px 12px;
+}
+.rt-win.is-compact .rt-input {
+  padding: 6px 10px;
+}
+.rt-win.is-compact .rt-status {
+  display: none;
+}

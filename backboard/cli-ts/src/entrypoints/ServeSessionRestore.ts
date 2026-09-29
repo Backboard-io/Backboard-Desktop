@@ -109,25 +109,36 @@ export class ServeSessionRestore {
 		}
 		if (this.modelKey !== key) {
 			this.controller.setModelContextLimit(null);
-			// Catalog lookup is best-effort. Per-turn provider usage remains authoritative.
-			try {
-				const catalog = await this.client.listModels({
-					signal: AbortSignal.timeout(10_000),
-				});
-				const entry = catalog.models.find(
-					(item) =>
-						item.provider === model.provider && item.name === model.model,
-				);
-				if (
-					entry?.context_limit &&
-					Number.isFinite(entry.context_limit) &&
-					entry.context_limit > 0
-				)
-					this.controller.setModelContextLimit(entry.context_limit);
-			} catch {
-				/* ResolveContextWindow supplies the existing conservative fallback. */
-			}
 			this.modelKey = key;
+			const lookup = this.applyCatalogContextLimit(model, key);
+			// The limit only decides whether this turn must compress first, which
+			// needs history. A new chat's first turn would otherwise wait on the
+			// whole model catalog (a dozen requests, ~1-2 s) before it starts.
+			if (this.session.getMessages().length > 0) await lookup;
+		}
+	}
+
+	/** Catalog lookup is best-effort. Per-turn provider usage remains authoritative. */
+	private async applyCatalogContextLimit(
+		model: ModelRef,
+		key: string,
+	): Promise<void> {
+		try {
+			const catalog = await this.client.listModels({
+				signal: AbortSignal.timeout(10_000),
+			});
+			const entry = catalog.models.find(
+				(item) => item.provider === model.provider && item.name === model.model,
+			);
+			if (
+				this.modelKey === key &&
+				entry?.context_limit &&
+				Number.isFinite(entry.context_limit) &&
+				entry.context_limit > 0
+			)
+				this.controller.setModelContextLimit(entry.context_limit);
+		} catch {
+			/* ResolveContextWindow supplies the existing conservative fallback. */
 		}
 	}
 	async save(model: ModelRef): Promise<void> {

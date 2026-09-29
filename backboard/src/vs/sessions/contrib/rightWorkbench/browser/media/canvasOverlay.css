@@ -50,7 +50,7 @@
 
 /* Over a wallpaper the playground is dark glass with bright text in every
  * theme, matching the chat and right panel around it. */
-.monaco-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light) .sessions-canvas-overlay {
+.monaco-workbench.vs-dark.sessions-chat-custom-background:not(.hc-black):not(.hc-light) .sessions-canvas-overlay {
 	--rwb-foreground: #ffffff;
 	--rwb-muted: #e8ebef;
 	--rwb-bg: #151619;
@@ -59,7 +59,7 @@
 	-webkit-backdrop-filter: blur(24px);
 }
 
-.monaco-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light) .sessions-canvas-overlay .sessions-right-workbench-canvas {
+.monaco-workbench.vs-dark.sessions-chat-custom-background:not(.hc-black):not(.hc-light) .sessions-canvas-overlay .sessions-right-workbench-canvas {
 	--rwb-canvas-surface: #151619;
 
 	.sessions-right-workbench-canvas-views,
@@ -90,7 +90,7 @@
 }
 
 /* Runway's dark palette, used in dark themes and over a wallpaper. */
-.monaco-workbench:is(.vs-dark, .sessions-chat-custom-background:not(.hc-black):not(.hc-light)) .sessions-canvas-overlay .sessions-right-workbench-canvas.focused {
+.monaco-workbench.vs-dark .sessions-canvas-overlay .sessions-right-workbench-canvas.focused {
 	--cd-bg: #000000;
 	--cd-raised: #131416;
 	--cd-surface: #1b1e23;

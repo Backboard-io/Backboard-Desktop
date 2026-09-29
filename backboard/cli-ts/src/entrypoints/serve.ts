@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { Config } from "../config/Config.ts";
 import {
@@ -22,6 +22,7 @@ import {
 	loadMcpConfig,
 	McpClientManager,
 	McpController,
+	McpToolCache,
 	McpToolRegistrar,
 } from "../core/mcp/index.ts";
 import {
@@ -146,7 +147,11 @@ export async function runServe(argv: string[]): Promise<void> {
 	// Connecting is deferred until after `serve:ready` (see below): the IDE
 	// kills a runtime that is not ready within 30s, and each server may take
 	// up to its timeout to connect.
-	const mcpManager = new McpClientManager(mcpConfig, config.cwd);
+	const mcpManager = new McpClientManager(mcpConfig, config.cwd, undefined, {
+		toolCache: new McpToolCache(
+			join(dirname(config.mcpConfigPaths.user), "mcp-tool-cache"),
+		),
+	});
 	/** Aborted on shutdown so no MCP connect or OAuth wait outlives the process. */
 	const mcpShutdown = new AbortController();
 	const mcpWork = new McpWorkQueue();
@@ -594,7 +599,7 @@ export async function runServe(argv: string[]): Promise<void> {
 				// set are disconnected; untouched servers keep their live
 				// connection. See ServeTypes for what `authoritative` layers.
 				const result = await mcpWork.run(
-					async () => {
+					async (releaseTurns) => {
 						const { entries, sources } = await resolveMcpServerSet({
 							cwd: config.cwd,
 							paths: config.mcpConfigPaths,
@@ -612,6 +617,7 @@ export async function runServe(argv: string[]): Promise<void> {
 							sources,
 							onUpdate: (update) =>
 								mcpToolRegistrar.applyRefresh({ ...update, warnings: [] }),
+							onToolsAdvertised: releaseTurns,
 						});
 					},
 					{ blocksTurns: true },
@@ -799,10 +805,15 @@ export async function runServe(argv: string[]): Promise<void> {
 	// first, so IDE pushes and turns line up behind it.
 	void mcpWork
 		.run(
-			async () => {
+			async (releaseTurns) => {
 				const result = await mcpManager.initialize(mcpShutdown.signal, {
 					onUpdate: (update) =>
-						mcpToolRegistrar.register({ ...update, warnings: [] }),
+						mcpToolRegistrar.applyRefresh({
+							tools: update.tools,
+							removedToolNames: update.removedToolNames ?? [],
+							warnings: [],
+						}),
+					onToolsAdvertised: releaseTurns,
 				});
 				// Startup warnings stay out of the transcript (they cluttered
 				// every launch); the IDE gets them with the status snapshot.

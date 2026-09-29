@@ -1085,8 +1085,14 @@
 
 /* Keep the wallpaper treatment identical across themes and chat states. */
 .monaco-workbench.agent-sessions-workbench {
-	--sessions-background-scrim: rgba(18, 20, 24, 0.48);
+	--sessions-background-scrim: color-mix(in srgb, var(--codex-canvas) 48%, transparent);
 	--sessions-background-filter: blur(3px);
+}
+
+/* Wallpaper text stays white in every theme, so its scrim must stay dark
+ * even when the surrounding workbench uses a light palette. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background {
+	--sessions-background-scrim: rgba(18, 20, 24, 0.60);
 }
 
 
@@ -2204,12 +2210,12 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	border-radius: 0;
 }
 
-/* Wallpaper has a fixed dark tint in every theme. Only content painted directly
+/* In every theme the wallpaper tint is dark. Only content painted directly
  * over it uses these light foregrounds; inputs, prompts and tool panels retain
  * their theme's foreground/background pairing. */
 .monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.hc-black):not(.hc-light) {
 	--wallpaper-foreground: #ffffff;
-	--wallpaper-muted: #e2e5e9;
+	--wallpaper-muted: #f5f5f5;
 
 	.part.sessionspart > .sessions-panel-header,
 	.new-chat-middle-title {
@@ -2236,6 +2242,8 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 	}
 
 	.part.sessionspart .interactive-response {
+		--backboard-foreground: var(--wallpaper-foreground);
+		--backboard-muted-foreground: var(--wallpaper-muted);
 		--bb-clean-chat-muted: var(--wallpaper-muted);
 		--bb-backboard-muted: var(--wallpaper-muted);
 		--bb-backboard-text: var(--wallpaper-foreground);
@@ -2246,12 +2254,30 @@ html body .monaco-workbench.agent-sessions-workbench .optimus-chat-view.backboar
 
 	.part.sessionspart .interactive-response > .value > .rendered-markdown,
 	.part.sessionspart .interactive-response :is(
+		.chat-backboard-turn-fold, .chat-backboard-working-row,
 		.chat-thinking-box, .chat-thinking-group-header, .chat-thinking-cursor-reasoning-label,
 		.chat-core-tool-stack-header, .chat-core-tool-card-header, .chat-progress,
 		.chat-progress-message, .chat-working-progress, .chat-working-progress-label,
 		.chat-footer-toolbar) {
 		color: var(--wallpaper-foreground) !important;
 		text-shadow: 0 1px 3px #00000080;
+	}
+
+	/* Sent messages also sit on translucent glass over the wallpaper. */
+	.part.sessionspart .interactive-request > .value > .rendered-markdown {
+		--vscode-foreground: var(--wallpaper-foreground);
+		color: var(--wallpaper-foreground) !important;
+		background: rgba(18, 20, 24, 0.28) !important;
+		text-shadow: 0 1px 3px #00000080;
+	}
+
+	/* Tool labels and their links declare colours below the row itself. */
+	.part.sessionspart .interactive-response :is(.chat-core-tool-card-header, .chat-core-tool-stack-header, .chat-thinking-group-header, .chat-thinking-cursor-reasoning-label) {
+		--vscode-foreground: var(--wallpaper-foreground);
+		--vscode-descriptionForeground: var(--wallpaper-muted);
+		--vscode-textLink-foreground: var(--wallpaper-foreground);
+		--vscode-textLink-activeForeground: var(--wallpaper-foreground);
+		--vscode-icon-foreground: var(--wallpaper-muted);
 	}
 
 	.part.sessionspart .interactive-response > .value > .rendered-markdown a {

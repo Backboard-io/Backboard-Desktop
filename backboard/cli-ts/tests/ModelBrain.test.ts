@@ -440,6 +440,37 @@ describe("ModelBrain", () => {
 		});
 	});
 
+	it("looks again after a click whose delivery the page left uncertain", async () => {
+		const surface = new FakeSurface([[el("Create new")], [el("Canvas")]]);
+		let thrown = false;
+		const press = surface.press.bind(surface);
+		surface.press = async (element) => {
+			if (!thrown) {
+				thrown = true;
+				throw new Error(
+					"cua-driver browser_click: DOM click raised a page-side exception; delivery is uncertain",
+				);
+			}
+			return press(element);
+		};
+		const result = await run(
+			surface,
+			sender([
+				["click", { id: "c1" }],
+				["click", { id: "c1" }],
+			]),
+		);
+		expect({
+			outcome: result.outcome,
+			steps: result.steps.map((step) => step.operation),
+			log: surface.log,
+		}).toEqual({
+			outcome: "done",
+			steps: ["CLICK", "CLICK", "DONE"],
+			log: ["press Create new"],
+		});
+	});
+
 	it("keeps one persistent agent profile per browser", () => {
 		expect(["Browser", "Brave", "Google Chrome"].map(agentProfileName)).toEqual(
 			["backboard", "backboard-brave-browser", "backboard-google-chrome"],

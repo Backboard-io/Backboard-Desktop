@@ -38,6 +38,8 @@ import { Extensions } from '../../../workbench/browser/panecomposite.js';
 import { mainWindow } from '../../../base/browser/window.js';
 import { IWorkbenchEnvironmentService } from '../../../workbench/services/environment/common/environmentService.js';
 import { SessionsPanelHeader } from './panelHeader.js';
+import { SessionsPart } from './sessionsPart.js';
+import { isPhoneLayout } from './mobile/mobileLayout.js';
 
 /**
  * Auxiliary bar part specifically for agent sessions workbench.
@@ -346,9 +348,13 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 			? AuxiliaryBarPart.MARGIN_BOTTOM
 			: 0;
 
+		// In Simple this panel ends the chat card (see SessionsPart.CARD_INSET),
+		// keeping the card's right and bottom gaps.
+		const cardInset = this.environmentService.isOptimusWindow || isPhoneLayout(this.layoutService) ? 0 : SessionsPart.CARD_INSET;
+
 		super.layout(
-			width - marginLeft - paddingLeft,
-			height - AuxiliaryBarPart.MARGIN_TOP - marginBottom - AuxiliaryBarPart.TITLE_HEIGHT_CSS_DELTA,
+			width - marginLeft - paddingLeft - cardInset,
+			height - AuxiliaryBarPart.MARGIN_TOP - marginBottom - AuxiliaryBarPart.TITLE_HEIGHT_CSS_DELTA - cardInset,
 			top, left
 		);
 

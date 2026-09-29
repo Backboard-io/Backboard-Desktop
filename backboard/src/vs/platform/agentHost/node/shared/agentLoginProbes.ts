@@ -94,6 +94,50 @@ export async function isClaudeLoggedIn(): Promise<boolean> {
 	});
 }
 
+/**
+ * How long a verified Claude login is trusted before the CLI is asked again.
+ * The probe spawns a process (about 0.3s) and ran ahead of every message; the
+ * cli-ts runtime honors and clears the same record (`claude-login.json`), so a
+ * turn that fails to authenticate makes the next send probe again.
+ */
+const CLAUDE_LOGIN_TRUST_MS = 5 * 60_000;
+
+function claudeLoginRecordPath(homeDir: string): string {
+	return join(homeDir, '.backboard', 'claude-login.json');
+}
+
+/**
+ * {@link isClaudeLoggedIn}, skipping the probe while a verified login is
+ * still trusted. Only a timestamp is stored; Claude Code keeps the credentials.
+ */
+export async function isClaudeLoggedInRecently(
+	probe: () => Promise<boolean> = isClaudeLoggedIn,
+	homeDir = homedir(),
+	now = Date.now(),
+): Promise<boolean> {
+	const record = claudeLoginRecordPath(homeDir);
+	try {
+		const { verifiedAt } = JSON.parse(await fs.promises.readFile(record, 'utf8')) as { verifiedAt?: unknown };
+		if (typeof verifiedAt === 'number' && verifiedAt <= now && now - verifiedAt < CLAUDE_LOGIN_TRUST_MS) {
+			return true;
+		}
+	} catch {
+		// No usable record: ask Claude Code.
+	}
+	const loggedIn = await probe();
+	try {
+		if (loggedIn) {
+			await fs.promises.mkdir(join(homeDir, '.backboard'), { recursive: true, mode: 0o700 });
+			await fs.promises.writeFile(record, JSON.stringify({ verifiedAt: now }), { mode: 0o600 });
+		} else {
+			await fs.promises.rm(record, { force: true });
+		}
+	} catch {
+		// Without the record every send simply probes again.
+	}
+	return loggedIn;
+}
+
 /** Whether the user has run `codex login` (ChatGPT plan or API key). */
 export function isCodexLoggedIn(): boolean {
 	const codexHome = process.env.CODEX_HOME || join(homedir(), '.codex');

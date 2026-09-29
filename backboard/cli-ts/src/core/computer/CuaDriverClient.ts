@@ -156,6 +156,8 @@ export class CuaDriverClient {
 					data.refusal?.code === "browser_ref_stale" ||
 					data.refusal?.code === "browser_input_trust_unavailable" ||
 					(data.refusal?.code === "browser_action_unavailable" &&
+						/does not declare/.test(data.refusal.message ?? "")) ||
+					(data.refusal?.code === "browser_action_unavailable" &&
 						data.refusal.message ===
 							"click target is no longer visible, enabled, or unobstructed"),
 			};
@@ -310,6 +312,10 @@ export function isUndispatchedRefusal(text: string): boolean {
 		/^refused \(browser_ref_stale\):/.test(text) ||
 		// "could not prepare trusted replacement input": nothing was typed.
 		/^refused \(browser_input_trust_unavailable\):/.test(text) ||
+		// The ref declares no such action: the driver refused before any input.
+		/^refused \(browser_action_unavailable\): semantic ref \S+ does not declare/.test(
+			text,
+		) ||
 		text ===
 			"refused (browser_action_unavailable): click target is no longer visible, enabled, or unobstructed"
 	);

@@ -118,32 +118,50 @@ describe("ComputerTool", () => {
 		expect(platform.actions).toEqual([]);
 	});
 
-	it("explains unsupported browser canvas routing before launching or taking actions", async () => {
+	it("runs Safari in the user's own window instead of refusing it", async () => {
 		let created = 0;
+		let decided = 0;
+		const platform = new FakePlatform();
+		platform.appName = "Safari";
+		platform.elements = [
+			{
+				id: "el_1",
+				role: "AXButton",
+				name: "Submit",
+				bounds: { x: 0, y: 0, width: 10, height: 10 },
+			},
+		];
 		const runtime = new ComputerRuntime({
-			platform: new FakePlatform(),
-			resolveCuaDriver: () => "/driver",
+			platform,
+			// No driver: the native platform surface stands in for the AX one.
+			resolveCuaDriver: () => undefined,
 			browserFactory: () => {
 				created++;
-				throw new Error("must not launch");
+				throw new Error("must not launch the agent browser");
 			},
 			jevWriter: async () => null,
 			brain: () => ({
 				name: "test",
 				next: async () => {
-					throw new Error("must not decide");
+					decided++;
+					return {
+						operation: "DONE",
+						unsure: false,
+						confidence: 1,
+						complete: 1,
+					};
 				},
 			}),
 		});
 		const result = await runtime.execute(
-			[{ action: "task", appName: "Safari", goal: "Draw a cat" }],
+			[{ action: "task", appName: "Safari", goal: "Fill out the form" }],
 			makeContext(new AbortController().signal),
 		);
-		expect(result.success).toBe(false);
-		expect(result.results[0]).toMatchObject({
-			error: expect.stringContaining("Brave, Chrome, or Edge"),
-		});
-		expect(created).toBe(0);
+		expect({
+			created,
+			decided: decided > 0,
+			outcome: (result.results[0] as { outcome?: string }).outcome,
+		}).toEqual({ created: 0, decided: true, outcome: "done" });
 	});
 	it("normalizes browser aliases without renaming unknown apps", () => {
 		expect(canonicalAppName(" brave ")).toBe("Brave Browser");
@@ -231,21 +249,15 @@ describe("ComputerTool", () => {
 		await runtime.dispose();
 	});
 
-	it("refuses a scoped screenshot without an existing browser instead of capturing another app", async () => {
-		const platform = new FakePlatform();
-		let screenshots = 0;
-		const capture = platform.screenshot.bind(platform);
-		platform.screenshot = async (path) => {
-			screenshots++;
-			return capture(path);
-		};
-		const runtime = new ComputerRuntime({ platform });
+	it("labels a scoped screenshot without an agent window as the whole desktop", async () => {
+		const runtime = new ComputerRuntime({ platform: new FakePlatform() });
 		const result = await runtime.execute(
 			[{ action: "screenshot", appName: "Brave" }],
 			makeContext(new AbortController().signal),
 		);
-		expect(result.success).toBe(false);
-		expect(screenshots).toBe(0);
+		expect(result.results[0]?.summary).toStartWith(
+			"No agent window is open for Brave, so this is the whole desktop, not that app.",
+		);
 	});
 
 	it("accepts the click and openApp shapes models actually send", () => {

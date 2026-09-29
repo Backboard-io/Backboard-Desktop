@@ -36,10 +36,12 @@ import { ToolCallProtocolGuard } from "../ToolCallProtocolGuard.ts";
 import { jsonSchemaToZodRawShape } from "./ClaudeJsonSchemaToZod.ts";
 import { ensureClaudeSdkSharedMemory } from "./ClaudeSdkRuntime.ts";
 import {
-	assertClaudeSubscriptionLogin,
+	assertRecentClaudeSubscriptionLogin,
 	buildClaudeSubscriptionEnv,
+	ClaudeSubscriptionLoginRequiredError,
 	claudeSubscriptionErrorMessage,
 	findClaudeCodeExecutable,
+	forgetClaudeSubscriptionLogin,
 } from "./ClaudeSubscriptionAuth.ts";
 import type {
 	ClaudeSubscriptionConversationStore,
@@ -297,7 +299,7 @@ export class ClaudeSubscriptionClient implements AgentClient {
 					delete thread.pendingMemory;
 				}
 			}
-			throw new Error(claudeSubscriptionErrorMessage(error), { cause: error });
+			throw await this.turnFailure(error);
 		}
 	}
 
@@ -330,8 +332,23 @@ export class ClaudeSubscriptionClient implements AgentClient {
 			yield* this.streamBoundary(req.thread_id, thread, options.signal);
 		} catch (error) {
 			this.disposeActive(thread, errorMessage(error));
-			throw new Error(claudeSubscriptionErrorMessage(error), { cause: error });
+			throw await this.turnFailure(error);
 		}
+	}
+
+	/**
+	 * A sign-in failure also drops the remembered login, so the next message
+	 * asks Claude Code for its status instead of trusting a stale record.
+	 */
+	private async turnFailure(error: unknown): Promise<Error> {
+		const message = claudeSubscriptionErrorMessage(error);
+		if (
+			!this.authCheck &&
+			message === new ClaudeSubscriptionLoginRequiredError().message
+		) {
+			await forgetClaudeSubscriptionLogin();
+		}
+		return new Error(message, { cause: error });
 	}
 
 	async preserveFailedMessage(req: SendMessageRequest): Promise<string | null> {
@@ -478,7 +495,7 @@ export class ClaudeSubscriptionClient implements AgentClient {
 	): Promise<ActiveClaudeTurn> {
 		const auth = this.authCheck
 			? await this.authCheck()
-			: await assertClaudeSubscriptionLogin({
+			: await assertRecentClaudeSubscriptionLogin({
 					executable: this.configuredExecutable,
 				});
 		const executable =
@@ -728,7 +745,7 @@ export class ClaudeSubscriptionClient implements AgentClient {
 		if (this.modelCatalog) return this.modelCatalog;
 		const auth = this.authCheck
 			? await this.authCheck()
-			: await assertClaudeSubscriptionLogin({
+			: await assertRecentClaudeSubscriptionLogin({
 					executable: this.configuredExecutable,
 				});
 		const executable =

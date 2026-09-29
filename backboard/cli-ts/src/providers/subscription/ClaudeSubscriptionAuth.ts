@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -12,6 +12,14 @@ import { errorMessage } from "../../utils/errors.ts";
 const execFileAsync = promisify(execFile);
 const STATUS_TIMEOUT_MS = 10_000;
 const LOGIN_TIMEOUT_MS = 10 * 60_000;
+/**
+ * How long a verified login is trusted before Claude Code is asked again.
+ * Asking costs a process spawn (about 0.3s) ahead of every message, and both
+ * the IDE and this runtime used to ask. Claude Code still authenticates every
+ * request itself, so an expired login fails the turn and clears the record.
+ */
+export const CLAUDE_LOGIN_TRUST_MS = 5 * 60_000;
+const LOGIN_RECORD_FILE = "claude-login.json";
 
 const STRIPPED_CLAUDE_ENV = new Set([
 	"ANTHROPIC_API_KEY",
@@ -162,9 +170,78 @@ export async function assertClaudeSubscriptionLogin(
 ): Promise<ClaudeSubscriptionStatus> {
 	const status = await readClaudeSubscriptionStatus(options);
 	if (!isClaudeAiSubscriptionStatus(status)) {
+		await forgetClaudeSubscriptionLogin(options);
 		throw new ClaudeSubscriptionLoginRequiredError();
 	}
+	await rememberClaudeSubscriptionLogin(options);
 	return status;
+}
+
+/**
+ * {@link assertClaudeSubscriptionLogin}, skipping the status command while a
+ * login verified by this runtime or by the IDE is still within
+ * {@link CLAUDE_LOGIN_TRUST_MS}.
+ */
+export async function assertRecentClaudeSubscriptionLogin(
+	options: ClaudeSubscriptionAuthOptions & { now?: number } = {},
+): Promise<{ executable: string }> {
+	const verifiedAt = await readClaudeLoginRecord(options);
+	const now = options.now ?? Date.now();
+	if (
+		verifiedAt !== undefined &&
+		verifiedAt <= now &&
+		now - verifiedAt < CLAUDE_LOGIN_TRUST_MS
+	) {
+		return { executable: await findClaudeCodeExecutable(options) };
+	}
+	return await assertClaudeSubscriptionLogin(options);
+}
+
+/** Clears the verified-login record so the next turn asks Claude Code again. */
+export async function forgetClaudeSubscriptionLogin(
+	options: Pick<ClaudeSubscriptionAuthOptions, "homeDir"> = {},
+): Promise<void> {
+	await rm(claudeLoginRecordPath(options.homeDir), { force: true }).catch(
+		() => undefined,
+	);
+}
+
+function claudeLoginRecordPath(homeDir = os.homedir()): string {
+	return path.join(homeDir, ".backboard", LOGIN_RECORD_FILE);
+}
+
+async function readClaudeLoginRecord(
+	options: Pick<ClaudeSubscriptionAuthOptions, "homeDir">,
+): Promise<number | undefined> {
+	try {
+		const parsed: unknown = JSON.parse(
+			await readFile(claudeLoginRecordPath(options.homeDir), "utf8"),
+		);
+		const verifiedAt =
+			typeof parsed === "object" && parsed !== null
+				? (parsed as { verifiedAt?: unknown }).verifiedAt
+				: undefined;
+		return typeof verifiedAt === "number" && Number.isFinite(verifiedAt)
+			? verifiedAt
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Holds a timestamp only; Claude Code keeps the credentials. */
+async function rememberClaudeSubscriptionLogin(
+	options: Pick<ClaudeSubscriptionAuthOptions, "homeDir">,
+): Promise<void> {
+	const file = claudeLoginRecordPath(options.homeDir);
+	try {
+		await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+		await writeFile(file, JSON.stringify({ verifiedAt: Date.now() }), {
+			mode: 0o600,
+		});
+	} catch {
+		// Without the record every turn simply verifies again.
+	}
 }
 
 /**
@@ -244,6 +321,7 @@ export async function disconnectClaudeSubscription(
 	const config = readBackboardConfig(options.homeDir);
 	const { claudeSubscriptionEnabled: _removed, ...remaining } = config;
 	await saveBackboardConfig(remaining, options.homeDir);
+	await forgetClaudeSubscriptionLogin(options);
 	return "Claude subscription disconnected from Backboard. Claude Code remains signed in.";
 }
 

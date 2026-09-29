@@ -700,7 +700,7 @@ export class ModalEditorPart {
 			} else if (fullWindow) {
 				// The host window may inset the block (e.g. the Agents window keeps its sidebar beside it).
 				width = modalElement.clientWidth || containerDimension.width;
-				height = containerDimension.height;
+				height = modalElement.clientHeight || containerDimension.height;
 			} else if (editorPart.maximized) {
 				const verticalPadding = Math.max(titleBarOffset /* keep away from title bar to prevent clipping issues with WCO */, MODAL_MAXIMIZED_PADDING);
 				width = Math.max(containerDimension.width - MODAL_MAXIMIZED_PADDING, 0);

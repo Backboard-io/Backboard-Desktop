@@ -6903,6 +6903,13 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	color: var(--vscode-foreground);
 }
 
+/* The Codex utility classes (text-text/60, text-text/40) resolve against a
+ * data-theme scope that is absent here and can fall back to black; the fold
+ * header should always follow the theme-aware muted colour instead. */
+.monaco-workbench .backboard-clean-chat .chat-backboard-turn-fold :is(.chat-backboard-turn-fold-label, .chat-backboard-turn-fold-chevron) {
+	color: inherit !important;
+}
+
 .monaco-workbench .backboard-clean-chat .chat-backboard-turn-fold:focus-visible {
 	outline: 1px solid color-mix(in srgb, var(--vscode-focusBorder) 75%, transparent);
 	outline-offset: 1px;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
@@ -7,8 +7,11 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { readBackboardConfig } from "../src/config/backboardConfig.ts";
 import { jsonSchemaToZodRawShape } from "../src/providers/subscription/ClaudeJsonSchemaToZod.ts";
 import {
+	assertRecentClaudeSubscriptionLogin,
 	buildClaudeSubscriptionEnv,
+	CLAUDE_LOGIN_TRUST_MS,
 	enableClaudeSubscription,
+	forgetClaudeSubscriptionLogin,
 	isClaudeAiSubscriptionStatus,
 } from "../src/providers/subscription/ClaudeSubscriptionAuth.ts";
 
@@ -115,6 +118,71 @@ describe("Claude subscription authentication", () => {
 
 			expect(message).toContain(executable);
 			expect(readBackboardConfig(homeDir).claudeSubscriptionEnabled).toBe(true);
+		} finally {
+			await rm(homeDir, { recursive: true, force: true });
+		}
+	});
+
+	it("asks Claude Code for its status once while a verified login is trusted", async () => {
+		if (process.platform === "win32") return;
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "claude-sub-trust-"));
+		const executable = path.join(homeDir, "claude");
+		const asked = path.join(homeDir, "asked");
+		try {
+			await writeFile(
+				executable,
+				`#!/bin/sh\necho x >> '${asked}'\nprintf '%s\\n' '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}'\n`,
+			);
+			await chmod(executable, 0o755);
+			const timesAsked = async () =>
+				(await readFile(asked, "utf8").catch(() => "")).length / 2;
+			const options = { homeDir, executable };
+
+			await assertRecentClaudeSubscriptionLogin(options);
+			await assertRecentClaudeSubscriptionLogin(options);
+			const whileTrusted = await timesAsked();
+			await assertRecentClaudeSubscriptionLogin({
+				...options,
+				now: Date.now() + CLAUDE_LOGIN_TRUST_MS,
+			});
+			const afterExpiry = await timesAsked();
+			await forgetClaudeSubscriptionLogin(options);
+			await assertRecentClaudeSubscriptionLogin(options);
+
+			expect({
+				whileTrusted,
+				afterExpiry,
+				afterForget: await timesAsked(),
+			}).toEqual({ whileTrusted: 1, afterExpiry: 2, afterForget: 3 });
+		} finally {
+			await rm(homeDir, { recursive: true, force: true });
+		}
+	});
+
+	it("never records a login that is not a Claude.ai subscription", async () => {
+		if (process.platform === "win32") return;
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "claude-sub-trust-"));
+		const executable = path.join(homeDir, "claude");
+		try {
+			await writeFile(
+				executable,
+				'#!/bin/sh\nprintf \'%s\\n\' \'{"loggedIn":true,"authMethod":"apiKey","apiProvider":"firstParty"}\'\n',
+			);
+			await chmod(executable, 0o755);
+			const options = { homeDir, executable };
+
+			const outcomes = [
+				await assertRecentClaudeSubscriptionLogin(options).then(
+					() => "accepted",
+					() => "refused",
+				),
+				await assertRecentClaudeSubscriptionLogin(options).then(
+					() => "accepted",
+					() => "refused",
+				),
+			];
+
+			expect(outcomes).toEqual(["refused", "refused"]);
 		} finally {
 			await rm(homeDir, { recursive: true, force: true });
 		}

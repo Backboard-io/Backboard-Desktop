@@ -4,7 +4,7 @@ export function DownloadButtons() {
       className="platform-downloads"
       id="downloads"
       role="group"
-      aria-label="Get Kevin for your computer"
+      aria-label="Get Backboard Desktop for your computer"
     >
       <button
         className="platform-download"

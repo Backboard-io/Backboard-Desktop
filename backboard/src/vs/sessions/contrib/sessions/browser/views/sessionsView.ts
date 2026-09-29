@@ -119,6 +119,7 @@ export class SessionsView extends ViewPane {
 	private workspacesHeader: HTMLElement | undefined;
 	private filterButton: HTMLButtonElement | undefined;
 	private projectFilterButton: HTMLButtonElement | undefined;
+	private searchRow: HTMLElement | undefined;
 	private projectFilterLabel: HTMLElement | undefined;
 	private filterPopover: HTMLElement | undefined;
 	private selectedWorkspaceFolderUri: string | undefined;
@@ -236,6 +237,14 @@ export class SessionsView extends ViewPane {
 		const simpleMode = !phoneLayout;
 		const sessionsContainer = DOM.append(parent, $('.agent-sessions-container'));
 
+		// Codex-style icon rail: full-window pages at the top, view toggles,
+		// Settings and the account at the bottom. The sessions section beside
+		// it becomes the rounded navigation panel.
+		const rail = simpleMode ? DOM.append(sessionsContainer, $('nav.agent-sessions-rail')) : undefined;
+		const railTop = rail ? DOM.append(rail, $('.agent-sessions-rail-group.agent-sessions-rail-top')) : undefined;
+		const railBottom = rail ? DOM.append(rail, $('.agent-sessions-rail-group.agent-sessions-rail-bottom')) : undefined;
+		sessionsContainer.classList.toggle('has-rail', !!rail);
+
 		// Sessions section (top, fills available space)
 		const sessionsSection = DOM.append(sessionsContainer, $('.agent-sessions-section'));
 
@@ -258,9 +267,13 @@ export class SessionsView extends ViewPane {
 		// is hidden in favor of the mobile filter chip row + the (+) button in the
 		// MobileTitlebarPart. We still create the row container because the find
 		// widget mounts inside it.
-		if (!phoneLayout && simpleMode) {
+		if (!phoneLayout && simpleMode && railTop && railBottom) {
 			const primaryActions = this.primaryActions = DOM.append(pinnedHeader, $('.agent-sessions-primary-actions.agent-sessions-simple-actions'));
-			const searchRow = DOM.append(primaryActions, $('.agent-sessions-simple-search-row'));
+			// Panel heading: New chat with Search and the folder/thread-card
+			// toggle as icons; the find input takes the whole row while open.
+			const searchRow = this.searchRow = DOM.append(primaryActions, $('.agent-sessions-simple-search-row'));
+			this.createSidebarAction(searchRow, Codicon.edit, localize('newChat', "New chat"), () => this.startNewChat());
+			searchRow.lastElementChild?.classList.add('agent-sessions-new-chat-button');
 			findWidgetHost = searchRow;
 
 			this.searchButton = DOM.append(searchRow, $('button.agent-sessions-sidebar-action.agent-sessions-search-button')) as HTMLButtonElement;
@@ -296,13 +309,12 @@ export class SessionsView extends ViewPane {
 				this.sessionsControl?.setSimpleCompact(this.simpleCompact);
 			}));
 
-			this.createSidebarAction(primaryActions, Codicon.edit, localize('newChat', "New chat"), () => this.startNewChat());
 			const mcpPage = this.mcpPage = this._register(this.instantiationService.createInstance(SimpleMcpPage));
-			this.createSidebarAction(primaryActions, Codicon.extensions, localize('simpleMcps', "Connectors"), async anchor => {
+			this.createSidebarAction(railTop, Codicon.extensions, localize('simpleMcps', "Connectors"), async anchor => {
 				await this.closeFullWindowPages('connectors');
 				mcpPage.show(anchor);
 			});
-			const mcpButton = primaryActions.lastElementChild;
+			const mcpButton = railTop.lastElementChild;
 			this._register(mcpPage.onDidChangeVisibility(selected => {
 				mcpButton?.classList.toggle('active', selected);
 				if (selected) {
@@ -312,7 +324,7 @@ export class SessionsView extends ViewPane {
 				}
 			}));
 			// Canvas: every image and video from the chat, full-window (the Codex-style playground).
-			this.createSidebarAction(primaryActions, Codicon.fileMedia, localize('canvas', "Canvas"), async () => {
+			this.createSidebarAction(railTop, Codicon.fileMedia, localize('canvas', "Canvas"), async () => {
 				// Toggles Canvas when it is what shows; brings it up when another page covers it.
 				const covered = await this.closeFullWindowPages('canvas');
 				if (covered && await this.commandService.executeCommand<boolean>(IS_CANVAS_OPEN_COMMAND_ID)) {
@@ -320,7 +332,7 @@ export class SessionsView extends ViewPane {
 				}
 				await this.commandService.executeCommand(RightWorkbenchCommandId.OpenCanvas);
 			});
-			this.createSidebarAction(primaryActions, Codicon.graphLine, localize('usage', "Usage"), () => {
+			this.createSidebarAction(railTop, Codicon.graphLine, localize('usage', "Usage"), () => {
 				// Simple mode can run without an extension host, so open the built-in
 				// usage view instead of dispatching the extension-owned command.
 				this.logService.info('[Backboard] Opening the Simple mode usage view.');
@@ -328,10 +340,6 @@ export class SessionsView extends ViewPane {
 					this.usageView ??= this._register(this.instantiationService.createInstance(BackboardUsageView));
 					this.usageView.show();
 				});
-			});
-			this.createSidebarAction(primaryActions, Codicon.settingsGear, localize('settings', "Settings"), async () => {
-				await this.closeFullWindowPages('settings');
-				void this.commandService.executeCommand('workbench.action.openSettings');
 			});
 			this.createProjectFilterRow(primaryActions);
 		} else if (!phoneLayout) {
@@ -434,7 +442,7 @@ export class SessionsView extends ViewPane {
 		this._register(this.onDidChangeBodyVisibility(visible => sessionsControl.setVisible(visible)));
 
 		// Bottom-pinned footer: update button (above) + signed-in user identity.
-		this.createFooter(sessionsSection, simpleMode);
+		this.createFooter(sessionsSection, railBottom);
 
 		// Footer/profile and header changes can resize the flex viewport without
 		// a workbench layout event. Keep the virtual tree inside its visible bounds
@@ -449,6 +457,7 @@ export class SessionsView extends ViewPane {
 		this._register(sessionsControl.onDidChangeFindOpenState(open => {
 			this.isFindWidgetOpen = open;
 			findWidgetContainer.style.display = open ? '' : 'none';
+			this.searchRow?.classList.toggle('find-open', open);
 			this.updateHeaderLayout();
 		}));
 
@@ -539,16 +548,18 @@ export class SessionsView extends ViewPane {
 	 * only while the Backboard update context key is set) sitting directly above
 	 * the signed-in user's identity card (avatar + name + plan/email). Both are
 	 * Backboard-only, so the whole footer is skipped for non-Backboard builds and
-	 * on phone layouts (which use their own chrome).
+	 * on phone layouts (which use their own chrome). With the icon rail, the
+	 * view toggles, Settings and the identity live at the bottom of the rail and
+	 * the panel footer keeps only the update control.
 	 */
-	private createFooter(container: HTMLElement, simpleMode: boolean): void {
+	private createFooter(container: HTMLElement, railBottom: HTMLElement | undefined): void {
 		if (!isBackboardProduct() || isPhoneLayout(this.layoutService)) {
 			return;
 		}
 
 		const footer = DOM.append(container, $('.agent-sessions-footer'));
-		if (simpleMode) {
-			const navigation = DOM.append(footer, $('.agent-sessions-footer-navigation'));
+		if (railBottom) {
+			const navigation = DOM.append(railBottom, $('.agent-sessions-footer-navigation'));
 			// Switches between one chat and a 2×2 grid of the most recent chats;
 			// pressed while more than one chat is visible. Sits beside Background.
 			this.createSidebarAction(navigation, Codicon.table, localize('chatGrid', "Grid view"), () => this.sessionsService.toggleSessionGrid());
@@ -564,19 +575,23 @@ export class SessionsView extends ViewPane {
 				}));
 			}
 			const backgroundPicker = this._register(this.instantiationService.createInstance(SimpleModeBackgroundPicker));
-			this.createSidebarAction(navigation, Codicon.fileMedia, localize('background', "Background"), anchor => {
+			this.createSidebarAction(navigation, Codicon.symbolColor, localize('background', "Background"), anchor => {
 				backgroundPicker.toggle(anchor);
 			}, true);
-
+			this.createSidebarAction(navigation, Codicon.settingsGear, localize('settings', "Settings"), async () => {
+				await this.closeFullWindowPages('settings');
+				void this.commandService.executeCommand('workbench.action.openSettings');
+			});
 		}
 
-		// Signed-in user identity card.
-		const user = DOM.append(footer, $('.agent-sessions-user.visible'));
+		// Signed-in user identity card (an avatar at the foot of the rail).
+		const user = DOM.append(railBottom ?? footer, $('.agent-sessions-user.visible'));
 		const avatar = DOM.append(user, $('span.agent-sessions-user-avatar'));
 		const text = DOM.append(user, $('.agent-sessions-user-text'));
 		const nameEl = DOM.append(text, $('span.agent-sessions-user-name'));
 		const subtitleEl = DOM.append(text, $('span.agent-sessions-user-subtitle'));
-		nameEl.textContent = localize('backboardProfilePlaceholder', "Backboard Studio");
+		nameEl.textContent = localize('backboardProfilePlaceholder', "Backboard Desktop");
+		user.title = nameEl.textContent;
 		avatar.classList.add('agent-sessions-user-logo');
 		avatar.setAttribute('aria-hidden', 'true');
 		avatar.appendChild(renderIcon(ThemeIcon.fromId('backboard-logo')));
@@ -643,6 +658,7 @@ export class SessionsView extends ViewPane {
 				return;
 			}
 			nameEl.textContent = info.name;
+			user.title = info.name;
 			avatar.classList.remove('agent-sessions-user-logo');
 			avatar.textContent = initialsFromName(info.name);
 			const subtitle = info.plan ?? info.email;

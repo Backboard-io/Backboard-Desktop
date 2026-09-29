@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { chmod, mkdir, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { errorMessage } from "../utils/errors.ts";
@@ -205,9 +206,19 @@ export async function saveBackboardConfig(
 
 	await mkdir(dir, { recursive: true, mode: 0o700 });
 	await chmod(dir, 0o700).catch(() => undefined);
-	await writeFile(file, `${JSON.stringify(config, null, 2)}\n`, {
-		mode: 0o600,
-	});
+	// Every runtime reads this file when it resolves credentials, and several
+	// write it. Writing in place let a reader catch it truncated and conclude
+	// that no subscription was connected; a rename swaps it in whole.
+	const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+	try {
+		await writeFile(temporary, `${JSON.stringify(config, null, 2)}\n`, {
+			mode: 0o600,
+		});
+		await rename(temporary, file);
+	} catch (error) {
+		await unlink(temporary).catch(() => undefined);
+		throw error;
+	}
 	await chmod(file, 0o600).catch(() => undefined);
 
 	return file;

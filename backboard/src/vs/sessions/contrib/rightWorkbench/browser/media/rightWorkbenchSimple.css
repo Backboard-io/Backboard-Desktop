@@ -855,7 +855,7 @@
  * text (not just the chrome) must be bright or it sinks into the image. The
  * launcher and tab strip keep their opaque surfaces and paired colors.
  * ------------------------------------------------------------------------- */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) {
+.monaco-workbench.agent-sessions-workbench.vs-dark.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) {
 	--rwb-foreground: #ffffff;
 	--rwb-muted: #e8ebef;
 	--rwb-hover: rgba(255, 255, 255, 0.12);
@@ -882,11 +882,11 @@
 
 /* The shared review style mutes line numbers for opaque surfaces; over the
  * wallpaper they stay near-white. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-editor .line-numbers {
+.monaco-workbench.agent-sessions-workbench.vs-dark.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-editor .line-numbers {
 	color: var(--vscode-editorLineNumber-foreground);
 }
 
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-editor .line-numbers.active-line-number {
+.monaco-workbench.agent-sessions-workbench.vs-dark.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-editor .line-numbers.active-line-number {
 	color: var(--vscode-editorLineNumber-activeForeground);
 }
 
@@ -894,18 +894,18 @@
  * get a lift so comments and punctuation read over the image; light themes'
  * dark tokens are flipped to their bright counterparts (hue preserved). Only
  * text rows are filtered, so diff tints and selections keep their colors. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-editor.vs-dark .view-line {
+.monaco-workbench.agent-sessions-workbench.vs-dark.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-editor.vs-dark .view-line {
 	filter: brightness(1.25) saturate(1.1);
 }
 
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-editor.vs .view-line {
+.monaco-workbench.agent-sessions-workbench.vs-dark.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-editor.vs .view-line {
 	filter: invert(1) hue-rotate(180deg) brightness(1.15);
 }
 
 /* Tree rows (review rail and Files explorer): white labels on a translucent
  * white selection — theme list colors are literal and would pair white text
  * with a white light-theme selection. */
-.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-list {
+.monaco-workbench.agent-sessions-workbench.vs-dark.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-list {
 	.monaco-list-row,
 	.monaco-icon-label,
 	.label-name {

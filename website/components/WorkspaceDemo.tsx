@@ -92,7 +92,7 @@ export function WorkspaceDemo() {
             ref={frame}
             hidden={mode === "film"}
             src="/laptop-demo.html"
-            title="Interactive Kevin IDE concept preview"
+            title="Interactive Backboard Desktop preview"
             onLoad={sendMode}
           />
         </div>

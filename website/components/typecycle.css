@@ -1,0 +1,33 @@
+/* TypeCycle: the typed word, its caret, and the screen-reader copy. */
+.tc-word {
+  color: var(--tc-ink, #26207a);
+  white-space: nowrap;
+}
+.tc-caret {
+  display: inline-block;
+  width: 0.08em;
+  height: 0.9em;
+  margin-left: 0.06em;
+  vertical-align: -0.08em;
+  border-radius: 2px;
+  background: var(--tc-ink, #26207a);
+  animation: tc-blink 1s steps(1) infinite;
+}
+.tc-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@keyframes tc-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tc-caret {
+    animation: none;
+  }
+}

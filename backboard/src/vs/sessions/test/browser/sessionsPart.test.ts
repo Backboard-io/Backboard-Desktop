@@ -78,7 +78,9 @@ suite('Sessions - Sessions Part', () => {
 				// Reproduces the Editor -> Simple ordering where the grid has made
 				// the view visible but the layout service has not observed it yet.
 				isVisible: (partId: string) => partId !== Parts.SESSIONS_PART,
+				mainContainer: { classList: { contains: () => false }, style: { setProperty: () => undefined } },
 			},
+			environmentService: { isOptimusWindow: false },
 			layoutContents: (width: number, height: number) => {
 				layoutContentsArgs = [width, height];
 				return {
@@ -94,8 +96,10 @@ suite('Sessions - Sessions Part', () => {
 
 		SessionsPart.prototype.layout.call(part as unknown as SessionsPart, 1200, 800, 0, 300);
 
-		assert.deepStrictEqual(layoutContentsArgs, [1198, 798]);
-		assert.deepStrictEqual(gridLayoutArgs, [1196, 796, 0, 300]);
+		// The borderless Simple card has no gaps here: the open right panel
+		// continues it on the right and the open terminal panel below.
+		assert.deepStrictEqual(layoutContentsArgs, [1200, 800]);
+		assert.deepStrictEqual(gridLayoutArgs, [1198, 798, 0, 300]);
 	});
 
 	test('clears relocated session headers when a draft replaces the active session', () => {

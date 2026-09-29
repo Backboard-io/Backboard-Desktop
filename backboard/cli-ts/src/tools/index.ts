@@ -4,6 +4,7 @@ import {
 	resolveRuntimeThinking,
 } from "../config/thinkingRuntime.ts";
 import { AgentTaskManager } from "../core/agent/AgentTaskManager.ts";
+import { openRouterRouting } from "../core/agent/RunMessageRequestBuilder.ts";
 import { LocalReplExecutor } from "../core/agent/rlm/LocalReplExecutor.ts";
 import { RLMLoop } from "../core/agent/rlm/RLMLoop.ts";
 import { SubAgentRunner } from "../core/agent/SubAgentRunner.ts";
@@ -120,6 +121,13 @@ export function createComputerUseTool(deps: DefaultToolDeps): ComputerTool {
 						// A pure text lookup: no tools, and nothing worth remembering.
 						tools: [],
 						memory: "off",
+						...(route.provider === "openrouter"
+							? {
+									openrouter: openRouterRouting(
+										deps.config.selectedOpenRouterProvider,
+									),
+								}
+							: {}),
 					},
 					{ signal: options.signal },
 				);

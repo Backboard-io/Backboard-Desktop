@@ -32,7 +32,7 @@ import { IInstantiationService } from '../../../instantiation/common/instantiati
 import { IAgentHostCheckpointService } from '../../common/agentHostCheckpointService.js';
 import { type IFileEditRecord, ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
 import { buildSessionDbUri, FileEditTracker } from '../shared/fileEditTracker.js';
-import { isClaudeLoggedIn } from '../shared/agentLoginProbes.js';
+import { isClaudeLoggedIn, isClaudeLoggedInRecently } from '../shared/agentLoginProbes.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { IAgentHostGitService, META_DIFF_BASE_BRANCH } from '../agentHostGitService.js';
 import { BYOK_COMMANDS, BYOK_GENERATION_ARG, BYOK_KEY_ARG, BYOK_PROVIDER_ARG, BYOK_PROVIDERS, byokProviderDefinition, type ByokProviderId, isByokProviderId, isKeyBilledProvider, keyBilledProviderId, parseBillingRoute, routeProviderFamily, vendorOfProvider } from '../../common/byokProviders.js';
@@ -686,6 +686,13 @@ export class CliTsAgent extends Disposable implements IAgent {
 	readonly models: IObservable<readonly IAgentModelInfo[]> = this._models;
 
 	private readonly _sessions = new Map<string, CliTsSession>();
+	/**
+	 * Each stored session's serialized entry, valid while the store file still
+	 * has this stamp. The store holds every chat (tens of MB) and a first send
+	 * rewrites it several times; re-reading, parsing and re-serializing all of
+	 * it on each write blocked the host ~0.4 s per write.
+	 */
+	private _storeEntries: { readonly stamp: string; readonly entries: ReadonlyMap<string, string> } | undefined;
 	/** Full historical child turns recovered from cli-ts's per-agent event logs. */
 	private readonly _runtimeSubagentTurnCache = new Map<string, Promise<CliTsRuntimeSubagentRecovery | undefined>>();
 	private readonly _runtimeWorkerStateCache = new Map<string, CliTsWorkerState>();
@@ -1169,7 +1176,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 	}
 
 	private async _enableClaudeSubscription(): Promise<void> {
-		await this._requireClaudeSubscriptionLogin();
+		await this._requireClaudeSubscriptionLogin(true);
 		this._claudeSubscriptionEnablePromise ??= runCliTsCommand(this._logService, ['claude-subscription', 'enable'])
 			.then(() => {
 				this._setClaudeSubscriptionConnectionState(true);
@@ -1181,9 +1188,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 		await this._claudeSubscriptionEnablePromise;
 	}
 
-	private async _requireClaudeSubscriptionLogin(): Promise<void> {
+	/** `fresh` asks Claude Code even while an earlier check is still trusted. */
+	private async _requireClaudeSubscriptionLogin(fresh = false): Promise<void> {
 		try {
-			await assertUsableClaudeSubscriptionLogin();
+			await assertUsableClaudeSubscriptionLogin(fresh ? isClaudeLoggedIn : () => isClaudeLoggedInRecently());
 			this._setClaudeSubscriptionConnectionState(true);
 		} catch (error) {
 			this._setClaudeSubscriptionConnectionState(false);
@@ -1232,10 +1240,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 				provisional: !existing.materialized,
 			};
 		}
-		const storedSessions = this._readStore();
 		const sourceSessionId = config.fork ? AgentSession.id(config.fork.session) : undefined;
 		const sourceSession = sourceSessionId ? this._sessions.get(sourceSessionId) : undefined;
-		const sourceStoredSession = sourceSessionId ? storedSessions.find(entry => entry.id === sourceSessionId) : undefined;
+		const sourceStoredSession = sourceSessionId ? this._readStore(sourceSessionId).find(entry => entry.id === sourceSessionId) : undefined;
 		const sourceTurns = sourceSession?.storedTurns ?? sourceStoredSession?.turns;
 		if (config.fork && !sourceTurns) {
 			throw new Error(`Cannot fork missing Backboard session: ${config.fork.session.toString()}`);
@@ -1255,7 +1262,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			modifiedAt: Date.now(),
 			forkContext: buildForkConversationContext(forkedTurns),
 			turns: forkedTurns,
-		} satisfies CliTsStoredSession : config.session ? storedSessions.find(entry => entry.id === sessionId) : undefined;
+		} satisfies CliTsStoredSession : config.session ? this._readStore(sessionId).find(entry => entry.id === sessionId) : undefined;
 		const session = this._createSessionEntry(sessionUri, restored);
 		if (config.workingDirectory) {
 			session.sourceWorkingDirectory = config.workingDirectory;
@@ -1308,8 +1315,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 	 * Spawns the serve process and kicks off the model-list refresh — so startup
 	 * and the backend connection happen while the composer is open, and the
 	 * picker shows the backend's real list before the first submit. Best-effort.
+	 * A draft's process is only for that refresh unless `keepProcess` says a
+	 * send is already on its way.
 	 */
-	private async _prewarm(session: CliTsSession): Promise<void> {
+	private async _prewarm(session: CliTsSession, keepProcess = session.materialized): Promise<void> {
 		if (session.disposed || session.proc?.isRunning) {
 			return;
 		}
@@ -1324,7 +1333,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			const proc = this._ensureProcess(session, rgDir);
 			proc.start();
 			const refresh = this._refreshModelsOnce(session);
-			if (!session.materialized && refresh) {
+			if (!keepProcess && !session.materialized && refresh) {
 				void refresh.finally(() => {
 					if (!session.materialized && session.proc === proc) {
 						proc.dispose();
@@ -1426,7 +1435,20 @@ export class CliTsAgent extends Disposable implements IAgent {
 	sendMessage(sessionUri: URI, prompt: string, attachments?: readonly MessageAttachment[], turnId?: string): Promise<void> {
 		const session = this._session(sessionUri);
 		const queuedAt = Date.now();
+		// A new chat's runtime would otherwise spawn only after the queued model
+		// switch, store writes and materialization, and then make the turn wait
+		// for its MCP servers to connect. A folder chat's cwd is already final,
+		// so start it now; a worktree chat still starts after its checkout.
+		if (!session.materialized && !session.archived && session.workingDirectory && this._liveIsolation(session) !== 'worktree') {
+			void this._prewarm(session, true);
+		}
 		return this._queueSessionOperation(session, () => this._sendMessage(session, prompt, attachments, turnId, queuedAt));
+	}
+
+	/** The isolation `_doMaterialize` will apply, from the same live config. */
+	private _liveIsolation(session: CliTsSession): unknown {
+		const liveConfig = this._configurationService.getSessionConfigValues(session.sessionUri.toString());
+		return { ...(session.config ?? {}), ...(liveConfig ?? {}) }[SessionConfigKey.Isolation];
 	}
 
 	async rewindSession(sessionUri: URI, request: AgentRewindRequest): Promise<IAgentRewindResult> {
@@ -1851,7 +1873,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				} else if (session.rewind?.pending) await this._recoverRewind(session);
 			});
 		}
-		const stored = this._readStore().find(entry => entry.id === sessionId);
+		const stored = this._readStore(sessionId).find(entry => entry.id === sessionId);
 		const runtimeWorkers = await this._readRuntimeWorkerStates(sessionId);
 		const parentTurns = (session?.storedTurns ?? stored?.turns ?? []).map(turn => ({ ...turn,
 			...(turn.parts ? { parts: turn.parts.map(part => {
@@ -1964,7 +1986,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 	async disposeSession(sessionUri: URI): Promise<void> {
 		const sessionId = AgentSession.id(sessionUri);
 		let session = this._sessions.get(sessionId);
-		const stored = session ? undefined : this._readStore().find(entry => entry.id === sessionId);
+		const stored = session ? undefined : this._readStore(sessionId).find(entry => entry.id === sessionId);
 		if (!session && stored) {
 			// Deletion can be the first operation after an IDE restart. Rehydrate a
 			// lightweight session so the stable cli-ts session id can settle and
@@ -2005,7 +2027,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		const sessionId = AgentSession.id(sessionUri);
 		let session = this._sessions.get(sessionId);
 		if (!session) {
-			const stored = this._readStore().find(entry => entry.id === sessionId);
+			const stored = this._readStore(sessionId).find(entry => entry.id === sessionId);
 			if (!stored) {
 				return;
 			}
@@ -2515,7 +2537,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		if (session?.disposed) {
 			throw new Error(`Backboard session was disposed: ${sessionUri.toString()}`);
 		}
-		const restored = this._readStore().find(entry => entry.id === sessionId);
+		const restored = this._readStore(sessionId).find(entry => entry.id === sessionId);
 		const recreated = this._createSessionEntry(sessionUri, restored);
 		this._sessions.set(sessionId, recreated);
 		this._logService.warn(`[cli-ts] Recreated missing session from URI ${sessionUri.toString()}`);
@@ -4172,7 +4194,9 @@ export class CliTsAgent extends Disposable implements IAgent {
 					return;
 				}
 				turn.failed = true;
-				turn.error = { errorType: 'BackboardError', message: event.error?.trim() ? event.error : localize('cliTsAgent.requestFailed', "Backboard request failed.") };
+				// An actionable failure (no credit left) says what to do; any
+				// other failure keeps the calm generic note.
+				turn.error = { errorType: event.actionable ? 'BackboardSendFailed' : 'BackboardError', message: event.error?.trim() ? event.error : localize('cliTsAgent.requestFailed', "Backboard request failed.") };
 				this._fireFailureNote(session, turnId, turn.error);
 				return;
 			}
@@ -4636,68 +4660,60 @@ export class CliTsAgent extends Disposable implements IAgent {
 		}
 	}
 
-	private _readStore(): CliTsStoredSession[] {
-		try {
-			const parsed: unknown = JSON.parse(fs.readFileSync(this._storePath(), 'utf8'));
-			if (!parsed || typeof parsed !== 'object' || (parsed as { version?: number }).version !== CLI_TS_STORE_VERSION) {
-				return [];
-			}
-			const sessions = (parsed as { sessions?: unknown }).sessions;
-			if (!Array.isArray(sessions)) {
-				return [];
-			}
-			return (sessions as CliTsStoredSession[]).map(session => session.turns.length === 0 && session.title
-				? {
-					...session,
-					turns: [{
-						prompt: session.title,
-						response: localize('cliTsAgent.interruptedTurn', "This response was interrupted when Backboard closed."),
-						failed: true,
-					}],
-				}
-				: session);
-		} catch {
-			return [];
+	/**
+	 * Every stored session, freshly parsed from disk. Passing `onlyId` returns
+	 * just that session (or nothing), parsed from the cached entries instead of
+	 * the whole file.
+	 */
+	private _readStore(onlyId?: string): CliTsStoredSession[] {
+		if (onlyId !== undefined) {
+			const entry = this._loadStoreEntries().get(onlyId);
+			return entry === undefined ? [] : [JSON.parse(entry) as CliTsStoredSession];
 		}
+		return readStoredSessions(this._storePath());
+	}
+
+	/** The store's serialized entries, re-read only when the file changed since. */
+	private _loadStoreEntries(): ReadonlyMap<string, string> {
+		const storePath = this._storePath();
+		const stamp = storeFileStamp(storePath);
+		if (this._storeEntries?.stamp === stamp) {
+			return this._storeEntries.entries;
+		}
+		const entries = new Map<string, string>();
+		for (const session of readStoredSessions(storePath)) {
+			if (!entries.has(session.id)) {
+				entries.set(session.id, serializeStoredSession(session));
+			}
+		}
+		this._storeEntries = { stamp, entries };
+		return entries;
 	}
 
 	private _writeStore(excludedSessionId?: string, strict = false): void {
 		try {
-			const persisted = this._readStore().filter(entry => entry.id !== excludedSessionId && !this._sessions.has(entry.id));
-			const inMemory: CliTsStoredSession[] = [...this._sessions.values()]
-				.filter(session => (session.materialized || session.storedTurns.length > 0 || !!session.turn) && session.sessionId !== excludedSessionId)
-				.map(session => ({
-					id: session.sessionId,
-					rewind: session.rewind,
-					title: session.title,
-					cwd: session.workingDirectory?.fsPath,
-					sourceCwd: session.sourceWorkingDirectory?.fsPath,
-					...(session.worktree ? {
-						worktree: {
-							path: session.worktree.path.fsPath,
-							repositoryRoot: session.worktree.repositoryRoot.fsPath,
-							branchName: session.worktree.branchName,
-							baseBranch: session.worktree.baseBranch,
-						},
-					} : {}),
-					createdAt: session.createdAt,
-					modifiedAt: session.modifiedAt,
-					materialized: session.materialized,
-					threadId: session.threadId,
-					forkContext: session.forkContext,
-					providerHandoffContext: session.providerHandoffContext,
-					// Persist the active turn as an error-state snapshot. Graceful shutdown
-					// replaces it with the final partial response, while a crash or forced
-					// quit still leaves a reopenable chat containing the exact prompt.
-					turns: session.turn
-						? [...session.storedTurns, activeTurnToStoredTurn(session.turn)]
-						: session.storedTurns,
-					subagents: Object.fromEntries(session.storedSubagentTurns),
-				}));
+			const current = this._loadStoreEntries();
+			const next = new Map<string, string>();
+			for (const session of this._sessions.values()) {
+				if ((session.materialized || session.storedTurns.length > 0 || !!session.turn) && session.sessionId !== excludedSessionId) {
+					next.set(session.sessionId, serializeStoredSession(storedSessionOf(session)));
+				}
+			}
+			for (const [id, entry] of current) {
+				if (id !== excludedSessionId && !this._sessions.has(id)) {
+					next.set(id, entry);
+				}
+			}
+			// The file already says exactly this (a draft that was never sent,
+			// a model switch before the first turn): skip the rewrite.
+			if (sameStoreEntries(current, next)) {
+				return;
+			}
 			const storePath = this._storePath();
 			fs.mkdirSync(path.dirname(storePath), { recursive: true });
-			fs.writeFileSync(`${storePath}.tmp`, `${JSON.stringify({ version: CLI_TS_STORE_VERSION, sessions: [...inMemory, ...persisted] }, undefined, '\t')}\n`, { encoding: 'utf8', mode: 0o600 });
+			fs.writeFileSync(`${storePath}.tmp`, serializeStore([...next.values()]), { encoding: 'utf8', mode: 0o600 });
 			fs.renameSync(`${storePath}.tmp`, storePath);
+			this._storeEntries = { stamp: storeFileStamp(storePath), entries: next };
 		} catch (error) {
 			this._logService.warn(`[cli-ts] Failed to persist session store: ${error instanceof Error ? error.message : String(error)}`);
 			if (strict) {
@@ -4708,6 +4724,110 @@ export class CliTsAgent extends Disposable implements IAgent {
 }
 
 // ---- helpers -----------------------------------------------------------------
+
+/** Every session in the store file; a legacy zero-turn chat gets its prompt back as a turn. */
+function readStoredSessions(storePath: string): CliTsStoredSession[] {
+	try {
+		const parsed: unknown = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+		if (!parsed || typeof parsed !== 'object' || (parsed as { version?: number }).version !== CLI_TS_STORE_VERSION) {
+			return [];
+		}
+		const sessions = (parsed as { sessions?: unknown }).sessions;
+		if (!Array.isArray(sessions)) {
+			return [];
+		}
+		return (sessions as CliTsStoredSession[]).map(session => session.turns.length === 0 && session.title
+			? {
+				...session,
+				turns: [{
+					prompt: session.title,
+					response: localize('cliTsAgent.interruptedTurn', "This response was interrupted when Backboard closed."),
+					failed: true,
+				}],
+			}
+			: session);
+	} catch {
+		return [];
+	}
+}
+
+/** What the store keeps for a session that is loaded in this process. */
+function storedSessionOf(session: CliTsSession): CliTsStoredSession {
+	return {
+		id: session.sessionId,
+		rewind: session.rewind,
+		title: session.title,
+		cwd: session.workingDirectory?.fsPath,
+		sourceCwd: session.sourceWorkingDirectory?.fsPath,
+		...(session.worktree ? {
+			worktree: {
+				path: session.worktree.path.fsPath,
+				repositoryRoot: session.worktree.repositoryRoot.fsPath,
+				branchName: session.worktree.branchName,
+				baseBranch: session.worktree.baseBranch,
+			},
+		} : {}),
+		createdAt: session.createdAt,
+		modifiedAt: session.modifiedAt,
+		materialized: session.materialized,
+		threadId: session.threadId,
+		forkContext: session.forkContext,
+		providerHandoffContext: session.providerHandoffContext,
+		// Persist the active turn as an error-state snapshot. Graceful shutdown
+		// replaces it with the final partial response, while a crash or forced
+		// quit still leaves a reopenable chat containing the exact prompt.
+		turns: session.turn
+			? [...session.storedTurns, activeTurnToStoredTurn(session.turn)]
+			: session.storedTurns,
+		subagents: Object.fromEntries(session.storedSubagentTurns),
+	};
+}
+
+/**
+ * Identifies one version of the store file. Every write, this window's or
+ * another app instance's, replaces the file by rename (a new inode); an edit
+ * in place still changes its size or mtime.
+ */
+function storeFileStamp(storePath: string): string {
+	try {
+		const stat = fs.statSync(storePath);
+		return `${storePath}\0${stat.ino}\0${stat.size}\0${stat.mtimeMs}`;
+	} catch {
+		return `${storePath}\0missing`;
+	}
+}
+
+/**
+ * One entry of the store's `sessions` array, exactly as
+ * `JSON.stringify(store, undefined, '\t')` lays it out, so unchanged entries
+ * are written back verbatim and the file keeps its format.
+ */
+function serializeStoredSession(session: CliTsStoredSession): string {
+	// JSON strings escape their newlines, so every raw one is layout.
+	return JSON.stringify(session, undefined, '\t').replace(/\n/g, '\n\t\t');
+}
+
+function serializeStore(entries: readonly string[]): string {
+	return entries.length === 0
+		? `{\n\t"version": ${CLI_TS_STORE_VERSION},\n\t"sessions": []\n}\n`
+		: `{\n\t"version": ${CLI_TS_STORE_VERSION},\n\t"sessions": [\n\t\t${entries.join(',\n\t\t')}\n\t]\n}\n`;
+}
+
+/** Same sessions, same order, same content. */
+function sameStoreEntries(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
+	if (a.size !== b.size) {
+		return false;
+	}
+	const left = [...a];
+	let index = 0;
+	for (const [id, entry] of b) {
+		const [otherId, otherEntry] = left[index++];
+		if (id !== otherId || entry !== otherEntry) {
+			return false;
+		}
+	}
+	return true;
+}
 
 /** Maps a protocol {@link ToolDefinition} to the cli-ts serve wire shape. */
 function clientToolDefinitionToWire(tool: ToolDefinition): CliTsClientToolDefinition {
@@ -5224,7 +5344,7 @@ function runtimeSubagentRecoveryFromEvents(prompt: string, eventsRaw: string): C
 				break;
 			case 'run:error':
 				failed = true;
-				error = { errorType: 'BackboardError', message: event.error?.trim() ? event.error : localize('cliTsAgent.requestFailed', "Backboard request failed.") };
+				error = { errorType: event.actionable ? 'BackboardSendFailed' : 'BackboardError', message: event.error?.trim() ? event.error : localize('cliTsAgent.requestFailed', "Backboard request failed.") };
 				break;
 			case 'turn:end':
 				failed = !!error || (event.status !== undefined && event.status !== 'completed');

@@ -42,6 +42,7 @@ import { ToolRoundProcessor } from "./ToolRoundProcessor.ts";
 import { Turn } from "./Turn.ts";
 import {
 	abortableDelay,
+	isAccountBlockedError,
 	TURN_FALLBACK_FROM_ATTEMPT,
 	turnRetryDelayMs,
 	turnRetryPrompt,
@@ -381,7 +382,8 @@ export class AgentLoop {
 					await finishTurn("cancelled");
 					return "cancelled";
 				}
-				if (attempt < maxAttempts) {
+				const accountBlocked = isAccountBlockedError(err);
+				if (attempt < maxAttempts && !accountBlocked) {
 					// Keep any partial answer as context for the continuation.
 					assistant.finalize();
 					attemptContent = turnRetryPrompt(content, errorMessage(err));
@@ -400,6 +402,7 @@ export class AgentLoop {
 					bus.emit({
 						type: "run:error",
 						error: errorMessage(err),
+						...(accountBlocked ? { actionable: true } : {}),
 					});
 				await finishTurn("failed");
 				return "failed";

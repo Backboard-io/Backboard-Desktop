@@ -36,10 +36,6 @@ export const models = [
     icon: "/assets/providers/ai_x_ai.svg",
   },
   {
-    name: "GitHub Copilot",
-    icon: "/assets/providers/copilot.svg",
-  },
-  {
     name: "Anthropic",
     icon: "/assets/providers/ai_anthropic.svg",
   },

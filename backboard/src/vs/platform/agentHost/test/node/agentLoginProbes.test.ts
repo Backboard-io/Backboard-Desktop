@@ -4,8 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
+import * as fs from 'fs';
+import { tmpdir } from 'os';
+import { join } from '../../../../base/common/path.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { claudeSubscriptionProbeEnv, isClaudeSubscriptionAuthStatus } from '../../node/shared/agentLoginProbes.js';
+import { claudeSubscriptionProbeEnv, isClaudeLoggedInRecently, isClaudeSubscriptionAuthStatus } from '../../node/shared/agentLoginProbes.js';
 
 suite('Agent login probes', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -33,5 +36,27 @@ suite('Agent login probes', () => {
 			apiProvider: 'bedrock',
 		}), false);
 		assert.strictEqual(isClaudeSubscriptionAuthStatus({ loggedIn: false }), false);
+	});
+
+	test('probes Claude once while a verified login is trusted, and again after it lapses or fails', async () => {
+		const homeDir = await fs.promises.mkdtemp(join(tmpdir(), 'claude-login-probe-'));
+		try {
+			let probes = 0;
+			let loggedIn = true;
+			const probe = async () => { probes++; return loggedIn; };
+			const start = 1_000_000;
+			const results = [
+				await isClaudeLoggedInRecently(probe, homeDir, start),
+				await isClaudeLoggedInRecently(probe, homeDir, start + 60_000),
+			];
+			const whileTrusted = probes;
+			loggedIn = false;
+			results.push(await isClaudeLoggedInRecently(probe, homeDir, start + 6 * 60_000));
+			// A failed probe leaves nothing to trust.
+			results.push(await isClaudeLoggedInRecently(probe, homeDir, start + 6 * 60_000 + 1));
+			assert.deepStrictEqual({ results, whileTrusted, probes }, { results: [true, true, false, false], whileTrusted: 1, probes: 3 });
+		} finally {
+			await fs.promises.rm(homeDir, { recursive: true, force: true });
+		}
 	});
 });

@@ -120,13 +120,6 @@
 	opacity: 1;
 }
 
-/* Stop sits on the composer's own surface; only the glyph reads during a run. */
-.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle {
-	color: var(--vscode-foreground) !important;
-	background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
-	box-shadow: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
 	.monaco-workbench:not(.agent-sessions-workbench) .part.auxiliarybar .chat-viewpane .backboard-clean-chat.backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > :is(.action-label.codicon-arrow-up, .action-label.codicon-newline, .action-label.codicon-stop-circle) {
 		transition: none;

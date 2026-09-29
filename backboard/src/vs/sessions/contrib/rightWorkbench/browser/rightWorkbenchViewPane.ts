@@ -706,7 +706,7 @@ export class RightWorkbenchViewPane extends ViewPane {
 				if (this.activeMode !== 'editor') {
 					this.renderEditorSectionHeader(this.root);
 				}
-			} else if (this.activeMode !== 'launcher') {
+			} else if (this.activeMode !== 'launcher' || this.useSimpleRightWorkbench) {
 				this.renderModeHeader(this.root);
 			}
 		}
@@ -969,13 +969,26 @@ export class RightWorkbenchViewPane extends ViewPane {
 			const tab = this.tabs[index];
 			this.renderTab(tabs, tab);
 		}
+		// Simple shows its launcher as a "New tab" in the strip, as the Codex
+		// app does, and "+" opens another one instead of a mode menu.
+		if (this.useSimpleRightWorkbench && this.activeMode === 'launcher') {
+			if (this.tabs.length > 0) {
+				append(tabs, $('span.sessions-right-workbench-tab-separator'));
+			}
+			this.renderLauncherTab(tabs);
+		}
 		const add = append(header, $('button.sessions-right-workbench-tab-add')) as HTMLButtonElement;
 		add.type = 'button';
-		add.ariaLabel = localize('rightWorkbench.openModePicker', "Open Mode Picker");
-		add.setAttribute('aria-haspopup', 'menu');
-		add.setAttribute('aria-expanded', 'false');
 		add.appendChild(renderIcon(Codicon.add));
-		this.headerStore.add(addDisposableListener(add, EventType.CLICK, () => this.toggleModePicker(add)));
+		if (this.useSimpleRightWorkbench) {
+			add.ariaLabel = add.title = localize('rightWorkbench.newTab', "New tab");
+			this.headerStore.add(addDisposableListener(add, EventType.CLICK, () => { void this.openMode('launcher'); }));
+		} else {
+			add.ariaLabel = localize('rightWorkbench.openModePicker', "Open Mode Picker");
+			add.setAttribute('aria-haspopup', 'menu');
+			add.setAttribute('aria-expanded', 'false');
+			this.headerStore.add(addDisposableListener(add, EventType.CLICK, () => this.toggleModePicker(add)));
+		}
 
 		// With many tabs the strip scrolls horizontally — keep the active tab
 		// in view so it never hides behind the overflow edge.
@@ -1067,6 +1080,32 @@ export class RightWorkbenchViewPane extends ViewPane {
 		}));
 	}
 
+	/** The transient tab that holds Simple's launcher; closing it returns to the last tab, or hides the panel. */
+	private renderLauncherTab(container: HTMLElement): void {
+		const label = localize('rightWorkbench.newTab', "New tab");
+		const element = append(container, $('.sessions-right-workbench-tab.sessions-right-workbench-launcher-tab.active'));
+		element.setAttribute('role', 'tab');
+		element.setAttribute('aria-selected', 'true');
+		element.tabIndex = 0;
+		element.title = label;
+		element.appendChild(renderIcon(Codicon.globe));
+		append(element, $('span.sessions-right-workbench-tab-label', {}, label));
+		const close = append(element, $('button.sessions-right-workbench-tab-close')) as HTMLButtonElement;
+		close.type = 'button';
+		close.tabIndex = -1;
+		close.title = close.ariaLabel = localize('rightWorkbench.closeTab', "Close");
+		close.appendChild(renderIcon(Codicon.close));
+		this.headerStore.add(addDisposableListener(close, EventType.CLICK, event => {
+			event.stopPropagation();
+			const lastTab = this.tabs.at(-1);
+			if (lastTab) {
+				void this.openTab(lastTab.id);
+			} else {
+				this.hidePanel();
+			}
+		}));
+	}
+
 	private refreshTabLabels(): void {
 		for (const tab of this.tabs) {
 			const label = this.tabLabelElements.get(tab.id);
@@ -1114,33 +1153,39 @@ export class RightWorkbenchViewPane extends ViewPane {
 
 	private renderPanelCloseButton(container: HTMLElement, store = this.domStore): void {
 		const close = this.renderIconButton(container, Codicon.layoutSidebarRight, localize('rightWorkbench.hidePanel', "Hide Right Panel"));
-		store.add(addDisposableListener(close, EventType.CLICK, () => {
-			if (this.splitHost) {
-				this.splitHost.hide();
-			} else {
-				this.layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
-			}
-			this.layoutService.focusPart(Parts.SESSIONS_PART);
-		}));
+		store.add(addDisposableListener(close, EventType.CLICK, () => this.hidePanel()));
+	}
+
+	private hidePanel(): void {
+		if (this.splitHost) {
+			this.splitHost.hide();
+		} else {
+			this.layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART);
+		}
+		this.layoutService.focusPart(Parts.SESSIONS_PART);
 	}
 
 	private renderLauncher(container: HTMLElement): void {
+		// Simple's launcher is a New tab like the Codex app's: an empty browser
+		// (its address bar opens a page in this tab), then Tools, then the
+		// browser pages already open.
 		if (this.useSimpleRightWorkbench) {
-			const header = append(container, $('.sessions-right-workbench-header'));
-			append(header, $('.sessions-right-workbench-tabs'));
-			this.renderPanelCloseButton(append(header, $('.sessions-right-workbench-frame-controls')));
+			this.renderLauncherBrowserBar(container);
 		}
 		const center = append(container, $('.sessions-right-workbench-launcher-center'));
 		if (this.useSimpleRightWorkbench) {
 			center.tabIndex = 0;
 			center.ariaLabel = localize('rightWorkbench.openSurface', "Open a surface");
-			append(center, $('h3.sessions-right-workbench-launcher-title', {}, localize('rightWorkbench.openSurface', "Open a surface")));
+			append(center, $('h3.sessions-right-workbench-launcher-title', {}, localize('rightWorkbench.tools', "Tools")));
 			append(center, $('p.sessions-right-workbench-launcher-description', {}, localize('rightWorkbench.chooseSurface', "Choose what to show in the right panel.")));
 		}
 		const rows = append(center, $('.sessions-right-workbench-launcher-rows'));
 		const entries = this.getModeEntries();
 		for (const entry of entries) {
 			this.renderLauncherRow(rows, entry);
+		}
+		if (this.useSimpleRightWorkbench) {
+			this.renderLauncherSuggestions(center);
 		}
 		if (this.useSimpleRightWorkbench) {
 			this.domStore.add(addDisposableListener(center, EventType.KEY_DOWN, event => {
@@ -1156,7 +1201,71 @@ export class RightWorkbenchViewPane extends ViewPane {
 				keyboardEvent.stopPropagation();
 				void this.openMode(entry.mode);
 			}));
-			center.focus();
+			center.focus({ preventScroll: true });
+		}
+	}
+
+	private renderLauncherBrowserBar(container: HTMLElement): void {
+		const chrome = append(container, $('.sessions-right-workbench-browser-chrome.sessions-right-workbench-launcher-browser'));
+		const nav = append(chrome, $('.sessions-right-workbench-browser-nav'));
+		// No page yet: history controls stay visible but inactive, as in a new browser tab.
+		for (const [icon, label] of [
+			[Codicon.arrowLeft, localize('rightWorkbench.browserBack', "Back")],
+			[Codicon.arrowRight, localize('rightWorkbench.browserForward', "Forward")],
+			[Codicon.refresh, localize('rightWorkbench.browserRefresh', "Refresh")],
+		] as const) {
+			this.renderIconButton(nav, icon, label).disabled = true;
+		}
+		const address = append(nav, $('.sessions-right-workbench-browser-address'));
+		const url = append(address, $('input.sessions-right-workbench-browser-url')) as HTMLInputElement;
+		url.placeholder = localize('rightWorkbench.browserSearchPlaceholder', "Search or enter a URL");
+		url.ariaLabel = url.placeholder;
+		url.type = 'text';
+		url.spellcheck = false;
+		this.domStore.add(new RightWorkbenchBrowserSuggestions(address, url, () => [...this.browserViewWorkbenchService.getKnownBrowserViews().values()], value => this.openLauncherBrowser(value)));
+		const go = this.renderIconButton(address, Codicon.arrowRight, localize('rightWorkbench.browserGo', "Open URL"));
+		this.domStore.add(addDisposableListener(go, EventType.CLICK, () => this.openLauncherBrowser(url.value)));
+	}
+
+	/** Turns the New tab into a browser tab showing `value`. */
+	private openLauncherBrowser(value: string): void {
+		const url = this.normalizeBrowserUrl(value);
+		if (!url) {
+			return;
+		}
+		this.activateSingleSurface();
+		const tab = this.createTab('browser');
+		tab.browserUrl = url;
+		this.activeTabId = tab.id;
+		this.renderShell();
+	}
+
+	/** Browser pages already open, offered as quick tiles (Codex's "Suggested"). */
+	private renderLauncherSuggestions(container: HTMLElement): void {
+		const pages = [...this.browserViewWorkbenchService.getKnownBrowserViews().values()]
+			.filter(input => !input.isDisposed() && !!input.url && input.url !== 'about:blank')
+			.slice(0, 8);
+		if (!pages.length) {
+			return;
+		}
+		append(container, $('h3.sessions-right-workbench-launcher-title', {}, localize('rightWorkbench.suggested', "Suggested")));
+		const grid = append(container, $('.sessions-right-workbench-launcher-suggested'));
+		for (const input of pages) {
+			const title = input.title || input.url!;
+			const tile = append(grid, $('button.sessions-right-workbench-launcher-site')) as HTMLButtonElement;
+			tile.type = 'button';
+			tile.title = input.url!;
+			const icon = append(tile, $('.sessions-right-workbench-launcher-site-icon'));
+			const favicon = input.favicon;
+			if (favicon && /^(?:https?|data):/i.test(favicon)) {
+				const image = append(icon, $('img')) as HTMLImageElement;
+				image.alt = '';
+				image.src = favicon;
+			} else {
+				icon.appendChild(renderIcon(Codicon.globe));
+			}
+			append(tile, $('.sessions-right-workbench-launcher-site-title', {}, title));
+			this.domStore.add(addDisposableListener(tile, EventType.CLICK, () => { void this.openMode({ mode: 'browser', browserViewId: input.id }); }));
 		}
 	}
 
@@ -1406,6 +1515,11 @@ export class RightWorkbenchViewPane extends ViewPane {
 			this.activeTabId = nextTab?.id;
 		}
 		this.renderShell();
+		// As in the Codex app, closing Simple's last tab closes the panel; it
+		// reopens on the launcher.
+		if (this.useSimpleRightWorkbench && this.tabs.length === 0) {
+			this.hidePanel();
+		}
 	}
 
 	private disposeTabResources(tab: IRightWorkbenchTabState): void {

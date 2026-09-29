@@ -114,7 +114,7 @@ describe("buildRunMessageRequest", () => {
 		expect(selected.video_model_name).toBe("google/veo-3.1");
 	});
 
-	it("pins a selected OpenRouter upstream and otherwise leaves routing automatic", () => {
+	it("pins a selected OpenRouter upstream and otherwise ranks upstreams by latency", () => {
 		const context = {
 			session: new Session("sess_test"),
 			tools: [],
@@ -124,7 +124,10 @@ describe("buildRunMessageRequest", () => {
 			memoryProfile: "code" as const,
 		};
 
-		expect(buildRunMessageRequest("hello", context).openrouter).toBeUndefined();
+		// OpenRouter's own price-weighted default queues on the cheapest hosts.
+		expect(buildRunMessageRequest("hello", context).openrouter).toEqual({
+			sort: "latency",
+		});
 		expect(
 			buildRunMessageRequest("hello", {
 				...context,

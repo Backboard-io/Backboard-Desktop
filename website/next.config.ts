@@ -3,7 +3,8 @@ const config: NextConfig = {
   devIndicators: false,
   async redirects() {
     return [
-      { source: "/kevin-concept.html", destination: "/kevin", permanent: true },
+      { source: "/kevin-concept.html", destination: "/desktop", permanent: true },
+      { source: "/kevin", destination: "/desktop", permanent: true },
       { source: "/index.html", destination: "/", permanent: true },
     ];
   },

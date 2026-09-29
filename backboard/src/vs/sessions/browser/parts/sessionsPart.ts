@@ -32,6 +32,8 @@ import { IWorkbenchAssignmentService } from '../../../workbench/services/assignm
 import { Menus } from '../menus.js';
 import { SessionsPanelHeader } from './panelHeader.js';
 import { ISessionsGridChangeEvent, SessionsGridLayout } from '../../services/sessions/browser/sessionsPartService.js';
+import { IWorkbenchEnvironmentService } from '../../../workbench/services/environment/common/environmentService.js';
+import { isPhoneLayout } from './mobile/mobileLayout.js';
 
 /**
  * ExP treatment that, when enabled, moves the session type ("harness") picker
@@ -79,6 +81,15 @@ export class SessionsPart extends Part<ISessionsPartMemento> {
 
 	/** Border width on the card (1px each side) */
 	static readonly BORDER_WIDTH = 1;
+
+	/**
+	 * Gap between the Simple window's chat card and each window edge it
+	 * touches (bottom; right when the right panel is closed; left when the
+	 * sidebar is hidden), so the card floats on the window chrome like the
+	 * Codex desktop app's main surface. `sessionsShell.css` mirrors it as
+	 * margins on the part content.
+	 */
+	static readonly CARD_INSET = 4;
 
 	/** Internal grid that hosts the part's session views. */
 	protected _gridWidget: SerializableGrid<SessionView> | undefined;
@@ -155,6 +166,7 @@ export class SessionsPart extends Part<ISessionsPartMemento> {
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IWorkbenchAssignmentService private readonly assignmentService: IWorkbenchAssignmentService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 	) {
 		super(
 			Parts.SESSIONS_PART,
@@ -914,17 +926,36 @@ export class SessionsPart extends Part<ISessionsPartMemento> {
 		this._lastLayout = { width, height, top, left };
 
 		// Compute content dimensions accounting for the border and the header.
-		const borderTotal = SessionsPart.BORDER_WIDTH * 2;
+		// The Simple card draws no border, so it gives that space to the content.
+		const cardInset = this.environmentService.isOptimusWindow || isPhoneLayout(this.layoutService) ? 0 : SessionsPart.CARD_INSET;
+		const borderTotal = cardInset ? 0 : SessionsPart.BORDER_WIDTH * 2;
 		const marginLeft = this.layoutService.isVisible(Parts.SIDEBAR_PART) ? 0 : SessionsPart.MARGIN_LEFT;
 		const marginBottom = this.layoutService.isVisible(Parts.PANEL_PART) ? SessionsPart.MARGIN_BOTTOM : 0;
 		const marginRight = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART) ? SessionsPart.MARGIN_RIGHT : 0;
 		const headerHeight = this._panelHeader?.height ?? 0;
+		// An open right panel continues the card to the window edge, and an
+		// open terminal panel continues it below the chat.
+		const cardInsetLeft = this.layoutService.isVisible(Parts.SIDEBAR_PART) ? 0 : cardInset;
+		const cardInsetRight = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART) ? 0 : cardInset;
+		const cardInsetBottom = this.layoutService.isVisible(Parts.PANEL_PART) ? 0 : cardInset;
 
 		// Size the content area with the reduced dimensions.
 		const { contentSize } = this.layoutContents(
-			width - marginLeft - marginRight - borderTotal,
-			height - headerHeight - SessionsPart.MARGIN_TOP - marginBottom - borderTotal
+			width - marginLeft - marginRight - borderTotal - cardInsetLeft - cardInsetRight,
+			height - headerHeight - SessionsPart.MARGIN_TOP - marginBottom - borderTotal - cardInsetBottom
 		);
+
+		// The wallpaper underlay spans the window; publish the card's origin so
+		// CSS can clip it to the card.
+		if (cardInset) {
+			const container = this.layoutService.mainContainer;
+			// While split the shared header is hidden (height 0), but the top
+			// cells' own headers take its place in the chrome row, so the card
+			// still starts one header height down.
+			const cardTop = this.element.classList.contains('sessions-grid-split') ? SessionsPanelHeader.HEIGHT : headerHeight;
+			container.style.setProperty('--sessions-card-top', `${top + cardTop}px`);
+			container.style.setProperty('--sessions-card-left', `${left + cardInsetLeft}px`);
+		}
 
 		// Layout the internal grid widget within the content area.
 		this._gridWidget?.layout(contentSize.width, contentSize.height, top, left);

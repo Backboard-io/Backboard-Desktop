@@ -1,0 +1,236 @@
+@import url("https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600&display=swap");
+
+/* The shared Studio header + page frame. Every page reserves
+   --site-header-h at its top. */
+:root {
+  --site-header-h: 60px;
+  --sh-ink: #1c1861;
+  --sh-paper: #f6f1e7;
+  --sh-line: rgba(28, 24, 97, 0.12);
+}
+html {
+  scroll-padding-top: var(--site-header-h);
+}
+
+.sh-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  pointer-events: none;
+  border: 4px solid rgba(28, 24, 97, 0.22);
+}
+
+.sh {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 900;
+  height: var(--site-header-h);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 16px;
+  padding: 0 clamp(16px, 3vw, 40px);
+  color: var(--sh-ink);
+  background: color-mix(in srgb, var(--sh-paper) 70%, transparent);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  font: 500 14.5px/1 "Instrument Sans", system-ui, sans-serif;
+  letter-spacing: -0.005em;
+  transition:
+    background 0.3s,
+    box-shadow 0.3s;
+}
+.sh.is-scrolled {
+  background: color-mix(in srgb, var(--sh-paper) 88%, transparent);
+  box-shadow: 0 1px 0 var(--sh-line);
+}
+.sh *,
+.sh *::before,
+.sh *::after {
+  box-sizing: border-box;
+}
+.sh a {
+  color: inherit;
+  text-decoration: none;
+}
+.sh a:focus-visible,
+.sh button:focus-visible {
+  outline: 2px solid var(--sh-ink);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* brand */
+.sh-brand {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.015em;
+}
+.sh-brand svg {
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.sh-brand:hover svg {
+  transform: rotate(-8deg) scale(1.06);
+}
+
+/* apps */
+.sh-apps {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(28, 24, 97, 0.05);
+}
+.sh-apps a {
+  position: relative;
+  padding: 8px 16px;
+  border-radius: 999px;
+  color: rgba(28, 24, 97, 0.68);
+  transition:
+    color 0.2s,
+    background 0.2s;
+}
+.sh-apps a:hover {
+  color: var(--sh-ink);
+}
+.sh-apps a[aria-current="page"] {
+  background: #fff;
+  color: var(--sh-ink);
+  box-shadow: 0 1px 2px rgba(28, 24, 97, 0.12), 0 0 0 1px rgba(28, 24, 97, 0.06);
+}
+
+/* right */
+.sh-right {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sh-gh {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  transition: background 0.2s;
+}
+.sh-gh:hover {
+  background: rgba(28, 24, 97, 0.07);
+}
+.sh-gh svg {
+  width: 19px;
+  height: 19px;
+  fill: currentColor;
+}
+.sh-cta {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--sh-ink);
+  color: var(--sh-paper) !important;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background 0.2s,
+    transform 0.2s;
+}
+.sh-cta:hover {
+  background: #2b2690;
+  transform: translateY(-1px);
+}
+.sh-burger {
+  display: none;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(28, 24, 97, 0.06);
+  color: var(--sh-ink);
+  cursor: pointer;
+}
+.sh-burger span,
+.sh-burger span::before {
+  display: block;
+  width: 16px;
+  height: 2px;
+  margin: 0 auto;
+  border-radius: 2px;
+  background: currentColor;
+  transition: transform 0.25s;
+}
+.sh-burger span::before {
+  content: "";
+  transform: translateY(5px);
+}
+.sh-burger span {
+  transform: translateY(-2.5px);
+}
+.sh.is-open .sh-burger span {
+  transform: rotate(45deg);
+}
+.sh.is-open .sh-burger span::before {
+  transform: rotate(-90deg);
+}
+
+/* phone menu */
+.sh-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 30px 60px -30px rgba(28, 24, 97, 0.55), 0 0 0 1px var(--sh-line);
+  animation: sh-menu 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes sh-menu {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.sh-menu a {
+  padding: 14px 14px;
+  border-radius: 10px;
+  font-size: 16px;
+}
+.sh-menu a:hover,
+.sh-menu a[aria-current="page"] {
+  background: rgba(28, 24, 97, 0.06);
+}
+
+@media (max-width: 760px) {
+  :root {
+    --site-header-h: 56px;
+  }
+  .sh {
+    grid-template-columns: 1fr auto;
+  }
+  .sh-apps,
+  .sh-gh {
+    display: none;
+  }
+  .sh-burger {
+    display: block;
+  }
+  .sh-frame {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sh-menu {
+    animation: none;
+  }
+}

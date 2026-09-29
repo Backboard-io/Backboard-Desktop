@@ -1775,6 +1775,47 @@ suite('CliTsAgent tool metadata', () => {
 		});
 	}
 
+	test('an actionable run error says what to do, live and after reopening', async () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-cli-ts-actionable-error-'));
+		try {
+			const blocked = 'We paused LLM chat — your balance is used up. Add credits on the Billing page (or turn on auto-reload) to top up and pick up right where you left off.';
+			const storePath = path.join(tempRoot, 'sessions.json');
+			const agent = createAgent({}, {}, {}, { getSessionConfigValues: () => ({ isolation: 'folder' }) });
+			const progress: AgentSignal[] = [];
+			store.add(agent.onDidSessionProgress(signal => progress.push(signal)));
+			const internals = agent as unknown as {
+				_storePath(): string;
+				_materialize(session: { materialized: boolean }): Promise<void>;
+				_resolveRgDir(): Promise<string | undefined>;
+				_refreshModelsOnce(): void;
+				_ensureProcess(session: unknown): unknown;
+				_handleAgentEvent(session: unknown, event: unknown): void;
+			};
+			internals._storePath = () => storePath;
+			internals._materialize = async session => { session.materialized = true; };
+			internals._resolveRgDir = async () => undefined;
+			internals._refreshModelsOnce = () => { };
+			internals._ensureProcess = session => ({
+				nextRequestId: () => 'fixture-request',
+				request: async () => {
+					internals._handleAgentEvent(session, { type: 'run:error', error: blocked, actionable: true });
+					return { payload: { status: 'failed' } };
+				},
+			});
+			const sessionUri = AgentSession.uri('backboard', 'actionable-run-error');
+			await agent.createSession({ session: sessionUri, workingDirectory: URI.file(tempRoot), model: { id: 'google/gemini-3-pro' } });
+			await agent.sendMessage(sessionUri, 'Inspect the requested behavior.');
+
+			const reopened = createAgent();
+			(reopened as unknown as { _storePath(): string })._storePath = () => storePath;
+			const turns = await reopened.getSessionMessages(sessionUri);
+			const expected = `_This response couldn't start: ${blocked}_`;
+			assert.deepStrictEqual({ live: failureNotes(progress), reopened: failureNote(turns[0]) }, { live: [expected], reopened: expected });
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	test('an error-only child archive preserves its failure without a markdown or tool part', async () => {
 		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-cli-ts-child-error-'));
 		try {
@@ -1893,6 +1934,102 @@ suite('CliTsAgent tool metadata', () => {
 			assert.strictEqual(legacy[0].message.text, 'Prompt retained only in the old title');
 			assert.strictEqual(legacy[0].state, TurnState.Complete);
 			assert.strictEqual(legacy[0].responseParts[0]?.kind, ResponsePartKind.Markdown);
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('store rewrites skip no-op writes, keep other windows\' sessions, and keep the file format', async () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-cli-ts-store-'));
+		try {
+			const storePath = path.join(tempRoot, 'cli-ts-sessions.json');
+			const otherWindowSession = (id: string) => ({ id, title: id, cwd: tempRoot, createdAt: 1, modifiedAt: 2, turns: [{ prompt: id, response: 'Done.' }] });
+			fs.writeFileSync(storePath, JSON.stringify({ version: 1, sessions: [otherWindowSession('from-other-window')] }), 'utf8');
+			const agent = createAgent();
+			const internals = agent as unknown as {
+				_storePath(): string;
+				_prewarm(session: unknown): Promise<void>;
+				_writeStore(excludedSessionId?: string): void;
+				_sessions: Map<string, { materialized: boolean; title?: string }>;
+			};
+			internals._storePath = () => storePath;
+			internals._prewarm = async () => { };
+
+			// A draft that was never sent changes nothing the store holds.
+			await agent.createSession({ session: AgentSession.uri('backboard', 'store-live'), workingDirectory: URI.file(tempRoot) });
+			const beforeNoOp = fs.statSync(storePath);
+			internals._writeStore();
+			const afterNoOp = fs.statSync(storePath);
+
+			const live = internals._sessions.get('store-live');
+			assert.ok(live);
+			live.materialized = true;
+			internals._writeStore();
+			// Another app instance replaces the file with its own session added.
+			const ours = JSON.parse(fs.readFileSync(storePath, 'utf8')) as { sessions: unknown[] };
+			fs.writeFileSync(`${storePath}.elsewhere`, JSON.stringify({ version: 1, sessions: [...ours.sessions, otherWindowSession('written-elsewhere')] }), 'utf8');
+			fs.renameSync(`${storePath}.elsewhere`, storePath);
+			live.title = 'Renamed here';
+			internals._writeStore();
+
+			const text = fs.readFileSync(storePath, 'utf8');
+			const stored = JSON.parse(text) as { sessions: Array<{ id: string; title?: string }> };
+			assert.deepStrictEqual({
+				noOpRewrote: afterNoOp.ino !== beforeNoOp.ino || afterNoOp.mtimeMs !== beforeNoOp.mtimeMs,
+				sessions: stored.sessions.map(entry => `${entry.id}:${entry.title}`),
+				sameFormatAsBefore: text === `${JSON.stringify(stored, undefined, '\t')}\n`,
+			}, {
+				noOpRewrote: false,
+				sessions: ['store-live:Renamed here', 'from-other-window:from-other-window', 'written-elsewhere:written-elsewhere'],
+				sameFormatAsBefore: true,
+			});
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('a folder chat\'s first send starts its runtime right away; a worktree chat waits for its checkout', async () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-cli-ts-early-start-'));
+		try {
+			const agent = createAgent({}, {}, {}, {
+				getSessionConfigValues: (resource: string) => ({ isolation: resource.endsWith('worktree-chat') ? 'worktree' : 'folder' }),
+			});
+			const started: string[] = [];
+			const runningAtSubmit: Record<string, boolean> = {};
+			const internals = agent as unknown as {
+				_modelsRefreshed: boolean;
+				_storePath(): string;
+				_resolveRgDir(): Promise<string | undefined>;
+				_refreshModelsOnce(): undefined;
+				_ensureProcess(session: { sessionId: string; proc?: unknown }): unknown;
+				_sendMessage(session: { sessionId: string; proc?: unknown }): Promise<void>;
+			};
+			internals._modelsRefreshed = true;
+			internals._storePath = () => path.join(tempRoot, 'cli-ts-sessions.json');
+			internals._resolveRgDir = async () => undefined;
+			internals._refreshModelsOnce = () => undefined;
+			internals._ensureProcess = session => {
+				started.push(session.sessionId);
+				session.proc = { isRunning: true, start: () => { }, dispose: () => { } };
+				return session.proc;
+			};
+			internals._sendMessage = async session => {
+				// The real send reaches its submit only after the model switch,
+				// store writes and materialization.
+				await new Promise(resolve => setTimeout(resolve, 0));
+				runningAtSubmit[session.sessionId] = session.proc !== undefined;
+			};
+
+			for (const id of ['folder-chat', 'worktree-chat']) {
+				const sessionUri = AgentSession.uri('backboard', id);
+				await agent.createSession({ session: sessionUri, workingDirectory: URI.file(tempRoot) });
+				await agent.sendMessage(sessionUri, 'Hello');
+			}
+
+			assert.deepStrictEqual({ started, runningAtSubmit }, {
+				started: ['folder-chat'],
+				runningAtSubmit: { 'folder-chat': true, 'worktree-chat': false },
+			});
 		} finally {
 			fs.rmSync(tempRoot, { recursive: true, force: true });
 		}

@@ -115,9 +115,10 @@ if [[ "${DEBUG_IDE:-}" == "1" ]]; then
 fi
 
 # Optional Chrome DevTools Protocol port for driving the dev app with
-# automation tooling (@playwright/cli attach --cdp=...).
+# automation tooling (@playwright/cli attach --cdp=...). Keep occluded windows
+# painting so screenshots work while the app sits behind other windows.
 if [[ -n "${CDP_PORT:-}" ]]; then
-	ARGS+=(--remote-debugging-port="$CDP_PORT")
+	ARGS+=(--remote-debugging-port="$CDP_PORT" --disable-backgrounding-occluded-windows)
 fi
 
 if [[ "${DISABLE_GPU:-}" == "1" ]]; then

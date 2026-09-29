@@ -597,6 +597,59 @@ describe("AgentController loop (mocked Backboard)", () => {
 		});
 	}
 
+	it("overlaps the request capture with turn setup but sends nothing before it completes", async () => {
+		const client = new FakeClient(
+			[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+			[],
+		);
+		const boundaries: string[] = [];
+		let finishCapture!: () => void;
+		const capture = new Promise<void>((resolve) => {
+			finishCapture = resolve;
+		});
+		const checkpoints: CheckpointRecorder = {
+			recordPreImage: async () => {},
+			recordPostImage: async () => {},
+			revertToolCall: async () => {},
+			beginShellCapture: async () => {},
+			endShellCapture: async () => {},
+			captureWarning: () => null,
+			scopedToTurn() {
+				return this;
+			},
+			beginTurn: async (id) => {
+				boundaries.push(`begin:${id}`);
+				await capture;
+				boundaries.push(`captured:${id}`);
+			},
+			endTurn: async (id) => {
+				boundaries.push(`end:${id}`);
+			},
+		};
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+			[],
+			{ checkpoints },
+		);
+		const submission = ctrl.submit("do it", { turnId: "editor-turn" });
+		for (let i = 0; i < 20; i++) await Promise.resolve();
+		const whileCapturing = {
+			turnStarted: events.some((event) => event.type === "turn:start"),
+			requests: client.messageRequests.length,
+		};
+		finishCapture();
+		expect(await submission).toBe("completed");
+		expect({ whileCapturing, boundaries }).toEqual({
+			whileCapturing: { turnStarted: true, requests: 0 },
+			boundaries: [
+				"begin:editor-turn",
+				"captured:editor-turn",
+				"end:editor-turn",
+			],
+		});
+	});
+
 	it("starts a safe tool mid-stream when tool_call_ready arrives early", async () => {
 		let requiresActionYielded = false;
 		let startedDuringStream = false;
@@ -1234,6 +1287,28 @@ describe("AgentController loop (mocked Backboard)", () => {
 		expect(
 			events.filter((event) => event.type === "turn:end").map((e) => e.status),
 		).toEqual(["completed"]);
+	});
+
+	it("does not retry a turn the account cannot pay for, and says why", async () => {
+		const blocked =
+			"We paused LLM chat — your balance is used up. Add credits on the Billing page (or turn on auto-reload) to top up and pick up right where you left off.";
+		const client = new FakeClient([{ kind: "failed", error: blocked }], []);
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("rename the widget");
+
+		expect({
+			status,
+			requests: client.messageRequests.length,
+			errors: events.filter((event) => event.type === "run:error"),
+		}).toEqual({
+			status: "failed",
+			requests: 1,
+			errors: [{ type: "run:error", error: blocked, actionable: true }],
+		});
 	});
 
 	it("queues prompts submitted while a turn is running", async () => {

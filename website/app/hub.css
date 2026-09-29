@@ -1,0 +1,339 @@
+@import url("https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@300;400&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap");
+
+/* Studio home, after nousresearch.com: huge compressed uppercase type, square
+   buttons, navy bands of 1-bit pixel art that bloom into colour on hover.
+   Below the hero, each app's own one-pager, joined by pixel-dissolve seams. */
+html:has(.nw) {
+  scroll-behavior: smooth;
+}
+body:has(.nw) {
+  margin: 0;
+  background: #f6f1e7;
+  color: #1c1861;
+  font-family: "Instrument Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.nw {
+  --paper: #f6f1e7;
+  --navy: #1c1861;
+  --navy-2: rgba(28, 24, 97, 0.72);
+  --line: rgba(28, 24, 97, 0.16);
+  --inset: clamp(10px, 2.6vw, 38px);
+  position: relative;
+  overflow-x: clip;
+  color: var(--navy);
+}
+.nw-hero,
+.nw-signoff {
+  background:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='900' height='900'><filter id='p' x='0' y='0' width='100%' height='100%'><feTurbulence type='fractalNoise' baseFrequency='.006 .014' numOctaves='5' seed='7' stitchTiles='stitch'/><feDiffuseLighting lighting-color='%23fffdf8' surfaceScale='4.5' diffuseConstant='1.05'><feDistantLight azimuth='235' elevation='48'/></feDiffuseLighting></filter><rect width='100%' height='100%' filter='url(%23p)'/></svg>")
+      0 0 / 900px 900px,
+    var(--paper);
+  background-blend-mode: multiply, normal;
+}
+.nw *,
+.nw *::before,
+.nw *::after {
+  box-sizing: border-box;
+}
+/* Zero specificity so components can colour their own links. */
+:where(.nw a) {
+  color: inherit;
+  text-decoration: none;
+}
+.nw a:focus-visible {
+  outline: 2px solid var(--navy);
+  outline-offset: 3px;
+}
+
+/* ---------- hero ---------- */
+.nw-hero {
+  position: relative;
+  text-align: center;
+  padding: calc(var(--site-header-h, 0px) + clamp(20px, 4vh, 48px)) var(--inset) clamp(28px, 5vh, 56px);
+}
+.nw-kicker {
+  margin: 0 0 12px;
+  font: 700 11px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  animation: nw-rise 0.9s 0.1s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.nw h1,
+.nw-signoff p {
+  margin: 0;
+  font-family: "Big Shoulders Display", "Arial Narrow", sans-serif;
+  font-weight: 300;
+  text-transform: uppercase;
+  line-height: 0.82;
+  color: var(--navy);
+}
+.nw h1 {
+  font-size: clamp(76px, 15.8vw, 250px);
+}
+.nw h1 span {
+  display: inline-block;
+  animation: nw-word 1.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.nw h1 span + span {
+  animation-delay: 0.12s;
+}
+@keyframes nw-word {
+  from {
+    opacity: 0;
+    transform: translateY(0.35em);
+    letter-spacing: 0.12em;
+    filter: blur(6px);
+  }
+}
+@keyframes nw-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+.nw-lede {
+  max-width: 46ch;
+  margin: clamp(18px, 3vh, 30px) auto 0;
+  font-size: clamp(15px, 1.2vw, 17.5px);
+  line-height: 1.5;
+  color: var(--navy-2);
+  animation: nw-rise 0.9s 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.nw-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 26px;
+  animation: nw-rise 0.9s 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.nw-actions a {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 16px;
+  background: rgba(28, 24, 97, 0.05);
+  color: var(--navy);
+  font: 700 12px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  transition: background 0.15s;
+}
+.nw-actions a:hover {
+  background: rgba(28, 24, 97, 0.12);
+}
+.nw-actions a.is-primary {
+  background: var(--navy);
+  color: var(--paper);
+}
+.nw-actions a.is-primary:hover {
+  background: #2b2690;
+}
+.nw-scroll {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  translate: -50% 0;
+  width: 22px;
+  height: 34px;
+  border: 2px solid var(--navy);
+  border-radius: 12px;
+}
+.nw-scroll span {
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  width: 4px;
+  height: 7px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--navy);
+  animation: nw-scroll 1.6s ease-in-out infinite;
+}
+@keyframes nw-scroll {
+  60% {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+}
+
+/* ---------- hero film: fills the rest of the first screen ---------- */
+.nw-film {
+  margin: clamp(18px, 3vh, 34px) auto 0;
+  height: clamp(220px, calc(100svh - var(--site-header-h, 0px) - clamp(230px, 15.8vw + 64px, 340px)), 880px);
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  animation: nw-band 1.4s 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.hf {
+  position: relative;
+  overflow: hidden;
+  background: #f2efe6;
+  box-shadow:
+    0 0 0 1px rgba(28, 24, 97, 0.12),
+    0 40px 80px -50px rgba(28, 24, 97, 0.45);
+}
+.hf video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.hf-sound {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: rgba(28, 24, 97, 0.82);
+  color: #f6f1e7;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.hf-sound:hover {
+  background: #1c1861;
+}
+.hf-sound:focus-visible {
+  outline: 2px solid #1c1861;
+  outline-offset: 3px;
+}
+.hf-sound svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---------- pixel bands ---------- */
+.pb {
+  position: relative;
+  overflow: hidden;
+  background: var(--navy);
+  isolation: isolate;
+}
+.pb-pixel,
+.pb-color {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+.pb-pixel {
+  image-rendering: pixelated;
+  mix-blend-mode: screen;
+  opacity: 0.92;
+}
+.pb-color {
+  opacity: 0;
+  transition: opacity 1.27s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .pb:hover .pb-color {
+    opacity: 0.96;
+    transition-duration: 2.33s;
+  }
+}
+.nw-band.is-hero {
+  margin-top: clamp(40px, 7vh, 72px);
+  aspect-ratio: 2400 / 900;
+  max-height: 70vh;
+  animation: nw-band 1.4s 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes nw-band {
+  from {
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(30px);
+  }
+}
+
+/* ---------- sign-off + footer ---------- */
+.nw-signoff {
+  padding: clamp(100px, 18vh, 200px) var(--inset) clamp(60px, 10vh, 110px);
+  text-align: center;
+}
+.nw-signoff p {
+  font-size: clamp(56px, 11.5vw, 190px);
+}
+.nw-foot {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 32px;
+  margin: 0 var(--inset) var(--inset);
+  padding: clamp(32px, 5vw, 64px);
+  background: var(--navy);
+  color: var(--paper);
+}
+.nw-foot-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.nw-foot-brand b {
+  font: 300 clamp(40px, 5vw, 72px) / 0.9 "Big Shoulders Display", sans-serif;
+  text-transform: uppercase;
+}
+.nw-foot-brand span {
+  opacity: 0.7;
+}
+.nw-foot nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+}
+.nw-foot nav b {
+  margin-bottom: 6px;
+  font: 700 12px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+.nw-foot nav span {
+  opacity: 0.5;
+}
+.nw-foot nav a:hover {
+  text-decoration: underline;
+}
+.nw-foot-legal {
+  grid-column: 1 / -1;
+  margin: 24px 0 0;
+  padding-top: 20px;
+  border-top: 1px solid rgba(246, 241, 231, 0.2);
+  font: 500 11px "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+@media (max-width: 760px) {
+  .nw-foot {
+    grid-template-columns: 1fr;
+  }
+  .nw-band.is-hero {
+    aspect-ratio: 4 / 3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:has(.nw) {
+    scroll-behavior: auto;
+  }
+  .nw h1 span,
+  .nw-kicker,
+  .nw-lede,
+  .nw-actions,
+  .nw-band.is-hero,
+  .nw-scroll span {
+    animation: none;
+  }
+  .pb-color {
+    transition: none;
+  }
+}

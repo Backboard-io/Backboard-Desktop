@@ -409,6 +409,7 @@ export class CodexSubscriptionClient implements AgentClient {
 	private readonly memoryStore?: SubscriptionMemoryStore;
 	private readonly retryLimit: number;
 	private readonly retryBaseDelayMs: number;
+	private resolvedDefaultModel?: string;
 
 	constructor(options: CodexSubscriptionClientOptions = {}) {
 		this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
@@ -723,10 +724,16 @@ export class CodexSubscriptionClient implements AgentClient {
 		);
 	}
 
+	/**
+	 * The plan's first model, for a turn that names none. Resolved once: the
+	 * catalog request otherwise ran ahead of every such turn.
+	 */
 	private async defaultModel(options: RequestOptions): Promise<string> {
+		if (this.resolvedDefaultModel) return this.resolvedDefaultModel;
 		const response = await this.listModels(options);
 		const model = response.models[0]?.name;
 		if (!model) throw new Error("No subscription model is available.");
+		this.resolvedDefaultModel = model;
 		return model;
 	}
 

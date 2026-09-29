@@ -12,6 +12,7 @@ import {
 	screenImage,
 	showAgentCursor,
 } from "./CuaDriverSurface.ts";
+import { JevStaleTargetError } from "./JevSurfaceError.ts";
 import {
 	type JevElement,
 	type JevKey,
@@ -289,19 +290,47 @@ export class CuaBrowserSurface implements JevSurface {
 		signal: AbortSignal,
 	): Promise<void> {
 		const target = await this.bind(signal);
-		await this.driver.call(
+		const field = {
+			target_id: target.target_id,
+			tab_id: target.tab_id,
+			ref: element.handle,
+			session: this.session,
+		};
+		// Replace, not append: the field may hold an earlier attempt.
+		const replaced = await this.driver.tryCall(
 			"browser_type",
-			{
-				target_id: target.target_id,
-				tab_id: target.tab_id,
-				ref: element.handle,
-				text,
-				// Replace, not append: the field may hold an earlier attempt.
-				replace: true,
-				session: this.session,
-			},
+			{ ...field, text, replace: true },
 			signal,
 		);
+		if (!replaced.ok) {
+			const message = `cua-driver browser_type: ${replaced.error}`;
+			// Replacing needs a focus-ready field, and Wikipedia's search box
+			// refused ("did not become focus-ready") in most logged runs. Nothing
+			// was typed, so type at the caret; failing that, click to focus first,
+			// if the field takes clicks at all (that combobox does not).
+			if (!/browser_input_trust_unavailable/.test(replaced.error ?? "")) {
+				throw replaced.inputNotDispatched
+					? new JevStaleTargetError(message)
+					: new Error(message);
+			}
+			const typed = await this.driver.tryCall(
+				"browser_type",
+				{ ...field, text },
+				signal,
+			);
+			if (!typed.ok) {
+				if (!element.clickable)
+					throw new JevStaleTargetError(
+						`cua-driver browser_type: ${typed.error}`,
+					);
+				await this.driver.call(
+					"browser_click",
+					{ ...field, input_route: "dom_event" },
+					signal,
+				);
+				await this.driver.call("browser_type", { ...field, text }, signal);
+			}
+		}
 		this.lastTyped = { role: element.role, label: element.label };
 	}
 
@@ -535,6 +564,7 @@ export function elementsFromRefs(refs: readonly PageRef[]): JevElement[] {
 				selected: states.selected === true,
 				// The driver says outright what can be typed into; no role guessing.
 				editable: ref.actions?.includes("type") ?? false,
+				clickable: ref.actions?.includes("click") ?? false,
 			};
 		});
 }

@@ -24,7 +24,11 @@ import type {
 import { errorMessage } from "../../utils/errors.ts";
 import { shortId } from "../../utils/id.ts";
 import type { EventBus } from "../bus/EventBus.ts";
-import type { AskUserQuestionSpec, TurnStatus } from "../bus/events.ts";
+import type {
+	AskUserQuestionSpec,
+	PerformanceTimingPhase,
+	TurnStatus,
+} from "../bus/events.ts";
 import type { CheckpointRecorder } from "../checkpoints/CheckpointStore.ts";
 import {
 	AUTO_COMPACT_THRESHOLD_PERCENT,
@@ -355,10 +359,18 @@ export class AgentController {
 		const turn = new Turn(options.turnId);
 		let turnStarted = false;
 		let finalStatus: TurnStatus = "failed";
+		// The request baseline walks the whole workspace (seconds on a large
+		// one). It only has to finish before the model can act, so it runs
+		// alongside the other pre-request waits below instead of ahead of them,
+		// and endTurn always waits for it.
+		const baselineCapture = options.turnId
+			? this.deps.checkpoints?.beginTurn?.(turn.id, text, config.cwd)
+			: undefined;
+		// Awaited (and its failure reported) below; this keeps an early exit
+		// from leaving the rejection unobserved.
+		baselineCapture?.catch(() => undefined);
 
 		try {
-			if (options.turnId)
-				await this.deps.checkpoints?.beginTurn?.(turn.id, text, config.cwd);
 			const hookController = this.deps.hookController;
 
 			bus.emit({ type: "turn:start", turnId: turn.id });
@@ -366,6 +378,9 @@ export class AgentController {
 
 			let promptHook: UserPromptHookResult | undefined;
 			if (hookController?.hasTrustedUserPromptHooks()) {
+				// A hook may edit files: capture first so those edits stay
+				// attributed to this turn, as they were before the overlap.
+				await baselineCapture;
 				promptHook = await this.runUserPromptHooks(turn.id, text, signal);
 			}
 			if (promptHook?.blockedReason) {
@@ -401,34 +416,61 @@ export class AgentController {
 			turnStarted = true;
 
 			const ctx = { ...this.buildContext(signal), modelRoute: route };
-			// All four are independent of each other: assistant resolution and
+			// All five are independent of each other: assistant resolution and
 			// thinking metadata are network round-trips, the skill scan reads
-			// only the skill catalog + filesystem, and the tool sync talks to
-			// MCP servers - none may stall the others. The only ordering that
-			// matters is that syncDynamicTools completes before
-			// visibleSchemas() below, which the single Promise.all preserves.
+			// only the skill catalog + filesystem, the tool sync talks to MCP
+			// servers, and the baseline walks the workspace - none may stall the
+			// others. The only orderings that matter are that syncDynamicTools
+			// completes before visibleSchemas() below and that the baseline
+			// exists before the first request lets the model run a tool, both of
+			// which the single Promise.all preserves.
 			// (In serve mode syncDynamicTools also waits, capped, for
 			// in-flight MCP connects so their tools make this snapshot.)
 			// An existing thread already knows its assistant, so skip the
 			// resolution round-trip entirely.
+			// Each wait reports its own duration, so a slow first token can be
+			// traced to the stage that held it.
+			const prepareStartedAt = performance.now();
+			const timed = async <T>(
+				phase: PerformanceTimingPhase,
+				work: Promise<T> | T,
+			): Promise<T> => {
+				const result = await work;
+				bus.emit({
+					type: "performance:timing",
+					phase,
+					durationMs: performance.now() - prepareStartedAt,
+				});
+				return result;
+			};
 			const [, skillPromptContext, assistantId, thinkingResolver] =
 				await Promise.all([
-					this.deps.syncDynamicTools?.(signal),
-					this.deps.skillController.buildPromptContext(text),
+					timed("prepare_tools", this.deps.syncDynamicTools?.(signal)),
+					timed(
+						"prepare_skills",
+						this.deps.skillController.buildPromptContext(text),
+					),
 					// A key-backed model has no assistant record to resolve, and an
 					// existing thread already knows its assistant - either way the
 					// round-trip is skipped.
-					!this.deps.client.capabilities.assistants || session.threadId
-						? (session.assistantId ?? undefined)
-						: this.loopFactory.resolveAssistantId({
-								systemPrompt: this.baseSystemPrompt(),
-								tools: this.baseTools(),
-								signal,
-							}),
-					createRuntimeThinkingResolver(
-						{ model: route, modelSource: route.source, thinkingIntent },
-						this.deps.client,
+					timed(
+						"prepare_assistant",
+						!this.deps.client.capabilities.assistants || session.threadId
+							? (session.assistantId ?? undefined)
+							: this.loopFactory.resolveAssistantId({
+									systemPrompt: this.baseSystemPrompt(),
+									tools: this.baseTools(),
+									signal,
+								}),
 					),
+					timed(
+						"prepare_thinking",
+						createRuntimeThinkingResolver(
+							{ model: route, modelSource: route.source, thinkingIntent },
+							this.deps.client,
+						),
+					),
+					timed("prepare_baseline", baselineCapture),
 				]);
 			const promptProfile = toPromptProfileId(modelProfile.name);
 			const tools = config.toolPolicy.visibleSchemas(
@@ -609,7 +651,12 @@ export class AgentController {
 				// Stop runs for every turn that actually started, whatever the outcome.
 				if (turnStarted) await this.runStopHooks(turn.id, finalStatus);
 				await this.disposeTools();
-				if (options.turnId) await this.deps.checkpoints?.endTurn?.(turn.id);
+				if (options.turnId) {
+					// The boundary closes only after it was opened, even when the
+					// turn ended before reaching the pre-request waits.
+					await baselineCapture?.catch(() => undefined);
+					await this.deps.checkpoints?.endTurn?.(turn.id);
+				}
 			} finally {
 				this.abortController = null;
 				this.rejectPendingAsks();

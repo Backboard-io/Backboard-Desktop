@@ -21,7 +21,7 @@ body > .shared-header.shared-header--ocean { --nav-ink: #113e49; text-shadow: no
 body > .shared-header nav {display:flex;align-items:center;justify-content:space-between;gap:20px;font:400 13px/1.4 Inter,Arial,sans-serif;letter-spacing:0;text-transform:none}
 body > .shared-header .nav-right {justify-content:flex-end}
 body > .shared-header .brand {display:flex;align-items:center;justify-content:center;min-width:180px;gap:10px;font:400 23px/.95 'Barlow Condensed',sans-serif;letter-spacing:-.4px;color:inherit}
-body > .shared-header .brand img {width:25px;height:34px;filter:invert(1)}
+body > .shared-header .brand img {width:40px;height:28px;filter:invert(1)}
 body > .shared-header--ocean .brand img {filter:none}
 body > .shared-header a {color:inherit;text-decoration:none}
 body > .shared-header a:hover {opacity:.72}

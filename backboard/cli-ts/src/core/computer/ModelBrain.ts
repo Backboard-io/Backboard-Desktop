@@ -57,6 +57,10 @@ To reach a website call open_url; never click an address bar.`;
  */
 const MAX_ATTEMPTS = 3;
 
+/** Failures a retry cannot fix, so the brain moves straight to the next route. */
+const NOT_TRANSIENT =
+	/balance is used up|insufficient (credits|balance)|payment required|\b402\b|billing|not signed in|No backend can serve|Unsupported LLM provider|No API key/i;
+
 const ID = { type: "string", description: "An id from this turn's lists." };
 const NO_ARGS = { type: "object", properties: {} };
 
@@ -290,7 +294,8 @@ export class ModelBrain implements ComputerBrain {
 				);
 			} catch (error) {
 				if (signal.aborted) throw error;
-				if (!retried) {
+				// An empty balance or a missing account will not change on retry.
+				if (!retried && !NOT_TRANSIENT.test(errorMessage(error))) {
 					retried = true;
 					this.options.onStatus?.(
 						`${formatModel(route)} failed (${errorMessage(error)}); retrying`,

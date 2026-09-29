@@ -1,0 +1,626 @@
+@import url("https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@300&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500;700&family=Caveat:wght@500&display=swap");
+
+/* Backboard Desktop: one screen, no scroll. A white impasto canvas with the
+   painted surf pieces drifting around a live, full-size IDE. */
+body:has(.dk.is-page) {
+  margin: 0;
+  background: #f6f1e7;
+  color: #17150f;
+  font-family: "Instrument Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+html:has(.dk.is-page) {
+  overflow: hidden;
+}
+.dk {
+  color: #17150f;
+  font-family: "Instrument Sans", system-ui, sans-serif;
+  --paper: #f6f1e7;
+  --ink: #17150f;
+  --ink-2: #625d52;
+  --sea: #1f8fb5;
+  --sun: #f0592a;
+  --mx: 0;
+  --my: 0;
+  --gutter: clamp(16px, 4vw, 56px);
+  position: relative;
+  height: 100vh;
+  height: 100dvh;
+  padding-top: var(--site-header-h, 0px);
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+  /* Impasto relief: lit fractal noise, laid over the paper. */
+  background:
+    radial-gradient(120% 90% at 70% 40%, transparent 50%, rgba(214, 196, 164, 0.35)),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='900' height='900'><filter id='p' x='0' y='0' width='100%' height='100%'><feTurbulence type='fractalNoise' baseFrequency='.006 .014' numOctaves='5' seed='7' stitchTiles='stitch'/><feDiffuseLighting lighting-color='%23fffdf8' surfaceScale='4.5' diffuseConstant='1.05'><feDistantLight azimuth='235' elevation='48'/></feDiffuseLighting></filter><rect width='100%' height='100%' filter='url(%23p)'/></svg>")
+      0 0 / 900px 900px,
+    var(--paper);
+  background-blend-mode: normal, multiply, normal;
+}
+.dk *,
+.dk *::before,
+.dk *::after {
+  box-sizing: border-box;
+}
+
+.dk-nav {
+  flex: none;
+}
+.dk-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------- painted surf ---------- */
+.dk-art {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+.dk-piece {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+}
+.dk-piece img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 18px 22px rgba(80, 60, 30, 0.18));
+}
+/* Art fills three corners (never the top-left, where the title lives):
+   top-right — a big sun rising behind the window;
+   bottom-right — the beach, with the reef tucked into the corner;
+   bottom-left — the surf lineup, with the wave breaking over the window.
+   Sizes follow both viewport axes so the corners stay full on big screens. */
+.dk-piece.is-sun {
+  top: calc(var(--site-header-h, 0px) - 2vh);
+  right: -6vw;
+  width: clamp(220px, min(25vw, 44vh), 520px);
+}
+.dk-piece.is-reef {
+  right: -9vw;
+  bottom: 16vh;
+  width: clamp(240px, min(28vw, 50vh), 560px);
+}
+.dk-piece.is-shore {
+  right: -7vw;
+  bottom: -5vh;
+  width: clamp(320px, min(40vw, 70vh), 820px);
+}
+.dk-piece.is-lineup {
+  left: -7vw;
+  bottom: -5vh;
+  width: clamp(320px, min(40vw, 66vh), 820px);
+  rotate: -6deg;
+}
+.dk-piece.is-foam {
+  left: -6vw;
+  right: -6vw;
+  bottom: -10vh;
+  opacity: 0.85;
+}
+.dk-piece.is-foam img {
+  width: 100%;
+  height: 28vh;
+  object-fit: fill;
+}
+/* The ribbon breaks over the window's lower-left corner. */
+.dk-piece.is-ribbon {
+  z-index: 3;
+  left: -18%;
+  bottom: -16%;
+  width: 42%;
+}
+
+/* ---------- layout ---------- */
+.dk-main {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(322px, 21fr) 79fr;
+  gap: clamp(12px, 1.2vw, 24px);
+  align-items: center;
+  padding: 0 clamp(10px, 1.2vw, 24px) clamp(8px, 1.6vh, 20px) clamp(16px, 2.8vw, 48px);
+}
+.dk-copy {
+  position: relative;
+  z-index: 4;
+  align-self: center;
+  max-width: 440px;
+}
+/* Hero: app icon, a big compressed name, the typing line, one download. */
+/* Name on the left, the app icon beside it on the right. */
+.dk-head {
+  display: flex;
+  align-items: center;
+  gap: clamp(14px, 1.6vw, 24px);
+}
+.dk-app-icon {
+  display: block;
+  flex: none;
+  width: clamp(60px, min(5vw, 8.6vh), 100px);
+  height: auto;
+  filter: drop-shadow(0 12px 18px rgba(30, 26, 90, 0.3)) drop-shadow(0 2px 3px rgba(30, 26, 90, 0.2));
+  rotate: -5deg;
+  transition: rotate 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.dk-app-icon:hover {
+  rotate: 4deg;
+}
+.dk .dk-title {
+  margin: 0;
+  font: 300 clamp(58px, min(5.9vw, 10.5vh), 104px) / 0.84 "Big Shoulders Display", "Arial Narrow", sans-serif;
+  text-transform: uppercase;
+  letter-spacing: -0.005em;
+  color: #1c1861;
+}
+.dk .dk-title span {
+  display: block;
+}
+
+/* One square download button + quiet links to the other platforms. */
+.dl {
+  margin-top: clamp(22px, 4vh, 36px);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.dl-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.dl-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  height: 58px;
+  padding: 0 22px 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: #0b0b0d;
+  color: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow: 0 14px 26px -14px rgba(0, 0, 0, 0.55);
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+}
+.dl-badge:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 32px -16px rgba(0, 0, 0, 0.6);
+}
+.dl-badge:focus-visible {
+  outline: 2px solid #1c1861;
+  outline-offset: 3px;
+}
+.dl-badge svg {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  fill: currentColor;
+}
+.dl-badge span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.dl-badge small {
+  font: 500 11px/1 "Instrument Sans", system-ui, sans-serif;
+  opacity: 0.75;
+}
+.dl-badge b {
+  font: 600 21px/1 "Instrument Sans", system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+.dl-top .ghl {
+  color: #1c1861;
+}
+.dl-more {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.dl-more button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #1c1861;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: rgba(28, 24, 97, 0.3);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.dl-more button:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Trusted and used by */
+.dk-trusted {
+  margin-top: clamp(22px, 5vh, 44px);
+  padding-top: clamp(16px, 2.6vh, 22px);
+  border-top: 1px solid rgba(23, 21, 15, 0.12);
+}
+.tb-label {
+  margin: 0 0 14px;
+  font: 700 10px/1 "JetBrains Mono", ui-monospace, monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.tb ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 15px;
+}
+.tb li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  opacity: 0.72;
+  transition: opacity 0.2s;
+}
+.tb li:hover {
+  opacity: 1;
+}
+.tb-mark {
+  display: grid;
+  place-items: center;
+  height: 20px;
+}
+.tb-mark svg {
+  height: 20px;
+  width: auto;
+  fill: currentColor;
+}
+.tb-aws .tb-mark svg {
+  height: 30px;
+  margin: -3px -2px 0;
+}
+.tb-mark img {
+  width: 18px;
+  height: 18px;
+  /* flatten the colour marks to ink so the row reads as one set */
+  filter: grayscale(1) brightness(0);
+}
+.tb-name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+/* All the models, drifting along the bottom edge */
+.dk-marquee {
+  flex: none;
+  position: relative;
+  z-index: 5;
+  margin: 0 var(--gutter) clamp(10px, 2vh, 18px);
+  border-radius: 999px;
+  background: rgba(252, 250, 245, 0.8);
+  backdrop-filter: blur(10px) saturate(1.2);
+  box-shadow: 0 0 0 1px rgba(23, 21, 15, 0.08), 0 10px 30px -14px rgba(40, 60, 70, 0.35);
+}
+.mm {
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+}
+.mm-track {
+  display: flex;
+  width: max-content;
+  animation: mm-flow var(--mm-duration, 180s) linear infinite;
+}
+.mm:hover .mm-track {
+  animation-play-state: paused;
+}
+.mm ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+}
+.mm li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 18px;
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.mm li img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+.mm li::after {
+  content: "";
+  width: 4px;
+  height: 4px;
+  margin-left: 18px;
+  margin-right: -18px;
+  border-radius: 50%;
+  background: rgba(23, 21, 15, 0.2);
+}
+@keyframes mm-flow {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mm {
+    overflow-x: auto;
+  }
+  .mm-track {
+    animation: none;
+  }
+}
+
+.dk-demo {
+  height: 100%;
+  min-height: 0;
+  container-type: size;
+  display: grid;
+  place-items: center start;
+}
+/* The window keeps its 16:10 shape and takes the largest size that fits,
+   leaving a margin on the right and above/below for the corner art. */
+.dk-frame {
+  position: relative;
+  width: min(100cqw, 160cqh);
+  aspect-ratio: 16 / 10;
+}
+.dk-ide {
+  z-index: 2;
+}
+.dk-hint {
+  position: absolute;
+  z-index: 4;
+  top: -34px;
+  left: 2%;
+  margin: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  font: 500 clamp(18px, 1.6vw, 24px) / 1 "Caveat", cursive;
+  color: #d9431a;
+  text-shadow:
+    0 0 6px var(--paper),
+    0 0 12px var(--paper),
+    0 0 2px var(--paper);
+  rotate: -3deg;
+  pointer-events: none;
+}
+.dk-hint svg {
+  width: 44px;
+  height: 30px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  translate: 0 14px;
+  filter: drop-shadow(0 0 3px var(--paper)) drop-shadow(0 0 6px var(--paper));
+}
+
+/* ---------- smaller screens: stack and let it scroll ---------- */
+@media (max-width: 900px), (max-height: 520px) {
+  html:has(.dk.is-page) {
+    overflow: auto;
+  }
+  .dk {
+    height: auto;
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+  .dk-main {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 36px;
+    padding-top: 12px;
+  }
+  .dk-copy {
+    max-width: 560px;
+  }
+  .dk-demo {
+    height: auto;
+    aspect-ratio: 16 / 10;
+    place-items: center;
+  }
+  .dk-frame {
+    width: min(100cqw, 160cqh);
+  }
+  .dk-hint {
+    top: -30px;
+  }
+  .dk-piece.is-sun {
+    top: calc(var(--site-header-h, 0px) + 10px);
+    right: -6vw;
+    width: 110px;
+  }
+  @media (max-width: 420px) {
+  .dk-downloads {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dk-piece img {
+    animation: none;
+  }
+}
+
+/* ---------- entrance: everything comes in once, then holds still ----------
+   Plays on load at /desktop; on the home page it waits for the chapter to be
+   revealed (.chapter.is-in). backwards fill = no lingering transform after. */
+.dk {
+  --dk-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes dk-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+}
+@keyframes dk-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-60px);
+  }
+}
+@keyframes dk-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-90px);
+  }
+}
+@keyframes dk-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(90px);
+  }
+}
+@keyframes dk-in-floor {
+  from {
+    opacity: 0;
+    transform: translateY(80px);
+  }
+}
+@keyframes dk-wipe-up {
+  from {
+    clip-path: inset(0 0 100% 0);
+    transform: translateY(0.35em);
+  }
+  to {
+    clip-path: inset(0 0 -10% 0);
+  }
+}
+@keyframes dk-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.3) rotate(-45deg);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.08) rotate(6deg);
+  }
+}
+@keyframes dk-window {
+  from {
+    opacity: 0;
+    transform: translateY(56px) scale(0.94);
+  }
+}
+@keyframes dk-sweep {
+  from {
+    opacity: 0;
+    transform: translate(-140px, 50px) rotate(-6deg);
+  }
+}
+
+.dk-piece.is-foam {
+  animation: dk-in-floor 1.1s var(--dk-ease) 0s backwards;
+}
+.dk-piece.is-sun {
+  animation: dk-in-down 1.2s var(--dk-ease) 0.05s backwards;
+}
+.dk-piece.is-shore {
+  animation: dk-in-right 1.1s var(--dk-ease) 0.15s backwards;
+}
+.dk-piece.is-lineup {
+  animation: dk-in-left 1.2s var(--dk-ease) 0.3s backwards;
+}
+.dk-piece.is-reef {
+  animation: dk-in-right 1.2s var(--dk-ease) 0.25s backwards;
+}
+.dk-piece.is-ribbon {
+  animation: dk-sweep 1.3s var(--dk-ease) 0.75s backwards;
+}
+
+.dk .dk-title span {
+  animation: dk-wipe-up 0.95s var(--dk-ease) 0.1s backwards;
+}
+.dk .dk-title span + span {
+  animation-delay: 0.22s;
+}
+.dk-app-icon {
+  animation: dk-pop 0.9s var(--dk-ease) 0.35s backwards;
+}
+.dl-top {
+  animation: dk-in-up 0.8s var(--dk-ease) 0.5s backwards;
+}
+.dl-more {
+  animation: dk-in-up 0.8s var(--dk-ease) 0.62s backwards;
+}
+.dk-trusted .tb-label {
+  animation: dk-in-up 0.7s var(--dk-ease) 0.72s backwards;
+}
+.dk-trusted li {
+  animation: dk-in-up 0.7s var(--dk-ease) calc(0.78s + var(--i, 0) * 0.05s) backwards;
+}
+.dk-trusted li:nth-child(2) {
+  --i: 1;
+}
+.dk-trusted li:nth-child(3) {
+  --i: 2;
+}
+.dk-trusted li:nth-child(4) {
+  --i: 3;
+}
+.dk-trusted li:nth-child(5) {
+  --i: 4;
+}
+.dk-trusted li:nth-child(6) {
+  --i: 5;
+}
+.dk-trusted li:nth-child(7) {
+  --i: 6;
+}
+.dk-frame {
+  animation: dk-window 1.2s var(--dk-ease) 0.3s backwards;
+}
+.dk-hint {
+  animation: dk-in-up 0.8s var(--dk-ease) 1.15s backwards;
+}
+.dk-marquee {
+  animation: dk-in-floor 1s var(--dk-ease) 0.6s backwards;
+}
+
+/* Embedded in the home page: hold every entrance until the chapter arrives. */
+.chapter:not(.is-in) .dk,
+.chapter:not(.is-in) .dk * {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dk-piece,
+  .dk .dk-title span,
+  .dk-app-icon,
+  .dl-top,
+  .dl-more,
+  .dk-trusted .tb-label,
+  .dk-trusted li,
+  .dk-frame,
+  .dk-hint,
+  .dk-marquee {
+    animation: none !important;
+  }
+}

@@ -97,17 +97,28 @@ export class McpWorkQueue {
 	private tail: Promise<void> = Promise.resolve();
 	private barrier: Promise<void> | undefined;
 
+	/**
+	 * `work` may call `releaseTurns` before it finishes, once a starting turn
+	 * no longer has anything to gain by waiting for it (every server's tools
+	 * are already advertised); the queue itself still waits for the work.
+	 */
 	run<T>(
-		work: () => Promise<T>,
+		work: (releaseTurns: () => void) => Promise<T>,
 		options: { blocksTurns?: boolean } = {},
 	): Promise<T> {
-		const result = this.tail.then(work);
+		let releaseTurns = () => {};
+		const released = new Promise<void>((resolve) => {
+			releaseTurns = resolve;
+		});
+		const result = this.tail.then(() => work(releaseTurns));
 		const settled = result.then(
 			() => undefined,
 			() => undefined,
 		);
 		this.tail = settled;
-		if (options.blocksTurns) this.barrier = settled;
+		if (options.blocksTurns) {
+			this.barrier = Promise.race([settled, released]);
+		}
 		return result;
 	}
 

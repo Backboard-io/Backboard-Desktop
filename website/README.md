@@ -1,6 +1,6 @@
 # Backboard Studio website
 
-The Backboard Studio product hub and Kevin landing page use Next.js App Router, React, and TypeScript.
+The Backboard Studio product hub and Backboard Desktop landing page use Next.js App Router, React, and TypeScript.
 The cloud page and embedded IDE demo remain static files in `public/`.
 
 ## Run locally
@@ -10,7 +10,7 @@ npm ci
 npm run dev
 ```
 
-Open http://127.0.0.1:4173/ for the product hub or `/kevin` for the IDE. The previous `/kevin-concept.html` URL redirects to `/kevin`, preserving anchor links.
+Open http://127.0.0.1:4173/ for the product hub or `/desktop` for Backboard Desktop. The previous `/kevin` and `/kevin-concept.html` URLs redirect to `/desktop`, preserving anchor links.
 
 ```sh
 npm run build      # production compilation and TypeScript validation
@@ -20,10 +20,10 @@ npm start          # serve the production build on port 4173
 
 ## Source map
 
-- `app/page.tsx` and `app/home.css`: compact five-product homepage.
+- `app/page.tsx` and `app/home.css`: the whole site on one page, one section per product (data in `data/products.ts`). Direction and image prompts in `ART-DIRECTION.md`.
 - `data/products.ts`: product artwork and destinations; missing URLs display as Coming soon.
-- `app/kevin/page.tsx`: hero, artwork, closing section and footer.
-- `app/kevin/kevin.css`: the existing responsive beach design, migrated without a visual redesign.
+- `app/desktop/page.tsx`: hero, artwork, closing section and footer.
+- `app/desktop/kevin.css`: the existing responsive beach design, migrated without a visual redesign.
 - `components/SiteHeader.tsx`: shared navigation for the product hub and Kevin.
 - `components/DownloadButtons.tsx`: four illustrated platform tiles. Destinations intentionally remain empty.
 - `components/WorkspaceDemo.tsx`: floating app window, integrated React mode controls, video playback, iframe sizing and lifecycle cleanup.

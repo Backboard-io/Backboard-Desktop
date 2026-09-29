@@ -17,6 +17,8 @@ export interface JevElement {
 	selected?: boolean;
 	/** Set by a surface that knows what takes text; otherwise judged by role. */
 	editable?: boolean;
+	/** Set by a surface that knows whether the element takes clicks. */
+	clickable?: boolean;
 }
 
 /** A capture of the window being operated, saved to disk. */
@@ -641,6 +643,17 @@ export class JevUseLoop {
 						text: `${err.message}; no input dispatched, reobserving.`,
 					});
 					await delay(this.waitMs, signal);
+					continue;
+				}
+				// The page threw while handling the click: it may or may not have
+				// worked. Ending the task here killed a Pixlr run that a retry then
+				// finished, so look again and let the brain judge from the screen.
+				if (/delivery is uncertain/i.test(errorMessage(err))) {
+					record({
+						...step,
+						text: "The page raised an error handling this; check the screen for whether it worked before repeating it.",
+					});
+					await delay(this.settleMs, signal);
 					continue;
 				}
 				record(step);

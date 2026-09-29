@@ -132,13 +132,19 @@ export class ComputerRuntime {
 				const surface = this.browsers.get(
 					canonicalAppName(action.appName).toLowerCase(),
 				);
-				if (!surface)
+				// No agent browser for that name: the desktop is what the model can
+				// see. Refusing sent models into loops of screenshot retries.
+				if (!surface) {
+					const observation = await new ScreenCapture(
+						ctx.sessionId,
+						this.platform,
+					).capture(ctx.signal);
+					this.lastObservation = observation;
 					return {
-						success: false,
-						action: "screenshot",
-						verification: "failed",
-						summary: `No active computer-use browser for ${action.appName}. Start a task in that app first.`,
+						...observation,
+						summary: `No agent window is open for ${action.appName}, so this is the whole desktop, not that app. ${observation.summary}`,
 					};
+				}
 				try {
 					return {
 						success: true,
@@ -241,16 +247,17 @@ export class ComputerRuntime {
 		const screenshots = () => paths.nextScreenshotPath();
 		let surface: JevSurface;
 		try {
-			if (isBrowserApp(action.appName)) {
+			// Safari, Firefox, and Orion have no driver DOM route. They are run in the
+			// user's own window through accessibility and screenshots, which fills
+			// forms and clicks fine; only canvas drawing needs a Chromium browser.
+			if (
+				isBrowserApp(action.appName) &&
+				!NATIVE_ONLY_BROWSERS.test(action.appName)
+			) {
 				if (!driver)
 					throw new Error(
 						"Cua Driver is unavailable. Browser tasks require its DOM and canvas support.",
 					);
-				if (/\b(safari|firefox|orion)\b/i.test(action.appName)) {
-					throw new Error(
-						`${action.appName} does not support the driver's DOM/canvas route. Use Brave, Chrome, or Edge; when the user did not specify a browser, use appName "Browser". Do not retry this task through browser toolbar accessibility.`,
-					);
-				}
 				surface = await this.browserSurface(
 					driver,
 					action.appName,
@@ -293,33 +300,49 @@ export class ComputerRuntime {
 			// Any earlier screenshot is stale once the agent has pressed things.
 			this.lastObservation = null;
 			const writer = this.jevWriter;
-			const result = await new JevUseLoop(surface, brain, (packet, options) =>
-				writer(packet, { ...options, modelRoute: ctx.modelRoute }),
-			).run(
-				{
-					goal: action.goal,
-					maxSteps: action.maxSteps,
-					onStepStart: (step) => subagent?.stepStarted(step),
-					onStep: (step) => {
-						subagent?.stepFinished(step);
-						// Also streamed as text, for hosts that do not render sub-agents.
-						progress(`${step.step}. ${describeStep(step)}`);
-					},
-					onStatus: (message) => progress(`${message}...`),
-					// A spawned sub-agent cannot prompt the user; without `ask` the run
-					// hands sign-ins and consequential controls back to its caller.
-					...((ctx.agentDepth ?? 0) === 0
-						? {
-								ask: (
-									question: string,
-									choices: string[],
-									signal: AbortSignal,
-								) => ctx.askUser(question, choices, signal),
-							}
-						: {}),
+			const runLoop = (on: JevSurface) =>
+				new JevUseLoop(on, brain, (packet, options) =>
+					writer(packet, { ...options, modelRoute: ctx.modelRoute }),
+				).run(loopOptions, ctx.signal);
+			const loopOptions: Parameters<JevUseLoop["run"]>[0] = {
+				goal: action.goal,
+				maxSteps: action.maxSteps,
+				onStepStart: (step) => subagent?.stepStarted(step),
+				onStep: (step) => {
+					subagent?.stepFinished(step);
+					// Also streamed as text, for hosts that do not render sub-agents.
+					progress(`${step.step}. ${describeStep(step)}`);
 				},
-				ctx.signal,
-			);
+				onStatus: (message) => progress(`${message}...`),
+				// A spawned sub-agent cannot prompt the user; without `ask` the run
+				// hands sign-ins and consequential controls back to its caller.
+				...((ctx.agentDepth ?? 0) === 0
+					? {
+							ask: (question: string, choices: string[], signal: AbortSignal) =>
+								ctx.askUser(question, choices, signal),
+						}
+					: {}),
+			};
+			let result = await runLoop(surface);
+			// The agent's browser outlives tasks, so the user may have closed it, or
+			// its tab died. Every later task then failed on the dead tab. Reopen
+			// it and run the task once more: the failure was a read, not an action.
+			if (
+				surface instanceof CuaBrowserSurface &&
+				result.outcome === "failed" &&
+				STALE_BROWSER.test(result.error ?? "") &&
+				driver
+			) {
+				progress("The browser window was gone; reopening it...");
+				await this.evictBrowser(action.appName);
+				surface = await this.browserSurface(
+					driver,
+					action.appName,
+					screenshots,
+					ctx.signal,
+				);
+				result = await runLoop(surface);
+			}
 			subagent?.endWith(result);
 			if (surface instanceof CuaBrowserSurface && !ctx.signal.aborted) {
 				try {
@@ -372,6 +395,13 @@ export class ComputerRuntime {
 		}
 	}
 
+	private async evictBrowser(appName: string): Promise<void> {
+		const key = canonicalAppName(appName).toLowerCase();
+		const surface = this.browsers.get(key);
+		this.browsers.delete(key);
+		await surface?.dispose().catch(() => {});
+	}
+
 	async dispose(): Promise<void> {
 		const browsers = [...this.browsers.values()];
 		this.browsers.clear();
@@ -407,6 +437,12 @@ export class ComputerRuntime {
 		return observation;
 	}
 }
+
+const NATIVE_ONLY_BROWSERS = /\b(safari|firefox|orion)\b/i;
+
+/** A browser target that no longer exists: the window or tab was closed. */
+const STALE_BROWSER =
+	/browser_tab_not_found|No target with given id|target_closed|Target closed|window_id_not_found|did not become ready/i;
 
 function requiresObservation(action: ComputerAction): boolean {
 	switch (action.action) {

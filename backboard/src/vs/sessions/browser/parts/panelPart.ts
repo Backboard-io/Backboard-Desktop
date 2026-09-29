@@ -30,6 +30,9 @@ import { IPaneCompositeBarOptions } from '../../../workbench/browser/parts/paneC
 import { IHoverService } from '../../../platform/hover/browser/hover.js';
 import { IConfigurationService } from '../../../platform/configuration/common/configuration.js';
 import { Extensions } from '../../../workbench/browser/panecomposite.js';
+import { IWorkbenchEnvironmentService } from '../../../workbench/services/environment/common/environmentService.js';
+import { SessionsPart } from './sessionsPart.js';
+import { isPhoneLayout } from './mobile/mobileLayout.js';
 
 /**
  * Panel part specifically for agent sessions workbench.
@@ -84,7 +87,8 @@ export class PanelPart extends AbstractPaneCompositePart {
 		@IContextKeyService contextKeyService: IContextKeyService,
 		@IExtensionService extensionService: IExtensionService,
 		@IMenuService menuService: IMenuService,
-		@IConfigurationService private readonly configurationService: IConfigurationService
+		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 	) {
 		super(
 			Parts.PANEL_PART,
@@ -174,12 +178,18 @@ export class PanelPart extends AbstractPaneCompositePart {
 			return;
 		}
 
-		// Layout content with reduced dimensions to account for the border only.
-		const borderTotal = 2; // 1px border on each side
+		// In Simple the terminal ends the chat card beneath the composer, so it
+		// keeps the card's gaps (see SessionsPart.CARD_INSET): bottom, right when
+		// no right panel follows, left when the sidebar is hidden. The card
+		// draws no border.
+		const cardInset = this.environmentService.isOptimusWindow || isPhoneLayout(this.layoutService) ? 0 : SessionsPart.CARD_INSET;
+		const borderTotal = cardInset ? 0 : 2; // 1px border on each side
 		const marginLeft = this.layoutService.isVisible(Parts.SIDEBAR_PART) ? 0 : PanelPart.MARGIN_LEFT;
+		const cardInsetLeft = this.layoutService.isVisible(Parts.SIDEBAR_PART) ? 0 : cardInset;
+		const cardInsetRight = this.layoutService.isVisible(Parts.AUXILIARYBAR_PART) ? 0 : cardInset;
 		super.layout(
-			width - marginLeft - borderTotal,
-			height - PanelPart.MARGIN_TOP - borderTotal,
+			width - marginLeft - borderTotal - cardInsetLeft - cardInsetRight,
+			height - PanelPart.MARGIN_TOP - borderTotal - cardInset,
 			top, left
 		);
 

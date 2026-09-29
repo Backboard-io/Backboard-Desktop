@@ -2,3 +2,5 @@ design-reference/
 kevin-*-preview.png
 kevin-beach-*.png
 .DS_Store
+.next
+node_modules
