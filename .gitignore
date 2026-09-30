@@ -27,6 +27,12 @@ node_modules/
 # Local build state for the product source tree.
 /backboard/.build/
 
+# Cloud agent build output and local environment files.
+/services/cloud-agents/dist/
+/services/cloud-agents/.env
+/services/cloud-agents/.env.*
+!/services/cloud-agents/.env.example
+
 # Per-workspace Backboard metadata is local machine state.
 /.backboard/
 
