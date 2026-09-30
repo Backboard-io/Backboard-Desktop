@@ -336,6 +336,38 @@ suite('MarkdownRenderer', () => {
 		assert.strictEqual(anchor.title, fileUri.fsPath);
 	});
 
+	test('Resolves encoded preview links and images without double encoding their paths', () => {
+		for (const basePath of ['/workspace/', '/workspace/chat.md']) {
+			const md = new MarkdownString('[preview](NeoLab%20Pitch%20Deck%20-%20v5/previews/12.jpg) ![Slide](NeoLab%20Pitch%20Deck%20-%20v5/previews/12.jpg)');
+			md.baseUri = URI.file(basePath);
+			let openedLink: string | undefined;
+			const result = store.add(renderMarkdown(md, {
+				actionHandler: href => { openedLink = href; },
+			})).element;
+			const anchor = result.querySelector('a')!;
+			const expectedPath = '/workspace/NeoLab Pitch Deck - v5/previews/12.jpg';
+			assert.strictEqual(URI.parse(anchor.dataset.href!).path, expectedPath);
+			assert.strictEqual(URI.parse(result.querySelector('img')!.src).path, expectedPath);
+			anchor.click();
+			assert.strictEqual(URI.parse(openedLink!).path, expectedPath);
+		}
+	});
+
+	test('Decodes local markdown paths once and tolerates literal percent signs', () => {
+		for (const [href, expectedPath] of [
+			['slides/caf%C3%A9%20%231%3F.png', '/workspace/slides/café #1?.png'],
+			['slides/literal%2520.png', '/workspace/slides/literal%20.png'],
+			['slides/100%.png', '/workspace/slides/100%.png'],
+			['/other/deck%20preview.png', '/other/deck preview.png'],
+			['file:///other/literal%2520.png', '/other/literal%20.png'],
+		]) {
+			const md = new MarkdownString(`[preview](${href})`);
+			md.baseUri = URI.file('/workspace/');
+			const result = store.add(renderMarkdown(md)).element;
+			assert.strictEqual(URI.parse(result.querySelector('a')!.dataset.href!).path, expectedPath);
+		}
+	});
+
 	test('Should include fragment in title for file:// links with line numbers', () => {
 		const fileUri = URI.file('/home/user/project/lib.d.ts');
 		const md = new MarkdownString(`[log](${fileUri.toString()}#L42)`, {});

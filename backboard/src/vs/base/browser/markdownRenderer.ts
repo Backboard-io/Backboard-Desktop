@@ -536,6 +536,15 @@ function resolveWithBaseUri(baseUri: URI, href: string): string {
 		return href;
 	}
 
+	// Markdown destinations are URI-encoded, but resolvePath expects a file
+	// path. Decode once so a folder such as "Pitch%20Deck" opens "Pitch Deck"
+	// instead of a file whose name literally contains "%20".
+	try {
+		href = decodeURIComponent(href);
+	} catch {
+		// Keep paths containing literal or malformed percent escapes usable.
+	}
+
 	if (baseUri.path.endsWith('/')) {
 		return resolvePath(baseUri, href).toString();
 	} else {

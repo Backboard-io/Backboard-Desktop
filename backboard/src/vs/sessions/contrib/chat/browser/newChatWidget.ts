@@ -46,6 +46,7 @@ import { ChatAgentLocation, ChatModeKind } from '../../../../workbench/contrib/c
 import { EDITOR_DRAG_AND_DROP_BACKGROUND } from '../../../../workbench/common/theme.js';
 import { activeSessionViewBackground, activeSessionViewForeground, agentsPanelBackground } from '../../../common/theme.js';
 import { IPathService } from '../../../../workbench/services/path/common/pathService.js';
+import { IWorkbenchLayoutService } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../platform/actions/browser/toolbar.js';
 import { Menus } from '../../../browser/menus.js';
 import { ISimpleModeBackgroundService } from './simpleModeBackgroundService.js';
@@ -276,6 +277,7 @@ export class NewChatWidget extends Disposable {
 	private readonly _workspacePicker: WorkspacePicker;
 	private readonly _sessionTypePicker: SessionTypePicker;
 	private readonly _widget: ChatWidget;
+	private readonly _editorOverflowWidgetsDomNode = dom.$('.chat-editor-overflow.monaco-editor');
 	private readonly _modelRef = this._register(new MutableDisposable<IChatModelReference>());
 	private readonly _loadCts = this._register(new MutableDisposable<CancellationTokenSource>());
 	private _currentChatResource: URI | undefined;
@@ -332,6 +334,7 @@ export class NewChatWidget extends Disposable {
 		@IPathService private readonly pathService: IPathService,
 		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
 		@ISimpleModeBackgroundService private readonly simpleModeBackgroundService: ISimpleModeBackgroundService,
+		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 	) {
 		super();
 		// Track the live instance for the test-only reset command.
@@ -341,6 +344,7 @@ export class NewChatWidget extends Disposable {
 				activeComposerForTest = undefined;
 			}
 		}));
+		this._register(toDisposable(() => this._editorOverflowWidgetsDomNode.remove()));
 		// On web (vscode.dev / insiders.vscode.dev), use {@link WebWorkspacePicker}
 		// which scopes recents to the active host and renders as a bottom
 		// sheet on phone-layout viewports. On Electron desktop, the regular
@@ -375,6 +379,7 @@ export class NewChatWidget extends Disposable {
 				autoScroll: mode => mode !== ChatModeKind.Ask,
 				renderFollowups: true,
 				supportsFileReferences: true,
+				editorOverflowWidgetsDomNode: this._editorOverflowWidgetsDomNode,
 				rendererOptions: {
 					referencesExpandedWhenEmptyResponse: false,
 					progressMessageAtBottomOfResponse: mode => mode !== ChatModeKind.Ask,
@@ -491,6 +496,9 @@ export class NewChatWidget extends Disposable {
 	// --- Rendering ---
 
 	render(parent: HTMLElement): void {
+		// Monaco positions suggestions in viewport coordinates. Keep their host
+		// outside the composer's transformed and clipped layout containers.
+		this.layoutService.getContainer(dom.getWindow(parent)).appendChild(this._editorOverflowWidgetsDomNode);
 		const element = dom.append(parent, dom.$('.sessions-chat-widget'));
 		// The provider picker lives in the composer. Use the vacated header slot
 		// for the same compact workspace / draft breadcrumb as T3 Code.
