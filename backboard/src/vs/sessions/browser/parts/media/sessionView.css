@@ -127,7 +127,7 @@
 }
 
 .session-view .backboard-auth-gate-card {
-	width: min(300px, 100%);
+	width: min(340px, 100%);
 	display: grid;
 	justify-items: center;
 	gap: 12px;

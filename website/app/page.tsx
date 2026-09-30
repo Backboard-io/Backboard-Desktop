@@ -7,7 +7,7 @@ import { NashScreen } from "@/components/screens/NashScreen";
 import { SoonScreen } from "@/components/screens/SoonScreen";
 import { ChapterStage } from "@/components/site/ChapterStage";
 import { StudioMark } from "@/components/StudioMark";
-import { REPO } from "@/data/links";
+import { DOCS, REPO } from "@/data/links";
 import "./hub.css";
 
 export const metadata: Metadata = {
@@ -120,7 +120,7 @@ export default function StudioHub() {
         <nav aria-label="Studio">
           <b>Studio</b>
           <a href={REPO}>GitHub ↗</a>
-          <a href={`${REPO}#documentation`}>Docs ↗</a>
+          <a href={DOCS}>Docs ↗</a>
           <a href="/cloud/">Cloud</a>
         </nav>
         <p className="nw-foot-legal">© 2026 Backboard Studio</p>

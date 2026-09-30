@@ -12,7 +12,9 @@ import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../../browser/e
 import { EditorExtensions, IEditorFactoryRegistry, IEditorSerializer } from '../../../../common/editor.js';
 import { EditorInput } from '../../../../common/editor/editorInput.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
-import { OPEN_API_KEYS_COMMAND_ID } from './byokKeys.js';
+import { ADD_PROVIDER_KEY_COMMAND_ID, OPEN_API_KEYS_COMMAND_ID } from './byokKeys.js';
+import { isByokProviderId } from '../../../../../platform/agentHost/common/byokProviders.js';
+import { IByokKeysService } from '../agentSessions/agentHost/byokKeysService.js';
 import { ByokKeysEditor } from './byokKeysEditor.js';
 import { ByokKeysEditorInput } from './byokKeysEditorInput.js';
 
@@ -54,5 +56,22 @@ registerAction2(class extends Action2 {
 
 	async run(accessor: ServicesAccessor): Promise<void> {
 		await accessor.get(IEditorService).openEditor(ByokKeysEditorInput.getOrCreate(), { pinned: true });
+	}
+});
+
+/**
+ * Inline key entry (model picker and sign-in card) saves through the same
+ * keychain-backed service as the API Keys page, so the runtime bills to it.
+ */
+registerAction2(class extends Action2 {
+	constructor() {
+		super({ id: ADD_PROVIDER_KEY_COMMAND_ID, title: localize2('backboard.addProviderKey', "Add Provider Key"), f1: false });
+	}
+
+	async run(accessor: ServicesAccessor, provider: unknown, key: unknown): Promise<void> {
+		if (!isByokProviderId(provider) || typeof key !== 'string' || !key.trim()) {
+			throw new Error(localize('backboard.addProviderKey.invalid', "Choose a provider and enter an API key."));
+		}
+		await accessor.get(IByokKeysService).add(provider, key.trim());
 	}
 });

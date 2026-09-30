@@ -26,11 +26,9 @@ const defaultUpdateManifestBaseUrl = 'https://backboard-studio-releases.s3.ca-ce
 const stableUpdateChannel = 'stable';
 const sandboxUpdateChannel = 'sandbox';
 const supportedUpdateChannels = new Set([stableUpdateChannel, sandboxUpdateChannel]);
-const promptedUpdateVersionStateKey = 'backboard.updates.lastPromptedVersion';
 const updateLockOwnerFileName = 'owner.json';
 const updateLockMissingOwnerGraceMs = 60_000;
 let backboardUpdateOutput: vscode.OutputChannel | undefined;
-let backboardUpdateContext: vscode.ExtensionContext | undefined;
 
 interface UpdateInstallLock {
 	readonly directory: string;
@@ -46,7 +44,6 @@ interface UpdateLockOwner {
 
 export function initializeBackboardUpdates(context: vscode.ExtensionContext, output: vscode.OutputChannel | undefined): void {
 	backboardUpdateOutput = output;
-	backboardUpdateContext = context;
 	// The deprecated Bagel bridge is intentionally a manual certificate migration.
 	// It must show only the direct-DMG notice: offering Install and Restart here
 	// sends the user through the cross-certificate in-place updater that this
@@ -66,6 +63,34 @@ export function initializeBackboardUpdates(context: vscode.ExtensionContext, out
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.installAvailableUpdate', () => installAvailableBackboardUpdate()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.cancelUpdate', () => backboardUpdateCancellation?.abort()));
 	context.subscriptions.push({ dispose: () => backboardUpdateCancellation?.abort() });
+	scheduleAutomaticBackboardUpdateChecks(context);
+}
+
+const automaticUpdateCheckStartupDelayMs = 8_000;
+const automaticUpdateCheckIntervalMs = 20 * 60_000;
+/** A focus change (switching between Simple, Editor and Agents) re-checks at most this often. */
+const automaticUpdateCheckFocusThrottleMs = 60_000;
+let lastAutomaticBackboardUpdateCheck = 0;
+
+/**
+ * Keeps the Update button current without the user asking: shortly after
+ * launch, on a timer, and whenever this window gains focus. Each mode is its
+ * own window, so switching modes is a focus change. These checks never show a
+ * prompt; they only set `backboard.updateAvailable`, which lights the button.
+ */
+function scheduleAutomaticBackboardUpdateChecks(context: vscode.ExtensionContext): void {
+	const check = (): void => {
+		lastAutomaticBackboardUpdateCheck = Date.now();
+		void checkBackboardUpdates(false);
+	};
+	const startup = setTimeout(check, automaticUpdateCheckStartupDelayMs);
+	const interval = setInterval(check, automaticUpdateCheckIntervalMs);
+	context.subscriptions.push({ dispose: () => { clearTimeout(startup); clearInterval(interval); } });
+	context.subscriptions.push(vscode.window.onDidChangeWindowState(state => {
+		if (state.focused && Date.now() - lastAutomaticBackboardUpdateCheck >= automaticUpdateCheckFocusThrottleMs) {
+			check();
+		}
+	}));
 }
 
 function showDeprecatedBridgeNotice(context: vscode.ExtensionContext): boolean {
@@ -138,6 +163,9 @@ async function checkBackboardUpdates(manual: boolean): Promise<void> {
 		if (!checkLock) {
 			if (manual) {
 				await vscode.window.showInformationMessage('Another Backboard Studio window is already checking for updates.');
+			} else {
+				// Each window tracks the button on its own; try again once the other window is done.
+				setTimeout(() => void checkBackboardUpdates(false), 5_000);
 			}
 			return;
 		}
@@ -168,17 +196,11 @@ async function checkBackboardUpdates(manual: boolean): Promise<void> {
 		}
 
 		await setAvailableBackboardUpdate(manifest);
-		const canInstall = canInstallBackboardUpdate();
-		if (!manual && backboardUpdateContext?.globalState.get<string>(promptedUpdateVersionStateKey) === manifest.version) {
+		// An automatic check only lights the Update button; the prompt is for a check the user asked for.
+		if (!manual) {
 			return;
 		}
-		if (!manual) {
-			try {
-				await backboardUpdateContext?.globalState.update(promptedUpdateVersionStateKey, manifest.version);
-			} catch (error) {
-				backboardUpdateOutput?.appendLine(`[updates] could not persist prompted update version: ${error instanceof Error ? error.message : String(error)}`);
-			}
-		}
+		const canInstall = canInstallBackboardUpdate();
 
 		const message = `Backboard Studio ${manifest.version} is available. Current version: ${currentVersion}.`;
 		const actions = canInstall ? ['Install and Restart', 'Download DMG', 'Copy Link', 'Later'] : ['Download DMG', 'Copy Link', 'Later'];

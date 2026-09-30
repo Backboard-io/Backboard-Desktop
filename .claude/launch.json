@@ -4,8 +4,26 @@
     {
       "name": "website",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "website", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "website",
+        "run",
+        "dev"
+      ],
       "port": 4173
+    },
+    {
+      "name": "backboard-builder",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "-y",
+        "pnpm@9",
+        "--dir",
+        "/Users/erintomorri/Desktop/t3code/backboard-builder",
+        "run",
+        "dev"
+      ],
+      "port": 5173
     }
   ]
 }

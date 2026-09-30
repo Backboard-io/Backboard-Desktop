@@ -93,11 +93,10 @@ suite('Backboard runtime configuration', () => {
 		const subscriptionModels = models.filter(model => model.id.startsWith('anthropic-subscription/'));
 
 		assert.deepStrictEqual(subscriptionModels.map(model => model.id), [
-			'anthropic-subscription/claude-fable-5-1[1m]',
-			'anthropic-subscription/default',
-			'anthropic-subscription/haiku',
-			'anthropic-subscription/opus[1m]',
-			'anthropic-subscription/sonnet',
+			'anthropic-subscription/claude-fable-5-1',
+			'anthropic-subscription/claude-haiku-4-5-20251001',
+			'anthropic-subscription/claude-opus-5-5',
+			'anthropic-subscription/claude-sonnet-5-5',
 		]);
 		for (const model of subscriptionModels) {
 			assert.strictEqual(model.provider, 'backboard');
@@ -105,10 +104,10 @@ suite('Backboard runtime configuration', () => {
 			assert.strictEqual(model._meta?.upstreamProvider, 'anthropic-subscription');
 			assert.strictEqual(model._meta?.upstreamProviderLabel, 'Claude Subscription');
 		}
-		assert.deepStrictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/opus[1m]')?.configSchema?.properties.intensity.enum, ['low', 'medium', 'high', 'xhigh', 'max']);
-		assert.strictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/opus[1m]')?.configSchema?.properties.intensity.default, 'high');
-		assert.strictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/haiku')?.configSchema, undefined);
-		assert.strictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/opus[1m]')?.maxContextWindow, 1_000_000);
+		assert.deepStrictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/claude-opus-5-5')?.configSchema?.properties.intensity.enum, ['low', 'medium', 'high', 'xhigh', 'max']);
+		assert.strictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/claude-opus-5-5')?.configSchema?.properties.intensity.default, 'high');
+		assert.strictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/claude-haiku-4-5-20251001')?.configSchema, undefined);
+		assert.strictEqual(subscriptionModels.find(model => model.id === 'anthropic-subscription/claude-opus-5-5')?.maxContextWindow, 200_000);
 	});
 
 	test('uses Claude Code live model names and does not add unavailable bundled aliases', () => {

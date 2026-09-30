@@ -14,7 +14,7 @@ import { GalleryMcpServerStatus, IGalleryMcpServer } from '../../../../../../../
 import { McpServerType } from '../../../../../../../platform/mcp/common/mcpPlatformTypes.js';
 import { StateType } from '../../../../../../../platform/update/common/update.js';
 import { buildModelPickerItems, getControlModelsForEntitlement, getModelPickerAccessibilityProvider } from '../../../../browser/widget/input/chatModelPicker.js';
-import { buildCombinedModelSections, byokFooterForSection, combinedModelSectionGroupLabel, COMBINED_MODEL_SECTION_ALL, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_RECOMMENDED, formatModelLabel, formatModelProviderDetail, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, isKeyBilledModel, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
+import { buildCombinedModelSections, combinedModelSectionGroupLabel, COMBINED_MODEL_SECTION_ALL, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_RECOMMENDED, formatContextWindow, formatModelLabel, formatModelProviderDetail, formatPrice, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, isKeyBilledModel, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
 import { buildMcpMarketplaceItems, buildSkillsLibraryItems, createMcpMarketplaceItemsFromCatalog, getHiddenMcpMarketplaceCatalogEntries, IMcpMarketplaceCatalogEntry, mcpItemMatchesInstalledServer, McpMarketplaceModalItem, resolveMcpMarketplaceItems, parseSkillsShHtml, splitSkillsShId } from '../../../../browser/widget/input/skillsLibrary.js';
 import { IModelPickerSetupCandidate } from '../../../../browser/widget/input/modelPickerActionItem.js';
 import { filterModelsForSession } from '../../../../browser/widget/input/chatModelSelectionLogic.js';
@@ -172,13 +172,8 @@ suite('combined model provider sections', () => {
 			ownSectionSearch: modelsForCombinedModelSection(models, 'byok:anthropic-key', true).map(model => model.metadata.id),
 			details: [formatModelProviderDetail(connected), formatModelProviderDetail(unavailable), formatModelProviderDetail(keyless), formatModelProviderDetail(backboard)],
 			icons: [providerIconKeyForCombinedModelSection('provider:openai-key'), providerIconKeyForCombinedModelSection('provider:anthropic-key')],
-			footers: [
-				byokFooterForSection('provider:openai')?.label,
-				byokFooterForSection('byok:openai-key')?.label,
-				byokFooterForSection('byok:openai')?.label,
-				byokFooterForSection('provider:google')?.label,
-				byokFooterForSection(COMBINED_MODEL_SECTION_ALL),
-			],
+			contexts: [formatContextWindow(1_000_000), formatContextWindow(1_048_576), formatContextWindow(200_000), formatContextWindow(0)],
+			prices: [formatPrice(0.14), formatPrice(3.5), formatPrice(15), formatPrice(150)],
 		}, {
 			sections: [
 				['provider:openai', 'OpenAI', 1],
@@ -191,7 +186,8 @@ suite('combined model provider sections', () => {
 			ownSectionSearch: ['openai-key/gpt-5.5', 'anthropic-key/claude-opus-5', 'openai/gpt-5.5'],
 			details: ['Billed to your OpenAI API key', 'Not available with this key', 'API key required', 'OpenAI'],
 			icons: ['open-ai', 'anthropic'],
-			footers: ['Use your own OpenAI key…', 'Manage API keys…', 'Manage API keys…', 'Use your own Google Gemini key…', undefined],
+			contexts: ['1M context', '1M context', '200K context', undefined],
+			prices: ['$0.14', '$3.50', '$15', '$150'],
 		});
 	});
 

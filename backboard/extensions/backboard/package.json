@@ -24,6 +24,7 @@
   "activationEvents": [
     "onStartupFinished",
     "onCommand:backboard.extension.signIn",
+    "onCommand:backboard.extension.signOut",
     "onCommand:backboard.setApiKey",
     "onCommand:backboard.configureProviderKey",
     "onCommand:backboard.setupProviderKey",
@@ -56,6 +57,10 @@
         "title": "Backboard: Sign In"
       },
       {
+        "command": "backboard.extension.signOut",
+        "title": "Backboard: Sign Out"
+      },
+      {
         "command": "backboard.refreshModels",
         "title": "Backboard: Refresh Models"
       },
@@ -86,6 +91,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "backboard.extension.signOut",
+          "when": "false"
+        },
         {
           "command": "backboard.cancelUpdate",
           "when": "backboard.updateCancellable"

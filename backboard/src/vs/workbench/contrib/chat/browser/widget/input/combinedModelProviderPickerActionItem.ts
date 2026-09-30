@@ -22,8 +22,11 @@ import { INotificationService } from '../../../../../../platform/notification/co
 import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
 import { IContextViewService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { AgentSessionProviders, AgentSessionTarget } from '../../agentSessions/agentSessions.js';
-import { BYOK_KEYS_SETUP_ID, CLAUDE_SUBSCRIPTION_SETUP_ID } from '../../agentSessions/agentCliSetup.js';
-import { byokProviderDefinition, isByokProviderId, isKeyBilledProvider, vendorOfProvider } from '../../../../../../platform/agentHost/common/byokProviders.js';
+import { byokProviderDefinition, ByokProviderId, isByokProviderId, isKeyBilledProvider, vendorOfProvider } from '../../../../../../platform/agentHost/common/byokProviders.js';
+import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
+import { BackboardConnectTarget, defaultBackboardConnectTargets, IBackboardConnectState, IBackboardConnectView, renderBackboardConnect } from '../../backboardConnect.js';
+import { BackboardAuthContextKeys } from '../../../common/backboardAuth.js';
 import { ISessionTypePickerDelegate } from '../../chat.js';
 import { ILanguageModelChatMetadataAndIdentifier, LanguageModelBillingSource, ILanguageModelsService } from '../../../common/languageModels.js';
 import { IChatInputPickerOptions } from './chatInputPickerActionItem.js';
@@ -32,44 +35,44 @@ import { IModelConfigurationAccess, IModelPickerDelegate } from './modelPickerAc
 import { filterAndRankModels } from './modelSearch.js';
 import './media/combinedModelProviderPicker.css';
 
-const RECOMMENDED_BACKBOARD_MODEL_IDS = [
-	'openai-subscription/gpt-5.6-sol',
-	'openai-subscription/gpt-5.6-terra',
-	'openai-subscription/gpt-5.6-luna',
-	'anthropic-subscription/default',
-	'anthropic-subscription/opus[1m]',
-	'anthropic-subscription/claude-fable-5-1[1m]',
-	'anthropic-subscription/sonnet',
-	'anthropic-subscription/haiku',
-	'anthropic/claude-fable-5',
-	'anthropic/claude-opus-5',
-	'anthropic/claude-sonnet-5',
-	'aws-bedrock/anthropic.claude-fable-5',
-	'aws-bedrock/anthropic.claude-opus-5',
-	'aws-bedrock/anthropic.claude-sonnet-4-6',
-	'cerebras/openai/gpt-oss-120b',
-	'cerebras/qwen/qwen3-235b-a22b-2507',
-	'cerebras/z-ai/glm-4.7',
-	'cohere/command-a-reasoning-08-2025',
-	'cohere/command-a-03-2025',
-	'cohere/command-r-plus-08-2024',
-	'google/gemini-3.6-flash',
-	'google/gemini-3.5-flash',
-	'google/gemini-3.1-pro-preview',
-	'openai/gpt-5.6-sol',
-	'openai/gpt-5.6-terra',
-	'openai/gpt-5.6-luna',
-	'openai/gpt-5.5-pro',
-	'openrouter/deepseek/deepseek-v4-pro',
-	'openrouter/moonshotai/kimi-k3',
-	'openrouter/qwen/qwen3.7-max',
-	'xai/grok-4.20-0309-reasoning',
-	'xai/grok-4.5',
-	'xai/grok-build-0.1',
-] as const;
-const RECOMMENDED_BACKBOARD_MODEL_PRIORITY = new Map<string, number>(
-	RECOMMENDED_BACKBOARD_MODEL_IDS.map((id, index) => [id, index])
-);
+/**
+ * One recommendation rule: within a provider, the models whose id (after the
+ * provider prefix) matches, grouped by the `family` capture and reduced to the
+ * highest `version` capture. Nothing names a specific release, so a newer
+ * model in the catalog replaces the older one without a code change.
+ */
+interface IRecommendedModelRule {
+	readonly provider: string;
+	/** Omitted: every model of the provider (subscriptions publish a curated list already). */
+	readonly pattern?: RegExp;
+	/** Keep only families on the provider's newest major version (GPT-6 Sol, not GPT-5.6 Terra). */
+	readonly newestGenerationOnly?: boolean;
+}
+
+/** Ordered by who pays: connected subscriptions first, then Backboard-billed frontier models, then fast open models. */
+const RECOMMENDED_MODEL_RULES: readonly IRecommendedModelRule[] = [
+	{ provider: 'openai-subscription', pattern: /^gpt-(?<version>\d+(?:\.\d+)*)-(?<family>sol|astra|terra|luna)$/, newestGenerationOnly: true },
+	{ provider: 'anthropic-subscription' },
+	{ provider: 'anthropic', pattern: /^claude-(?<family>fable|opus|sonnet|haiku)-(?<version>\d+(?:-\d{1,2})?)(?:-\d{8})?$/ },
+	{ provider: 'openai', pattern: /^gpt-(?<version>\d+(?:\.\d+)*)-(?<family>sol|astra|terra|luna)$/, newestGenerationOnly: true },
+	{ provider: 'google', pattern: /^gemini-(?<version>\d+(?:\.\d+)*)-(?<family>pro|flash)(?:-preview)?$/ },
+	{ provider: 'xai', pattern: /^grok-(?<version>\d+(?:\.\d+)*)$/ },
+	{ provider: 'openrouter', pattern: /^deepseek\/deepseek-v(?<version>\d+(?:\.\d+)*)-(?<family>pro|flash)$/ },
+	{ provider: 'openrouter', pattern: /^moonshotai\/kimi-k(?<version>\d+(?:\.\d+)*)$/ },
+	{ provider: 'openrouter', pattern: /^qwen\/qwen(?<version>\d+(?:\.\d+)*)-max(?:-prime)?$/ },
+	{ provider: 'openrouter', pattern: /^z-ai\/glm-(?<version>\d+(?:\.\d+)*)$/ },
+	{ provider: 'cerebras', pattern: /^openai\/gpt-oss-120b$/ },
+];
+
+function compareModelVersions(a: readonly number[], b: readonly number[]): number {
+	for (let index = 0; index < Math.max(a.length, b.length); index++) {
+		const delta = (a[index] ?? 0) - (b[index] ?? 0);
+		if (delta !== 0) {
+			return delta;
+		}
+	}
+	return 0;
+}
 
 export const COMBINED_MODEL_SECTION_RECOMMENDED = 'recommended';
 export const COMBINED_MODEL_SECTION_ALL = 'all';
@@ -217,7 +220,8 @@ function formatModelLabelPart(part: string): string {
 export function formatModelLabel(name: string): string {
 	const cleanName = name.replace(/^[\p{L}\p{N}. &()-]{1,48}:\s+/u, '');
 	const rawModelName = cleanName.split('/').pop() || cleanName;
-	const modelName = rawModelName.replace(/^(?:[^.]+\.)*anthropic\./i, '');
+	// Release-date stamps (`claude-haiku-4-5-20251001`, Bedrock's `-v1:0`) are not part of the name.
+	const modelName = rawModelName.replace(/^(?:[^.]+\.)*anthropic\./i, '').replace(/(?:-v\d+(?::\d+)?)?$/i, '').replace(/[-_ ]20\d{6}$/, '');
 	const gptMatch = /^gpt[-_\s]*(\d+(?:\.\d+)*(?:[a-z]+)?)(?:[-_\s]+(.+))?$/i.exec(modelName);
 	if (gptMatch) {
 		const suffix = gptMatch[2]
@@ -375,34 +379,43 @@ function isReadyToUse(model: ILanguageModelChatMetadataAndIdentifier): boolean {
 	return (!isSubscriptionModel(model) && !isKeyBilledModel(model)) || !!model.metadata.auth?.accountLabel;
 }
 
-/** The picker footer action for a vendor section: add a key, or manage the one in use. */
-export function byokFooterForSection(sectionId: string): { readonly label: string; readonly title: string } | undefined {
-	const byokSection = sectionId.startsWith(BYOK_SECTION_PREFIX);
-	if (!byokSection && !sectionId.startsWith('provider:')) {
-		return undefined;
-	}
-	const providerId = sectionId.slice(byokSection ? BYOK_SECTION_PREFIX.length : 'provider:'.length);
-	if (byokSection || isKeyBilledProvider(providerId)) {
-		return {
-			label: localize('combinedPicker.manageApiKeys', "Manage API keys…"),
-			title: localize('combinedPicker.manageApiKeysTitle', "Replace, test, or remove the API keys Backboard uses on your behalf."),
-		};
-	}
-	if (isByokProviderId(providerId)) {
-		const label = byokProviderDefinition(providerId).label;
-		return {
-			label: localize('combinedPicker.useOwnKey', "Use your own {0} key…", label),
-			title: localize('combinedPicker.useOwnKeyTitle', "Add a {0} API key to bill these models to your own {0} account instead of Backboard.", label),
-		};
-	}
-	return undefined;
-}
-
 function recommendedModels(models: readonly ILanguageModelChatMetadataAndIdentifier[]): ILanguageModelChatMetadataAndIdentifier[] {
-	const recommended = models
-		.filter(model => RECOMMENDED_BACKBOARD_MODEL_PRIORITY.has(model.metadata.id) && isReadyToUse(model))
-		.sort((a, b) => (RECOMMENDED_BACKBOARD_MODEL_PRIORITY.get(a.metadata.id) ?? Number.MAX_SAFE_INTEGER) - (RECOMMENDED_BACKBOARD_MODEL_PRIORITY.get(b.metadata.id) ?? Number.MAX_SAFE_INTEGER));
-	return recommended.length ? recommended : models.filter(isReadyToUse);
+	const ready = models.filter(isReadyToUse);
+	const recommended: ILanguageModelChatMetadataAndIdentifier[] = [];
+	for (const rule of RECOMMENDED_MODEL_RULES) {
+		const candidates = ready.filter(model => upstreamProviderId(model) === rule.provider && billingSourceOf(model) !== 'byok');
+		if (!rule.pattern) {
+			// Most capable first; the catalog itself lists them alphabetically.
+			const tier = (model: ILanguageModelChatMetadataAndIdentifier) => {
+				const index = ['fable', 'opus', 'sonnet', 'haiku'].findIndex(family => model.metadata.name.toLowerCase().includes(family));
+				return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+			};
+			recommended.push(...[...candidates].sort((a, b) => tier(a) - tier(b)));
+			continue;
+		}
+		// Newest version per family, in the order families first appear.
+		const newest = new Map<string, { model: ILanguageModelChatMetadataAndIdentifier; version: number[] }>();
+		for (const model of candidates) {
+			const match = rule.pattern.exec(model.metadata.id.slice(model.metadata.id.indexOf('/') + 1));
+			if (!match) {
+				continue;
+			}
+			const family = match.groups?.family ?? '';
+			const version = (match.groups?.version ?? '0').split(/[.-]/).map(Number);
+			const current = newest.get(family);
+			if (!current || compareModelVersions(version, current.version) > 0) {
+				newest.set(family, { model, version });
+			}
+		}
+		// Families list in the order the pattern names them (Fable, Opus, Sonnet, Haiku).
+		const familyOrder = rule.pattern.source;
+		const picks = [...newest.entries()].sort(([a], [b]) => familyOrder.indexOf(a) - familyOrder.indexOf(b)).map(([, pick]) => pick);
+		const generation = Math.max(...picks.map(pick => pick.version[0] ?? 0));
+		recommended.push(...picks
+			.filter(pick => !rule.newestGenerationOnly || (pick.version[0] ?? 0) === generation)
+			.map(pick => pick.model));
+	}
+	return recommended.length ? recommended : ready;
 }
 
 /** Rail label for an upstream provider; drops per-model suffixes such as "OpenRouter · Z.ai". */
@@ -527,6 +540,57 @@ export function isClaudeSubscriptionConnected(models: readonly ILanguageModelCha
 	return models.some(model => upstreamProviderId(model) === 'anthropic-subscription' && !!model.metadata.auth?.accountLabel);
 }
 
+/** Rail entry listing every way to connect (sign in, subscriptions, API keys). */
+export const COMBINED_MODEL_SECTION_CONNECT = 'connect';
+
+/** "1M context" / "200K context" from a model's input window; undefined when unknown. */
+export function formatContextWindow(tokens: number | undefined): string | undefined {
+	if (!tokens || tokens <= 0) {
+		return undefined;
+	}
+	if (tokens >= 1_000_000) {
+		const millions = Math.round(tokens / 100_000) / 10;
+		return localize('combinedPicker.contextMillions', "{0}M context", Number.isInteger(millions) ? millions : millions.toFixed(1));
+	}
+	return localize('combinedPicker.contextThousands', "{0}K context", Math.round(tokens / 1000));
+}
+
+/** A per-million-token price such as "$0.14", "$3.50" or "$15". */
+export function formatPrice(dollars: number): string {
+	return dollars >= 100 ? `$${Math.round(dollars)}` : `$${dollars.toFixed(2).replace(/\.00$/, '')}`;
+}
+
+const COST_SCALE_MIN = 0.05;
+const COST_SCALE_MAX = 40;
+
+/**
+ * Where a model sits on the cheap-to-expensive scale, 0..1, from a blended
+ * per-million price (three input tokens per output token, typical for agent
+ * turns) on a log scale. Undefined when the catalog has no price.
+ */
+export function modelCostScore(model: ILanguageModelChatMetadataAndIdentifier): number | undefined {
+	const input = model.metadata.inputCost;
+	const output = model.metadata.outputCost;
+	if (input === undefined && output === undefined) {
+		return undefined;
+	}
+	const blended = ((input ?? output!) * 3 + (output ?? input!)) / 4;
+	if (blended <= 0) {
+		return 0;
+	}
+	const position = Math.log(blended / COST_SCALE_MIN) / Math.log(COST_SCALE_MAX / COST_SCALE_MIN);
+	return Math.max(0, Math.min(1, position));
+}
+
+function connectHint(target: BackboardConnectTarget): string {
+	switch (target) {
+		case 'backboard': return localize('combinedPicker.connectBackboardHint', "Sign in to Backboard to use this model");
+		case 'chatgpt': return localize('combinedPicker.connectChatGptHint', "Connect ChatGPT to use this model");
+		case 'claude': return localize('combinedPicker.connectClaudeHint', "Connect Claude to use this model");
+		case 'key': return localize('combinedPicker.connectKeyHint', "Add an API key to use this model");
+	}
+}
+
 /**
  * Model picker for the Sessions composer. A single inline control shows the
  * active model and thinking level; opening it reveals a searchable model list
@@ -561,6 +625,8 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		@IAgentHostService private readonly _agentHostService: IAgentHostService,
 		@INotificationService private readonly _notificationService: INotificationService,
 		@IHoverService private readonly _hoverService: IHoverService,
+		@ICommandService private readonly _commandService: ICommandService,
+		@IContextKeyService private readonly _contextKeyService: IContextKeyService,
 	) {
 		super(undefined, action);
 
@@ -785,230 +851,378 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 		};
 	}
 
+	/** What is already connected, for the inline Connect rows and unavailable models. */
+	private _connectState(models: readonly ILanguageModelChatMetadataAndIdentifier[]): IBackboardConnectState {
+		const keys = new Set<ByokProviderId>();
+		for (const model of models) {
+			const vendor = vendorOfProvider(upstreamProviderId(model));
+			if (isKeyBilledModel(model) && model.metadata.auth?.accountLabel && isByokProviderId(vendor)) {
+				keys.add(vendor);
+			}
+		}
+		return {
+			signedIn: this._contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) === true,
+			chatGpt: isChatGptSubscriptionConnected(models),
+			claude: isClaudeSubscriptionConnected(models),
+			keys,
+		};
+	}
+
+	/**
+	 * Re-reads the catalog after a connection changed. `announce` reports the
+	 * outcome; the automatic refresh after connecting stays quiet.
+	 */
+	private _refreshModels(announce: boolean): Promise<void> {
+		this._refreshPromise ??= this._agentHostService.executeAgentCommand({ provider: 'backboard', command: 'models.refresh' })
+			.then(() => {
+				if (announce) {
+					this._notificationService.info(localize('combinedPicker.refreshSuccess', "Models and subscriptions are up to date."));
+				}
+			}, error => {
+				const message = error instanceof Error ? error.message : String(error);
+				this._notificationService.error(message.includes('Unsupported Backboard command: models.refresh')
+					? localize('combinedPicker.refreshRestartRequired', "Restart Backboard after your running agents finish to enable model and subscription refresh.")
+					: localize('combinedPicker.refreshFailed', "Could not refresh models and subscriptions: {0}", message));
+			})
+			.finally(() => {
+				this._refreshPromise = undefined;
+				this._onDidRefresh.fire();
+			});
+		this._onDidRefresh.fire();
+		return this._refreshPromise;
+	}
+
+	/** The connect target that makes an unavailable model usable. */
+	private _connectTargetFor(model: ILanguageModelChatMetadataAndIdentifier): { target: BackboardConnectTarget; provider?: ByokProviderId } {
+		const providerId = upstreamProviderId(model);
+		if (providerId === 'openai-subscription') {
+			return { target: 'chatgpt' };
+		}
+		if (providerId === 'anthropic-subscription') {
+			return { target: 'claude' };
+		}
+		if (isKeyBilledModel(model)) {
+			const vendor = vendorOfProvider(providerId);
+			return { target: 'key', provider: isByokProviderId(vendor) ? vendor : undefined };
+		}
+		return { target: 'backboard' };
+	}
+
+	/**
+	 * The effort control for one model. Per-model settings apply to any row; the
+	 * session-wide fallback only belongs to the model in use.
+	 */
+	private _thinkingOptionFor(model: ILanguageModelChatMetadataAndIdentifier, isCurrent: boolean): ICombinedModelThinkingOption | undefined {
+		if (isCurrent) {
+			return this._thinkingOption(model);
+		}
+		const config = resolveConfigProperty(model, 'navigation', this._modelConfiguration);
+		if (!config?.schema.enum?.length) {
+			return undefined;
+		}
+		const labels = config.schema.enum.map((value, index) => config.schema.enumItemLabels?.[index] ?? String(value));
+		const explicit = resolveExplicitReasoningOptions(config.schema.enum, labels, config.value);
+		return explicit ? {
+			label: localize('combinedPicker.reasoning', "Reasoning"),
+			currentLabel: explicit.currentLabel,
+			currentValue: explicit.currentValue,
+			values: explicit.values,
+			labels: explicit.labels,
+			needsMigration: explicit.needsMigration,
+			setValue: value => this._modelConfiguration.setModelConfiguration(model.identifier, { [config.key]: value }),
+		} : undefined;
+	}
+
 	private _renderOverlay(container: HTMLElement, store: DisposableStore): void {
 		dom.clearNode(container);
 		const root = dom.append(container, dom.$('.combined-model-provider-root'));
 		const allModels = this._modelsForProvider(this._railProvider ?? '');
 		const showingBackboard = this._railProvider === AgentSessionProviders.AgentHostBackboard;
-		const connectedToChatGpt = isChatGptSubscriptionConnected(allModels);
-		const connectedToClaude = isClaudeSubscriptionConnected(allModels);
-		const sections = showingBackboard
+		const connectState = this._connectState(allModels);
+		const sections: ICombinedModelSection[] = showingBackboard
 			? buildCombinedModelSections(allModels)
 			: [{ id: COMBINED_MODEL_SECTION_ALL, label: localize('combinedPicker.allModels', "All models"), modelCount: allModels.length, kind: 'library' as const, group: 'models' as const }];
-		if (!sections.some(section => section.id === this._railSection)) {
+		if (this._railSection !== COMBINED_MODEL_SECTION_CONNECT && !sections.some(section => section.id === this._railSection)) {
 			this._railSection = sections[0]?.id ?? COMBINED_MODEL_SECTION_ALL;
 		}
+		const currentModel = this._modelDelegate.currentModel.get();
+		const currentOption = currentModel ? this._thinkingOption(currentModel) : undefined;
+		if (currentModel && currentOption?.needsMigration) {
+			void Promise.resolve(currentOption.setValue(currentOption.currentValue)).then(() => this._updateTrigger());
+		}
 
-		// --- Catalog navigation rail ---
+		// --- Slim navigation rail ---
 		const rail = dom.append(root, dom.$('.combined-model-provider-rail'));
 		const railList = dom.append(rail, dom.$('.combined-model-provider-rail-list'));
 		railList.setAttribute('role', 'listbox');
 
-		// --- Search, model list, and fixed reasoning footer ---
+		// --- Search and model list ---
 		const pane = dom.append(root, dom.$('.combined-model-provider-pane'));
-		const toolbar = dom.append(pane, dom.$('.combined-model-provider-catalog-toolbar'));
-		const searchRow = dom.append(toolbar, dom.$('.combined-model-provider-search'));
+		const searchRow = dom.append(pane, dom.$('.combined-model-provider-search'));
 		searchRow.appendChild(renderIcon(Codicon.search));
 		const search = dom.append(searchRow, dom.$('input.combined-model-provider-search-input')) as HTMLInputElement;
 		search.type = 'text';
 		search.placeholder = localize('combinedPicker.searchAllModelsPlaceholder', "Search all models…");
 		search.value = this._searchValue;
-		search.setAttribute('aria-label', localize('combinedPicker.searchAllModelsPlaceholder', "Search all models…"));
-
+		search.setAttribute('aria-label', search.placeholder);
 		if (showingBackboard) {
-			const refresh = dom.append(toolbar, dom.$('button.combined-model-provider-refresh')) as HTMLButtonElement;
+			const refresh = dom.append(searchRow, dom.$('button.combined-model-provider-refresh')) as HTMLButtonElement;
 			refresh.type = 'button';
 			const label = localize('combinedPicker.refreshModels', "Refresh Models and Subscriptions");
 			refresh.setAttribute('aria-label', label);
 			store.add(this._hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), refresh, label));
 			const icon = refresh.appendChild(renderIcon(Codicon.refresh));
-			const updateBusy = () => {
-				refresh.disabled = !!this._refreshPromise;
-				refresh.setAttribute('aria-busy', String(!!this._refreshPromise));
-				icon.classList.toggle('combined-model-provider-refresh-spinning', !!this._refreshPromise);
-			};
-			updateBusy();
+			refresh.disabled = !!this._refreshPromise;
+			refresh.setAttribute('aria-busy', String(!!this._refreshPromise));
+			icon.classList.toggle('combined-model-provider-refresh-spinning', !!this._refreshPromise);
 			store.add(dom.addDisposableListener(refresh, dom.EventType.CLICK, event => {
 				dom.EventHelper.stop(event, true);
-				if (this._refreshPromise) { return; }
-				this._refreshPromise = this._agentHostService.executeAgentCommand({ provider: 'backboard', command: 'models.refresh' })
-					.then(() => {
-						this._notificationService.info(localize('combinedPicker.refreshSuccess', "Models and subscriptions are up to date."));
-					}, error => {
-						const message = error instanceof Error ? error.message : String(error);
-						this._notificationService.error(message.includes('Unsupported Backboard command: models.refresh')
-							? localize('combinedPicker.refreshRestartRequired', "Restart Backboard after your running agents finish to enable model and subscription refresh.")
-							: localize('combinedPicker.refreshFailed', "Could not refresh models and subscriptions: {0}", message));
-					})
-					.finally(() => {
-						this._refreshPromise = undefined;
-						this._onDidRefresh.fire();
-					});
-				updateBusy();
+				void this._refreshModels(true);
 			}));
 		}
-
-		// Pinned summary of the model in use, so it is obvious whichever section
-		// or search is showing (the in-use row may not be in the current list).
-		const current = dom.append(pane, dom.$('.combined-model-provider-current'));
 		const list = dom.append(pane, dom.$('.combined-model-provider-list'));
-		const footer = dom.append(pane, dom.$('.combined-model-provider-footer'));
+		list.setAttribute('role', 'listbox');
+
+		// --- Reasoning slider for the model in use, always in the same place ---
 		const thinking = dom.append(pane, dom.$('.combined-model-provider-thinking'));
-		const routingModal = dom.append(container, dom.$('.combined-model-provider-routing-modal.hidden'));
-		const routingStore = new DisposableStore();
-		const thinkingStore = new DisposableStore();
-		const listStore = new DisposableStore();
-		store.add(routingStore);
-		store.add(thinkingStore);
-		store.add(listStore);
-
-		let routingModalOpen = false;
-		const closeRoutingModal = () => {
-			routingModalOpen = false;
-			routingStore.clear();
-			dom.clearNode(routingModal);
-			routingModal.classList.add('hidden');
-		};
-		const renderRoutingModal = () => {
-			routingStore.clear();
-			dom.clearNode(routingModal);
-			const model = this._modelDelegate.currentModel.get();
-			const option = this._routingOption(model);
-			if (!routingModalOpen || !model || !option) {
-				closeRoutingModal();
-				return;
-			}
-
-			routingModal.classList.remove('hidden');
-			const dialog = dom.append(routingModal, dom.$('.combined-model-provider-routing-dialog'));
-			dialog.setAttribute('role', 'dialog');
-			dialog.setAttribute('aria-label', localize('combinedPicker.openRouterProviderAriaLabel', "OpenRouter serving provider for {0}", formatModelLabel(model.metadata.name)));
-
-			const header = dom.append(dialog, dom.$('.combined-model-provider-routing-dialog-header'));
-			const heading = dom.append(header, dom.$('.combined-model-provider-routing-dialog-heading'));
-			dom.append(heading, dom.$('.combined-model-provider-routing-dialog-title')).textContent = localize('combinedPicker.chooseOpenRouterProvider', "Choose provider");
-			dom.append(heading, dom.$('.combined-model-provider-routing-dialog-subtitle')).textContent = formatModelLabel(model.metadata.name);
-			const close = dom.append(header, dom.$('button.combined-model-provider-routing-dialog-close')) as HTMLButtonElement;
-			close.type = 'button';
-			close.title = localize('combinedPicker.closeProviderPicker', "Close provider picker");
-			close.setAttribute('aria-label', close.title);
-			close.appendChild(renderIcon(Codicon.close));
-
-			const choices = dom.append(dialog, dom.$('.combined-model-provider-routing-choices'));
-			choices.setAttribute('role', 'listbox');
-			choices.setAttribute('aria-label', option.label);
-			let selectedChoice: HTMLButtonElement | undefined;
-			option.values.forEach((value, index) => {
-				const selected = Object.is(value, option.currentValue);
-				const item = dom.append(choices, dom.$('button.combined-model-provider-routing-choice')) as HTMLButtonElement;
-				item.type = 'button';
-				item.setAttribute('role', 'option');
-				item.setAttribute('aria-selected', String(selected));
-				item.classList.toggle('selected', selected);
-				const copy = dom.append(item, dom.$('.combined-model-provider-routing-choice-copy'));
-				dom.append(copy, dom.$('.combined-model-provider-routing-choice-label')).textContent = option.labels[index] ?? String(value);
-				if (selected) {
-					item.appendChild(renderIcon(Codicon.check));
-					selectedChoice = item;
-				}
-				routingStore.add(dom.addDisposableListener(item, dom.EventType.CLICK, e => {
-					dom.EventHelper.stop(e, true);
-					routingModalOpen = false;
-					void Promise.resolve(option.setValue(value)).then(() => {
-						closeRoutingModal();
-						renderList();
-						this._updateTrigger();
-					}, () => closeRoutingModal());
-				}));
-			});
-
-			routingStore.add(dom.addDisposableListener(close, dom.EventType.CLICK, e => {
-				dom.EventHelper.stop(e, true);
-				closeRoutingModal();
-			}));
-			routingStore.add(dom.addDisposableListener(dialog, dom.EventType.KEY_DOWN, e => {
-				const event = new StandardKeyboardEvent(e);
-				if (event.equals(KeyCode.Escape)) {
-					dom.EventHelper.stop(e, true);
-					closeRoutingModal();
-				}
-			}));
-			setTimeout(() => (selectedChoice ?? choices.querySelector<HTMLButtonElement>('.combined-model-provider-routing-choice'))?.focus(), 0);
-		};
-		const openRoutingModal = () => {
-			routingModalOpen = true;
-			renderRoutingModal();
-		};
-
+		const thinkingStore = store.add(new DisposableStore());
 		const renderThinking = () => {
 			thinkingStore.clear();
 			dom.clearNode(thinking);
 			const model = this._modelDelegate.currentModel.get();
-			const option = this._thinkingOption(model);
-			thinking.classList.toggle('hidden', !model || !option);
-			thinking.dataset.provider = model ? upstreamProviderId(model) : '';
-			if (!model || !option) {
+			const option = model ? this._thinkingOption(model) : undefined;
+			thinking.classList.toggle('hidden', !model || !option || option.values.length < 2);
+			if (!model || !option || option.values.length < 2) {
 				return;
 			}
-			if (option.needsMigration) {
-				void Promise.resolve(option.setValue(option.currentValue)).then(() => this._updateTrigger());
-			}
-
+			thinking.dataset.provider = upstreamProviderId(model);
 			const heading = dom.append(thinking, dom.$('.combined-model-provider-thinking-heading'));
-			const headingText = dom.append(heading, dom.$('.combined-model-provider-thinking-title'));
-			headingText.textContent = option.label;
-			const currentValue = dom.append(heading, dom.$('.combined-model-provider-thinking-current'));
-			currentValue.setAttribute('aria-live', 'polite');
-
-			const sliderShell = dom.append(thinking, dom.$('.combined-model-provider-thinking-slider-shell'));
-			const dots = dom.append(sliderShell, dom.$('.combined-model-provider-thinking-dots'));
-			const dotElements: HTMLElement[] = [];
-			for (let index = 0; index < option.values.length; index++) {
-				dotElements.push(dom.append(dots, dom.$('span.combined-model-provider-thinking-dot')));
-			}
-			const slider = dom.append(sliderShell, dom.$('input.combined-model-provider-thinking-slider')) as HTMLInputElement;
+			dom.append(heading, dom.$('.combined-model-provider-thinking-title')).textContent = option.label;
+			const value = dom.append(heading, dom.$('.combined-model-provider-thinking-current'));
+			value.setAttribute('aria-live', 'polite');
+			const shell = dom.append(thinking, dom.$('.combined-model-provider-thinking-slider-shell'));
+			const dots = dom.append(shell, dom.$('.combined-model-provider-thinking-dots'));
+			const dotElements = option.values.map(() => dom.append(dots, dom.$('span.combined-model-provider-thinking-dot')));
+			const slider = dom.append(shell, dom.$('input.combined-model-provider-thinking-slider')) as HTMLInputElement;
 			slider.type = 'range';
 			slider.min = '0';
 			slider.max = String(option.values.length - 1);
 			slider.step = '1';
-			const initialIndex = Math.max(0, option.values.indexOf(option.currentValue));
-			slider.value = String(initialIndex);
 			slider.setAttribute('aria-label', localize('combinedPicker.reasoningAriaLabel', "Reasoning level for {0}", formatModelLabel(model.metadata.name)));
-
+			let applied = Math.max(0, option.values.findIndex(candidate => Object.is(candidate, option.currentValue)));
 			const paint = (index: number) => {
-				const safeIndex = Math.max(0, Math.min(option.values.length - 1, Math.round(index)));
-				const label = option.labels[safeIndex] ?? String(option.values[safeIndex]);
-				currentValue.textContent = label;
+				const label = option.labels[index] ?? String(option.values[index]);
+				value.textContent = label;
 				slider.setAttribute('aria-valuetext', label);
-				slider.title = localize('combinedPicker.reasoningValue', "Reasoning: {0}", label);
-				dotElements.forEach((dot, dotIndex) => dot.classList.toggle('active', dotIndex <= safeIndex));
-				const progress = option.values.length > 1 ? safeIndex / (option.values.length - 1) : 0;
-				sliderShell.style.setProperty('--combined-thinking-progress', `${progress}`);
+				dotElements.forEach((dot, dotIndex) => dot.classList.toggle('active', dotIndex <= index));
+				shell.style.setProperty('--combined-thinking-progress', String(index / (option.values.length - 1)));
 			};
-			let appliedIndex = initialIndex;
-			let applyQueue: Promise<void> = Promise.resolve();
-			const apply = (index: number) => {
-				const safeIndex = Math.max(0, Math.min(option.values.length - 1, Math.round(index)));
-				paint(safeIndex);
-				if (safeIndex === appliedIndex) {
+			slider.value = String(applied);
+			paint(applied);
+			let queue: Promise<void> = Promise.resolve();
+			const apply = () => {
+				const index = Math.max(0, Math.min(option.values.length - 1, Math.round(Number(slider.value))));
+				paint(index);
+				if (index === applied) {
 					return;
 				}
-				appliedIndex = safeIndex;
-				this._triggerThinking!.textContent = option.labels[safeIndex] ?? String(option.values[safeIndex]);
-				applyQueue = applyQueue
-					.then(() => Promise.resolve(option.setValue(option.values[safeIndex])))
-					.then(() => this._updateTrigger(), () => undefined);
+				applied = index;
+				if (this._triggerThinking) {
+					this._triggerThinking.textContent = option.labels[index] ?? String(option.values[index]);
+				}
+				queue = queue
+					.then(() => Promise.resolve(option.setValue(option.values[index])))
+					.then(() => {
+						this._updateTrigger();
+						const row = list.querySelector<HTMLElement>('.combined-model-provider-row.selected .combined-model-provider-row-effort');
+						if (row) {
+							row.textContent = option.labels[index] ?? String(option.values[index]);
+						}
+					}, () => undefined);
 			};
-
-			paint(initialIndex);
-			thinkingStore.add(dom.addDisposableListener(slider, dom.EventType.INPUT, () => apply(Number(slider.value))));
-			thinkingStore.add(dom.addDisposableListener(slider, dom.EventType.CHANGE, () => apply(Number(slider.value))));
+			thinkingStore.add(dom.addDisposableListener(slider, dom.EventType.INPUT, apply));
+			thinkingStore.add(dom.addDisposableListener(slider, dom.EventType.CHANGE, apply));
 		};
 
-		const currentSection = () => sections.find(section => section.id === this._railSection) ?? sections[0];
-		const updateSearchPlaceholder = () => {
-			search.placeholder = localize('combinedPicker.searchAllModelsPlaceholder', "Search all models…");
-			search.setAttribute('aria-label', search.placeholder);
+		// --- Detail card beside the list (Devin-style), shown for the hovered or active row ---
+		const card = dom.append(container, dom.$('.combined-model-provider-card.hidden'));
+		card.setAttribute('role', 'dialog');
+		const cardStore = store.add(new DisposableStore());
+		const listStore = store.add(new DisposableStore());
+		let cardModel: ILanguageModelChatMetadataAndIdentifier | undefined;
+		let cardRow: HTMLElement | undefined;
+		let showTimer: ReturnType<typeof setTimeout> | undefined;
+		let hideTimer: ReturnType<typeof setTimeout> | undefined;
+		const clearTimers = () => {
+			if (showTimer) { clearTimeout(showTimer); showTimer = undefined; }
+			if (hideTimer) { clearTimeout(hideTimer); hideTimer = undefined; }
+		};
+		store.add({ dispose: clearTimers });
+
+		const hideCard = () => {
+			clearTimers();
+			cardModel = undefined;
+			cardRow = undefined;
+			cardStore.clear();
+			card.classList.add('hidden');
+		};
+		const scheduleHide = () => {
+			if (showTimer) { clearTimeout(showTimer); showTimer = undefined; }
+			if (hideTimer) { clearTimeout(hideTimer); }
+			hideTimer = setTimeout(() => {
+				hideTimer = undefined;
+				if (!card.matches(':hover') && !card.contains(dom.getActiveElement())) {
+					hideCard();
+				}
+			}, 160);
+		};
+
+		const placeCard = () => {
+			if (!cardRow) {
+				return;
+			}
+			const window = dom.getWindow(container);
+			const containerRect = container.getBoundingClientRect();
+			const rowRect = cardRow.getBoundingClientRect();
+			const cardWidth = card.offsetWidth || 300;
+			const cardHeight = card.offsetHeight;
+			const roomLeft = containerRect.left;
+			const roomRight = window.innerWidth - containerRect.right;
+			card.classList.toggle('right', roomLeft < cardWidth + 12 && roomRight > roomLeft);
+			const minTop = 8 - containerRect.top;
+			const maxTop = window.innerHeight - 8 - cardHeight - containerRect.top;
+			const top = Math.max(minTop, Math.min(rowRect.top - containerRect.top - 6, maxTop));
+			card.style.top = `${Math.round(top)}px`;
+		};
+
+		const renderCard = (model: ILanguageModelChatMetadataAndIdentifier, row: HTMLElement) => {
+			cardStore.clear();
+			dom.clearNode(card);
+			cardModel = model;
+			cardRow = row;
+			const isCurrent = model.identifier === this._modelDelegate.currentModel.get()?.identifier;
+			const option = this._thinkingOptionFor(model, isCurrent);
+			const name = formatModelLabel(model.metadata.name);
+			card.setAttribute('aria-label', name);
+
+			const header = dom.append(card, dom.$('.combined-model-provider-card-header'));
+			const title = dom.append(header, dom.$('.combined-model-provider-card-title'));
+			dom.append(title, dom.$('span')).textContent = name;
+			if (option) {
+				dom.append(title, dom.$('span.combined-model-provider-card-effort')).textContent = option.currentLabel;
+			}
+			const facts = [formatContextWindow(model.metadata.maxInputTokens), formatModelProviderDetail(model)].filter((fact): fact is string => !!fact);
+			if (facts.length) {
+				dom.append(header, dom.$('.combined-model-provider-card-sub')).textContent = facts.join(' · ');
+			}
+
+			const routing = upstreamProviderId(model) === 'openrouter' ? this._routingOption(model) : undefined;
+			if (routing) {
+				const field = dom.append(card, dom.$('.combined-model-provider-card-field.inline'));
+				dom.append(field, dom.$('.combined-model-provider-card-label')).textContent = localize('combinedPicker.servingProvider', "Provider");
+				const select = dom.append(field, dom.$('select.combined-model-provider-card-select')) as HTMLSelectElement;
+				select.setAttribute('aria-label', routing.label);
+				routing.values.forEach((value, index) => {
+					const choice = dom.append(select, dom.$('option')) as HTMLOptionElement;
+					choice.value = String(index);
+					choice.textContent = routing.labels[index] ?? String(value);
+					choice.selected = Object.is(value, routing.currentValue);
+				});
+				cardStore.add(dom.addDisposableListener(select, dom.EventType.CHANGE, () => {
+					const value = routing.values[Number(select.value)];
+					void Promise.resolve(routing.setValue(value)).then(() => {
+						this._updateTrigger();
+						renderList();
+					});
+				}));
+			}
+
+			const cost = dom.append(card, dom.$('.combined-model-provider-card-cost'));
+			const costHeading = dom.append(cost, dom.$('.combined-model-provider-card-cost-heading'));
+			dom.append(costHeading, dom.$('span.combined-model-provider-card-label')).textContent = localize('combinedPicker.cost', "Cost");
+			const unavailable = !isReadyToUse(model);
+			const providerId = upstreamProviderId(model);
+			if (unavailable) {
+				dom.append(costHeading, dom.$('span.combined-model-provider-card-note')).textContent = connectHint(this._connectTargetFor(model).target);
+			} else if (providerId === 'openai-subscription' || providerId === 'anthropic-subscription') {
+				dom.append(costHeading, dom.$('span.combined-model-provider-card-note')).textContent = providerId === 'openai-subscription'
+					? localize('combinedPicker.includedChatGpt', "Included with your ChatGPT plan")
+					: localize('combinedPicker.includedClaude', "Included with your Claude plan");
+			} else {
+				const score = modelCostScore(model);
+				if (score !== undefined) {
+					const meter = dom.append(cost, dom.$('.combined-model-provider-card-meter'));
+					meter.style.setProperty('--combined-cost', String(score));
+					dom.append(meter, dom.$('span.combined-model-provider-card-meter-dot'));
+				}
+				const prices = dom.append(cost, dom.$('.combined-model-provider-card-prices'));
+				for (const [label, value] of [
+					[localize('combinedPicker.inputPrice', "Input"), model.metadata.inputCost],
+					[localize('combinedPicker.cachedPrice', "Cached input"), model.metadata.cacheCost],
+					[localize('combinedPicker.outputPrice', "Output"), model.metadata.outputCost],
+				] as const) {
+					if (value === undefined) {
+						continue;
+					}
+					const line = dom.append(prices, dom.$('.combined-model-provider-card-price'));
+					dom.append(line, dom.$('span.combined-model-provider-card-price-label')).textContent = label;
+					dom.append(line, dom.$('span.combined-model-provider-card-price-value')).textContent = localize('combinedPicker.pricePerMillion', "{0} / 1M", formatPrice(value));
+				}
+			}
+
+			card.classList.remove('hidden');
+			placeCard();
+		};
+
+		const showCardFor = (model: ILanguageModelChatMetadataAndIdentifier, row: HTMLElement, immediate: boolean) => {
+			if (hideTimer) { clearTimeout(hideTimer); hideTimer = undefined; }
+			if (showTimer) { clearTimeout(showTimer); showTimer = undefined; }
+			if (cardModel?.identifier === model.identifier && !card.classList.contains('hidden')) {
+				return;
+			}
+			if (immediate || !card.classList.contains('hidden')) {
+				renderCard(model, row);
+				return;
+			}
+			showTimer = setTimeout(() => {
+				showTimer = undefined;
+				renderCard(model, row);
+			}, 260);
+		};
+		store.add(dom.addDisposableListener(card, dom.EventType.MOUSE_ENTER, () => {
+			if (hideTimer) { clearTimeout(hideTimer); hideTimer = undefined; }
+		}));
+		store.add(dom.addDisposableListener(card, dom.EventType.MOUSE_LEAVE, scheduleHide));
+
+		let activeIndex = -1;
+		const rows = (): HTMLElement[] => [...list.querySelectorAll<HTMLElement>('.combined-model-provider-row')];
+		const setActive = (index: number, reveal: boolean) => {
+			const all = rows();
+			if (!all.length) {
+				activeIndex = -1;
+				return;
+			}
+			activeIndex = Math.max(0, Math.min(all.length - 1, index));
+			all.forEach((row, rowIndex) => row.classList.toggle('active', rowIndex === activeIndex));
+			const row = all[activeIndex];
+			if (reveal) {
+				row.scrollIntoView({ block: 'nearest' });
+				const model = modelsByRow.get(row);
+				if (model) {
+					showCardFor(model, row, true);
+				}
+			}
+		};
+		const modelsByRow = new WeakMap<HTMLElement, ILanguageModelChatMetadataAndIdentifier>();
+		let connectView: IBackboardConnectView | undefined;
+
+		const onDidConnect = async (): Promise<void> => {
+			await this._refreshModels(false);
+		};
+		const renderConnect = (parent: HTMLElement, targets: readonly BackboardConnectTarget[]): void => {
+			const view = renderBackboardConnect(parent, this._commandService, connectState, { targets, onDidConnect });
+			listStore.add(view.store);
+			connectView = view;
 		};
 
 		const railButtons = new Map<string, HTMLButtonElement>();
@@ -1020,273 +1234,209 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			}
 		};
 
-		const renderCurrent = () => {
-			dom.clearNode(current);
-			const model = this._modelDelegate.currentModel.get();
-			current.classList.toggle('hidden', !model);
-			for (const [id, button] of railButtons) {
-				button.classList.toggle('has-current', !!model && id === combinedModelSectionId(model));
-			}
-			if (!model) {
-				return;
-			}
-			const label = localize('combinedPicker.currentModelLabel', "In use");
-			dom.append(current, dom.$('.combined-model-provider-current-label')).textContent = label;
-			const card = dom.append(current, dom.$('button.combined-model-provider-current-card')) as HTMLButtonElement;
-			card.type = 'button';
-			dom.append(card, dom.$(`.combined-model-logo.provider-${modelBrandIconKey(model)}`)).setAttribute('aria-hidden', 'true');
-			const main = dom.append(card, dom.$('.combined-model-provider-row-main'));
-			const name = formatModelLabel(model.metadata.name);
-			dom.append(main, dom.$('.combined-model-provider-row-name')).textContent = name;
-			const detail = formatModelProviderDetail(model);
-			if (detail) {
-				dom.append(main, dom.$('.combined-model-provider-row-sub')).textContent = detail;
-			}
-			card.appendChild(renderIcon(Codicon.check));
-			card.title = localize('combinedPicker.showCurrentModel', "{0} is in use. Show it in its provider's list.", name);
-			card.setAttribute('aria-label', card.title);
-			listStore.add(dom.addDisposableListener(card, dom.EventType.CLICK, e => {
-				dom.EventHelper.stop(e, true);
-				const sectionId = combinedModelSectionId(model);
-				if (sections.some(section => section.id === sectionId)) {
-					this._railSection = sectionId;
-				}
-				this._searchValue = '';
-				search.value = '';
-				updateRailSelection();
-				renderList();
-			}));
-		};
-
 		const renderList = () => {
 			listStore.clear();
 			dom.clearNode(list);
-			dom.clearNode(footer);
-			renderCurrent();
-			const renderSetupAction = () => {
-				const byokFooter = this._railSection ? byokFooterForSection(this._railSection) : undefined;
-				if (byokFooter && this._sessionTypeDelegate.runSetup) {
-					const setup = dom.append(footer, dom.$('button.combined-model-provider-connect')) as HTMLButtonElement;
-					setup.type = 'button';
-					setup.appendChild(renderIcon(Codicon.key));
-					dom.append(setup, dom.$('span')).textContent = byokFooter.label;
-					setup.title = byokFooter.title;
-					listStore.add(dom.addDisposableListener(setup, dom.EventType.CLICK, e => {
-						dom.EventHelper.stop(e, true);
-						this._overlay.clear();
-						this._sessionTypeDelegate.runSetup?.(BYOK_KEYS_SETUP_ID);
-					}));
-					return;
-				}
-				if (this._railSection !== COMBINED_MODEL_SECTION_CHATGPT && this._railSection !== COMBINED_MODEL_SECTION_CLAUDE) {
-					return;
-				}
-				const railProvider = this._railProvider as AgentSessionTarget | undefined;
-				const chatGptCandidate = railProvider
-					? this._sessionTypeDelegate.getSetupCandidateForProvider?.(railProvider)
-					: undefined;
-				const setupId = this._railSection === COMBINED_MODEL_SECTION_CLAUDE
-					? CLAUDE_SUBSCRIPTION_SETUP_ID
-					: chatGptCandidate?.id;
-				if (!setupId || !this._sessionTypeDelegate.runSetup) {
-					return;
-				}
-				const claude = this._railSection === COMBINED_MODEL_SECTION_CLAUDE;
-				const connected = claude ? connectedToClaude : connectedToChatGpt;
-				const setup = dom.append(footer, dom.$('button.combined-model-provider-connect')) as HTMLButtonElement;
-				setup.type = 'button';
-				if (claude) {
-					const icon = dom.append(setup, dom.$('.combined-model-provider-brand-icon.provider-claude'));
-					icon.setAttribute('aria-hidden', 'true');
-				} else {
-					setup.appendChild(renderIcon(Codicon.openai));
-				}
-				dom.append(setup, dom.$('span')).textContent = claude
-					? connected
-						? localize('combinedPicker.reconnectClaude', "Reconnect Claude")
-						: localize('combinedPicker.connectClaude', "Connect Claude")
-					: connected
-						? localize('combinedPicker.reconnectChatGpt', "Reconnect ChatGPT")
-						: localize('combinedPicker.connectChatGpt', "Connect ChatGPT");
-				setup.title = claude
-					? localize('combinedPicker.claudeSubscriptionSetupDescription', "Connect Claude Code to use your Claude subscription through the Backboard harness.")
-					: chatGptCandidate?.description ?? chatGptCandidate?.label ?? '';
-				listStore.add(dom.addDisposableListener(setup, dom.EventType.CLICK, e => {
-					dom.EventHelper.stop(e, true);
-					this._overlay.clear();
-					this._sessionTypeDelegate.runSetup?.(setupId);
-				}));
-			};
-			const section = currentSection();
+			connectView = undefined;
 			const query = this._searchValue.trim().toLowerCase();
+			if (this._railSection === COMBINED_MODEL_SECTION_CONNECT && !query) {
+				hideCard();
+				renderConnect(list, defaultBackboardConnectTargets());
+				return;
+			}
+			const section = sections.find(candidate => candidate.id === this._railSection);
 			const models = showingBackboard && section
 				? modelsForCombinedModelSection(allModels, section.id, !!query)
 				: allModels;
 			const filtered = filterAndRankModels(models, query);
 
-			// Search results span the full catalog. Only the unfiltered subscription
-			// views need supporting copy, so ordinary providers can flow directly
-			// into their model list without a duplicate title card.
-			if (section?.id === COMBINED_MODEL_SECTION_CHATGPT && !query) {
-				const header = dom.append(list, dom.$('.combined-model-provider-section-header'));
-				const headerMain = dom.append(header, dom.$('.combined-model-provider-section-header-main'));
-				headerMain.appendChild(renderIcon(Codicon.openai));
-				dom.append(headerMain, dom.$('.combined-model-provider-section-title')).textContent = localize('combinedPicker.chatGptSubscription', "ChatGPT Subscription");
-				const description = dom.append(header, dom.$('.combined-model-provider-section-description'));
-				description.textContent = connectedToChatGpt
-					? localize('combinedPicker.chatGptConnectedDescription', "Connected. These models use your ChatGPT plan.")
-					: localize('combinedPicker.chatGptDisconnectedDescription', "Connect ChatGPT to use models included with your plan.");
-			}
-			if (section?.id === COMBINED_MODEL_SECTION_CLAUDE && !query) {
-				const header = dom.append(list, dom.$('.combined-model-provider-section-header'));
-				const headerMain = dom.append(header, dom.$('.combined-model-provider-section-header-main'));
-				const icon = dom.append(headerMain, dom.$('.combined-model-provider-brand-icon.provider-claude'));
-				icon.setAttribute('aria-hidden', 'true');
-				dom.append(headerMain, dom.$('.combined-model-provider-section-title')).textContent = localize('combinedPicker.claudeSubscription', "Claude Subscription");
-				const description = dom.append(header, dom.$('.combined-model-provider-section-description'));
-				description.textContent = connectedToClaude
-					? localize('combinedPicker.claudeConnectedDescription', "Connected. These models use your Claude plan through Claude Code.")
-					: localize('combinedPicker.claudeDisconnectedDescription', "Connect Claude Code to use models included with your plan.");
-			}
-
 			if (filtered.length === 0) {
 				dom.append(list, dom.$('.combined-model-provider-empty')).textContent = query
 					? localize('combinedPicker.noMatchingModels', "No matching models")
 					: localize('combinedPicker.noModels', "No models available");
-				renderSetupAction();
-				return;
 			}
 
-			const currentModelId = this._modelDelegate.currentModel.get()?.identifier;
-			filtered.forEach(model => {
+			const currentId = this._modelDelegate.currentModel.get()?.identifier;
+			// The same model can be listed once per route (Anthropic and Bedrock);
+			// name the route whenever a label would otherwise repeat.
+			const labelCounts = new Map<string, number>();
+			for (const model of filtered) {
+				const label = formatModelLabel(model.metadata.name);
+				labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+			}
+			for (const model of filtered) {
 				const providerId = model.metadata.targetChatSessionType ?? this._railProvider ?? '';
+				const isCurrent = model.identifier === currentId;
+				const unavailable = !isReadyToUse(model);
 				const row = dom.append(list, dom.$('.combined-model-provider-row'));
-				row.tabIndex = 0;
-				row.setAttribute('role', 'button');
-				if (model.identifier === currentModelId) {
-					row.classList.add('selected');
-					row.setAttribute('aria-current', 'true');
+				modelsByRow.set(row, model);
+				row.dataset.model = model.identifier;
+				row.tabIndex = -1;
+				row.setAttribute('role', 'option');
+				row.setAttribute('aria-selected', String(isCurrent));
+				row.classList.toggle('selected', isCurrent);
+				row.classList.toggle('unavailable', unavailable);
+
+				dom.append(row, dom.$(`.combined-model-logo.provider-${modelBrandIconKey(model)}`)).setAttribute('aria-hidden', 'true');
+				const nameCell = dom.append(row, dom.$('.combined-model-provider-row-name'));
+				dom.append(nameCell, dom.$('span.combined-model-provider-row-name-text')).textContent = formatModelLabel(model.metadata.name);
+				const effort = this._thinkingOptionFor(model, isCurrent)?.currentLabel;
+				if (effort) {
+					dom.append(nameCell, dom.$('span.combined-model-provider-row-effort')).textContent = effort;
+				}
+				// Subscription rows already say "Plan"; only other routes need naming.
+				const route = !isSubscriptionModel(model) && ((query && billingSourceOf(model) !== 'backboard') || (labelCounts.get(formatModelLabel(model.metadata.name)) ?? 0) > 1)
+					? formatModelProviderDetail(model)
+					: undefined;
+				if (route) {
+					dom.append(nameCell, dom.$('span.combined-model-provider-row-route')).textContent = route;
 				}
 
-				const logo = dom.append(row, dom.$(`.combined-model-logo.provider-${modelBrandIconKey(model)}`));
-				logo.setAttribute('aria-hidden', 'true');
-				const main = dom.append(row, dom.$('.combined-model-provider-row-main'));
-				const nameRow = dom.append(main, dom.$('.combined-model-provider-row-name'));
-				dom.append(nameRow, dom.$('span.combined-model-provider-row-name-text')).textContent = formatModelLabel(model.metadata.name);
-				if (model.identifier === currentModelId) {
-					dom.append(nameRow, dom.$('span.combined-model-provider-row-in-use')).textContent = localize('combinedPicker.inUse', "In use");
+				const meta = dom.append(row, dom.$('.combined-model-provider-row-meta'));
+				if (unavailable) {
+					dom.append(meta, dom.$('span.combined-model-provider-row-connect')).textContent = localize('combinedPicker.connect', "Connect");
+				} else if (isSubscriptionModel(model)) {
+					dom.append(meta, dom.$('span.combined-model-provider-row-plan')).textContent = localize('combinedPicker.plan', "Plan");
+				} else {
+					const score = modelCostScore(model);
+					if (score !== undefined) {
+						const bar = dom.append(meta, dom.$('span.combined-model-provider-row-cost'));
+						bar.style.setProperty('--combined-cost', String(score));
+						dom.append(bar, dom.$('span.combined-model-provider-row-cost-dot'));
+						bar.setAttribute('aria-hidden', 'true');
+					}
 				}
-				const routingOption = upstreamProviderId(model) === 'openrouter' ? this._routingOption(model) : undefined;
-				const routingIndex = routingOption?.values.findIndex(value => Object.is(value, routingOption.currentValue)) ?? -1;
-				const selectedRoutingLabel = routingIndex >= 0 && String(routingOption?.currentValue).toLowerCase() !== 'auto'
-					? routingOption?.labels[routingIndex]
-					: undefined;
-				const detail = section?.id === COMBINED_MODEL_SECTION_CLAUDE && !query
-					? undefined
-					: !!query || section?.kind === 'library' || upstreamProviderId(model) === 'openrouter'
-						? formatModelProviderDetail(model, selectedRoutingLabel)
-						: undefined;
-				if (detail) {
-					dom.append(main, dom.$('.combined-model-provider-row-sub')).textContent = detail;
+				if (isCurrent) {
+					meta.appendChild(renderIcon(Codicon.check));
 				}
+				row.setAttribute('aria-label', [formatModelLabel(model.metadata.name), effort, formatModelProviderDetail(model)].filter(Boolean).join(', '));
 
 				const commit = async () => {
-					const choosingOpenRouterModel = upstreamProviderId(model) === 'openrouter';
-					if (!await this._commit(providerId, model, choosingOpenRouterModel)) {
+					if (unavailable) {
+						// Connecting lives in one place: jump there with the right row ready.
+						const { target, provider } = this._connectTargetFor(model);
+						hideCard();
+						this._railSection = COMBINED_MODEL_SECTION_CONNECT;
+						this._searchValue = '';
+						search.value = '';
+						updateRailSelection();
+						renderList();
+						connectView?.reveal(target, provider);
 						return;
 					}
-					if (choosingOpenRouterModel) {
-						// OpenRouter selection is a two-step choice: model, then serving
-						// upstream. Keep the catalog behind a focused modal instead of
-						// squeezing route selection into the picker footer.
-						renderList();
-						renderThinking();
-						openRoutingModal();
-					}
+					await this._commit(providerId, model);
 				};
-				listStore.add(dom.addDisposableListener(row, dom.EventType.CLICK, commit));
-				listStore.add(dom.addDisposableListener(row, dom.EventType.KEY_DOWN, e => {
-					const event = new StandardKeyboardEvent(e);
-					if (event.equals(KeyCode.Enter) || event.equals(KeyCode.Space)) {
-						dom.EventHelper.stop(e, true);
-						commit();
-					}
+				listStore.add(dom.addDisposableListener(row, dom.EventType.CLICK, () => void commit()));
+				listStore.add(dom.addDisposableListener(row, dom.EventType.MOUSE_ENTER, () => {
+					setActive(rows().indexOf(row), false);
+					showCardFor(model, row, false);
 				}));
-			});
+				listStore.add(dom.addDisposableListener(row, dom.EventType.MOUSE_LEAVE, scheduleHide));
+			}
 
-			renderSetupAction();
-			if (!query) {
-				list.querySelector<HTMLElement>('.combined-model-provider-row.selected')?.scrollIntoView({ block: 'nearest' });
+			const all = rows();
+			const selectedIndex = all.findIndex(row => row.classList.contains('selected'));
+			setActive(query ? 0 : Math.max(0, selectedIndex), false);
+			if (!query && selectedIndex >= 0) {
+				all[selectedIndex].scrollIntoView({ block: 'nearest' });
+			}
+			if (cardModel) {
+				const row = list.querySelector<HTMLElement>(`[data-model="${CSS.escape(cardModel.identifier)}"]`);
+				if (row) {
+					cardRow = row;
+					placeCard();
+				} else {
+					hideCard();
+				}
 			}
 		};
+		store.add(dom.addDisposableListener(list, 'scroll', () => {
+			if (!card.classList.contains('hidden')) {
+				placeCard();
+			}
+		}));
 
 		let previousGroup: CombinedModelSectionGroup | undefined;
-		let previousKind: ICombinedModelSection['kind'] | undefined;
 		let railGroup: HTMLElement | undefined;
+		const addRailButton = (parent: HTMLElement, id: string, label: string, decorate: (button: HTMLButtonElement) => void) => {
+			const button = dom.append(parent, dom.$('button.combined-model-provider-rail-item')) as HTMLButtonElement;
+			button.type = 'button';
+			button.setAttribute('role', 'option');
+			decorate(button);
+			// Icon-only: the name is the accessible label and the hover.
+			button.setAttribute('aria-label', label);
+			store.add(this._hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), button, label));
+			railButtons.set(id, button);
+			store.add(dom.addDisposableListener(button, dom.EventType.CLICK, event => {
+				dom.EventHelper.stop(event, true);
+				hideCard();
+				this._railSection = id;
+				this._searchValue = '';
+				search.value = '';
+				updateRailSelection();
+				renderList();
+				search.focus();
+			}));
+			return button;
+		};
 		for (const section of sections) {
 			if (section.group !== previousGroup) {
 				const groupLabel = combinedModelSectionGroupLabel(section.group);
 				railGroup = dom.append(railList, dom.$('.combined-model-provider-rail-group'));
 				railGroup.setAttribute('role', 'group');
 				railGroup.setAttribute('aria-label', groupLabel);
-				const heading = dom.append(railGroup, dom.$('.combined-model-provider-rail-heading'));
-				heading.textContent = groupLabel;
-				heading.setAttribute('aria-hidden', 'true');
-			} else if (section.kind !== previousKind) {
-				// Library views and per-provider filters share the Backboard
-				// heading; a hairline keeps the two lists visually distinct.
-				dom.append(railGroup!, dom.$('.combined-model-provider-rail-divider'));
 			}
 			previousGroup = section.group;
-			previousKind = section.kind;
-			const button = dom.append(railGroup!, dom.$('button.combined-model-provider-rail-item')) as HTMLButtonElement;
-			button.type = 'button';
-			button.setAttribute('role', 'option');
-			const libraryIcon = section.id === COMBINED_MODEL_SECTION_ALL
-					? Codicon.listFlat
-					: undefined;
-			const providerIconKey = providerIconKeyForCombinedModelSection(section.id);
-			if (libraryIcon) {
-				button.appendChild(renderIcon(libraryIcon));
-			} else if (providerIconKey) {
-				const providerIcon = dom.append(button, dom.$('.combined-model-provider-rail-provider-icon'));
-				providerIcon.classList.add(`provider-${providerIconKey}`);
-				providerIcon.setAttribute('aria-hidden', 'true');
-			} else {
-				button.appendChild(renderIcon(Codicon.server));
-			}
-			dom.append(button, dom.$('.combined-model-provider-rail-item-label')).textContent = section.label;
-			if (section.id === COMBINED_MODEL_SECTION_CHATGPT || section.id === COMBINED_MODEL_SECTION_CLAUDE) {
-				const connected = section.id === COMBINED_MODEL_SECTION_CLAUDE ? connectedToClaude : connectedToChatGpt;
-				const meta = dom.append(button, dom.$('.combined-model-provider-rail-item-meta'));
-				meta.textContent = connected
-					? localize('combinedPicker.connected', "Connected")
-					: localize('combinedPicker.connect', "Connect");
-				meta.classList.toggle('connected', connected);
-			}
-			railButtons.set(section.id, button);
-			store.add(dom.addDisposableListener(button, dom.EventType.CLICK, e => {
-				dom.EventHelper.stop(e, true);
-				closeRoutingModal();
-				this._railSection = section.id;
-				this._searchValue = '';
-				search.value = '';
-				updateRailSelection();
-				updateSearchPlaceholder();
-				renderList();
-				search.focus();
-			}));
+			const subscription = section.id === COMBINED_MODEL_SECTION_CHATGPT || section.id === COMBINED_MODEL_SECTION_CLAUDE;
+			const connected = section.id === COMBINED_MODEL_SECTION_CLAUDE ? connectState.claude : connectState.chatGpt;
+			const railLabel = !subscription
+				? section.label
+				: connected
+					? localize('combinedPicker.subscriptionConnected', "{0} (Connected)", section.label)
+					: localize('combinedPicker.subscriptionNotConnected', "{0} (Not Connected)", section.label);
+			const button = addRailButton(railGroup!, section.id, railLabel, target => {
+				const providerIconKey = providerIconKeyForCombinedModelSection(section.id);
+				if (section.id === COMBINED_MODEL_SECTION_ALL) {
+					target.appendChild(renderIcon(Codicon.listFlat));
+				} else if (providerIconKey) {
+					dom.append(target, dom.$(`.combined-model-provider-rail-provider-icon.provider-${providerIconKey}`)).setAttribute('aria-hidden', 'true');
+				} else {
+					target.appendChild(renderIcon(Codicon.server));
+				}
+			});
+			button.classList.toggle('connected', subscription && connected);
+		}
+		if (showingBackboard) {
+			const footer = dom.append(rail, dom.$('.combined-model-provider-rail-footer'));
+			addRailButton(footer, COMBINED_MODEL_SECTION_CONNECT, localize('combinedPicker.connectRail', "Connect"), button => {
+				button.appendChild(renderIcon(Codicon.plug));
+			});
 		}
 
 		store.add(dom.addDisposableListener(search, dom.EventType.INPUT, () => {
 			this._searchValue = search.value;
+			hideCard();
 			renderList();
 		}));
 		store.add(dom.addDisposableListener(search, dom.EventType.KEY_DOWN, e => {
 			const event = new StandardKeyboardEvent(e);
 			if (event.equals(KeyCode.Escape)) {
 				dom.EventHelper.stop(e, true);
+				if (!card.classList.contains('hidden')) {
+					hideCard();
+					return;
+				}
 				this._overlay.clear();
+				return;
+			}
+			if (event.equals(KeyCode.DownArrow) || event.equals(KeyCode.UpArrow)) {
+				dom.EventHelper.stop(e, true);
+				setActive(activeIndex + (event.equals(KeyCode.DownArrow) ? 1 : -1), true);
+				return;
+			}
+			if (event.equals(KeyCode.Enter)) {
+				dom.EventHelper.stop(e, true);
+				rows()[Math.max(0, activeIndex)]?.click();
 				return;
 			}
 			// ⌘1..⌘9 quick-select the nth visible model.
@@ -1296,14 +1446,12 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 					: undefined;
 				if (digit !== undefined) {
 					dom.EventHelper.stop(e, true);
-					const rows = list.querySelectorAll<HTMLElement>('.combined-model-provider-row');
-					rows[digit - 1]?.click();
+					rows()[digit - 1]?.click();
 				}
 			}
 		}));
 
 		updateRailSelection();
-		updateSearchPlaceholder();
 		renderList();
 		renderThinking();
 		setTimeout(() => search.focus(), 0);

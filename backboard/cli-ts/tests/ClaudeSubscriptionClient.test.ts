@@ -272,25 +272,43 @@ describe("ClaudeSubscriptionClient", () => {
 		});
 	});
 
-	it("publishes only the Claude subscription model catalog and provider", async () => {
+	it("publishes one current Claude model per family, dropping aliases and older generations", async () => {
 		const capture: SdkCapture = {
 			tools: [],
 			closed: false,
 			supportedModels: [
 				{
 					value: "default",
-					resolvedModel: "claude-opus-5[1m]",
+					resolvedModel: "claude-opus-5-5",
 					displayName: "Default (recommended)",
-					description: "Opus 5 with 1M context",
+					description: "Opus 5.5 · Best for everyday, complex tasks",
 					supportsEffort: true,
 					supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
 					supportsAdaptiveThinking: true,
 				},
 				{
-					value: "claude-fable-5-1[1m]",
+					value: "opus",
+					resolvedModel: "claude-opus-5-5",
+					displayName: "Opus",
+					description: "Best for everyday, complex tasks",
+					supportsEffort: true,
+					supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+					supportsAdaptiveThinking: true,
+				},
+				{
+					value: "claude-fable-5-1",
 					resolvedModel: "claude-fable-5-1",
 					displayName: "Fable",
-					description: "Fable 5.1 with 1M context",
+					description: "Most capable for your hardest and longest-running tasks",
+					supportsEffort: true,
+					supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+					supportsAdaptiveThinking: true,
+				},
+				{
+					value: "sonnet",
+					resolvedModel: "claude-sonnet-5-5",
+					displayName: "Sonnet",
+					description: "Efficient for routine tasks",
 					supportsEffort: true,
 					supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
 					supportsAdaptiveThinking: true,
@@ -299,7 +317,25 @@ describe("ClaudeSubscriptionClient", () => {
 					value: "haiku",
 					resolvedModel: "claude-haiku-4-5-20251001",
 					displayName: "Haiku",
-					description: "Haiku 4.5",
+					description: "Fastest for quick answers",
+				},
+				{
+					value: "claude-sonnet-5",
+					resolvedModel: "claude-sonnet-5",
+					displayName: "Sonnet 5",
+					description: "Efficient for routine tasks",
+					supportsEffort: true,
+					supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+					supportsAdaptiveThinking: true,
+				},
+				{
+					value: "claude-opus-4-8",
+					resolvedModel: "claude-opus-4-8",
+					displayName: "Opus 4.8",
+					description: "Best for everyday, complex tasks",
+					supportsEffort: true,
+					supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+					supportsAdaptiveThinking: true,
 				},
 			],
 		};
@@ -320,21 +356,23 @@ describe("ClaudeSubscriptionClient", () => {
 			contexts: result.models.map((model) => model.context_limit),
 			visions: result.models.map((model) => model.supports_vision),
 		}).toEqual({
-			total: 3,
-			names: ["default", "claude-fable-5-1[1m]", "haiku"],
+			total: 4,
+			names: ["claude-fable-5-1", "opus", "sonnet", "haiku"],
 			displayNames: [
-				"Claude Default (Opus 5)",
 				"Claude Fable 5.1",
+				"Claude Opus 5.5",
+				"Claude Sonnet 5.5",
 				"Claude Haiku 4.5",
 			],
 			providers: ["anthropic-subscription"],
 			effortLevels: [
 				["low", "medium", "high", "xhigh", "max"],
 				["low", "medium", "high", "xhigh", "max"],
+				["low", "medium", "high", "xhigh", "max"],
 				[],
 			],
-			contexts: [1_000_000, 1_000_000, 200_000],
-			visions: [true, true, true],
+			contexts: [200_000, 200_000, 200_000, 200_000],
+			visions: [true, true, true, true],
 		});
 	});
 

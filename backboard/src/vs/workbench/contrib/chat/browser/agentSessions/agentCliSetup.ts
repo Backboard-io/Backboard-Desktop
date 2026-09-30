@@ -139,7 +139,11 @@ export const IAgentCliSetupService = createDecorator<IAgentCliSetupService>('age
 export interface IAgentCliSetupService {
 	readonly _serviceBrand: undefined;
 	getSetupCandidates(registeredTypeIds: ReadonlySet<string>): IAgentCliSetupCandidate[];
-	beginSetup(id: string): Promise<void>;
+	/**
+	 * Runs a setup flow. `confirmed` skips the confirm dialog when the caller's
+	 * own UI already said what connecting does (the inline Connect rows).
+	 */
+	beginSetup(id: string, options?: { readonly confirmed?: boolean }): Promise<void>;
 }
 
 export class AgentCliSetupService implements IAgentCliSetupService {
@@ -197,7 +201,7 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 		return `${install} && export PATH="${definition.binDir.posix}:$PATH" && ${definition.signIn}`;
 	}
 
-	async beginSetup(id: string): Promise<void> {
+	async beginSetup(id: string, options?: { readonly confirmed?: boolean }): Promise<void> {
 		if (id === BYOK_KEYS_SETUP_ID) {
 			await this._commandService.executeCommand(OPEN_API_KEYS_COMMAND_ID);
 			return;
@@ -211,7 +215,7 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 			}
 			this._inFlight.add(id);
 			try {
-				await this._runChatGptSubscriptionSetup();
+				await this._runChatGptSubscriptionSetup(options?.confirmed === true);
 			} catch (err) {
 				this._logService.error('[AgentCliSetup] ChatGPT subscription login failed', err);
 				this._notificationService.error(localize('agentSetup.chatgptSubscription.failed', "ChatGPT could not be connected: {0}", err instanceof Error ? err.message : String(err)));
@@ -226,7 +230,7 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 			}
 			this._inFlight.add(id);
 			try {
-				await this._runClaudeSubscriptionSetup();
+				await this._runClaudeSubscriptionSetup(options?.confirmed === true);
 			} catch (err) {
 				this._logService.error('[AgentCliSetup] Claude subscription login failed', err);
 				this._notificationService.error(localize('agentSetup.claudeSubscription.failed', "Claude could not be connected: {0}", err instanceof Error ? err.message : String(err)));
@@ -250,8 +254,8 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 		}
 	}
 
-	private async _runChatGptSubscriptionSetup(): Promise<void> {
-		const { confirmed } = await this._dialogService.confirm({
+	private async _runChatGptSubscriptionSetup(preconfirmed: boolean): Promise<void> {
+		const { confirmed } = preconfirmed ? { confirmed: true } : await this._dialogService.confirm({
 			message: localize('agentSetup.chatgptSubscription.confirmTitle', "Connect ChatGPT subscription?"),
 			detail: localize('agentSetup.chatgptSubscription.confirmDetail', "Backboard will open ChatGPT in your browser and store its own renewable login. OpenAI model requests will continue to run through the Backboard CLI harness."),
 			primaryButton: localize('agentSetup.chatgptSubscription.connectButton', "Connect"),
@@ -271,8 +275,8 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 		this._notificationService.info(result.message);
 	}
 
-	private async _runClaudeSubscriptionSetup(): Promise<void> {
-		const { confirmed } = await this._dialogService.confirm({
+	private async _runClaudeSubscriptionSetup(preconfirmed: boolean): Promise<void> {
+		const { confirmed } = preconfirmed ? { confirmed: true } : await this._dialogService.confirm({
 			message: localize('agentSetup.claudeSubscription.confirmTitle', "Connect Claude subscription?"),
 			detail: localize('agentSetup.claudeSubscription.confirmDetail', "Backboard will use your existing Claude Code subscription login, or open Anthropic's sign-in flow if needed."),
 			primaryButton: localize('agentSetup.claudeSubscription.connectButton', "Connect"),

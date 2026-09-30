@@ -113,47 +113,39 @@ export interface ClaudeSubscriptionClientOptions {
 	authCheck?: () => Promise<{ executable: string }>;
 }
 
+/** Used only when Claude Code does not report its own model list. */
 const FALLBACK_CLAUDE_MODELS: readonly ClaudeModelInfo[] = [
 	{
-		value: "default",
-		displayName: "Claude Default (Opus 5)",
-		description: "Opus 5 with 1M context",
-		resolvedModel: "claude-opus-5[1m]",
-		supportsEffort: true,
-		supportsAdaptiveThinking: true,
-		supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
-	},
-	{
-		value: "opus[1m]",
-		displayName: "Claude Opus 5 (1M)",
-		description: "Opus 5 with 1M context",
-		resolvedModel: "claude-opus-5[1m]",
-		supportsEffort: true,
-		supportsAdaptiveThinking: true,
-		supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
-	},
-	{
-		value: "claude-fable-5-1[1m]",
-		displayName: "Claude Fable 5.1 (1M)",
-		description: "Fable 5.1 with 1M context",
+		value: "claude-fable-5-1",
+		displayName: "Claude Fable 5.1",
+		description: "Most capable for your hardest and longest-running tasks",
 		resolvedModel: "claude-fable-5-1",
 		supportsEffort: true,
 		supportsAdaptiveThinking: true,
 		supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
 	},
 	{
-		value: "sonnet",
-		displayName: "Claude Sonnet 5",
-		description: "Sonnet 5",
-		resolvedModel: "claude-sonnet-5",
+		value: "claude-opus-5-5",
+		displayName: "Claude Opus 5.5",
+		description: "Best for everyday, complex tasks",
+		resolvedModel: "claude-opus-5-5",
 		supportsEffort: true,
 		supportsAdaptiveThinking: true,
 		supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
 	},
 	{
-		value: "haiku",
+		value: "claude-sonnet-5-5",
+		displayName: "Claude Sonnet 5.5",
+		description: "Efficient for routine tasks",
+		resolvedModel: "claude-sonnet-5-5",
+		supportsEffort: true,
+		supportsAdaptiveThinking: true,
+		supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+	},
+	{
+		value: "claude-haiku-4-5-20251001",
 		displayName: "Claude Haiku 4.5",
-		description: "Haiku 4.5",
+		description: "Fastest for quick answers",
 		resolvedModel: "claude-haiku-4-5-20251001",
 		supportsEffort: false,
 		supportsAdaptiveThinking: false,
@@ -404,9 +396,10 @@ export class ClaudeSubscriptionClient implements AgentClient {
 		provider: string,
 		model: string,
 	): Promise<ModelThinkingMetadataResponse> {
-		const catalogModel = this.modelCatalog?.find(
-			(entry) => entry.value === model,
-		);
+		const catalogModel = [
+			...(this.modelCatalog ?? []),
+			...FALLBACK_CLAUDE_MODELS,
+		].find((entry) => entry.value === model);
 		const effortLevels = supportedClaudeEffortLevels(catalogModel, model);
 		if (effortLevels.length === 0) {
 			return {
@@ -433,7 +426,9 @@ export class ClaudeSubscriptionClient implements AgentClient {
 	}
 
 	async listModels(options: RequestOptions = {}): Promise<ModelsListResponse> {
-		const catalog = await this.supportedClaudeModels(options.signal);
+		const catalog = curateClaudeCatalog(
+			await this.supportedClaudeModels(options.signal),
+		);
 		const models = catalog.map((model) => ({
 			name: model.value,
 			provider: PROVIDER,
@@ -941,6 +936,67 @@ function supportedClaudeEffortLevels(
 	return /(?:^|[-_/])haiku(?:$|[-_/[])/i.test(requestedModel)
 		? []
 		: [...CLAUDE_EFFORT_LEVELS];
+}
+
+interface ClaudeModelVersion {
+	family: string;
+	version: number[];
+}
+
+/**
+ * One row per model family (Fable, Opus, Sonnet, Haiku), at the newest version
+ * Claude Code reports. Aliases such as `default` and pinned older generations
+ * duplicate a family and are left out; a session already pinned to one still
+ * routes, it just is not listed. Newer models are never added from a compiled
+ * list: an older Claude Code rejects model ids it does not know.
+ */
+function curateClaudeCatalog(
+	live: readonly ClaudeModelInfo[],
+): ClaudeModelInfo[] {
+	const byFamily = new Map<
+		string,
+		{ model: ClaudeModelInfo; version: number[] }
+	>();
+	for (const model of live) {
+		if (["default", "best", "opusplan"].includes(model.value.toLowerCase())) {
+			continue;
+		}
+		const parsed = parseClaudeModelVersion(model.resolvedModel ?? model.value);
+		if (!parsed) continue;
+		const current = byFamily.get(parsed.family);
+		if (!current || compareVersions(parsed.version, current.version) > 0) {
+			byFamily.set(parsed.family, { model, version: parsed.version });
+		}
+	}
+	const order = ["fable", "opus", "sonnet", "haiku"];
+	return [...byFamily.entries()]
+		.sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
+		.map(([, entry]) => entry.model);
+}
+
+function parseClaudeModelVersion(
+	modelId: string,
+): ClaudeModelVersion | undefined {
+	const match =
+		/^claude-(fable|opus|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(
+			modelId
+				.toLowerCase()
+				.replace(/\[1m\]$/, "")
+				.replace(/^.*\//, ""),
+		);
+	if (!match?.[1] || !match[2]) return undefined;
+	return {
+		family: match[1],
+		version: [Number(match[2]), Number(match[3] ?? 0)],
+	};
+}
+
+function compareVersions(a: number[], b: number[]): number {
+	for (let index = 0; index < Math.max(a.length, b.length); index++) {
+		const delta = (a[index] ?? 0) - (b[index] ?? 0);
+		if (delta !== 0) return delta;
+	}
+	return 0;
 }
 
 function claudeCatalogDisplayName(model: ClaudeModelInfo): string {

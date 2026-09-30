@@ -71,7 +71,7 @@ import type { AgentTaskManager } from "./AgentTaskManager.ts";
 import { AgentTraceContext } from "./AgentTraceStore.ts";
 import { AssistantSessionBinding } from "./AssistantSessionBinding.ts";
 import { capacityFallbackCandidates, modelKey } from "./RuntimeRecovery.ts";
-import { TURN_MAX_ATTEMPTS } from "./TurnRetry.ts";
+import { isAccountBlockedError, TURN_MAX_ATTEMPTS } from "./TurnRetry.ts";
 import { Turn } from "./Turn.ts";
 
 export interface AgentControllerDeps {
@@ -638,6 +638,7 @@ export class AgentController {
 			bus.emit({
 				type: "run:error",
 				error: formatSubmitError(err),
+				...(isAccountBlockedError(err) ? { actionable: true } : {}),
 			});
 			bus.emit({
 				type: "turn:end",

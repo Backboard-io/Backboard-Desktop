@@ -2,12 +2,12 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-.backboard-auth-setup-actions {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
+
+/* The sign-in card hosts the same Connect list as the model picker. */
+.backboard-auth-setup-connect {
+	align-self: stretch;
+	width: 100%;
+	min-width: min(320px, 100%);
+	margin: 4px -10px -6px;
+	text-align: left;
 }
-.backboard-auth-setup-actions .backboard-auth-gate-button:disabled { opacity: .6; cursor: wait; }
-.backboard-auth-setup-actions .backboard-auth-gate-button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 3px; }
-.backboard-auth-setup-status { margin: 0; color: var(--vscode-errorForeground); font-size: 12px; }
-.backboard-auth-setup-status:empty { display: none; }

@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { createHash } from 'crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -294,6 +295,7 @@ export class CliTsServeProcess extends Disposable {
 	private spawnedCommand = '';
 	/** On-disk identity of the executable at spawn time. */
 	private spawnedInvocationFingerprint: string | undefined;
+	private spawnedCredentialFingerprint: string | undefined;
 	/** Settles with the `serve:ready` payload of the current child, or rejects when it dies first. */
 	private ready: DeferredPromise<CliTsReadyPayload> | undefined;
 	/** Resolves once the current child may receive traffic; rejects when it never can. */
@@ -329,12 +331,17 @@ export class CliTsServeProcess extends Disposable {
 		return this.ready!.p;
 	}
 
-	/** True when a rebuild or path override replaced the running executable. */
+	/**
+	 * True when a rebuild or path override replaced the running executable, or
+	 * the credentials changed since spawn (a sign-out must not leave a process
+	 * holding the old key in its environment).
+	 */
 	get isInvocationStale(): boolean {
 		if (!this.isRunning || !this.spawnedInvocationFingerprint) {
 			return false;
 		}
-		return cliTsInvocationFingerprint(this.resolveCliTsInvocation()) !== this.spawnedInvocationFingerprint;
+		return cliTsInvocationFingerprint(this.resolveCliTsInvocation()) !== this.spawnedInvocationFingerprint
+			|| cliTsCredentialFingerprint() !== this.spawnedCredentialFingerprint;
 	}
 
 	/** Starts the serve subprocess without submitting a turn. */
@@ -470,6 +477,7 @@ export class CliTsServeProcess extends Disposable {
 		}
 		const invocation = this.resolveCliTsInvocation();
 		this.spawnedInvocationFingerprint = cliTsInvocationFingerprint(invocation);
+		this.spawnedCredentialFingerprint = cliTsCredentialFingerprint();
 		const args = [...invocation.args, '--serve'];
 		if (this.options.workingDirectory) {
 			args.push('--cwd', this.options.workingDirectory);
@@ -733,6 +741,22 @@ function resolveBundledCuaDriver(appRoot = dirname(FileAccess.asFileUri('').fsPa
  * onto the env vars cli-ts reads, so the serve process authenticates as the
  * IDE user without a separate `backboard login`.
  */
+/**
+ * Identifies the credentials a serve process started with: the Backboard key
+ * the host passes in, plus the subscription connections cli-ts reads from
+ * `~/.backboard/config.json`. Not a secret: the key is hashed.
+ */
+export function cliTsCredentialFingerprint(): string {
+	let subscriptions: unknown;
+	try {
+		const cliConfig = JSON.parse(fs.readFileSync(join(os.homedir(), '.backboard', 'config.json'), 'utf8')) as Record<string, unknown>;
+		subscriptions = [cliConfig.apiKey, cliConfig.claudeSubscriptionEnabled, cliConfig.chatgptSubscriptionAuthFile];
+	} catch {
+		subscriptions = null;
+	}
+	return createHash('sha256').update(JSON.stringify([cliTsCredentialEnv(), subscriptions])).digest('hex');
+}
+
 export function cliTsCredentialEnv(): Record<string, string> {
 	const config = bridgeConfig();
 	const out: Record<string, string> = {};

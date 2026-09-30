@@ -8,7 +8,6 @@ import './media/chatViewPane.css';
 import '../../widget/media/chatPanelCursorLook.css';
 import '../../widget/media/chatPanelSimpleLook.css';
 import { $, addDisposableListener, append, EventHelper, EventType, getWindow, scheduleAtNextAnimationFrame, setVisibility } from '../../../../../../base/browser/dom.js';
-import { syncRootPresenceClass } from '../../../../../browser/part.js';
 import { StandardMouseEvent } from '../../../../../../base/browser/mouseEvent.js';
 import { Orientation, Sash } from '../../../../../../base/browser/ui/sash/sash.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
@@ -939,9 +938,6 @@ referencesExpandedWhenEmptyResponse: false,
 	private updateBackboardChatAuthGate(): void {
 		const gated = this.isBackboardAuthRequired();
 		this.chatControlsContainer?.classList.toggle('backboard-auth-gate-active', gated);
-		if (this.chatControlsContainer) {
-			syncRootPresenceClass(getWindow(this.chatControlsContainer), 'backboard-chat-auth-gated', '.chat-viewpane .backboard-auth-gate-active');
-		}
 		if (this.chatAuthGateOverlay) {
 			setVisibility(gated, this.chatAuthGateOverlay);
 		}

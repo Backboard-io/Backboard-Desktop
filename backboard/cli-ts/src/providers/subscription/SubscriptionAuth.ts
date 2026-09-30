@@ -7,6 +7,7 @@ import {
 	readBackboardConfig,
 	saveBackboardConfig,
 } from "../../config/backboardConfig.ts";
+import { backboardOAuthCompleteUrl } from "../../core/auth/BackboardOAuthComplete.ts";
 import { openDefaultBrowser } from "../../core/oauth/LoopbackOAuth.ts";
 import { acquireFileLease } from "../../utils/FileLease.ts";
 import { ensureDir, renameOverPreservingDestination } from "../../utils/fs.ts";
@@ -505,7 +506,7 @@ async function startCallbackServer(state: string): Promise<{
 				"Content-Security-Policy":
 					"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
 			});
-			response.end(oauthCallbackHtml(message, error === undefined));
+			response.end(oauthCallbackHtml(message));
 			if (settled || !completesLogin) return;
 			settled = true;
 			if (error) rejectCode(error);
@@ -537,7 +538,17 @@ async function startCallbackServer(state: string): Promise<{
 			);
 			return;
 		}
-		finish(200, "ChatGPT subscription connected. You can return to Backboard.");
+		// Land on the same page Backboard SSO finishes on. The redirect target
+		// is a fixed Backboard URL, so the code never leaves this machine.
+		response.writeHead(302, {
+			Location: backboardOAuthCompleteUrl(),
+			"Cache-Control": "no-store",
+			"Referrer-Policy": "no-referrer",
+		});
+		response.end();
+		if (settled) return;
+		settled = true;
+		resolveCode(url.searchParams.get("code") as string);
 	});
 
 	let port: number | undefined;
@@ -561,22 +572,14 @@ async function startCallbackServer(state: string): Promise<{
 	return { server, port, code };
 }
 
-function oauthCallbackHtml(message: string, success: boolean): string {
+/** Shown only when the login failed; success redirects to Backboard. */
+function oauthCallbackHtml(message: string): string {
 	const escapedMessage = message
 		.replaceAll("&", "&amp;")
 		.replaceAll("<", "&lt;")
 		.replaceAll(">", "&gt;")
 		.replaceAll('"', "&quot;")
 		.replaceAll("'", "&#39;");
-	const completionScript = success
-		? `<script>
-			history.replaceState(null, "", "/auth/complete");
-			window.close();
-			setTimeout(() => {
-				if (!window.closed) window.location.replace("https://backboard.io");
-			}, 300);
-		</script>`
-		: "";
 	return `<!doctype html>
 	<html lang="en">
 	<head>
@@ -590,7 +593,7 @@ function oauthCallbackHtml(message: string, success: boolean): string {
 			p { margin: 0; color: #c8c8c8; line-height: 1.5; }
 		</style>
 	</head>
-	<body><main><p>${escapedMessage}</p></main>${completionScript}</body>
+	<body><main><p>${escapedMessage}</p></main></body>
 	</html>`;
 }
 

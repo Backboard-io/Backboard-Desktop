@@ -8,9 +8,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createHash } from 'crypto';
-import { raceTimeout } from '../../../../base/common/async.js';
+import { raceTimeout, RunOnceScheduler } from '../../../../base/common/async.js';
 import { Emitter } from '../../../../base/common/event.js';
-import { Disposable, DisposableStore, MutableDisposable, type IReference } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, MutableDisposable, toDisposable, type IReference } from '../../../../base/common/lifecycle.js';
 import { type IObservable, observableValue } from '../../../../base/common/observable.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
@@ -41,7 +41,7 @@ import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_GENERATIVE_ME
 /** cli-ts tool name excluded from the turn when Web Search is toggled off. */
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
 import { rgDiskPath } from '../../../../base/node/ripgrep.js';
-import { type CliTsCredentialSnapshot, CliTsServeProcess, runCliTsCommand } from './cliTsProcess.js';
+import { type CliTsCredentialSnapshot, CliTsServeProcess, cliTsCredentialFingerprint, runCliTsCommand } from './cliTsProcess.js';
 import type { CliTsRecord, CliTsAgentEvent, CliTsClientToolDefinition, CliTsClientToolResultContent, CliTsClientToolResultPayload, CliTsFileAttachment, CliTsMcpListPayload, CliTsMcpServerEntry, CliTsMcpServerStatus, CliTsPermissionMode, CliTsReadyPayload, CliTsTurnStatus, CliTsWorkerIntegrationChange, CliTsWorkerIntegrationSnapshot, CliTsWorkerState } from './cliTsProtocol.js';
 import { CLI_TS_MCP_STATUS_EVENTS_CAPABILITY } from './cliTsProtocol.js';
 import { GenerativeModelCatalog, type GenerativeModelItem, type GenerativeModelProperty } from './generativeModelCatalog.js';
@@ -747,6 +747,41 @@ export class CliTsAgent extends Disposable implements IAgent {
 			this._logService,
 		));
 		void this._refreshClaudeSubscriptionConnectionState();
+		this._watchCredentials();
+	}
+
+	/**
+	 * Signing in or out (SSO, API key, subscription connect/disconnect) changes
+	 * which models exist. Refresh the catalog when the credentials change, so
+	 * the picker never keeps a signed-out list after a sign-in or vice versa.
+	 * The IDE folder also holds chat history, so only a changed credential
+	 * fingerprint triggers the refresh.
+	 */
+	private _watchCredentials(): void {
+		let fingerprint = cliTsCredentialFingerprint();
+		const check = this._register(new RunOnceScheduler(() => {
+			const next = cliTsCredentialFingerprint();
+			if (next === fingerprint) {
+				return;
+			}
+			fingerprint = next;
+			this._modelsRefreshed = false;
+			this._modelRefreshPromise ??= this._refreshModelCatalog()
+				.catch(error => this._logService.warn(`[cli-ts] model refresh after a credential change failed: ${error instanceof Error ? error.message : String(error)}`))
+				.finally(() => { this._modelRefreshPromise = undefined; });
+		}, 500));
+		for (const directory of [path.join(os.homedir(), '.backboard_ide'), path.join(os.homedir(), '.backboard')]) {
+			try {
+				const watcher = fs.watch(directory, { persistent: false }, (_event, file) => {
+					if (!file || file.toString().endsWith('.json')) {
+						check.schedule();
+					}
+				});
+				this._register(toDisposable(() => watcher.close()));
+			} catch {
+				// A missing folder has no credentials to watch; the first sign-in creates it.
+			}
+		}
 	}
 
 	private _modelsCachePath(): string {
@@ -2862,7 +2897,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			return session.proc;
 		}
 		if (session.proc?.isInvocationStale) {
-			this._logService.info(`[cli-ts] restarting session ${session.sessionId} because the CLI executable changed on disk.`);
+			this._logService.info(`[cli-ts] restarting session ${session.sessionId} because the CLI executable or credentials changed.`);
 		}
 		session.proc?.dispose();
 		const proc = new CliTsServeProcess(this._logService, {

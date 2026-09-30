@@ -7,6 +7,8 @@ import {
 	readBackboardConfig,
 	saveBackboardConfig,
 } from "../../config/backboardConfig.ts";
+import { backboardOAuthCompleteUrl } from "../../core/auth/BackboardOAuthComplete.ts";
+import { openDefaultBrowser } from "../../core/oauth/LoopbackOAuth.ts";
 import { errorMessage } from "../../utils/errors.ts";
 
 const execFileAsync = promisify(execFile);
@@ -47,6 +49,8 @@ export interface ClaudeSubscriptionStatus {
 export interface ClaudeSubscriptionAuthOptions {
 	homeDir?: string;
 	executable?: string;
+	/** Test seam for the completion page opened after a successful login. */
+	openBrowser?: (url: string) => Promise<void>;
 }
 
 export class ClaudeSubscriptionLoginRequiredError extends Error {
@@ -295,10 +299,16 @@ export async function loginWithClaudeSubscription(
 		});
 	});
 
-	return enableClaudeSubscription({
+	const message = await enableClaudeSubscription({
 		...options,
 		executable,
 	});
+	// Claude Code owns this OAuth flow and its final browser page; finish on
+	// Backboard's completion page like the other sign-ins. Best effort only.
+	await (options.openBrowser ?? openDefaultBrowser)(
+		backboardOAuthCompleteUrl(options.homeDir),
+	).catch(() => undefined);
+	return message;
 }
 
 /** Persist the Backboard enable bit after a non-interactive status check. */

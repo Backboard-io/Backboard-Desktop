@@ -584,6 +584,11 @@ export class SessionsView extends ViewPane {
 			});
 		}
 
+		// With the icon rail, the update control is a blue button directly above
+		// the avatar, so it is visible whether or not the chat list is open.
+		const railUpdateButton = railBottom ? DOM.append(railBottom, $('button.agent-sessions-rail-update')) as HTMLButtonElement : undefined;
+		const railUpdateIcon = railUpdateButton ? DOM.append(railUpdateButton, $('span')) : undefined;
+
 		// Signed-in user identity card (an avatar at the foot of the rail).
 		const user = DOM.append(railBottom ?? footer, $('.agent-sessions-user.visible'));
 		const avatar = DOM.append(user, $('span.agent-sessions-user-avatar'));
@@ -597,7 +602,7 @@ export class SessionsView extends ViewPane {
 		avatar.appendChild(renderIcon(ThemeIcon.fromId('backboard-logo')));
 
 		// Keep the update control independent of the optional account identity.
-		const updateButton = DOM.append(footer, $('button.agent-sessions-update-pill')) as HTMLButtonElement;
+		const updateButton = railUpdateButton ?? DOM.append(footer, $('button.agent-sessions-update-pill')) as HTMLButtonElement;
 		updateButton.type = 'button';
 		this._register(DOM.addDisposableListener(updateButton, DOM.EventType.CLICK, e => {
 			e.preventDefault();
@@ -641,10 +646,18 @@ export class SessionsView extends ViewPane {
 		const syncUpdateButton = () => {
 			const cancellable = this.scopedContextKeyService.getContextKeyValue<boolean>(UPDATE_CANCELLABLE_CONTEXT_KEY) === true;
 			const label = cancellable ? localize('stopBackboardUpdate', "Stop") : localize('updateBackboard', "Update");
+			const available = this.scopedContextKeyService.getContextKeyValue<boolean>(UPDATE_CONTEXT_KEY) === true;
+			updateButton.setAttribute('aria-label', label);
+			if (railUpdateIcon) {
+				// Icon-only on the rail; the hover names the action.
+				DOM.clearNode(railUpdateIcon);
+				railUpdateIcon.appendChild(renderIcon(cancellable ? Codicon.debugStop : Codicon.arrowUp));
+				updateButton.title = cancellable ? label : localize('updateBackboardAvailable', "Update Available: Install and Restart");
+				updateButton.classList.toggle('has-update', available || cancellable);
+				return;
+			}
 			updateButton.textContent = label;
 			updateButton.title = label;
-			updateButton.setAttribute('aria-label', label);
-			const available = this.scopedContextKeyService.getContextKeyValue<boolean>(UPDATE_CONTEXT_KEY) === true;
 			footer.classList.toggle('has-update', available || cancellable);
 		};
 		syncUpdateButton();

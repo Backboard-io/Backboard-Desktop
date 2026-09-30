@@ -94,6 +94,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signIn', () => promptBackboardSso(bridge)));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signOut', () => bridge.signOut()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => panelProvider.refreshModels()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.generateCommitMessage', (rootUri: vscode.Uri | undefined, _context: unknown, token: vscode.CancellationToken | undefined) => generateBackboardCommitMessage(bridge, rootUri, token)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.openUsage', () => usagePanel.show()));
@@ -2355,6 +2356,30 @@ class BackboardBridge implements vscode.Disposable {
 			}
 		});
 		return child;
+	}
+
+	/**
+	 * Signs out of everything the chat can bill to, so the sign-in gate shows:
+	 * the IDE's Backboard key, the CLI's saved key, and both subscription
+	 * connections. Claude Code and ChatGPT themselves stay signed in; only
+	 * Backboard's link to them is removed.
+	 */
+	async signOut(): Promise<void> {
+		await clearBackboardConfigApiKey();
+		const failures: string[] = [];
+		for (const args of [['logout'], ['subscription', 'logout'], ['claude-subscription', 'logout']]) {
+			await new Promise<void>(resolve => {
+				cp.execFile(this.resolveCliPath(), args, { timeout: 15000, maxBuffer: 64 * 1024 }, error => {
+					if (error) { failures.push(args.join(' ')); }
+					resolve();
+				});
+			});
+		}
+		this.restart();
+		await updateBackboardAuthContext();
+		if (failures.length) {
+			throw new Error(vscode.l10n.t('Signed out of Backboard, but could not finish: {0}.', failures.join(', ')));
+		}
 	}
 
 	async hasAlternativeCredentials(): Promise<boolean> {

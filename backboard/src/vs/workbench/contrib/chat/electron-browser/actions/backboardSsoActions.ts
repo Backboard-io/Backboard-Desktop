@@ -17,7 +17,9 @@ import { IActionViewItemService } from '../../../../../platform/actions/browser/
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
+import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
+import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { ChatEntitlementContextKeys, IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
 import { BackboardAuthContextKeys, IBackboardAuthService } from '../../common/backboardAuth.js';
@@ -29,8 +31,13 @@ export function registerBackboardSsoActions(): void {
 	if (!isWindows) {
 		registerAction2(class BackboardSubscriptionSetupAction extends Action2 {
 			constructor() { super({ id: 'backboard.setupSubscription', title: localize2('backboard.setupSubscription', "Set Up Subscription"), category: backboardCategory, f1: true }); }
-			override async run(accessor: ServicesAccessor): Promise<void> {
+			/** With a setup id (ChatGPT or Claude), connects that subscription directly; the caller's UI already confirmed. */
+			override async run(accessor: ServicesAccessor, setupId?: unknown): Promise<void> {
 				const setup = accessor.get(IAgentCliSetupService);
+				if (setupId === CHATGPT_SUBSCRIPTION_SETUP_ID || setupId === CLAUDE_SUBSCRIPTION_SETUP_ID) {
+					await setup.beginSetup(setupId, { confirmed: true });
+					return;
+				}
 				const choice = await accessor.get(IQuickInputService).pick([
 					{ label: 'ChatGPT', id: CHATGPT_SUBSCRIPTION_SETUP_ID },
 					{ label: 'Claude', id: CLAUDE_SUBSCRIPTION_SETUP_ID },
@@ -57,6 +64,55 @@ export function registerBackboardSsoActions(): void {
 		 */
 		override async run(accessor: ServicesAccessor): Promise<boolean> {
 			return Boolean(await accessor.get(ICommandService).executeCommand<boolean>('backboard.extension.signIn'));
+		}
+	});
+
+	registerAction2(class BackboardSignOutAction extends Action2 {
+		constructor() {
+			super({
+				id: 'backboard.signOut',
+				title: localize2('backboard.signOut', "Sign Out"),
+				category: backboardCategory,
+				f1: true,
+				precondition: BackboardAuthContextKeys.enabled,
+				menu: {
+					id: MenuId.GlobalActivity,
+					// Its own group after '7_update', so it sits under "Check for Updates...".
+					group: '8_backboard_account',
+					order: 1,
+					when: ContextKeyExpr.and(
+						BackboardAuthContextKeys.enabled,
+						ContextKeyExpr.or(BackboardAuthContextKeys.signedIn, BackboardAuthContextKeys.alternativeConfigured),
+					),
+				},
+			});
+		}
+
+		/**
+		 * Removes every credential the chat can bill to (Backboard key and the
+		 * ChatGPT/Claude connections), then re-reads auth state so the sign-in
+		 * gate blurs the chat and sessions right away.
+		 */
+		override async run(accessor: ServicesAccessor): Promise<void> {
+			const dialogService = accessor.get(IDialogService);
+			const commandService = accessor.get(ICommandService);
+			const authService = accessor.get(IBackboardAuthService);
+			const notificationService = accessor.get(INotificationService);
+			const { confirmed } = await dialogService.confirm({
+				message: localize('backboard.signOut.confirm', "Sign out of Backboard?"),
+				detail: localize('backboard.signOut.detail', "This removes your Backboard API key and disconnects ChatGPT and Claude subscriptions from Backboard. ChatGPT and Claude Code stay signed in on their own."),
+				primaryButton: localize({ key: 'backboard.signOut.button', comment: ['&& denotes a mnemonic'] }, "&&Sign Out"),
+			});
+			if (!confirmed) {
+				return;
+			}
+			try {
+				await commandService.executeCommand('backboard.extension.signOut');
+			} catch (error) {
+				notificationService.error(error instanceof Error ? error.message : String(error));
+			} finally {
+				await authService.refresh();
+			}
 		}
 	});
 

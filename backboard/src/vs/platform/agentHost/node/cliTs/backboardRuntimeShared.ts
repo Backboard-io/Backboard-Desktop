@@ -182,11 +182,10 @@ export const BUNDLED_CHATGPT_SUBSCRIPTION_MODELS: readonly BridgeModel[] = [
 
 /** Local Claude Code subscription routes are not part of Backboard's API catalog. */
 export const BUNDLED_CLAUDE_SUBSCRIPTION_MODELS: readonly BridgeModel[] = [
-	{ provider: 'anthropic-subscription', name: 'default', displayName: 'Claude Default (Opus 5)', resolved_model: 'claude-opus-5[1m]', modelType: 'llm', contextLimit: 1_000_000, supportsVision: true, supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
-	{ provider: 'anthropic-subscription', name: 'opus[1m]', displayName: 'Claude Opus 5 (1M)', resolved_model: 'claude-opus-5[1m]', modelType: 'llm', contextLimit: 1_000_000, supportsVision: true, supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
-	{ provider: 'anthropic-subscription', name: 'claude-fable-5-1[1m]', displayName: 'Claude Fable 5.1 (1M)', resolved_model: 'claude-fable-5-1', modelType: 'llm', contextLimit: 1_000_000, supportsVision: true, supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
-	{ provider: 'anthropic-subscription', name: 'sonnet', displayName: 'Claude Sonnet 5', resolved_model: 'claude-sonnet-5', modelType: 'llm', contextLimit: 200_000, supportsVision: true, supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
-	{ provider: 'anthropic-subscription', name: 'haiku', displayName: 'Claude Haiku 4.5', resolved_model: 'claude-haiku-4-5-20251001', modelType: 'llm', contextLimit: 200_000, supportsVision: true, supported_effort_levels: [] },
+	{ provider: 'anthropic-subscription', name: 'claude-fable-5-1', displayName: 'Claude Fable 5.1', resolved_model: 'claude-fable-5-1', modelType: 'llm', contextLimit: 200_000, supportsVision: true, supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+	{ provider: 'anthropic-subscription', name: 'claude-opus-5-5', displayName: 'Claude Opus 5.5', resolved_model: 'claude-opus-5-5', modelType: 'llm', contextLimit: 200_000, supportsVision: true, supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+	{ provider: 'anthropic-subscription', name: 'claude-sonnet-5-5', displayName: 'Claude Sonnet 5.5', resolved_model: 'claude-sonnet-5-5', modelType: 'llm', contextLimit: 200_000, supportsVision: true, supported_effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+	{ provider: 'anthropic-subscription', name: 'claude-haiku-4-5-20251001', displayName: 'Claude Haiku 4.5', resolved_model: 'claude-haiku-4-5-20251001', modelType: 'llm', contextLimit: 200_000, supportsVision: true, supported_effort_levels: [] },
 ];
 
 interface BackboardConfigJson {

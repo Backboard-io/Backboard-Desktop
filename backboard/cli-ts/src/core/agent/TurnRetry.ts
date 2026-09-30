@@ -28,17 +28,19 @@ export function turnRetryPrompt(
 
 /**
  * Failures that no retry or fallback model can fix because the account itself
- * is blocked: Backboard pauses chat once the balance is used up. Retrying them
- * kept the user waiting ~20 s across five attempts for the same answer.
+ * is blocked: Backboard pauses chat once the balance is used up, and nothing
+ * can bill a model once its route is signed out. Retrying them kept the user
+ * waiting ~20 s across five attempts for the same answer.
  */
 const ACCOUNT_BLOCKED_PATTERNS = [
 	"balance is used up",
 	"add credits",
 	"insufficient credits",
 	"credit balance",
+	"no backend can serve",
 ];
 
-/** True when the failure needs the user to act (add credit), not a retry. */
+/** True when the failure needs the user to act (add credit, sign in), not a retry. */
 export function isAccountBlockedError(error: unknown): boolean {
 	const message = (
 		error instanceof Error ? error.message : String(error)

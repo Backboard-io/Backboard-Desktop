@@ -192,7 +192,8 @@ describe("SubscriptionAuth", () => {
 		let staleCallbackStatus: number | undefined;
 		let callbackResponse:
 			| {
-					body: string;
+					status: number;
+					location: string | null;
 					cacheControl: string | null;
 					referrerPolicy: string | null;
 			  }
@@ -216,9 +217,11 @@ describe("SubscriptionAuth", () => {
 					"state",
 					authUrl.searchParams.get("state") ?? "",
 				);
-				const response = await fetch(callback);
+				const response = await fetch(callback, { redirect: "manual" });
+				await response.text();
 				callbackResponse = {
-					body: await response.text(),
+					status: response.status,
+					location: response.headers.get("location"),
 					cacheControl: response.headers.get("cache-control"),
 					referrerPolicy: response.headers.get("referrer-policy"),
 				};
@@ -234,16 +237,13 @@ describe("SubscriptionAuth", () => {
 			chatgptSubscriptionAuthFile: authFile,
 			model: { provider: "openai-subscription", model: "gpt-native" },
 		});
+		// Success lands on Backboard SSO's completion page; the code stays local.
+		expect(callbackResponse?.status).toBe(302);
+		expect(callbackResponse?.location).toBe(
+			"https://app.backboard.io/oauth/device/complete",
+		);
 		expect(callbackResponse?.cacheControl).toBe("no-store");
 		expect(callbackResponse?.referrerPolicy).toBe("no-referrer");
-		expect(callbackResponse?.body).toContain(
-			'history.replaceState(null, "", "/auth/complete")',
-		);
-		expect(callbackResponse?.body).toContain("window.close()");
-		expect(callbackResponse?.body).toContain(
-			'window.location.replace("https://backboard.io")',
-		);
-		expect(callbackResponse?.body).not.toContain("authorization-code");
 		await rm(homeDir, { recursive: true, force: true });
 	});
 });
