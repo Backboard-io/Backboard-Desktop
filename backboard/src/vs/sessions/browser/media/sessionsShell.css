@@ -448,21 +448,22 @@
 
 /* ---- Rail update button -------------------------------------------------- */
 
-/* A blue button above the avatar, present only while an update is available
- * (or installing, when it becomes Stop). */
+/* Sized and rounded like the rail's other icon buttons, in the same blue as
+ * the Editor's Update pill; present only while an update is available (or
+ * installing, when it becomes Stop). */
 .monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update {
 	display: none;
 	align-items: center;
 	justify-content: center;
 	flex: 0 0 auto;
-	width: 28px;
-	height: 28px;
-	margin: 2px auto 6px;
+	width: 26px;
+	height: 26px;
+	margin: 4px auto 8px;
 	padding: 0;
 	border: 0;
-	border-radius: 50%;
-	background: var(--vscode-button-background);
-	color: var(--vscode-button-foreground);
+	border-radius: 8px;
+	background: #1769d2;
+	color: #fff;
 	cursor: pointer;
 }
 
@@ -471,7 +472,7 @@
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update:hover {
-	background: var(--vscode-button-hoverBackground);
+	background: #125bb8;
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update:focus-visible {
@@ -480,8 +481,8 @@
 }
 
 .monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update .codicon {
-	font-size: 15px;
-	color: inherit;
+	font-size: 14px;
+	color: #fff;
 }
 
 /* ---- Panel footer ------------------------------------------------------- */

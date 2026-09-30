@@ -1440,20 +1440,22 @@
 /* One size ladder for the model control, measured on the composer's own
  * control row so Simple, split panes and the editor panel behave alike:
  * the name ellipsizes first, then the reasoning level and chevron drop, and
- * only a very narrow row falls back to the provider logo alone. */
-@container backboard-composer-controls (max-width: 380px) {
+ * only a very narrow row falls back to the provider logo alone. The level
+ * stays through the editor's default side-panel width (about 270px of row),
+ * where it is the only place the chat shows its reasoning setting. */
+@container backboard-composer-controls (max-width: 250px) {
 	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger > .combined-model-provider-trigger-thinking {
 		display: none !important;
 	}
 }
 
-@container backboard-composer-controls (max-width: 300px) {
+@container backboard-composer-controls (max-width: 230px) {
 	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger > .combined-model-provider-trigger-chevron {
 		display: none !important;
 	}
 }
 
-@container backboard-composer-controls (max-width: 240px) {
+@container backboard-composer-controls (max-width: 210px) {
 	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger > :not(.combined-model-logo) {
 		display: none !important;
 	}
