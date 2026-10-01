@@ -46,6 +46,10 @@ import { OPEN_API_KEYS_COMMAND_ID } from '../../../../workbench/contrib/chat/bro
 
 // --- Account Menu Items --- //
 const AccountMenu = Menus.AccountMenu;
+MenuRegistry.appendMenuItem(AccountMenu, {
+	command: { id: 'backboard.openBilling', title: localize('billing', "Billing"), icon: Codicon.creditCard },
+	when: IsPhoneLayoutContext.negate(), group: '2_settings', order: 3,
+});
 const SessionsTitleBarAccountWidgetAction = 'sessions.action.titleBarAccountWidget';
 const SESSIONS_ACCOUNT_TITLEBAR_PANEL_WIDTH = 360;
 

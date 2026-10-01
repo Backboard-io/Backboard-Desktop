@@ -179,6 +179,10 @@
 			"project": "vscode-workbench"
 		},
 		{
+			"name": "vs/workbench/contrib/backboardBilling",
+			"project": "vscode-workbench"
+		},
+		{
 			"name": "vs/workbench/contrib/chat",
 			"project": "vscode-workbench"
 		},

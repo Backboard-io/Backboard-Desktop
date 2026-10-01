@@ -1,0 +1,49 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.backboard-billing {
+	box-sizing: border-box;
+	width: 100%;
+	max-width: 1000px;
+	margin: 0 auto;
+	padding: 20px 32px 40px;
+	overflow: auto;
+	color: var(--vscode-editor-foreground);
+}
+.backboard-billing h1 { font-size: 24px; margin: 0; font-weight: var(--vscode-agents-fontWeight-semiBold, 600); }
+.backboard-billing h2 { font-size: var(--vscode-agents-fontSize-heading2, 18px); margin: 20px 0 12px; }
+.backboard-billing h3 { font-size: 17px; margin: 0; }
+.backboard-billing p { line-height: 1.5; }
+.backboard-billing .billing-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.backboard-billing .billing-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.backboard-billing .billing-account { font-weight: var(--vscode-agents-fontWeight-semiBold, 600); }
+.backboard-billing .billing-notice { min-height: 20px; color: var(--vscode-descriptionForeground); }
+.backboard-billing .billing-muted { color: var(--vscode-descriptionForeground); }
+.backboard-billing .billing-current, .backboard-billing .billing-plan {
+	border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+	border-radius: var(--vscode-cornerRadius-large, 8px);
+	background: var(--vscode-editorWidget-background);
+	padding: 20px;
+}
+.backboard-billing .billing-current h2 { margin-top: 0; }
+.backboard-billing .billing-metrics { display: flex; flex-wrap: wrap; gap: 0 24px; }
+.backboard-billing .billing-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 20px; }
+.backboard-billing .billing-price { font-size: 21px; font-weight: var(--vscode-agents-fontWeight-semiBold, 600); }
+.backboard-billing .billing-current-label { color: var(--vscode-textLink-foreground); font-weight: var(--vscode-agents-fontWeight-semiBold, 600); }
+.backboard-billing .billing-button {
+	font: inherit;
+	padding: 8px 16px;
+	border: var(--vscode-strokeThickness, 1px) solid transparent;
+	border-radius: var(--vscode-cornerRadius-medium, 6px);
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	cursor: pointer;
+}
+.backboard-billing .billing-button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.backboard-billing .billing-button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.backboard-billing .billing-button.primary:hover { background: var(--vscode-button-hoverBackground); }
+.backboard-billing .billing-button:disabled { opacity: 0.5; cursor: default; }
+.backboard-billing .billing-button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+@media (max-width: 550px) { .backboard-billing { padding: 16px; } .backboard-billing .billing-header { flex-wrap: wrap; } }

@@ -9,6 +9,7 @@ import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.j
 import { URI } from '../../../../base/common/uri.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IRequestService } from '../../../../platform/request/common/request.js';
@@ -62,6 +63,7 @@ export class BackboardUsageView extends Disposable {
 		@ILogService private readonly logService: ILogService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IEditorGroupsService private readonly editorGroupsService: IEditorGroupsService,
+		@ICommandService private readonly commandService: ICommandService,
 	) {
 		super();
 	}
@@ -92,6 +94,8 @@ export class BackboardUsageView extends Disposable {
 		this.inputDisposables.add(input.webview.onMessage(event => {
 			if (event.message?.type === 'ready' || event.message?.type === 'refresh') {
 				void this.load();
+			} else if (event.message?.type === 'billing') {
+				void this.commandService.executeCommand('backboard.openBilling');
 			} else if (event.message?.type === 'back') {
 				const modalEditorPart = this.editorGroupsService.activeModalEditorPart;
 				if (modalEditorPart) {
@@ -439,7 +443,7 @@ function usageHtml(): string {
 	</style>
 </head>
 <body>
-	<nav class="app-bar"><button class="back" id="back" type="button" aria-label="Back to app"><span class="back-arrow" aria-hidden="true">←</span><span>Back to app</span></button></nav>
+	<nav class="app-bar"><button class="back" id="back" type="button" aria-label="Back to app"><span class="back-arrow" aria-hidden="true">←</span><span>Back to app</span></button><button class="back" id="billing" type="button">Billing</button></nav>
 	<div class="shell">
 		<header><h1>Usage</h1><span class="period" id="period"></span><div class="segmented"><button data-range="7">7 days</button><button data-range="30" aria-pressed="true">30 days</button><button data-range="90">90 days</button></div><button class="refresh" id="refresh" title="Refresh usage">↻</button></header>
 		<div class="status" id="status"></div>
@@ -471,6 +475,7 @@ function usageHtml(): string {
 		function renderMetrics(value) { const total = value.input + value.output; const metrics = [['Processed tokens', compact(total), compact(value.input) + ' input'], ['Output', compact(value.output), total ? percent(value.output / total) + ' of tokens' : 'No output reported'], ['Cached input', compact(value.cached), value.cached ? percent(value.cached / Math.max(1, value.input)) + ' of input' : 'Not reported'], ['Usage events', compact(value.count), state.range + '-day view'], ['Balance', money(value.balance), 'Available credit']]; byId('metrics').innerHTML = metrics.map(metric => '<div class="metric"><div class="muted">' + metric[0] + '</div><div class="metric-value">' + metric[1] + '</div><div class="muted">' + metric[2] + '</div></div>').join(''); }
 		function renderTable(value) { const rows = aggregate(value.events, state.breakdown), total = rows.reduce((sum, row) => sum + row.cost, 0); byId('first-column').textContent = state.breakdown === 'day' ? 'Day' : 'Model'; byId('table').style.display = rows.length ? 'table' : 'none'; byId('table-empty').classList.toggle('visible', !rows.length); byId('rows').innerHTML = rows.map(row => '<tr><td>' + escapeHtml(state.breakdown === 'day' && row.label !== 'Undated' ? new Date(row.label + 'T00:00:00').toLocaleDateString() : row.label) + '</td><td>' + money(row.cost) + '</td><td>' + percent(total ? row.cost / total : 0) + '</td><td>' + compact(row.tokens) + '</td></tr>').join(''); }
 		byId('back').addEventListener('click', () => vscode.postMessage({ type: 'back' }));
+		byId('billing').addEventListener('click', () => vscode.postMessage({ type: 'billing' }));
 		document.addEventListener('click', event => { const button = event.target.closest('button'); if (!button || button.id === 'back') return; if (button.dataset.range) state.range = Number(button.dataset.range); else if (button.dataset.mode) state.mode = button.dataset.mode; else if (button.dataset.breakdown) state.breakdown = button.dataset.breakdown; else if (button.id === 'refresh' && !state.loading) { state.loading = true; vscode.postMessage({ type: 'refresh' }); } render(); });
 		window.addEventListener('message', event => { const message = event.data; if (message.type === 'loading') { state.loading = true; byId('status').className = 'status visible'; byId('status').textContent = 'Loading Backboard usage…'; } else if (message.type === 'snapshot') { state.snapshot = message.snapshot; state.loading = false; byId('status').className = 'status'; } else if (message.type === 'error') { state.loading = false; byId('status').className = 'status visible error'; byId('status').textContent = message.message || 'Could not load usage.'; } render(); });
 		vscode.postMessage({ type: 'ready' }); render();

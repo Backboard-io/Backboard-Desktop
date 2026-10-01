@@ -304,6 +304,8 @@ export class BackboardUsagePanel implements vscode.Disposable {
 		panel.webview.onDidReceiveMessage(message => {
 			if (message?.type === 'ready' || message?.type === 'refresh') {
 				void this.load();
+			} else if (message?.type === 'billing') {
+				void vscode.commands.executeCommand('backboard.openBilling');
 			}
 		});
 	}
@@ -386,6 +388,7 @@ function usageHtml(webview: vscode.Webview): string {
 		.segmented button:hover, .refresh:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
 		.segmented button:focus-visible, .refresh:focus-visible, .breakdown-toggle button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -2px; }
 		.refresh { width: 32px; flex: 0 0 32px; border: 1px solid var(--usage-border); border-radius: 7px; font-size: 17px; line-height: 28px; }
+		#billing { width: auto; flex-basis: auto; padding: 0 10px; font-size: 12px; }
 		.refresh.loading { animation: usage-spin 0.9s linear infinite; }
 		@keyframes usage-spin { to { transform: rotate(360deg); } }
 		.status {
@@ -470,6 +473,7 @@ function usageHtml(webview: vscode.Webview): string {
 	<div class="usage-shell">
 		<header class="usage-header">
 			<h1>Usage</h1>
+			<button class="refresh" id="billing" type="button">Billing</button>
 			<div class="period" id="period"></div>
 			<div class="segmented" aria-label="Usage period">
 				<button data-range="7" aria-pressed="false">7 days</button>
@@ -652,6 +656,7 @@ function usageHtml(webview: vscode.Webview): string {
 		}
 		function escapeHtml(value) { const node = document.createElement('span'); node.textContent = String(value); return node.innerHTML; }
 		document.addEventListener('click', event => {
+			if (event.target.closest('#billing')) { vscode.postMessage({ type: 'billing' }); return; }
 			const button = event.target.closest('button'); if (!button) return;
 			if (button.dataset.range) { state.range = Number(button.dataset.range); render(); }
 			else if (button.dataset.mode) { state.mode = button.dataset.mode; render(); }

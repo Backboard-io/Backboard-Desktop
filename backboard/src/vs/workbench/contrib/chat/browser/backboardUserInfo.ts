@@ -92,17 +92,52 @@ async function userInfoClaims(oauth: Record<string, unknown>, fileService: IFile
 		logService.info(`[Backboard] userinfo lookup failed with status ${result.status}; not refreshing (refresh token available: ${Boolean(refreshToken)}).`);
 		return undefined;
 	}
-	const tokens = await refreshBackboardAccessToken(refreshToken, requestService, logService);
-	if (!tokens) {
+	const refreshed = await refreshBackboardOAuthCredentials(fileService, configResource, requestService, logService, accessToken);
+	if (!refreshed) {
 		return undefined;
 	}
-	await patchBackboardConfigOAuth(fileService, configResource, {
-		access_token: tokens.accessToken,
-		refresh_token: tokens.refreshToken ?? refreshToken,
-		expires_in: tokens.expiresIn,
-		obtained_at: new Date().toISOString(),
-	});
-	return (await requestUserInfo(tokens.accessToken, requestService)).claims;
+	return (await requestUserInfo(refreshed, requestService)).claims;
+}
+
+const credentialRefreshes = new Map<string, Promise<string | undefined>>();
+const credentialRotations = new Map<string, { previous: string; current: string }>();
+
+/** Identify a coordinated rotation so concurrent successful responses remain usable. */
+export function isBackboardOAuthRotation(resource: URI, previous: string, current: string | undefined): boolean {
+	const rotation = credentialRotations.get(resource.toString());
+	return rotation?.previous === previous && rotation.current === current;
+}
+
+/** Share token rotation between account metadata and concurrent billing requests. */
+export async function refreshBackboardOAuthCredentials(fileService: IFileService, resource: URI, requestService: IRequestService, logService: ILogService, rejectedToken: string): Promise<string | undefined> {
+	const key = resource.toString();
+	const inFlight = credentialRefreshes.get(key);
+	if (inFlight) { return inFlight; }
+	const refresh = (async () => {
+		const config = await readBackboardConfigJson(fileService, resource);
+		const oauth = isRecord(config.oauth) ? config.oauth : {};
+		const current = stringValue(oauth.access_token);
+		if (current !== rejectedToken) { return current; }
+		const refreshToken = stringValue(oauth.refresh_token);
+		if (!refreshToken) { return undefined; }
+		const tokens = await refreshBackboardAccessToken(refreshToken, requestService, logService);
+		if (!tokens) { return undefined; }
+		// A sign-in/sign-out that happened during the request wins over this refresh.
+		const latest = await readBackboardConfigJson(fileService, resource);
+		const latestOAuth = isRecord(latest.oauth) ? latest.oauth : {};
+		if (stringValue(latestOAuth.access_token) !== rejectedToken) { return stringValue(latestOAuth.access_token); }
+		await fileService.writeFile(resource, VSBuffer.fromString(`${JSON.stringify({
+			...latest, oauth: {
+				...latestOAuth,
+				access_token: tokens.accessToken, refresh_token: tokens.refreshToken ?? refreshToken,
+				expires_in: tokens.expiresIn, obtained_at: new Date().toISOString(),
+			}
+		}, undefined, '\t')}\n`));
+		credentialRotations.set(key, { previous: rejectedToken, current: tokens.accessToken });
+		return tokens.accessToken;
+	})();
+	credentialRefreshes.set(key, refresh);
+	try { return await refresh; } finally { credentialRefreshes.delete(key); }
 }
 
 async function requestUserInfo(accessToken: string, requestService: IRequestService): Promise<{ readonly status: number | undefined; readonly claims: Record<string, unknown> | undefined }> {
@@ -130,6 +165,7 @@ async function refreshBackboardAccessToken(refreshToken: string, requestService:
 		url: BackboardOAuth.tokenUrl,
 		data: body.toString(),
 		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+		timeout: 15000,
 		callSite: 'backboardUserInfo.refreshToken',
 	}, CancellationToken.None);
 	const status = context.res.statusCode;

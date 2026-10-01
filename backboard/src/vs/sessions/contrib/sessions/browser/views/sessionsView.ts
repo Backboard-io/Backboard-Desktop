@@ -582,6 +582,10 @@ export class SessionsView extends ViewPane {
 				await this.closeFullWindowPages('settings');
 				void this.commandService.executeCommand('workbench.action.openSettings');
 			});
+			this.createSidebarAction(navigation, Codicon.creditCard, localize('billing', "Billing"), async () => {
+				await this.closeFullWindowPages('settings');
+				await this.commandService.executeCommand('backboard.openBilling');
+			});
 		}
 
 		// With the icon rail, the update control is a blue button directly above
