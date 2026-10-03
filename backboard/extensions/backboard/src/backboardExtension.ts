@@ -14,6 +14,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 import { codiconsStylesheetUri, fontBaseUri, iconBaseUri, panelHtml, webviewLocalResourceRoots } from './panel/panelHtml';
 import { initializeBackboardUpdates, readCurrentAppVersion } from './updates';
+import { installTerminalCommand } from './terminalCommand';
 import type { BackboardAttachment, BackboardConfigJson, BackboardDeviceCodeResponse, BackboardOAuthSaveResult, BackboardOAuthTokens, BridgeEvent, BridgeModel, FileAttachment, FileChangePayload, ImageAttachment, ModelCacheEntry, PanelOptions, PanelPersistedState, PanelStateStore, PanelThreadFile, PendingRequest, ResponseSink, ToolCacheEntry, ToolResultRequest, VoiceAttachment } from './types';
 import { BackboardUsagePanel, readLocalUsageSnapshot, type BackboardUsageSnapshot } from './usagePanel';
 
@@ -87,6 +88,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	}));
 
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.configureProviderKey', (provider: string, key: string) => bridge.configureProviderKey(provider, key)));
+	// Onboarding's "Install terminal command" option; no admin prompt, see installTerminalCommand.
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.installTerminalCommand', (commandName: string) => installTerminalCommand(vscode.env.appRoot, commandName)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', async () => {
 		if (await setApiKey()) {
 			bridge.restart();

@@ -45,6 +45,7 @@ import { ISessionsService } from '../../../../services/sessions/browser/sessions
 import { ISessionsListModelService } from '../../../../services/sessions/browser/sessionsListModelService.js';
 import { MissingFolderTracker } from '../../../../browser/missingFolderTracker.js';
 import { IWorkbenchAssignmentService } from '../../../../../workbench/services/assignment/common/assignmentService.js';
+import { subscriptionPlanOfAgentType, subscriptionPlanOfModelId } from '../../../../../platform/agentHost/common/byokProviders.js';
 // =============================================================================
 // TEMPORARY (tracked by https://github.com/microsoft/vscode/issues/320480)
 // -----------------------------------------------------------------------------
@@ -157,6 +158,22 @@ function providerPresentationForSession(session: ISession, sessionsProvidersServ
 		icon: registeredType?.icon ?? provider?.icon ?? session.icon,
 		label: registeredType?.label ?? provider?.label ?? session.sessionType,
 	};
+}
+
+/**
+ * The subscription a chat bills to, shown in place of the provider: a
+ * Backboard chat on a subscription model, or a Claude Code / Codex session.
+ * Undefined when it is not subscription-billed.
+ */
+function subscriptionPresentationForSession(session: ISession, modelId: string | undefined): ISessionProviderPresentation | undefined {
+	switch (subscriptionPlanOfModelId(modelId) ?? subscriptionPlanOfAgentType(session.sessionType)) {
+		case 'claude':
+			return { icon: Codicon.claude, label: localize('sessionProvider.claudeSubscription', "Claude subscription") };
+		case 'chatgpt':
+			return { icon: Codicon.openai, label: localize('sessionProvider.chatgptSubscription', "ChatGPT subscription") };
+		default:
+			return undefined;
+	}
 }
 
 function isSessionSection(item: SessionListItem): item is ISessionSection {
@@ -532,18 +549,27 @@ class SessionItemRenderer implements ITreeRenderer<SessionListItem, FuzzyScore, 
 			? `session-provider-icon ${ThemeIcon.asClassName(providerIcon)}`
 			: 'session-provider-icon';
 		template.providerIcon.classList.toggle('no-icon', !providerIcon);
+		// Provider pill — reactive: a Backboard chat on a Claude or ChatGPT
+		// subscription names that subscription, since the model can change.
 		const providerPresentation = providerPresentationForSession(element, this.sessionsProvidersService);
-		template.simpleAgentIcon.className = `session-simple-agent-icon ${ThemeIcon.asClassName(providerPresentation.icon)}`;
-		template.simpleAgentLabel.textContent = providerPresentation.label;
-		const showSimpleProvider = this.options.simpleMode && providerPresentation.showInSimple !== false;
-		template.simpleProvider.classList.toggle('hidden', !showSimpleProvider);
-		if (showSimpleProvider) {
-			template.simpleProvider.title = localize('sessionProvider.tooltip', "Provider: {0}", providerPresentation.label);
-			template.simpleProvider.setAttribute('aria-label', template.simpleProvider.title);
-		} else {
-			template.simpleProvider.removeAttribute('title');
-			template.simpleProvider.removeAttribute('aria-label');
-		}
+		template.elementDisposables.add(autorun(reader => {
+			const subscription = subscriptionPresentationForSession(element, element.modelId.read(reader));
+			const presentation = subscription ?? providerPresentation;
+			template.simpleAgentIcon.className = `session-simple-agent-icon ${ThemeIcon.asClassName(presentation.icon)}`;
+			template.simpleAgentLabel.textContent = presentation.label;
+			template.simpleProvider.classList.toggle('subscription', !!subscription);
+			const showSimpleProvider = this.options.simpleMode && presentation.showInSimple !== false;
+			template.simpleProvider.classList.toggle('hidden', !showSimpleProvider);
+			if (showSimpleProvider) {
+				template.simpleProvider.title = subscription
+					? localize('sessionProvider.subscriptionTooltip', "Runs on your {0}", presentation.label)
+					: localize('sessionProvider.tooltip', "Provider: {0}", presentation.label);
+				template.simpleProvider.setAttribute('aria-label', template.simpleProvider.title);
+			} else {
+				template.simpleProvider.removeAttribute('title');
+				template.simpleProvider.removeAttribute('aria-label');
+			}
+		}));
 		const branchName = workspace?.folders[0]?.gitRepository?.branchName?.trim();
 		template.simpleBranch.textContent = this.options.simpleMode && !simpleSettled ? branchName ?? '' : '';
 		template.simpleBranch.classList.toggle('no-branch', !branchName || simpleSettled);

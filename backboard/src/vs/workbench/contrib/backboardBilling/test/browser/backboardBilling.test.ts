@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { DeferredPromise } from '../../../../../base/common/async.js';
+import { DeferredPromise, timeout } from '../../../../../base/common/async.js';
 import { bufferToStream, VSBuffer } from '../../../../../base/common/buffer.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Schemas } from '../../../../../base/common/network.js';
@@ -14,8 +14,6 @@ import { runWithFakedTimers } from '../../../../../base/test/common/virtualSched
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { IRequestContext, IRequestOptions } from '../../../../../base/parts/request/common/request.js';
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
-import { NullTelemetryService } from '../../../../../platform/telemetry/common/telemetryUtils.js';
-import { TestThemeService } from '../../../../../platform/theme/test/common/testThemeService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { FileService } from '../../../../../platform/files/common/fileService.js';
 import { InMemoryFileSystemProvider } from '../../../../../platform/files/common/inMemoryFilesystemProvider.js';
@@ -25,10 +23,9 @@ import { IRequestService } from '../../../../../platform/request/common/request.
 import { InMemoryStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IHostService } from '../../../../services/host/browser/host.js';
 import { IPathService } from '../../../../services/path/common/pathService.js';
-import { IEditorGroup, IEditorGroupsService } from '../../../../services/editor/common/editorGroupsService.js';
-import { BackboardBillingEditor } from '../../browser/backboardBillingEditor.js';
 import { BackboardBillingService } from '../../browser/backboardBillingService.js';
-import { billingPlanAction, billingReturn, IBillingStatus, parsePendingCheckout } from '../../common/backboardBilling.js';
+import { BillingPlansView, planCards } from '../../browser/billingPlansView.js';
+import { billingPlanAction, billingReturn, IBackboardBillingService, IBillingStatus, parsePendingCheckout } from '../../common/backboardBilling.js';
 
 const status: IBillingStatus = {
 	account: { id: 7, name: 'My organization', is_personal: false }, can_manage_billing: true,
@@ -330,7 +327,15 @@ suite('Backboard Billing', () => {
 		assert.match(billing.message, /Unavailable/);
 	});
 
-	test('native editor renders admin restrictions and confirms cancellation and downgrade dates', async () => {
+	function plansView(billing: IBackboardBillingService, dialog: IDialogService, opened: string[] = []) {
+		const opener = new class extends mock<IOpenerService>() { override async open(target: URI | string): Promise<boolean> { opened.push(target.toString()); return true; } };
+		const parent = document.createElement('div');
+		disposables.add(new BillingPlansView(parent, { mode: 'standalone', onDone: () => { } }, billing, dialog, opener, new class extends mock<ICommandService>() { }));
+		const button = (label: string) => Array.from(parent.querySelectorAll('button')).find(button => button.textContent === label);
+		return { parent, button };
+	}
+
+	test('plans view renders admin restrictions and confirms cancellation and downgrade dates', async () => {
 		const changed = disposables.add(new Emitter<void>());
 		const operations: string[] = [];
 		const confirmations: string[] = [];
@@ -343,35 +348,28 @@ suite('Backboard Billing', () => {
 			catalog, pending: undefined, loading: false, busy: false, message: '', needsSignIn: false,
 			refresh: async () => { }, run: async (operation: string) => { operations.push(operation); }, resumeCheckout: async () => { }
 		};
-		const theme = new TestThemeService();
-		disposables.add(theme._onThemeChange); disposables.add(theme._onFileIconThemeChange); disposables.add(theme._onProductIconThemeChange);
 		const dialog = new class extends mock<IDialogService>() {
 			override async confirm(confirmation: { message: string }) { confirmations.push(confirmation.message); return { confirmed: true }; }
 		};
-		const editor = disposables.add(new BackboardBillingEditor(new class extends mock<IEditorGroup>() { }, NullTelemetryService, theme,
-			disposables.add(new InMemoryStorageService()), billing, new class extends mock<ICommandService>() { }, dialog,
-			new class extends mock<IEditorGroupsService>() { }));
-		const parent = document.createElement('div');
-		editor.create(parent);
-		const button = (label: string) => Array.from(parent.querySelectorAll('button')).find(button => button.textContent === label)!;
+		const { parent, button } = plansView(billing, dialog);
 		assert.match(parent.textContent!, /My organization/);
 		assert.match(parent.textContent!, /5% service fee/);
-		button('Cancel renewal').click();
-		await Promise.resolve();
-		button('Downgrade').click();
-		await Promise.resolve();
+		button('Cancel Renewal')!.click();
+		await timeout(0);
+		button('Downgrade')!.click();
+		await timeout(0);
 		assert.deepStrictEqual(operations, ['cancel', 'change-plan']);
 		assert.ok(confirmations.every(message => message.includes(new Date(end * 1000).toLocaleDateString())));
 		billing.status = { ...billing.status, can_manage_billing: false };
 		changed.fire();
 		assert.match(parent.textContent!, /An account admin manages/);
-		assert.strictEqual(button('Update payment details').disabled, true);
+		assert.strictEqual(button('Update Payment Details')!.disabled, true);
 		assert.strictEqual(button('Downgrade'), undefined);
 	});
 
 	test('confirming a dialog cannot apply its action to an account selected while it was open', async () => {
 		let mutations = 0;
-		const { billing, storage } = await setup(async options => {
+		const { billing } = await setup(async options => {
 			if (options.type === 'POST') { mutations++; }
 			return response(options.url!.endsWith('/plans') ? catalog : status);
 		});
@@ -379,18 +377,29 @@ suite('Backboard Billing', () => {
 		billing.catalog = catalog;
 		const confirmation = new DeferredPromise<{ confirmed: boolean }>();
 		const dialog = new class extends mock<IDialogService>() { override confirm() { return confirmation.p; } };
-		const theme = new TestThemeService();
-		disposables.add(theme._onThemeChange); disposables.add(theme._onFileIconThemeChange); disposables.add(theme._onProductIconThemeChange);
-		const editor = disposables.add(new BackboardBillingEditor(new class extends mock<IEditorGroup>() { }, NullTelemetryService, theme,
-			storage, billing, new class extends mock<ICommandService>() { }, dialog, new class extends mock<IEditorGroupsService>() { }));
-		const parent = document.createElement('div');
-		editor.create(parent);
-		Array.from(parent.querySelectorAll('button')).find(button => button.textContent === 'Cancel renewal')!.click();
+		const { button } = plansView(billing, dialog);
+		button('Cancel Renewal')!.click();
 		billing.status = { ...billing.status, account: { ...status.account, id: 8 } };
 		await confirmation.complete({ confirmed: true });
 		assert.strictEqual(mutations, 0);
 		assert.strictEqual(billing.pending, undefined);
 		assert.match(billing.message, /billing account changed/);
+	});
+
+	test('before the billing API is deployed, cards use published prices and Subscribe opens the web billing page', async () => {
+		const billing = {
+			_serviceBrand: undefined, onDidChange: Event.None, status: undefined, catalog: undefined, pending: undefined,
+			loading: false, busy: false, message: 'billing has not been deployed yet', needsSignIn: false,
+			refresh: async () => { }, run: async () => { assert.fail('no API checkout without the billing API'); }, resumeCheckout: async () => { }
+		};
+		const opened: string[] = [];
+		const { parent, button } = plansView(billing, new class extends mock<IDialogService>() { }, opened);
+		assert.deepStrictEqual(planCards(undefined).map(card => `${card.name} ${card.price}`), ['Builder $20', 'Scale $400', 'Enterprise Custom']);
+		assert.doesNotMatch(parent.textContent!, /not been deployed/);
+		button('Subscribe $20')!.click();
+		await timeout(0);
+		assert.deepStrictEqual(opened, ['https://app.backboard.io/dashboard/billing?plan=builder']);
+		assert.match(parent.textContent!, /Finish checkout in your browser/);
 	});
 
 });

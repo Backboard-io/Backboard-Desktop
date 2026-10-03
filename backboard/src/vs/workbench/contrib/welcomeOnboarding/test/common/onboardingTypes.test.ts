@@ -29,8 +29,8 @@ suite('Backboard onboarding types', () => {
 
 	test('steps are ordered to match the Backboard onboarding flow', () => {
 		assert.deepStrictEqual([...ONBOARDING_STEPS], [
-			OnboardingStepId.Welcome,
 			OnboardingStepId.Theme,
+			OnboardingStepId.Welcome,
 		]);
 	});
 

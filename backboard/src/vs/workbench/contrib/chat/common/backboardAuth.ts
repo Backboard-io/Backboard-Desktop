@@ -34,6 +34,9 @@ export const BackboardOAuth = {
 	clientId: 'Backboard_oauth_q_cli',
 } as const;
 
+/** Opens the "sign in to use this model" popup. Argument: the model's display name (optional). */
+export const SHOW_SIGN_IN_PROMPT_COMMAND_ID = 'backboard.showSignInPrompt';
+
 export namespace BackboardAuthContextKeys {
 	export const alternativeConfigured = new RawContextKey<boolean>('backboard.alternativeConfigured', false);
 	export const enabled = new RawContextKey<boolean>('backboard.authGateEnabled', false, {
@@ -87,6 +90,15 @@ export function backboardConfigApiKey(config: BackboardConfigJson): string | und
 	return stringValueFromRecord(backboardConfigEnvKeys(config)[env]);
 }
 
+/**
+ * The device's guest key, minted by the agent host while nobody is signed in.
+ * It runs Backboard's free models only, so it never counts as signed in.
+ */
+export function backboardConfigGuestApiKey(config: BackboardConfigJson): string | undefined {
+	const guest = isObjectRecord(config.guest) ? config.guest : undefined;
+	return stringValueFromRecord(guest?.api_key);
+}
+
 export function backboardConfigAccessToken(config: BackboardConfigJson): string | undefined {
 	const oauth = isObjectRecord(config.oauth) ? config.oauth : undefined;
 	return stringValueFromRecord(oauth?.access_token);
@@ -116,6 +128,18 @@ export function normalizeBackboardEnv(env: string | undefined): string {
 		default:
 			return (env || 'prod').trim().toLowerCase();
 	}
+}
+
+/**
+ * The Backboard REST API base for the configured environment, e.g.
+ * `https://app.backboard.io/api`. An explicit URL (setting or config file)
+ * wins over the environment default.
+ */
+export function backboardApiBaseUrl(config: BackboardConfigJson, configuredUrl?: string, configuredEnv?: string): string {
+	const explicit = configuredUrl ?? stringValueFromRecord(config.api_url) ?? stringValueFromRecord(config.apiUrl);
+	const env = normalizeBackboardEnv(stringValueFromRecord(config.env) ?? configuredEnv);
+	const base = explicit ?? (env === 'local' ? 'http://localhost:8000' : env === 'prod' ? 'https://app.backboard.io/api' : 'https://dev.app.backboard.io/api');
+	return base.replace(/\/+$/, '');
 }
 
 function stringValueFromRecord(value: unknown): string | undefined {

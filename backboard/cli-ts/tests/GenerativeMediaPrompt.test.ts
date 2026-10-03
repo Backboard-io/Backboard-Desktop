@@ -38,9 +38,11 @@ describe("buildGenerativeMediaPrompt", () => {
 		expect(prompt).toContain("call the `generate_video` function tool");
 		expect(prompt).toContain("Never use execute, curl");
 		expect(prompt).not.toContain("operation=generate_video");
-		// On OpenRouter an attached clip is a video reference described as a new video (edit wording fails on Seedance),
-		// never read with Read, and failures are retried from the tool's hint or reported.
-		expect(prompt).toContain("pass that clip in the references (`input_reference_document_ids`)");
+		// On OpenRouter an attached clip is a video reference described as a new video, sent with the images
+		// that should appear in it; only some models take a clip. Never read with Read; failures are retried
+		// from the tool's hint or reported.
+		expect(prompt).toContain("pass that clip in the references (`input_reference_document_ids`), together with any attached images");
+		expect(prompt).toContain("Only Hailuo 3 takes a clip plus images");
 		expect(prompt).toContain("Write the prompt as a new video that follows the reference, never as an edit of it");
 		expect(prompt).not.toContain("Keep the same footage, camera motion");
 		expect(prompt).toContain("Never open attached images or videos with Read");

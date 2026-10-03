@@ -43,6 +43,7 @@ import { Turn } from "./Turn.ts";
 import {
 	abortableDelay,
 	isAccountBlockedError,
+	isSignInRequiredError,
 	TURN_FALLBACK_FROM_ATTEMPT,
 	turnRetryDelayMs,
 	turnRetryPrompt,
@@ -99,6 +100,11 @@ export interface AgentLoopDeps {
 	displayContent?: string;
 	durableSession?: RunMessageOptions["durableSession"];
 	resolveCapacityFallback?: CapacityFallbackResolver;
+	/**
+	 * A model Backboard runs with no credit, for a turn the account is blocked
+	 * from paying for (see TurnRetry.isAccountBlockedError).
+	 */
+	resolveFreeFallback?: CapacityFallbackResolver;
 	onModelSucceeded?: ModelSucceededHandler;
 	onThinkingDisabled?: ThinkingDisabledHandler;
 	/**
@@ -242,11 +248,15 @@ export class AgentLoop {
 				notifications.activeNotificationHidesResponse(),
 		});
 
-		const switchToFallbackModel = async (): Promise<void> => {
-			const fallback = await this.deps
-				.resolveCapacityFallback?.(activeModel, attemptedModelKeys, ctx.signal)
-				.catch(() => null);
-			if (!fallback) return;
+		const switchToFallbackModel = async (
+			resolve = this.deps.resolveCapacityFallback,
+		): Promise<boolean> => {
+			const fallback = await resolve?.(
+				activeModel,
+				attemptedModelKeys,
+				ctx.signal,
+			).catch(() => null);
+			if (!fallback) return false;
 			activeModel.provider = fallback.provider;
 			activeModel.model = fallback.model;
 			attemptedModelKeys.add(modelKey(activeModel));
@@ -259,7 +269,9 @@ export class AgentLoop {
 				).catch(() => activeThinkingResolver);
 			}
 			forceThinkingOff = false;
+			return true;
 		};
+		let switchedToFreeModel = false;
 
 		// A failed turn is retried silently on the same thread (see TurnRetry.ts):
 		// the model resumes with everything it already did, and later attempts
@@ -383,6 +395,26 @@ export class AgentLoop {
 					return "cancelled";
 				}
 				const accountBlocked = isAccountBlockedError(err);
+				// Out of credit: no paid model will run, but Backboard's $0 models
+				// still do. Move the turn to one once instead of failing it.
+				if (
+					accountBlocked &&
+					!switchedToFreeModel &&
+					this.deps.resolveFreeFallback
+				) {
+					switchedToFreeModel = true;
+					const blockedModel = `${activeModel.provider}/${activeModel.model}`;
+					if (await switchToFallbackModel(this.deps.resolveFreeFallback)) {
+						assistant.finalize();
+						bus.emit({
+							type: "system:warning",
+							message: isSignInRequiredError(err)
+								? `This reply uses ${activeModel.model}, a free model. Sign in to use ${blockedModel}.`
+								: `You're out of credits, so this reply uses ${activeModel.model}, a free model. Add credits on the Billing page to use ${blockedModel} again.`,
+						});
+						continue;
+					}
+				}
 				if (attempt < maxAttempts && !accountBlocked) {
 					// Keep any partial answer as context for the continuation.
 					assistant.finalize();

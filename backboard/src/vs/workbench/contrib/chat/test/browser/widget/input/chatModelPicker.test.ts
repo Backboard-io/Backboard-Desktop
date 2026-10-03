@@ -14,7 +14,7 @@ import { GalleryMcpServerStatus, IGalleryMcpServer } from '../../../../../../../
 import { McpServerType } from '../../../../../../../platform/mcp/common/mcpPlatformTypes.js';
 import { StateType } from '../../../../../../../platform/update/common/update.js';
 import { buildModelPickerItems, getControlModelsForEntitlement, getModelPickerAccessibilityProvider } from '../../../../browser/widget/input/chatModelPicker.js';
-import { buildCombinedModelSections, combinedModelSectionGroupLabel, COMBINED_MODEL_SECTION_ALL, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_RECOMMENDED, formatContextWindow, formatModelLabel, formatModelProviderDetail, formatPrice, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, isKeyBilledModel, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
+import { buildCombinedModelSections, combinedModelSectionGroupLabel, COMBINED_MODEL_SECTION_ALL, COMBINED_MODEL_SECTION_CHATGPT, COMBINED_MODEL_SECTION_CLAUDE, COMBINED_MODEL_SECTION_FREE, COMBINED_MODEL_SECTION_RECOMMENDED, formatContextWindow, formatModelLabel, formatModelProviderDetail, formatPrice, isChatGptSubscriptionConnected, isClaudeSubscriptionConnected, isKeyBilledModel, modelsForCombinedModelSection, providerIconKeyForCombinedModelSection } from '../../../../browser/widget/input/combinedModelProviderPickerActionItem.js';
 import { buildMcpMarketplaceItems, buildSkillsLibraryItems, createMcpMarketplaceItemsFromCatalog, getHiddenMcpMarketplaceCatalogEntries, IMcpMarketplaceCatalogEntry, mcpItemMatchesInstalledServer, McpMarketplaceModalItem, resolveMcpMarketplaceItems, parseSkillsShHtml, splitSkillsShId } from '../../../../browser/widget/input/skillsLibrary.js';
 import { IModelPickerSetupCandidate } from '../../../../browser/widget/input/modelPickerActionItem.js';
 import { filterModelsForSession } from '../../../../browser/widget/input/chatModelSelectionLogic.js';
@@ -123,6 +123,24 @@ suite('combined model provider sections', () => {
 		assert.deepStrictEqual(modelsForCombinedModelSection(models, 'byok:anthropic-key', false).map(model => model.metadata.id), ['anthropic-key/claude-opus-5']);
 		assert.strictEqual(formatModelProviderDetail(models[1]), 'OpenAI · Your key');
 		assert.strictEqual(formatModelProviderDetail(models[6]), 'OpenAI');
+	});
+
+	test('lists free Backboard models in their own section after Recommended', () => {
+		const models = [
+			createBackboardModel('openrouter/cohere/north-mini-code:free', 'cohere/north-mini-code:free', { billingSource: 'backboard', priceCategory: 'free' }),
+			createBackboardModel('openrouter/deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-flash', { billingSource: 'backboard' }),
+			createBackboardModel('openai/gpt-free', 'GPT Free', { billingSource: 'byok', priceCategory: 'free' }),
+		];
+
+		const sections = buildCombinedModelSections(models);
+
+		assert.deepStrictEqual(sections.slice(0, 3).map(section => [section.id, section.modelCount]), [
+			[COMBINED_MODEL_SECTION_RECOMMENDED, 1],
+			[COMBINED_MODEL_SECTION_FREE, 1],
+			[COMBINED_MODEL_SECTION_ALL, 3],
+		]);
+		assert.deepStrictEqual(modelsForCombinedModelSection(models, COMBINED_MODEL_SECTION_FREE).map(model => model.metadata.id), ['openrouter/cohere/north-mini-code:free']);
+		assert.strictEqual(buildCombinedModelSections(models.slice(1)).some(section => section.id === COMBINED_MODEL_SECTION_FREE), false);
 	});
 
 	test('keeps subscriptions between Backboard and BYOK in the shipped catalog', () => {

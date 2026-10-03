@@ -80,6 +80,20 @@ export function capacityFallbackCandidates(
 	});
 }
 
+/**
+ * Models Backboard runs with no credit, for a turn the account can't pay for.
+ * Only models that can call tools qualify (the agent needs them); larger
+ * context windows first.
+ */
+export function freeFallbackCandidates(
+	models: readonly ModelInfo[],
+): ModelRef[] {
+	return models
+		.filter((model) => model.free && model.supportsTools !== false)
+		.sort((a, b) => (b.contextLimit ?? 0) - (a.contextLimit ?? 0))
+		.map((model) => ({ provider: model.provider, model: model.model }));
+}
+
 export function modelKey(model: ModelRef): string {
 	return `${model.provider}/${model.model}`.trim().toLowerCase();
 }

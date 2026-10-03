@@ -1,6 +1,6 @@
 # Desktop billing
 
-The shared contribution registers `backboard.openBilling` and a native modal editor in Simple, Editor, and Advanced modes. It uses stored SSO OAuth credentials and `IRequestService`; billing never uses the shared organization API key. The API origin comes from the existing Desktop SSO configuration.
+The shared contribution registers `backboard.openBilling`, which opens the plans view (`BillingPlansView`) as a full-window overlay in Simple, Editor, and Advanced modes. Onboarding shows the same view right after a Backboard sign-in. Until the desktop billing API is deployed, the cards fall back to published prices and Subscribe opens the app.backboard.io billing page. It uses stored SSO OAuth credentials and `IRequestService`; billing never uses the shared organization API key. The API origin comes from the existing Desktop SSO configuration.
 
 `BackboardBillingService` loads `/billing/status` and `/billing/plans`. Purchases carry a stable UUID, `source=desktop`, and the displayed account ID. The backend independently resolves and authorizes that account. Pending attempts and sessions persist in application storage and survive restarts. Stripe opens through the system browser, restricted to Stripe's HTTPS checkout and billing hosts.
 

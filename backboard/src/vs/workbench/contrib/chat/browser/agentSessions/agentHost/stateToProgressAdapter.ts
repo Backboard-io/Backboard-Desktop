@@ -1172,7 +1172,7 @@ function rewriteLinkTokenRaw(token: Tokens.Link | Tokens.Image, connectionAuthor
 		return undefined;
 	}
 	const scheme = parsed.scheme.toLowerCase();
-	if (!scheme || EXTERNAL_LINK_SCHEMES.has(scheme)) {
+	if (!scheme || EXTERNAL_LINK_SCHEMES.has(scheme) || (scheme === 'command' && CHAT_QUICK_FIX_COMMANDS.includes(parsed.path))) {
 		return undefined;
 	}
 	let agentHostUri = toAgentHostUri(parsed, connectionAuthority);
@@ -1217,8 +1217,16 @@ function isSkillFileUri(uri: URI): boolean {
  */
 export function rawMarkdownToString(content: string, connectionAuthority: string): MarkdownString {
 	const rewritten = connectionAuthority ? rewriteMarkdownLinks(content, connectionAuthority) : content;
-	return new MarkdownString(rewritten);
+	// A turn that could not start because an account is disconnected ends with
+	// a one-click fix (Reconnect Claude, Sign In, ...). Only these connect
+	// commands may run from chat text; every other command link stays inert.
+	return /\(command:backboard\./.test(rewritten)
+		? new MarkdownString(rewritten, { isTrusted: { enabledCommands: [...CHAT_QUICK_FIX_COMMANDS] } })
+		: new MarkdownString(rewritten);
 }
+
+/** Commands a chat failure note may link to: each connects the account the turn needed. */
+const CHAT_QUICK_FIX_COMMANDS: readonly string[] = ['backboard.signIn', 'backboard.setupSubscription', 'backboard.openApiKeys'];
 
 /**
  * Converts a protocol `StringOrMarkdown` value to a chat-layer `IMarkdownString`.

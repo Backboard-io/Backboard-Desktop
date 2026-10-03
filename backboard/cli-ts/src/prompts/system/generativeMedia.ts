@@ -216,23 +216,23 @@ export const VIDEO_LENGTH_OPTIONS = ["5s", "8s", "10s", "15s"] as const;
  *
  * OpenRouter (every video model the picker lists today) has no source-video
  * field: the clip goes in as a video *reference* (`input_references` with a
- * `video_url`). The prompt must describe a new video that follows that
- * reference. Edit wording ("keep the same footage, change only …") makes
- * Seedance 2.5 switch to its video-editing mode, which needs duration=-1 and
- * aspect_ratio=adaptive; OpenRouter cannot send either, so the job fails
- * (OpenRouterTeam/typescript-sdk#1096). Reference-guided wording succeeds.
+ * `video_url`). Live tests (2026-10-02) showed which models take one: Hailuo 3
+ * (clip alone or clip plus images, e.g. "the man at the mic is the fox from
+ * the reference image"), Aleph 2 and FLUX Video Edit (clip alone). Seedance
+ * failed on every video input however the prompt was worded, and references
+ * past ~10s or above 720p failed everywhere.
  */
 function attachedMediaGuidance(videoProvider: string): string {
 	const sourceClip = videoProvider === "openrouter"
 		? [
-			"pass that clip in the references (`input_reference_document_ids`), not `input_video_document_id` (this provider has no source-video field).",
-			"Write the prompt as a new video that follows the reference, never as an edit of it: describe the whole shot you want (subject, action, setting) with the user's change built in, and say it follows the reference video's camera motion, framing, movement and scene. For example, \"A soccer broadcast shot that follows the reference video's camera motion, framing, player movement and stadium; the teams are Canada in red and white and the USA in navy.\"",
-			"Never use edit wording such as \"edit the video\", \"keep the same footage\", \"change only\" or \"replace\": Seedance then switches to a video-editing mode this provider cannot run, and the job fails.",
+			"pass that clip in the references (`input_reference_document_ids`), together with any attached images that should appear in it, not `input_video_document_id` (this provider has no source-video field).",
+			"Write the prompt as a new video that follows the reference, never as an edit of it: describe the whole shot you want (subject, action, setting) with the user's change built in, say it follows the reference video's camera motion, framing, movement and scene, and name which reference image becomes which person or object. For example, \"The man at the microphone is the fox character from the reference image, rapping with the same gestures; follows the reference video's camera motion, framing, the other performer and the studio.\"",
+			"Only Hailuo 3 takes a clip plus images; Aleph 2 and FLUX Video Edit take a clip alone; Seedance models take no video input at all. If the selected model cannot take what the user attached, say so and name a model that can instead of calling the tool.",
 		].join(" ")
 		: "pass that clip as the source video (`input_video_document_id`) and describe only the change.";
 	return [
 		"Attached media: images and videos the user attaches are uploaded with their message and reach `generate_video` as document IDs, not file paths. Never open attached images or videos with Read or other file tools; they are binary.",
-		`- To edit, restyle, extend or continue an attached video ("change the jerseys", "make it night"), ${sourceClip} Use first/last-frame images only to animate a still.`,
+		`- To edit, restyle, extend or continue an attached video ("change the jerseys", "make it night", "replace him with @image_2"), ${sourceClip} Use first/last-frame images only to animate a still.`,
 		"- The user's attachment is the file their message names. If several document IDs are offered and you cannot tell which one it is, prefer the one uploaded with this message and say which you used.",
 		"- If `generate_video` fails with a `hint`, follow it and retry once with the same inputs. Otherwise tell the user the tool's error and what you passed. Do not quietly switch to generating a new clip from scratch, or from a still of the clip; offer that as an option instead.",
 	].join("\n");

@@ -171,6 +171,44 @@ export function parseBillingRoute(modelId: string | undefined): ModelRoute | und
 	return billingRouteForProvider(modelId.slice(0, slash), modelId.slice(slash + 1));
 }
 
+/** The plan a subscription-billed chat runs on. */
+export type SubscriptionPlan = 'claude' | 'chatgpt';
+
+/**
+ * Which subscription a model id, or a `vendor:provider/model` language-model
+ * identifier, bills to; undefined for Backboard- and key-billed models.
+ */
+export function subscriptionPlanOfModelId(modelId: string | undefined): SubscriptionPlan | undefined {
+	const route = parseBillingRoute(modelId?.replace(/^[^/]*:/, ''));
+	if (route?.source !== 'subscription') {
+		return undefined;
+	}
+	const provider = route.provider.toLowerCase();
+	if (provider.startsWith('anthropic') || provider.startsWith('claude')) {
+		return 'claude';
+	}
+	if (provider.startsWith('openai') || provider.startsWith('chatgpt') || provider.startsWith('codex')) {
+		return 'chatgpt';
+	}
+	return undefined;
+}
+
+/**
+ * The subscription a Claude Code or Codex agent session runs on, from its
+ * session or provider type (e.g. `claude-code`, `agent-host-codex`). Those
+ * agents sign in with the user's own Claude or ChatGPT plan.
+ */
+export function subscriptionPlanOfAgentType(type: string | undefined): SubscriptionPlan | undefined {
+	const normalized = type?.toLowerCase() ?? '';
+	if (normalized.includes('claude')) {
+		return 'claude';
+	}
+	if (normalized === 'openai' || normalized.includes('codex')) {
+		return 'chatgpt';
+	}
+	return undefined;
+}
+
 /**
  * The provider family used to decide whether a conversation must be handed
  * off to a fresh backend thread. Every key-billed vendor shares one family

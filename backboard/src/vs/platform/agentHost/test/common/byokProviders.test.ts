@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { byokProviderDefinition, isByokProviderId, isConfigPropertyAvailableForModel, keyBilledProviderId, parseBillingRoute, routeProviderFamily, vendorOfProvider } from '../../common/byokProviders.js';
+import { byokProviderDefinition, isByokProviderId, isConfigPropertyAvailableForModel, keyBilledProviderId, parseBillingRoute, routeProviderFamily, subscriptionPlanOfAgentType, subscriptionPlanOfModelId, vendorOfProvider } from '../../common/byokProviders.js';
 
 suite('byokProviders', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -65,6 +65,17 @@ suite('byokProviders', () => {
 				[true, false, true, true, true],
 				[true, true, true, true, true],
 			],
+		);
+	});
+
+	test('names the subscription a model bills to', () => {
+		assert.deepStrictEqual(
+			['anthropic-subscription/opus', 'agent-host-backboard:openai-subscription/gpt-5.5', 'anthropic/claude-opus-5', 'openai-key/gpt-5.5', 'opus', undefined].map(subscriptionPlanOfModelId),
+			['claude', 'chatgpt', undefined, undefined, undefined, undefined],
+		);
+		assert.deepStrictEqual(
+			['claude-code', 'agent-host-codex', 'openai-codex', 'agent-host-backboard', 'local', undefined].map(subscriptionPlanOfAgentType),
+			['claude', 'chatgpt', 'chatgpt', undefined, undefined, undefined],
 		);
 	});
 

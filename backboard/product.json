@@ -41,7 +41,10 @@
 	"nodejsRepository": "https://nodejs.org",
 	"urlProtocol": "backboard",
 	"linkProtectionTrustedDomains": [
-		"https://app.backboard.io"
+		"https://app.backboard.io",
+		"https://*.backboard.io",
+		"https://checkout.stripe.com",
+		"https://billing.stripe.com"
 	],
 	"trustedExtensionProtocolHandlers": [
 		"vscode.github-authentication"
@@ -195,6 +198,11 @@
 			"description": "Keyboard mapping from Notepad++"
 		}
 	],
+	"backboardAnalytics": {
+		"posthogKey": "",
+		"posthogHost": "https://us.i.posthog.com",
+		"conversionsUrl": ""
+	},
 	"onboardingThemes": [
 		{
 			"id": "backboard-obsidian",

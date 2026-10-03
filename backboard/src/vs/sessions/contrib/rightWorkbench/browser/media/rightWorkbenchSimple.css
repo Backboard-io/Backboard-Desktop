@@ -1182,10 +1182,14 @@
 	padding-top: 24px;
 }
 
+/* Each turn is headed by its chat's name and time. */
 .sessions-right-workbench-canvas-time {
 	position: absolute;
 	top: 0;
 	left: 0;
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
 	color: color-mix(in srgb, var(--rwb-foreground) 50%, transparent);
 	font-size: 12px;
 	line-height: 16px;
@@ -1335,22 +1339,6 @@
 	height: 100%;
 }
 
-/* --- Other chats: a labelled section, each turn headed by its chat's name --- */
-
-.sessions-right-workbench-canvas-section {
-	margin: 8px 0 -8px;
-	color: color-mix(in srgb, var(--rwb-foreground) 70%, transparent);
-	font-size: 13px;
-	font-weight: 600;
-	line-height: 18px;
-}
-
-.sessions-right-workbench-canvas-time {
-	display: flex;
-	align-items: baseline;
-	gap: 6px;
-}
-
 .sessions-right-workbench-canvas-source {
 	max-width: 320px;
 	padding: 0 6px;
@@ -1451,54 +1439,6 @@
 	bottom: 4px;
 	width: 18px;
 	height: 18px;
-}
-
-/* Other chats' thumbs sit under a label and carry a corner mark. */
-.sessions-right-workbench-canvas-rail-label {
-	flex-shrink: 0;
-	padding: 6px 2px 0;
-	border-top: 1px solid color-mix(in srgb, var(--rwb-foreground) 10%, transparent);
-	color: color-mix(in srgb, var(--rwb-foreground) 55%, transparent);
-	font-size: 11px;
-	line-height: 14px;
-}
-
-.sessions-right-workbench-canvas-rail-thumb.other-chat::after {
-	content: '';
-	position: absolute;
-	top: 5px;
-	right: 5px;
-	width: 8px;
-	height: 8px;
-	border-radius: 50%;
-	background: var(--rwb-canvas-accent);
-	box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.35);
-}
-
-.sessions-right-workbench-canvas-source-badge {
-	position: absolute;
-	top: 12px;
-	left: 50%;
-	z-index: 3;
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	box-sizing: border-box;
-	max-width: 50%;
-	height: 28px;
-	padding: 0 12px;
-	border-radius: 14px;
-	color: var(--rwb-foreground);
-	background: color-mix(in srgb, var(--rwb-canvas-accent) 22%, var(--rwb-canvas-surface));
-	box-shadow: 0 0 0 1px color-mix(in srgb, var(--rwb-foreground) 8%, transparent);
-	font-size: 12px;
-	transform: translateX(-50%);
-}
-
-.sessions-right-workbench-canvas-source-badge span {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
 }
 
 .sessions-right-workbench-canvas-composer {

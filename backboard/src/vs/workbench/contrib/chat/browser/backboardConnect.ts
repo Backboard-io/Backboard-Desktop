@@ -14,7 +14,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { BYOK_PROVIDERS, ByokProviderId } from '../../../../platform/agentHost/common/byokProviders.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
-import { CHATGPT_SUBSCRIPTION_SETUP_ID, CLAUDE_SUBSCRIPTION_SETUP_ID } from './agentSessions/agentCliSetup.js';
+import { CHATGPT_SUBSCRIPTION_SETUP_ID, CHECK_CLAUDE_CODE_VERSION_COMMAND_ID, CLAUDE_SUBSCRIPTION_SETUP_ID, IClaudeCodeVersion, UPDATE_CLAUDE_CODE_COMMAND_ID } from './agentSessions/agentCliSetup.js';
 import { ADD_PROVIDER_KEY_COMMAND_ID } from './byokKeys/byokKeys.js';
 import './media/backboardConnect.css';
 
@@ -82,6 +82,10 @@ export function renderBackboardConnect(parent: HTMLElement, commands: ICommandSe
 	let keyFormOpen = false;
 	let keyError = '';
 	let keyDraft = '';
+	/** Read once per render of the panel; an outdated Claude Code lists fewer models. */
+	let claudeCode: IClaudeCodeVersion | undefined;
+	let updatingClaudeCode = false;
+	const claudeCodeOutdated = (): boolean => state.claude && claudeCode?.updateAvailable === true;
 
 	const isConnected = (target: BackboardConnectTarget): boolean => {
 		switch (target) {
@@ -102,6 +106,9 @@ export function renderBackboardConnect(parent: HTMLElement, commands: ICommandSe
 	};
 
 	const description = (target: BackboardConnectTarget): string => {
+		if (busy === target && target === 'claude' && updatingClaudeCode) {
+			return localize('backboardConnect.updatingClaudeCode', "Updating Claude Code…");
+		}
 		if (busy === target) {
 			return target === 'key'
 				? localize('backboardConnect.validating', "Checking the key…")
@@ -114,7 +121,9 @@ export function renderBackboardConnect(parent: HTMLElement, commands: ICommandSe
 			case 'chatgpt': return state.chatGpt
 				? localize('backboardConnect.chatGptConnected', "Connected. GPT models use your plan")
 				: localize('backboardConnect.chatGptDescription', "Use GPT models included with your plan");
-			case 'claude': return state.claude
+			case 'claude': return claudeCodeOutdated()
+				? localize('backboardConnect.claudeCodeOutdated', "Claude Code {0} is out of date. Update to see every model", claudeCode!.installed)
+				: state.claude
 				? localize('backboardConnect.claudeConnected', "Connected. Claude models use your plan")
 				: localize('backboardConnect.claudeDescription', "Use Claude models included with your plan");
 			case 'key': return state.keys.size
@@ -129,6 +138,9 @@ export function renderBackboardConnect(parent: HTMLElement, commands: ICommandSe
 		}
 		if (target === 'backboard') {
 			return state.signedIn ? localize('backboardConnect.signedIn', "Signed In") : localize('backboardConnect.signIn', "Sign In");
+		}
+		if (target === 'claude' && claudeCodeOutdated()) {
+			return localize('backboardConnect.update', "Update");
 		}
 		return isConnected(target) ? localize('backboardConnect.reconnect', "Reconnect") : localize('backboardConnect.connect', "Connect");
 	};
@@ -169,6 +181,14 @@ export function renderBackboardConnect(parent: HTMLElement, commands: ICommandSe
 				void run(target, () => commands.executeCommand('backboard.setupSubscription', CHATGPT_SUBSCRIPTION_SETUP_ID));
 				return;
 			case 'claude':
+				if (claudeCodeOutdated()) {
+					updatingClaudeCode = true;
+					void run(target, async () => {
+						await commands.executeCommand(UPDATE_CLAUDE_CODE_COMMAND_ID);
+						claudeCode = await commands.executeCommand<IClaudeCodeVersion | undefined>(CHECK_CLAUDE_CODE_VERSION_COMMAND_ID);
+					}).finally(() => { updatingClaudeCode = false; });
+					return;
+				}
 				void run(target, () => commands.executeCommand('backboard.setupSubscription', CLAUDE_SUBSCRIPTION_SETUP_ID));
 				return;
 			case 'key':
@@ -286,6 +306,7 @@ export function renderBackboardConnect(parent: HTMLElement, commands: ICommandSe
 			row.type = 'button';
 			row.dataset.target = target;
 			row.classList.toggle('connected', connected);
+			row.classList.toggle('update-available', target === 'claude' && claudeCodeOutdated());
 			row.classList.toggle('busy', busy === target);
 			row.classList.toggle('expanded', target === 'key' && keyFormOpen);
 			row.disabled = (!!busy && busy !== target) || (target === 'backboard' && state.signedIn);
@@ -326,6 +347,14 @@ export function renderBackboardConnect(parent: HTMLElement, commands: ICommandSe
 	};
 
 	render();
+	if (state.claude && targets.includes('claude')) {
+		commands.executeCommand<IClaudeCodeVersion | undefined>(CHECK_CLAUDE_CODE_VERSION_COMMAND_ID).then(version => {
+			if (!disposed && version?.updateAvailable && !busy) {
+				claudeCode = version;
+				render();
+			}
+		}, () => { /* No version, no prompt. */ });
+	}
 	return {
 		store,
 		reveal: (target, provider) => {

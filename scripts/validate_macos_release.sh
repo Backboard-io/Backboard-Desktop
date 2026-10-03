@@ -196,6 +196,9 @@ else
       exit 1
     fi
   fi
+  echo "Checking the packaged chat runtime's JIT entitlement"
+  codesign -d --entitlements :- "${STAGED_APP}/Contents/Resources/app/extensions/backboard/bin/backboard-cli-ts" 2>/dev/null | \
+    python3 -c 'import plistlib,sys; data=sys.stdin.buffer.read(); assert data and plistlib.loads(data).get("com.apple.security.cs.allow-jit") is True, "Chat runtime missing allow-jit entitlement"'
   spctl --assess --type execute -vv "${STAGED_APP}"
 fi
 

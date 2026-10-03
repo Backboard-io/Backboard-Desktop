@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import { tmpdir } from 'os';
 import { join } from '../../../../base/common/path.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { claudeSubscriptionProbeEnv, isClaudeLoggedInRecently, isClaudeSubscriptionAuthStatus } from '../../node/shared/agentLoginProbes.js';
+import { claudeSubscriptionProbeEnv, isClaudeCodeOutdated, isClaudeLoggedInRecently, isClaudeSubscriptionAuthStatus } from '../../node/shared/agentLoginProbes.js';
 
 suite('Agent login probes', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -58,5 +58,16 @@ suite('Agent login probes', () => {
 		} finally {
 			await fs.promises.rm(homeDir, { recursive: true, force: true });
 		}
+	});
+
+	test('offers a Claude Code update only when the install is older than stable', () => {
+		assert.deepStrictEqual([
+			isClaudeCodeOutdated('2.1.172 (Claude Code)', '2.1.285'),
+			isClaudeCodeOutdated('2.1.285', '2.1.285'),
+			isClaudeCodeOutdated('2.1.287', '2.1.285'),
+			isClaudeCodeOutdated('2.2.0', '2.1.285'),
+			isClaudeCodeOutdated('1.9.999', '2.0.0'),
+			isClaudeCodeOutdated('unknown', '2.1.285'),
+		], [true, false, false, false, true, false]);
 	});
 });

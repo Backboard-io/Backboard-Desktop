@@ -376,6 +376,57 @@ describe("ClaudeSubscriptionClient", () => {
 		});
 	});
 
+	it("keeps alias rows from an older Claude Code that reports no resolvedModel", async () => {
+		// Verbatim shape of Claude Code 2.1.172's supportedModels().
+		const capture: SdkCapture = {
+			tools: [],
+			closed: false,
+			supportedModels: [
+				{
+					value: "default",
+					displayName: "Default (recommended)",
+					description: "Opus 4.8 with 1M context · Best for everyday, complex tasks",
+				},
+				{
+					value: "claude-fable-5[1m]",
+					displayName: "Fable",
+					description:
+						"Fable 5 · Most capable for your hardest and longest-running tasks",
+				},
+				{
+					value: "sonnet",
+					displayName: "Sonnet",
+					description: "Sonnet 4.6 · Efficient for routine tasks",
+				},
+				{
+					value: "haiku",
+					displayName: "Haiku",
+					description: "Haiku 4.5 · Fastest for quick answers",
+				},
+			],
+		};
+		const client = new ClaudeSubscriptionClient({
+			cwd: "/workspace",
+			authCheck: async () => ({ executable: "/opt/claude" }),
+			sdk: fakeClaudeSdk(capture),
+		});
+
+		const result = await client.listModels();
+
+		expect({
+			names: result.models.map((model) => model.name),
+			displayNames: result.models.map((model) => model.display_name),
+		}).toEqual({
+			names: ["claude-fable-5[1m]", "default", "sonnet", "haiku"],
+			displayNames: [
+				"Claude Fable 5",
+				"Claude Default (Opus 4.8)",
+				"Claude Sonnet 4.6",
+				"Claude Haiku 4.5",
+			],
+		});
+	});
+
 	it("retries a first-turn auth failure as a fresh session without duplicating the user message", async () => {
 		let authChecks = 0;
 		const capture: SdkCapture = { tools: [], closed: false };

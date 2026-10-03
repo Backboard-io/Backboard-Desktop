@@ -6,10 +6,12 @@
 import { $, addDisposableListener, append, clearNode, EventType, getActiveWindow } from '../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
+import { disposableTimeout, raceTimeout } from '../../../../base/common/async.js';
+import { applyEdits, setProperty } from '../../../../base/common/jsonEdit.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { KeyCode } from '../../../../base/common/keyCodes.js';
-import { Disposable, DisposableStore, toDisposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { FileAccess } from '../../../../base/common/network.js';
 import { isLinux, isMacintosh, isWindows } from '../../../../base/common/platform.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -23,15 +25,19 @@ import { areSameExtensions } from '../../../../platform/extensionManagement/comm
 import { ExtensionType } from '../../../../platform/extensions/common/extensions.js';
 import { IFileService, FileOperationResult, toFileOperationResult } from '../../../../platform/files/common/files.js';
 import product from '../../../../platform/product/common/product.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILayoutService } from '../../../../platform/layout/browser/layoutService.js';
 import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
+import { IBackboardAnalyticsService } from '../../../services/backboardAnalytics/common/backboardAnalytics.js';
 import { IAccessibilityService } from '../../../../platform/accessibility/common/accessibility.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
-import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
+import { IWorkbenchColorTheme, IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
 import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
+import { IBackboardBillingService } from '../../backboardBilling/common/backboardBilling.js';
+import { BillingPlansView } from '../../backboardBilling/browser/billingPlansView.js';
 import { OPEN_AGENTS_WINDOW_COMMAND_ID } from '../../chat/common/constants.js';
 import { SessionType } from '../../chat/common/chatSessionsService.js';
 import { IOnboardingService } from '../common/onboardingService.js';
@@ -47,6 +53,8 @@ import {
 	OnboardingStepId,
 	ONBOARDING_STEPS,
 } from '../common/onboardingTypes.js';
+import { createCustomizePanel, IThemePreviewPalette, OTHER_PREVIEW_PALETTE, ThemeChoice } from './onboardingCustomize.js';
+import { createMadeByFooter, createSignInPanel } from './onboardingSignIn.js';
 
 type OnboardingStepViewClassification = {
 	owner: 'cwebster-99';
@@ -113,6 +121,8 @@ const BACKBOARD_SIGN_IN_URL = 'https://app.backboard.io/signup';
 const BACKBOARD_API_KEYS_URL = 'https://app.backboard.io/dashboard/api-keys';
 const BACKBOARD_API_KEY_PATTERN = /^espr_[A-Za-z0-9_-]{43}$/;
 const LOCAL_AGENT_HOST_PROVIDER_ID = 'local-agent-host';
+/** Each screen fades out, then the next fades in, over this many milliseconds. */
+const STEP_FADE_MS = 100;
 const SOURCE_SETTINGS_RESOURCE_NAMES = ['settings.json', 'keybindings.json'] as const;
 const DEFAULT_SETTINGS_IMPORT_SELECTION: ISettingsImportSelection = {
 	settings: true,
@@ -160,6 +170,9 @@ function getBackboardEnvKeys(config: Record<string, unknown>): Record<string, st
  * This ports the Zed onboarding flow into the VS Code workbench shell:
  * welcome, experience picker, theme picker, and optional settings import.
  */
+/** How long onboarding waits for billing before showing the plans anyway. */
+const PLANS_LOAD_TIMEOUT_MS = 8_000;
+
 export class OnboardingVariationA extends Disposable implements IOnboardingService {
 
 	declare readonly _serviceBrand: undefined;
@@ -188,6 +201,12 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private readonly stepDisposables = this._register(new DisposableStore());
 	private readonly footerFocusableElements: HTMLElement[] = [];
 	private readonly stepFocusableElements: HTMLElement[] = [];
+	private readonly stepFade = this._register(new MutableDisposable());
+
+	/** What Enter does on the current screen, as on Devin's onboarding. */
+	private enterAction: (() => void) | undefined;
+	/** The control the current screen wants focused, if not its first one. */
+	private initialFocus: HTMLElement | undefined;
 
 	private previouslyFocusedElement: HTMLElement | undefined;
 	private _isShowing = false;
@@ -215,6 +234,9 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		@IExtensionGalleryService private readonly extensionGalleryService: IExtensionGalleryService,
 		@IClipboardService private readonly clipboardService: IClipboardService,
 		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
+		@IBackboardAnalyticsService private readonly analytics: IBackboardAnalyticsService,
+		@IBackboardBillingService private readonly billingService: IBackboardBillingService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
 	) {
 		super();
 
@@ -266,6 +288,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this.titleEl = append(this.bodyEl, $('h2.onboarding-a-step-title'));
 		this.subtitleEl = append(this.bodyEl, $('p.onboarding-a-step-subtitle'));
 		this.contentEl = append(this.bodyEl, $('.onboarding-a-step-content'));
+		createMadeByFooter(this.card);
 		this._renderStep();
 		this._logStepView();
 
@@ -328,11 +351,46 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			}
 		}));
 
+		// Enter runs the screen's main action wherever focus is, the way Devin's
+		// onboarding does, so it still works if whatever opened onboarding (such
+		// as the command palette) kept focus.
+		this.disposables.add(addDisposableListener(this.overlay.ownerDocument, EventType.KEY_DOWN, (event: KeyboardEvent) => {
+			if (event.key !== 'Enter' || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.defaultPrevented || !this.enterAction || this._handlesOwnEnter(event.target)) {
+				return;
+			}
+			event.preventDefault();
+			event.stopPropagation();
+			this.enterAction();
+		}, true));
+
 		getActiveWindow().requestAnimationFrame(() => {
 			this.overlay?.classList.add('visible');
 		});
 
 		this._focusCurrentStepElement();
+		// Whatever opened onboarding (such as the command palette) may restore
+		// its own focus once it closes; take it back so Enter works right away.
+		disposableTimeout(() => {
+			if (this.overlay && !this.overlay.contains(getActiveWindow().document.activeElement)) {
+				this._focusCurrentStepElement();
+			}
+		}, 80, this.disposables);
+	}
+
+	/** Pickers, dialogs, onboarding's own text fields and links keep Enter for themselves. */
+	private _handlesOwnEnter(target: EventTarget | null): boolean {
+		if (!(target instanceof HTMLElement)) {
+			return false;
+		}
+		const picker = target.closest<HTMLElement>('.quick-input-widget, .monaco-dialog-box');
+		if (picker) {
+			return picker.ownerDocument.defaultView?.getComputedStyle(picker).display !== 'none';
+		}
+		if (!this.overlay?.contains(target)) {
+			return false;
+		}
+		return ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName) && (target as HTMLInputElement).type !== 'checkbox'
+			|| target.classList.contains('onboarding-signin-link');
 	}
 
 	reset(): void {
@@ -552,11 +610,27 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _renderStepFrame(): void {
-		this._renderStep();
-		this._renderProgress();
-		this._updateButtonStates();
-		this._focusCurrentStepElement();
-		this._logStepView();
+		this._fadeSwap(() => {
+			this._renderStep();
+			this._renderProgress();
+			this._updateButtonStates();
+			this._focusCurrentStepElement();
+			this._logStepView();
+		});
+	}
+
+	/** Fades the current screen out, runs `paint`, and fades the result back in. */
+	private _fadeSwap(paint: () => void): void {
+		const body = this.bodyEl;
+		if (!body || this.accessibilityService.isMotionReduced()) {
+			paint();
+			return;
+		}
+		body.classList.add('onboarding-a-body-fading');
+		this.stepFade.value = disposableTimeout(() => {
+			paint();
+			body.classList.remove('onboarding-a-body-fading');
+		}, STEP_FADE_MS);
 	}
 
 	private _isLastStep(): boolean {
@@ -624,6 +698,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 		this.stepDisposables.clear();
 		this.stepFocusableElements.length = 0;
+		this.enterAction = undefined;
+		this.initialFocus = undefined;
 
 		const stepId = this.steps[this.currentStepIndex];
 		const isWelcome = stepId === OnboardingStepId.Welcome;
@@ -631,12 +707,14 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const isExperience = stepId === OnboardingStepId.Experience;
 		const isImportSettings = stepId === OnboardingStepId.ImportSettings;
 
+		const isTheme = stepId === OnboardingStepId.Theme;
+		this.overlay?.classList.toggle('onboarding-a-overlay-launch', isWelcome || isConnectAI || isTheme);
 		this.card.classList.toggle('onboarding-a-card-welcome', isWelcome);
 		this.card.classList.toggle('onboarding-a-card-connect', isConnectAI);
 		this.card.classList.toggle('onboarding-a-card-mode', isExperience);
 		this.card.classList.toggle('onboarding-a-card-import', isImportSettings);
-		this.titleEl.style.display = isWelcome || isConnectAI || isExperience || isImportSettings || stepId === OnboardingStepId.Theme ? 'none' : '';
-		this.subtitleEl.style.display = isWelcome || isConnectAI || isExperience || isImportSettings ? 'none' : '';
+		this.titleEl.style.display = isWelcome || isConnectAI || isExperience || isImportSettings || isTheme ? 'none' : '';
+		this.subtitleEl.style.display = isWelcome || isConnectAI || isExperience || isImportSettings || isTheme ? 'none' : '';
 		this.titleEl.textContent = getOnboardingStepTitle(stepId);
 		this.subtitleEl.textContent = getOnboardingStepSubtitle(stepId);
 
@@ -653,7 +731,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 				this._renderExperienceStep(this.contentEl);
 				break;
 			case OnboardingStepId.Theme:
-				this._renderThemeStep(this.contentEl);
+				this._renderCustomizeStep(this.contentEl);
 				break;
 			case OnboardingStepId.ImportSettings:
 				this._renderImportSettingsStep(this.contentEl);
@@ -667,13 +745,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 
 		const visibleSteps = this._visibleSteps();
-		this.bodyEl.setAttribute('aria-label', localize(
-			'onboarding.step.aria',
-			"Step {0} of {1}: {2}",
-			visibleSteps.indexOf(stepId) + 1,
-			visibleSteps.length,
-			getOnboardingStepTitle(stepId)
-		));
+		const position = visibleSteps.indexOf(stepId);
+		this.bodyEl.setAttribute('aria-label', position < 0
+			? getOnboardingStepTitle(stepId)
+			: localize('onboarding.step.aria', "Step {0} of {1}: {2}", position + 1, visibleSteps.length, getOnboardingStepTitle(stepId)));
 	}
 
 	private _updateButtonStates(): void {
@@ -705,49 +780,31 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _renderConnectAIStep(container: HTMLElement): void {
-		const wrapper = append(container, $('.onboarding-backboard-welcome'));
-		const welcomeContent = append(wrapper, $('.onboarding-backboard-welcome-content'));
-		this._createBrandLockup(welcomeContent, true);
-
-		const signInButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button')));
-		signInButton.type = 'button';
-		signInButton.textContent = localize('onboarding.backboard.signInButton', "Continue with Backboard");
-
-		const ownKeyButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button.onboarding-backboard-own-key-button')));
-		ownKeyButton.type = 'button';
-		ownKeyButton.textContent = localize('onboarding.byok.start', "Bring Your Own Key");
-
-		const subscriptionButton = this._registerStepFocusable(append(welcomeContent, $<HTMLButtonElement>('button.onboarding-backboard-sign-in-button.onboarding-backboard-own-key-button')));
-		subscriptionButton.type = 'button';
-		subscriptionButton.textContent = localize('onboarding.byos.start', "Bring Your Own Subscription");
+		const { element, signUpButton, logInButton, apiKeyButton, skipButton } = createSignInPanel(container);
+		for (const button of [signUpButton, logInButton, apiKeyButton, skipButton]) {
+			this._registerStepFocusable(button);
+		}
+		this.enterAction = () => signUpButton.click();
 
 		let didContinueWithoutAccount = false;
-		let skipButton: HTMLButtonElement | undefined;
-		const showContinueWithoutAccount = (): void => {
-			if (skipButton) {
-				return;
-			}
 
-			const skipArea = append(welcomeContent, $('.onboarding-backboard-skip-area'));
-			skipButton = this._registerStepFocusable(append(skipArea, $<HTMLButtonElement>('button.onboarding-backboard-skip-link')));
-			skipButton.type = 'button';
-			skipButton.textContent = localize('onboarding.backboard.skipStep', "Set Up Later");
-			this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => {
-				didContinueWithoutAccount = true;
-				this.postOnboardingSignInPromptShown = true;
-				this._logAction('skipWelcomeSignIn');
-				this._advanceOrComplete();
-			}));
-		};
-		showContinueWithoutAccount();
+		this.stepDisposables.add(addDisposableListener(skipButton, EventType.CLICK, () => {
+			didContinueWithoutAccount = true;
+			this.postOnboardingSignInPromptShown = true;
+			this._logAction('skipWelcomeSignIn');
+			this._advanceOrComplete();
+		}));
 
-		this.stepDisposables.add(addDisposableListener(ownKeyButton, EventType.CLICK, () => {
+		this.stepDisposables.add(addDisposableListener(apiKeyButton, EventType.CLICK, () => {
 			didContinueWithoutAccount = true;
 			this._logAction('chooseOwnKey');
-			this.stepDisposables.clear();
-			this.stepFocusableElements.length = 0;
-			clearNode(container);
-			this._renderProviderKeySetup(container);
+			this._fadeSwap(() => {
+				this.stepDisposables.clear();
+				this.stepFocusableElements.length = 0;
+				this.enterAction = undefined;
+				clearNode(container);
+				this._renderProviderKeySetup(container);
+			});
 		}));
 
 		// Completing onboarding reloads this window into the chosen experience,
@@ -755,34 +812,27 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		// reload before the device-code flow can open the browser or save the
 		// tokens). So wait for the sign-in to finish before advancing; the
 		// browser opens once the device code is ready, and this page stays up
-		// until approval.
-		const startConnection = async (sourceButton: HTMLButtonElement, action: string, subscription = false): Promise<void> => {
-			if (signInButton.disabled) {
+		// until approval. Signing up and logging in share the Backboard SSO
+		// page, which offers both.
+		const startSignIn = async (sourceButton: HTMLButtonElement, action: string): Promise<void> => {
+			if (signUpButton.disabled) {
 				return;
 			}
 			this._logAction(action);
-			showContinueWithoutAccount();
-			signInButton.disabled = true;
-			ownKeyButton.disabled = true;
-			subscriptionButton.disabled = true;
-			const idleLabel = sourceButton.textContent;
-			sourceButton.textContent = subscription
-				? localize('onboarding.byos.waiting', "Connecting…")
-				: localize('onboarding.backboard.signInConnecting', "Connecting to Backboard…");
+			signUpButton.disabled = logInButton.disabled = true;
+			const label = sourceButton.querySelector('.onboarding-signin-btn-label');
+			const idleLabel = label?.textContent;
+			if (label) {
+				label.textContent = localize('onboarding.backboard.signInConnecting', "Connecting to Backboard…");
+			}
 			try {
 				// Resolves true once the tokens are saved; false when the sign-in
 				// failed or was denied (the extension already surfaced that error).
-				let connected: boolean | undefined;
-				if (subscription) {
-					await this.commandService.executeCommand('backboard.setupSubscription');
-					connected = await this.commandService.executeCommand<boolean>('backboard.hasAlternativeCredentials');
-				} else {
-					connected = await this.commandService.executeCommand<boolean>('backboard.signIn');
-				}
-				if (connected && !didContinueWithoutAccount && welcomeContent.isConnected) {
-					if (!subscription) { this.hasConfirmedBackboardSignIn = true; }
+				const connected = await this.commandService.executeCommand<boolean>('backboard.signIn');
+				if (connected && !didContinueWithoutAccount && element.isConnected) {
+					this.hasConfirmedBackboardSignIn = true;
 					this.postOnboardingSignInPromptShown = true;
-					this._advanceOrComplete();
+					await this._offerPlansOrAdvance(container);
 					return;
 				}
 			} catch (error) {
@@ -792,18 +842,50 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 					source: error instanceof Error ? error.message : undefined,
 				});
 			}
-			signInButton.disabled = false;
-			ownKeyButton.disabled = false;
-			subscriptionButton.disabled = false;
-			sourceButton.textContent = idleLabel;
+			signUpButton.disabled = logInButton.disabled = false;
+			if (label) {
+				label.textContent = idleLabel ?? null;
+			}
 		};
 
-		this.stepDisposables.add(addDisposableListener(signInButton, EventType.CLICK, () => {
-			void startConnection(signInButton, 'openBackboardSso');
+		this.stepDisposables.add(addDisposableListener(signUpButton, EventType.CLICK, () => {
+			void startSignIn(signUpButton, 'signUpBackboard');
 		}));
-		this.stepDisposables.add(addDisposableListener(subscriptionButton, EventType.CLICK, () => {
-			void startConnection(subscriptionButton, 'chooseOwnSubscription', true);
+		this.stepDisposables.add(addDisposableListener(logInButton, EventType.CLICK, () => {
+			void startSignIn(logInButton, 'openBackboardSso');
 		}));
+	}
+
+	/**
+	 * Right after a Backboard sign-in, show the plans before the rest of
+	 * setup. Accounts already on an active paid plan go straight on.
+	 */
+	private async _offerPlansOrAdvance(container: HTMLElement): Promise<void> {
+		// Bounded: a slow or undeployed billing API must not hold up onboarding.
+		await raceTimeout(this.billingService.refresh(), PLANS_LOAD_TIMEOUT_MS);
+		const plan = this.billingService.status?.plan;
+		if ((plan && !plan.cancel_at_period_end) || !container.isConnected) {
+			this._advanceOrComplete();
+			return;
+		}
+		this._logAction('viewPlans');
+		this._fadeSwap(() => {
+			this.stepDisposables.clear();
+			this.stepFocusableElements.length = 0;
+			this.enterAction = undefined;
+			clearNode(container);
+			this.stepDisposables.add(this.instantiationService.createInstance(BillingPlansView, container, {
+				mode: 'onboarding',
+				onDone: () => {
+					this._logAction('closePlans');
+					this._advanceOrComplete();
+				},
+				onDidRender: focusable => {
+					this.stepFocusableElements.length = 0;
+					this.stepFocusableElements.push(...focusable);
+				},
+			}));
+		});
 	}
 
 	private _renderProviderKeySetup(container: HTMLElement): void {
@@ -876,162 +958,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this.stepDisposables.add(addDisposableListener(save, EventType.CLICK, () => { void submit(); }));
 		this.stepDisposables.add(addDisposableListener(back, EventType.CLICK, () => this._renderStepFrame()));
 		provider.focus();
-	}
-
-	private _createAnimatedBackboardMark(parent: HTMLElement): HTMLElement {
-		const mark = append(parent, $('.onboarding-backboard-welcome-mark'));
-		const targetDocument = getActiveWindow().document;
-		const svgNamespace = 'http://www.w3.org/2000/svg';
-		const createSvgElement = (tagName: string): SVGElement => targetDocument.createElementNS(svgNamespace, tagName) as SVGElement;
-		const setAttributes = (element: SVGElement, attributes: Record<string, string>): SVGElement => {
-			for (const [name, value] of Object.entries(attributes)) {
-				element.setAttribute(name, value);
-			}
-			return element;
-		};
-
-		const strands = [
-			{ tagName: 'path', attributes: { d: 'M77.21,0h10.1c1.32,0,2.4,1.07,2.4,2.4v216.39c0,1.32-1.07,2.4-2.4,2.4h-10.1c-1.32,0-2.4-1.07-2.4-2.4V2.4c0-1.32,1.07-2.4,2.4-2.4Z', 'fill-rule': 'evenodd' } },
-			{ tagName: 'rect', attributes: { x: '49.87', y: '30.34', width: '14.89', height: '80.25', rx: '2.4', ry: '2.4' } },
-			{ tagName: 'rect', attributes: { x: '0', y: '90.8', width: '14.88', height: '19.8', rx: '2.4', ry: '2.4' } },
-			{ tagName: 'rect', attributes: { x: '99.74', y: '110.59', width: '14.89', height: '80.25', rx: '2.4', ry: '2.4' } },
-			{ tagName: 'rect', attributes: { x: '149.61', y: '110.59', width: '14.89', height: '19.8', rx: '2.4', ry: '2.4' } },
-			{ tagName: 'rect', attributes: { x: '124.68', y: '110.59', width: '14.89', height: '50.06', rx: '2.4', ry: '2.4' } },
-			{ tagName: 'rect', attributes: { x: '24.94', y: '60.53', width: '14.89', height: '50.06', rx: '2.4', ry: '2.4' } },
-		] as const;
-		const createStrand = (strand: typeof strands[number]): SVGElement => setAttributes(createSvgElement(strand.tagName), strand.attributes);
-
-		const svg = setAttributes(createSvgElement('svg'), {
-			viewBox: '0 0 164.5 221.19',
-			preserveAspectRatio: 'xMidYMid meet',
-			'aria-hidden': 'true',
-			focusable: 'false',
-		});
-		svg.classList.add('onboarding-backboard-water-mark');
-
-		const definitions = createSvgElement('defs');
-		const waterGradientId = 'onboarding-backboard-water-gradient';
-		const waterGradient = setAttributes(createSvgElement('linearGradient'), {
-			id: waterGradientId,
-			x1: '0',
-			y1: '0',
-			x2: '0',
-			y2: '86',
-			gradientUnits: 'userSpaceOnUse',
-			spreadMethod: 'repeat',
-		});
-		for (const [offset, color, opacity] of [
-			['0%', '#f8fcff', '1'],
-			['18%', '#b9e8f8', '1'],
-			['38%', '#649fe2', '0.96'],
-			['58%', '#e8faff', '1'],
-			['77%', '#72c6df', '0.98'],
-			['100%', '#f8fcff', '1'],
-		]) {
-			waterGradient.appendChild(setAttributes(createSvgElement('stop'), { offset, 'stop-color': color, 'stop-opacity': opacity }));
-		}
-		definitions.appendChild(waterGradient);
-
-		const glintGradientId = 'onboarding-backboard-water-glint';
-		const glintGradient = setAttributes(createSvgElement('linearGradient'), {
-			id: glintGradientId,
-			x1: '0',
-			y1: '0',
-			x2: '0',
-			y2: '124',
-			gradientUnits: 'userSpaceOnUse',
-			spreadMethod: 'repeat',
-		});
-		for (const [offset, opacity] of [
-			['0%', '0'],
-			['42%', '0'],
-			['50%', '0.7'],
-			['58%', '0'],
-			['100%', '0'],
-		]) {
-			glintGradient.appendChild(setAttributes(createSvgElement('stop'), { offset, 'stop-color': '#ffffff', 'stop-opacity': opacity }));
-		}
-		definitions.appendChild(glintGradient);
-
-		const textureFilterId = 'onboarding-backboard-water-texture';
-		const textureFilter = setAttributes(createSvgElement('filter'), {
-			id: textureFilterId,
-			x: '-12%',
-			y: '-10%',
-			width: '124%',
-			height: '120%',
-			'color-interpolation-filters': 'sRGB',
-		});
-		textureFilter.appendChild(setAttributes(createSvgElement('feTurbulence'), {
-			type: 'fractalNoise',
-			baseFrequency: '0.012 0.095',
-			numOctaves: '2',
-			seed: '7',
-			result: 'waterNoise',
-		}));
-		textureFilter.appendChild(setAttributes(createSvgElement('feDisplacementMap'), {
-			in: 'SourceGraphic',
-			in2: 'waterNoise',
-			scale: '3.4',
-			xChannelSelector: 'R',
-			yChannelSelector: 'B',
-		}));
-		definitions.appendChild(textureFilter);
-		svg.appendChild(definitions);
-
-		for (const [index, strand] of strands.entries()) {
-			const clipId = `onboarding-backboard-water-clip-${index}`;
-			const clipPath = setAttributes(createSvgElement('clipPath'), { id: clipId });
-			clipPath.appendChild(createStrand(strand));
-			definitions.appendChild(clipPath);
-
-			const base = createStrand(strand);
-			base.classList.add('onboarding-backboard-water-strand-base');
-			svg.appendChild(base);
-
-			const clippedFlow = setAttributes(createSvgElement('g'), { 'clip-path': `url(#${clipId})` });
-			const current = setAttributes(createSvgElement('rect'), {
-				x: '-18',
-				y: '-442',
-				width: '200.5',
-				height: '1105',
-				fill: `url(#${waterGradientId})`,
-				filter: `url(#${textureFilterId})`,
-			});
-			current.classList.add('onboarding-backboard-water-current');
-			current.style.setProperty('--onboarding-water-delay', `${index * -0.43}s`);
-			current.style.setProperty('--onboarding-water-duration', `${3.1 + (index % 4) * 0.36}s`);
-			clippedFlow.appendChild(current);
-
-			const glint = setAttributes(createSvgElement('rect'), {
-				x: '-28',
-				y: '-442',
-				width: '220.5',
-				height: '1105',
-				fill: `url(#${glintGradientId})`,
-			});
-			glint.classList.add('onboarding-backboard-water-glint');
-			glint.style.setProperty('--onboarding-water-delay', `${-1.2 + index * -0.61}s`);
-			glint.style.setProperty('--onboarding-water-duration', `${4.4 + (index % 3) * 0.52}s`);
-			clippedFlow.appendChild(glint);
-			svg.appendChild(clippedFlow);
-		}
-
-		mark.appendChild(svg);
-		return mark;
-	}
-
-	private _createBrandLockup(parent: HTMLElement, prominent = false): void {
-		const brand = append(parent, $('.onboarding-brand-lockup'));
-		brand.classList.toggle('onboarding-brand-lockup-prominent', prominent);
-		if (prominent) {
-			this._createAnimatedBackboardMark(brand);
-		} else {
-			this._createBackboardMark(brand, 'onboarding-brand-mark');
-		}
-		const name = append(brand, $(prominent ? 'h1.onboarding-brand-name' : 'span.onboarding-brand-name'));
-		append(name, $('span')).textContent = localize('onboarding.brand.backboard', "Backboard");
-		append(name, $('span')).textContent = localize('onboarding.brand.studio', "Studio");
 	}
 
 	private _createBackboardMark(parent: HTMLElement, className: string): HTMLElement {
@@ -1156,65 +1082,134 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this._updateButtonStates();
 	}
 
-	private _renderThemeStep(container: HTMLElement): void {
-		const wrapper = append(container, $('.onboarding-backboard-theme'));
-		const themeGrid = append(wrapper, $('.onboarding-a-theme-grid'));
-		themeGrid.setAttribute('role', 'radiogroup');
-		themeGrid.setAttribute('aria-label', localize('onboarding.personalize.themeLabel', "Choose a color theme"));
-
+	private _renderCustomizeStep(container: HTMLElement): void {
 		const themes = product.onboardingThemes ?? [];
-		if (!themes.length) {
-			const empty = append(wrapper, $('p.onboarding-backboard-empty'));
-			empty.textContent = localize('onboarding.backboard.theme.empty', "No onboarding themes are configured.");
-			return;
+		const lightTheme = themes.find(theme => theme.type === 'light');
+		const darkTheme = themes.find(theme => theme.type === 'dark');
+		const terminalCommand = isWindows ? undefined : product.applicationName;
+		const panel = createCustomizePanel(container, { terminalCommand });
+
+		for (const card of panel.themeCards.values()) {
+			this._registerStepFocusable(card);
 		}
-
-		const themeCards: HTMLButtonElement[] = [];
-		for (const theme of themes) {
-			this._createThemeCard(themeGrid, theme, themeCards);
+		if (panel.terminalCheckbox) {
+			this._registerStepFocusable(panel.terminalCheckbox);
 		}
+		this._registerStepFocusable(panel.importToggle);
+		this._registerStepFocusable(panel.nextButton);
+		this.initialFocus = panel.nextButton;
 
-		const selectedThemeIndex = themes.findIndex(theme => theme.id === this.selectedThemeId);
-		this._setupRadioGroupNavigation(themeCards, Math.max(0, selectedThemeIndex));
-	}
+		// The cards follow the live theme, including one picked under "Other".
+		const syncTheme = (): void => {
+			const current = this.themeService.getColorTheme();
+			const choice: ThemeChoice = current.settingsId === lightTheme?.themeId ? 'light' : current.settingsId === darkTheme?.themeId ? 'dark' : 'other';
+			panel.setSelectedTheme(choice);
+			panel.setThemePalette('other', choice === 'other' ? this._previewPalette(current) : OTHER_PREVIEW_PALETTE);
+		};
+		syncTheme();
+		this.stepDisposables.add(this.themeService.onDidColorThemeChange(syncTheme));
 
-	private _createThemeCard(parent: HTMLElement, theme: IOnboardingThemeOption, allCards: HTMLButtonElement[]): void {
-		const card = this._registerStepFocusable(append(parent, $<HTMLButtonElement>('button.onboarding-a-theme-card')));
-		card.type = 'button';
-		card.dataset.id = theme.id;
-		card.setAttribute('role', 'radio');
-		card.setAttribute('aria-checked', theme.id === this.selectedThemeId ? 'true' : 'false');
-		card.setAttribute('aria-label', theme.label);
-		allCards.push(card);
-
-		if (theme.id === this.selectedThemeId) {
-			card.classList.add('selected');
-		}
-
-		const preview = append(card, $('div.onboarding-a-theme-preview'));
-		const img = append(preview, $<HTMLImageElement>('img.onboarding-a-theme-preview-img'));
-		img.alt = '';
-		img.decoding = 'async';
-		img.src = this._mediaUri(`theme-preview-${theme.id}.svg`);
-
-		const label = append(card, $('div.onboarding-a-theme-label'));
-		label.textContent = theme.label;
-
-		this.stepDisposables.add(addDisposableListener(card, EventType.CLICK, () => {
+		const chooseTheme = (theme: IOnboardingThemeOption | undefined): void => {
+			if (!theme) {
+				return;
+			}
 			this._logAction('selectTheme', undefined, theme.id);
 			this.themeChange = this.themeChange.then(() => this._selectTheme(theme)).catch(() => {
 				this.notificationService.error(localize('onboarding.theme.failed', "Could not apply this theme. Choose another theme or try again."));
 			});
-
-			for (const c of allCards) {
-				const isSelected = c.dataset.id === theme.id;
-				c.classList.toggle('selected', isSelected);
-				c.setAttribute('aria-checked', isSelected ? 'true' : 'false');
-				c.tabIndex = isSelected ? 0 : -1;
+		};
+		this.stepDisposables.add(addDisposableListener(panel.themeCards.get('light')!, EventType.CLICK, () => chooseTheme(lightTheme)));
+		this.stepDisposables.add(addDisposableListener(panel.themeCards.get('dark')!, EventType.CLICK, () => chooseTheme(darkTheme)));
+		this.stepDisposables.add(addDisposableListener(panel.themeCards.get('other')!, EventType.CLICK, async () => {
+			this._logAction('selectOtherTheme');
+			// The theme picker opens under the onboarding overlay unless the
+			// overlay steps back below it while the picker is up.
+			this.overlay?.classList.add('onboarding-a-overlay-picking');
+			try {
+				await this.commandService.executeCommand('workbench.action.selectTheme');
+			} finally {
+				this.overlay?.classList.remove('onboarding-a-overlay-picking');
+				panel.themeCards.get('other')?.focus();
 			}
-
-			this.accessibilityService.alert(localize('onboarding.theme.selected.alert', "{0} theme selected", theme.label));
 		}));
+
+		if (panel.terminalHelp) {
+			this._registerStepFocusable(panel.terminalHelp);
+		}
+
+		let importSource: ISettingsImportSource | undefined;
+		let importExpanded = false;
+		this.stepDisposables.add(addDisposableListener(panel.importToggle, EventType.CLICK, () => {
+			importExpanded = !importExpanded;
+			panel.importList.hidden = !importExpanded;
+			panel.importToggle.setAttribute('aria-expanded', String(importExpanded));
+			panel.importToggle.classList.toggle('expanded', importExpanded);
+		}));
+		for (const source of this._getSettingsImportSources()) {
+			void this.fileService.exists(source.userDataHome).then(exists => {
+				if (!exists || !panel.element.isConnected) {
+					return;
+				}
+				const row = this._registerStepFocusable(panel.addImportSource(source.id, source.label, this._mediaUri(source.icon)));
+				this.stepDisposables.add(addDisposableListener(row, EventType.CLICK, () => {
+					importSource = importSource === source ? undefined : source;
+					panel.setSelectedImport(importSource?.id);
+				}));
+			}, () => undefined);
+		}
+
+		const next = (): void => {
+			this._logAction('customizeNext', undefined, `terminal:${panel.terminalCheckbox?.checked === true},import:${importSource?.id ?? 'none'}`);
+			if (panel.terminalCheckbox?.checked && terminalCommand) {
+				// Best effort, like Devin's: a failure here must not hold up onboarding.
+				this.commandService.executeCommand('backboard.installTerminalCommand', terminalCommand).then(undefined, () => undefined);
+			}
+			if (importSource) {
+				void this._importSettingsInBackground(importSource);
+			}
+			this._nextStep();
+		};
+		this.stepDisposables.add(addDisposableListener(panel.nextButton, EventType.CLICK, next));
+		this.enterAction = next;
+	}
+
+	/** The colours of a real theme, for the "Other" card's miniature editor. */
+	private _previewPalette(theme: IWorkbenchColorTheme): IThemePreviewPalette {
+		const color = (id: string, fallback: string): string => theme.getColor(id)?.toString() ?? fallback;
+		return {
+			editorBg: color('editor.background', OTHER_PREVIEW_PALETTE.editorBg),
+			chromeBg: color('sideBar.background', OTHER_PREVIEW_PALETTE.chromeBg),
+			border: color('panel.border', OTHER_PREVIEW_PALETTE.border),
+			fg: color('editor.foreground', OTHER_PREVIEW_PALETTE.fg),
+			keyword: color('textLink.foreground', OTHER_PREVIEW_PALETTE.keyword),
+			name: color('charts.purple', OTHER_PREVIEW_PALETTE.name),
+			text: color('charts.green', OTHER_PREVIEW_PALETTE.text),
+		};
+	}
+
+	/**
+	 * Imports settings, keybindings, snippets and extensions after the
+	 * Customize screen. The theme picked on that screen wins over the one the
+	 * imported settings name, and is written in the same edit so a later
+	 * settings reload cannot undo it.
+	 */
+	private async _importSettingsInBackground(source: ISettingsImportSource): Promise<void> {
+		try {
+			await this.themeChange;
+			const result = await this._copySettingsFromSource(source, DEFAULT_SETTINGS_IMPORT_SELECTION, this.themeService.getColorTheme().settingsId);
+			if (result.imported.length) {
+				this.notificationService.notify({
+					severity: Severity.Info,
+					message: localize('onboarding.backboard.import.complete', "Imported {0}: {1}.", source.label, result.imported.join(', ')),
+				});
+			}
+		} catch (error) {
+			this.notificationService.notify({
+				severity: Severity.Warning,
+				message: localize('onboarding.backboard.import.failed', "Could not import from {0}.", source.label),
+				source: error instanceof Error ? error.message : undefined,
+			});
+		}
 	}
 
 	private async _selectTheme(theme: IOnboardingThemeOption): Promise<void> {
@@ -1455,7 +1450,11 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		return selected.join(',');
 	}
 
-	private async _copySettingsFromSource(source: ISettingsImportSource, selection: ISettingsImportSelection): Promise<ISettingsImportResult> {
+	/**
+	 * Copies the selected settings buckets from another editor. With
+	 * `keepColorTheme`, the copied settings name that theme instead of their own.
+	 */
+	private async _copySettingsFromSource(source: ISettingsImportSource, selection: ISettingsImportSelection, keepColorTheme?: string): Promise<ISettingsImportResult> {
 		const profile = this.userDataProfileService.currentProfile;
 		const imported: string[] = [];
 		const missing: string[] = [];
@@ -1463,7 +1462,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		await this._tryCreateFolder(profile.location);
 
 		if (selection.settings) {
-			const settingsImported = await this._copySettingsResource(source, SOURCE_SETTINGS_RESOURCE_NAMES[0], profile.settingsResource);
+			const keepTheme = keepColorTheme === undefined ? undefined : (contents: string) => applyEdits(contents, setProperty(contents, ['workbench.colorTheme'], keepColorTheme, { tabSize: 4, insertSpaces: true, eol: '\n' }));
+			const settingsImported = await this._copySettingsResource(source, SOURCE_SETTINGS_RESOURCE_NAMES[0], profile.settingsResource, keepTheme);
 			const snippetCount = await this._copySnippets(URI.joinPath(source.userDataHome, 'snippets'), profile.snippetsHome);
 			if (settingsImported || snippetCount > 0) {
 				imported.push(localize('onboarding.backboard.import.resource.settings', "Settings"));
@@ -1492,13 +1492,13 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		return { imported, missing };
 	}
 
-	private async _copySettingsResource(source: ISettingsImportSource, sourceName: string, target: URI): Promise<boolean> {
+	private async _copySettingsResource(source: ISettingsImportSource, sourceName: string, target: URI, transform?: (contents: string) => string): Promise<boolean> {
 		const contents = await this._tryReadFile(URI.joinPath(source.userDataHome, sourceName));
 		if (contents === undefined) {
 			return false;
 		}
 
-		await this.fileService.writeFile(target, VSBuffer.fromString(contents));
+		await this.fileService.writeFile(target, VSBuffer.fromString(transform ? transform(contents) : contents));
 		return true;
 	}
 
@@ -2038,6 +2038,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _focusCurrentStepElement(): void {
+		if (this.initialFocus && this._isTabbable(this.initialFocus)) {
+			this.initialFocus.focus();
+			return;
+		}
 		const stepFocusable = this.stepFocusableElements.find(element => this._isTabbable(element));
 		(stepFocusable ?? this.nextButton ?? this.closeButton)?.focus();
 	}
@@ -2059,10 +2063,16 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private _logStepView(): void {
 		const stepId = this.steps[this.currentStepIndex];
 		const visibleSteps = this._visibleSteps();
+		const stepNumber = visibleSteps.indexOf(stepId) + 1;
 		this.telemetryService.publicLog2<OnboardingStepViewEvent, OnboardingStepViewClassification>('welcomeOnboarding.stepView', {
 			step: stepId,
-			stepNumber: visibleSteps.indexOf(stepId) + 1,
+			stepNumber,
 		});
+
+		if (stepNumber === 1) {
+			this.analytics.capture('onboarding_started', { step: stepId });
+		}
+		this.analytics.capture('onboarding_step_viewed', { step: stepId, step_number: stepNumber, step_count: visibleSteps.length });
 	}
 
 	private _logAction(action: string, stepOverride?: OnboardingStepId, argument?: string): void {
@@ -2071,11 +2081,25 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			step: stepOverride ?? this.steps[this.currentStepIndex],
 			argument: argument ?? undefined,
 		});
+
+		const step = stepOverride ?? this.steps[this.currentStepIndex];
+		if (action === 'dismiss') {
+			this.analytics.capture(argument === 'complete' ? 'onboarding_completed' : 'onboarding_skipped', { step });
+			return;
+		}
+		if (action === 'selectExperience' && argument) {
+			// Every later event can be split by the workspace the user chose.
+			this.analytics.register({ experience: argument });
+		}
+		this.analytics.capture('onboarding_action', { action, step, argument });
 	}
 
 	private _removeFromDOM(): void {
+		this.stepFade.clear();
 		this.stepDisposables.clear();
 		this.disposables.clear();
+		this.enterAction = undefined;
+		this.initialFocus = undefined;
 
 		if (this.overlay) {
 			this.overlay.remove();

@@ -393,6 +393,12 @@ import './contrib/welcomeViews/common/newFile.contribution.js';
 // Welcome Onboarding
 import './contrib/welcomeOnboarding/browser/welcomeOnboarding.contribution.js';
 
+// Backboard product analytics (PostHog)
+import './contrib/backboardAnalytics/browser/backboardAnalytics.contribution.js';
+
+// Backboard sign-in prompt and low/no balance cards
+import './contrib/backboardUpsell/browser/backboardUpsell.contribution.js';
+
 // Call Hierarchy
 import './contrib/callHierarchy/browser/callHierarchy.contribution.js';
 

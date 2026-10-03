@@ -873,7 +873,13 @@ sign_code() {
 sign_macho_file() {
   local target="$1"
   if file -b "${target}" | grep -q "Mach-O"; then
-    sign_code "${target}"
+    if [[ "${target}" == */extensions/backboard/bin/backboard-cli-ts ]]; then
+      # Bun needs JIT/shared WebAssembly memory to initialize the Claude SDK.
+      # Re-signing this binary without its entitlement disables subscriptions.
+      sign_code "${target}" --entitlements "${REPO_ROOT}/scripts/macos-release/cli-entitlements.plist"
+    else
+      sign_code "${target}"
+    fi
   fi
 }
 

@@ -228,12 +228,6 @@
 	display: none;
 }
 
-.sessions-canvas-overlay .sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-rail-label {
-	padding: 4px 0 0;
-	font-size: 10px;
-	text-align: center;
-}
-
 /* Action row, centred under the item. */
 .sessions-canvas-overlay .sessions-right-workbench-canvas-detail-actions {
 	position: absolute;

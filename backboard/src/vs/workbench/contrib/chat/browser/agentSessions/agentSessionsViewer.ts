@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import './media/agentsessionsviewer.css';
-import { h } from '../../../../../base/browser/dom.js';
+import { $, clearNode, h, reset } from '../../../../../base/browser/dom.js';
 import { localize } from '../../../../../nls.js';
 import { IIdentityProvider, IListVirtualDelegate, NotSelectableGroupId, NotSelectableGroupIdType } from '../../../../../base/browser/ui/list/list.js';
 import { AriaRole } from '../../../../../base/browser/ui/aria/aria.js';
@@ -53,6 +53,7 @@ import { BugIndicatingError } from '../../../../../base/common/errors.js';
 import { compareIgnoreCase } from '../../../../../base/common/strings.js';
 import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { IChatSessionsService } from '../../common/chatSessionsService.js';
+import { subscriptionPlanOfAgentType, subscriptionPlanOfModelId } from '../../../../../platform/agentHost/common/byokProviders.js';
 
 export type AgentSessionListItem = IAgentSession | IAgentSessionSection | IAgentSessionShowMore | IAgentSessionShowLess;
 
@@ -81,6 +82,7 @@ interface IAgentSessionItemTemplate {
 	readonly badge: HTMLElement;
 	readonly separator: HTMLElement;
 	readonly description: HTMLElement;
+	readonly subscription: HTMLElement;
 
 	// Approval row
 	readonly approvalRow: HTMLElement;
@@ -171,6 +173,7 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 								h('span.agent-session-diff-removed@removedSpan')
 							]),
 						h('div.agent-session-description@description'),
+						h('span.agent-session-subscription@subscription'),
 						h('div.agent-session-status@statusContainer', [
 							h('span.agent-session-status-time@statusTime'),
 						]),
@@ -205,6 +208,7 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 			diffAddedSpan: elements.addedSpan,
 			diffRemovedSpan: elements.removedSpan,
 			description: elements.description,
+			subscription: elements.subscription,
 			statusContainer: elements.statusContainer,
 			statusTime: elements.statusTime,
 			approvalRow: elements.approvalRow,
@@ -323,6 +327,9 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 			}
 		}
 
+		// Subscription the chat bills to (Claude / ChatGPT plan)
+		const hasSubscription = this.renderSubscription(session, template);
+
 		// Status
 		const hasStatus = this.renderStatus(session, template);
 
@@ -333,7 +340,8 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 		template.statusContainer.classList.toggle('hidden', hideDetails);
 		template.separator.classList.toggle('has-separator', !hideDetails && hasBadge && hasDiff);
 		template.description.classList.toggle('has-separator', hasDescription && !hideDetails && (hasBadge || hasDiff));
-		template.statusContainer.classList.toggle('has-separator', !hideDetails && hasStatus && (hasBadge || hasDiff || hasDescription));
+		template.subscription.classList.toggle('has-subscription', hasSubscription && !hideDetails);
+		template.statusContainer.classList.toggle('has-separator', !hideDetails && hasStatus && (hasBadge || hasDiff || hasDescription || hasSubscription));
 
 		// Hover
 		this.renderHover(session, template);
@@ -521,6 +529,28 @@ export class AgentSessionRenderer extends Disposable implements ICompressibleTre
 		}
 
 		return getDurationString(elapsed, useFullTimeWords);
+	}
+
+	private renderSubscription(session: ITreeNode<IAgentSession, FuzzyScore>, template: IAgentSessionItemTemplate): boolean {
+		const modelId = session.element.metadata?.modelId;
+		const plan = subscriptionPlanOfModelId(typeof modelId === 'string' ? modelId : undefined)
+			?? subscriptionPlanOfAgentType(session.element.providerType);
+		if (!plan) {
+			clearNode(template.subscription);
+			template.subscription.removeAttribute('title');
+			return false;
+		}
+
+		const label = plan === 'claude'
+			? localize('agentSessions.subscription.claude', "Claude subscription")
+			: localize('agentSessions.subscription.chatgpt', "ChatGPT subscription");
+		const icon = $(`span.agent-session-subscription-icon${ThemeIcon.asCSSSelector(plan === 'claude' ? Codicon.claude : Codicon.openai)}`);
+		icon.setAttribute('aria-hidden', 'true');
+		const text = $('span.agent-session-subscription-label');
+		text.textContent = label;
+		reset(template.subscription, icon, text);
+		template.subscription.title = localize('agentSessions.subscription.tooltip', "Runs on your {0}", label);
+		return true;
 	}
 
 	private renderStatus(session: ITreeNode<IAgentSession, FuzzyScore>, template: IAgentSessionItemTemplate): boolean {

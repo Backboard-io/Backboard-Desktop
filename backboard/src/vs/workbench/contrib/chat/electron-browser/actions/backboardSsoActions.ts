@@ -9,7 +9,7 @@ import { IAction } from '../../../../../base/common/actions.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { isWindows } from '../../../../../base/common/platform.js';
 import { IQuickInputService } from '../../../../../platform/quickinput/common/quickInput.js';
-import { IAgentCliSetupService, CHATGPT_SUBSCRIPTION_SETUP_ID, CLAUDE_SUBSCRIPTION_SETUP_ID } from '../../browser/agentSessions/agentCliSetup.js';
+import { IAgentCliSetupService, CHATGPT_SUBSCRIPTION_SETUP_ID, CHECK_CLAUDE_CODE_VERSION_COMMAND_ID, CLAUDE_SUBSCRIPTION_SETUP_ID, IClaudeCodeVersion, UPDATE_CLAUDE_CODE_COMMAND_ID } from '../../browser/agentSessions/agentCliSetup.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { ServicesAccessor } from '../../../../../editor/browser/editorExtensions.js';
 import { localize, localize2 } from '../../../../../nls.js';
@@ -43,6 +43,20 @@ export function registerBackboardSsoActions(): void {
 					{ label: 'Claude', id: CLAUDE_SUBSCRIPTION_SETUP_ID },
 				], { title: localize('backboard.byos.title', "Bring Your Own Subscription"), placeHolder: localize('backboard.byos.choose', "Choose a subscription") });
 				if (choice) { await setup.beginSetup(choice.id); }
+			}
+		});
+		registerAction2(class BackboardCheckClaudeCodeVersionAction extends Action2 {
+			constructor() { super({ id: CHECK_CLAUDE_CODE_VERSION_COMMAND_ID, title: localize2('backboard.claudeCode.checkVersion', "Check Claude Code Version"), category: backboardCategory }); }
+			override run(accessor: ServicesAccessor): Promise<IClaudeCodeVersion | undefined> {
+				return accessor.get(IAgentCliSetupService).checkClaudeCodeVersion();
+			}
+		});
+		registerAction2(class BackboardUpdateClaudeCodeAction extends Action2 {
+			constructor() { super({ id: UPDATE_CLAUDE_CODE_COMMAND_ID, title: localize2('backboard.claudeCode.update', "Update Claude Code"), category: backboardCategory, f1: true }); }
+			override async run(accessor: ServicesAccessor): Promise<void> {
+				if (!await accessor.get(IAgentCliSetupService).updateClaudeCode()) {
+					throw new Error(localize('backboard.claudeCode.updateFailed', "Claude Code could not be updated."));
+				}
 			}
 		});
 	}

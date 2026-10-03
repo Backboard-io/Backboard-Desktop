@@ -126,6 +126,16 @@ export function claudeSubscriptionLoginShellCommand(windows = isWindows): string
 	return 'if command -v claude >/dev/null 2>&1; then claude auth login --claudeai; elif [ -x "$HOME/.local/bin/claude" ]; then "$HOME/.local/bin/claude" auth login --claudeai; else echo "Claude Code is not installed or was not found on PATH" >&2; exit 127; fi';
 }
 
+/** Installed Claude Code next to the stable release; see the agent host's `claudeSubscription.version`. */
+export interface IClaudeCodeVersion {
+	readonly installed: string;
+	readonly latest: string;
+	readonly updateAvailable: boolean;
+}
+
+export const CHECK_CLAUDE_CODE_VERSION_COMMAND_ID = 'backboard.claudeCode.checkVersion';
+export const UPDATE_CLAUDE_CODE_COMMAND_ID = 'backboard.claudeCode.update';
+
 export const IAgentCliSetupService = createDecorator<IAgentCliSetupService>('agentCliSetupService');
 
 /**
@@ -144,6 +154,10 @@ export interface IAgentCliSetupService {
 	 * own UI already said what connecting does (the inline Connect rows).
 	 */
 	beginSetup(id: string, options?: { readonly confirmed?: boolean }): Promise<void>;
+	/** Undefined when Claude Code is missing or the release list is unreachable. */
+	checkClaudeCodeVersion(): Promise<IClaudeCodeVersion | undefined>;
+	/** Runs `claude update` and re-reads the models; resolves false when it failed (already reported). */
+	updateClaudeCode(): Promise<boolean>;
 }
 
 export class AgentCliSetupService implements IAgentCliSetupService {
@@ -251,6 +265,34 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 			this._notificationService.error(localize('agentSetup.failed', "{0} could not be installed: {1}", definition.label, err instanceof Error ? err.message : String(err)));
 		} finally {
 			this._inFlight.delete(id);
+		}
+	}
+
+	async checkClaudeCodeVersion(): Promise<IClaudeCodeVersion | undefined> {
+		if (isWindows) {
+			return undefined;
+		}
+		try {
+			const result = await this._agentHostService.executeAgentCommand({ provider: 'backboard', command: 'claudeSubscription.version' });
+			return isClaudeCodeVersion(result.data) ? result.data : undefined;
+		} catch (err) {
+			this._logService.warn('[AgentCliSetup] Claude Code version check failed', err);
+			return undefined;
+		}
+	}
+
+	async updateClaudeCode(): Promise<boolean> {
+		try {
+			const result = await this._progressService.withProgress({
+				location: ProgressLocation.Notification,
+				title: localize('agentSetup.claudeCode.updating', "Updating Claude Code…"),
+			}, () => this._agentHostService.executeAgentCommand({ provider: 'backboard', command: 'claudeSubscription.update' }));
+			this._notificationService.info(result.message);
+			return true;
+		} catch (err) {
+			this._logService.error('[AgentCliSetup] Claude Code update failed', err);
+			this._notificationService.error(localize('agentSetup.claudeCode.updateFailed', "Claude Code could not be updated: {0}. Run `claude update` in a terminal, then reopen the model picker.", err instanceof Error ? err.message : String(err)));
+			return false;
 		}
 	}
 
@@ -458,3 +500,8 @@ export class AgentCliSetupService implements IAgentCliSetupService {
 }
 
 registerSingleton(IAgentCliSetupService, AgentCliSetupService, InstantiationType.Delayed);
+
+function isClaudeCodeVersion(value: unknown): value is IClaudeCodeVersion {
+	const candidate = value as Partial<IClaudeCodeVersion> | undefined;
+	return typeof candidate?.installed === 'string' && typeof candidate.latest === 'string' && typeof candidate.updateAvailable === 'boolean';
+}

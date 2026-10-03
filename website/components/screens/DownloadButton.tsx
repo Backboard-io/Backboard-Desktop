@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { GithubLink } from "@/components/GithubLink";
 import { DESKTOP_REPO } from "@/data/links";
+import { track } from "@/lib/analytics";
 
 type Platform = { id: string; os: string; detail: string; short: string };
 
@@ -53,6 +54,10 @@ export function DownloadButton() {
           className="dl-badge"
           aria-disabled="true"
           title="Downloads open soon"
+          onClick={() =>
+            // Counted while it's still "soon": clicks here are demand.
+            track("download_clicked", { product: "desktop", platform: p.id, available: false })
+          }
         >
           <Icon id={p.id} />
           <span>

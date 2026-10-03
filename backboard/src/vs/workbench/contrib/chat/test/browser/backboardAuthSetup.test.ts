@@ -9,7 +9,8 @@ import { ICommandService } from '../../../../../platform/commands/common/command
 import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { renderBackboardAuthSetup } from '../../browser/backboardAuthSetup.js';
-import { CHATGPT_SUBSCRIPTION_SETUP_ID, CLAUDE_SUBSCRIPTION_SETUP_ID } from '../../browser/agentSessions/agentCliSetup.js';
+import { CHATGPT_SUBSCRIPTION_SETUP_ID, CHECK_CLAUDE_CODE_VERSION_COMMAND_ID, CLAUDE_SUBSCRIPTION_SETUP_ID, UPDATE_CLAUDE_CODE_COMMAND_ID } from '../../browser/agentSessions/agentCliSetup.js';
+import { EMPTY_BACKBOARD_CONNECT_STATE, renderBackboardConnect } from '../../browser/backboardConnect.js';
 import { ADD_PROVIDER_KEY_COMMAND_ID } from '../../browser/byokKeys/byokKeys.js';
 
 suite('Backboard auth setup', () => {
@@ -86,6 +87,38 @@ suite('Backboard auth setup', () => {
 			calls: [ADD_PROVIDER_KEY_COMMAND_ID],
 			note: 'OpenAI rejected the key.',
 			keptDraft: 'sk-abcdefghijklmnopqrstuvwxyz0123',
+		});
+	});
+
+	(isWindows ? test.skip : test)('an outdated Claude Code turns the Claude row into Update, which updates and refreshes', async () => {
+		let updated = false;
+		const calls: unknown[][] = [];
+		const commands = new class extends mock<ICommandService>() {
+			override async executeCommand<T>(id: string): Promise<T> {
+				calls.push([id]);
+				if (id === UPDATE_CLAUDE_CODE_COMMAND_ID) {
+					updated = true;
+				}
+				return (id === CHECK_CLAUDE_CODE_VERSION_COMMAND_ID
+					? { installed: updated ? '2.1.285' : '2.1.172', latest: '2.1.285', updateAvailable: !updated }
+					: undefined) as T;
+			}
+		};
+		const parent = document.createElement('div');
+		const view = renderBackboardConnect(parent, commands, { ...EMPTY_BACKBOARD_CONNECT_STATE, claude: true }, { targets: ['claude'], onDidConnect: () => { calls.push(['refresh']); } });
+		disposables.add(view.store);
+		const row = () => parent.querySelector<HTMLButtonElement>('.backboard-connect-row[data-target="claude"]')!;
+		const action = () => row().querySelector('.backboard-connect-action')!.textContent;
+		const before = action();
+		await settle();
+		const outdated = { action: action(), description: row().querySelector('.backboard-connect-description')!.textContent };
+		row().click();
+		await settle();
+		assert.deepStrictEqual({ before, outdated, after: action(), calls }, {
+			before: 'Reconnect',
+			outdated: { action: 'Update', description: 'Claude Code 2.1.172 is out of date. Update to see every model' },
+			after: 'Reconnect',
+			calls: [[CHECK_CLAUDE_CODE_VERSION_COMMAND_ID], [UPDATE_CLAUDE_CODE_COMMAND_ID], [CHECK_CLAUDE_CODE_VERSION_COMMAND_ID], ['refresh']],
 		});
 	});
 });

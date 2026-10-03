@@ -37,14 +37,21 @@ import { ISessionsManagementService } from '../../../services/sessions/common/se
 import { RightWorkbenchCommandId } from './rightWorkbench.js';
 import { CanvasMediaKind, CanvasView, extractCanvasImageGroups, extractCanvasTurns, ICanvasComment, ICanvasFilter, ICanvasImage, ICanvasImageGroup, ICanvasMediaModel, ICanvasModelChoices, ICanvasSendOptions, hasPerReferenceInstructions, referenceName, RightWorkbenchCanvas } from './rightWorkbenchCanvas.js';
 
-/** How many recently updated chats Canvas reads for their media (it shows every chat's). */
+/** How many recently updated chats Canvas reads for their media. */
 const OTHER_CHATS_LIMIT = 200;
 /** How many other chats are read at once. */
 const OTHER_CHATS_CONCURRENCY = 4;
-/** Longest edge of the previews tiles, filmstrips, and the thread show. */
+/** Longest edge of the previews that tiles, filmstrips, and the thread show. */
 const THUMBNAIL_EDGE = 640;
 /** The composer value that turns image or video generation off (not a model to list). */
 const GENERATIVE_MEDIA_OFF = 'off';
+/**
+ * Video models that took an attached clip in live API tests (2026-10-02). Only
+ * Hailuo 3 also took image references with it ("replace him with @image_2");
+ * Seedance failed on every video input, Aleph on a clip plus an image.
+ */
+const CLIP_WITH_IMAGES_VIDEO_MODEL = 'openrouter/minimax/hailuo-3';
+const CLIP_VIDEO_MODELS = [CLIP_WITH_IMAGES_VIDEO_MODEL, 'openrouter/runway/aleph-2', 'openrouter/black-forest-labs/flux-video-edit'];
 const SIDE_WIDTH_STORAGE_KEY = 'sessions.canvas.chatWidth';
 const FILTER_STORAGE_KEY = 'sessions.canvas.filter';
 /** Uploads live in `~/.backboard/canvas-uploads`, shared by every chat. */
@@ -66,6 +73,18 @@ function modelDisplayName(label: string): string {
 }
 
 
+/**
+ * How a message names an item: generated items share labels ("Generated
+ * image"), so the label carries its file, or its URL when only hosted (never
+ * an inline `data:` URL, which would paste the whole image into the message).
+ */
+function itemName(image: ICanvasImage): string {
+	if (image.localFile) {
+		return `${image.label} (${basename(image.localFile)})`;
+	}
+	return image.src.scheme === Schemas.data ? image.label : `${image.label} (${image.key})`;
+}
+
 /** Blob types to play videos as. QuickTime `.mov` is typed as MP4: Chromium plays H.264 `.mov` that way, but not as `video/quicktime`. */
 const VIDEO_MIME_TYPES: Record<string, string> = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/mp4', webm: 'video/webm' };
 
@@ -86,8 +105,8 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 	private readonly chatMediaCache = new Map<string, { readonly updated: number; readonly groups: readonly ICanvasImageGroup[] }>();
 	/** Display names of image/video models by id, learnt from the catalogs. */
 	private readonly modelLabels = new Map<string, string>();
-	/** The last model list read per kind, so the menu opens at once. */
-	private readonly modelChoices = new Map<CanvasMediaKind, ICanvasModelChoices>();
+	/** The last model list read per chat and kind, so the menu opens at once. */
+	private readonly modelChoices = new Map<string, ICanvasModelChoices>();
 	/** Image previews by item, kept across openings; revoked with the contribution. */
 	private readonly thumbnailUrls = new Map<string, Promise<string | undefined>>();
 	/** Composer attachment ids Canvas added, replaced as its selection changes. */
@@ -147,11 +166,18 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 		let listUploads: (saved: readonly URI[]) => Promise<ICanvasImage[]> = async () => [];
 		const blobUrls: string[] = [];
 		store.add(toDisposable(() => blobUrls.forEach(url => URL.revokeObjectURL(url))));
+		// One copy of each item per opening: a video's tile and stage share it rather than reading the file twice.
+		const fullUrls = new Map<string, Promise<string | undefined>>();
+		const fullUrl = (image: ICanvasImage) => {
+			let url = fullUrls.get(image.key);
+			if (!url) {
+				url = this.fullUrl(image, blobUrls);
+				fullUrls.set(image.key, url);
+			}
+			return url;
+		};
 		const canvas = store.add(this.instantiationService.createInstance(RightWorkbenchCanvas, body, {
-			toDisplayUrl: (image, size) => size === 'thumb' ? this.thumbnailUrl(image, blobUrls) : this.fullUrl(image, blobUrls),
-			// Canvas has its own composer: selecting items must not leave attachments in the
-			// chat's composer. Sends and comments attach their images themselves.
-			setComposerImages: () => { },
+			toDisplayUrl: (image, size) => size === 'thumb' && image.kind === 'image' ? this.thumbnailUrl(image) : fullUrl(image),
 			sendComments: comments => {
 				if (chatResource) {
 					void this.sendComments(chatResource, comments);
@@ -234,18 +260,28 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 				return chatResource;
 			}
 			const previous = chatResource?.toString();
+			// The new chat answers with the model Canvas showed, not whatever a new chat defaults to.
+			const model = chatResource && this.chatWidget(chatResource)?.input.currentLanguageModel;
 			adoptNextChat = true;
-			await this.sessionsService.openNewChatInSession(session);
-			// Wait for the new chat's widget, which sends the message.
-			for (let waited = 0; waited < 5000; waited += 100) {
-				if (chatResource && chatResource.toString() !== previous && this.chatWidgetService.getWidgetBySessionResource(chatResource)) {
-					break;
+			try {
+				await this.sessionsService.openNewChatInSession(session);
+				// Wait for the new chat's widget, which sends the message.
+				for (let waited = 0; waited < 5000; waited += 100) {
+					const widget = chatResource && chatResource.toString() !== previous ? this.chatWidget(chatResource) : undefined;
+					if (chatResource && widget) {
+						if (model && widget.input.currentLanguageModel !== model) {
+							widget.input.switchModelByIdentifier(model);
+						}
+						return chatResource;
+					}
+					await new Promise(resolve => setTimeout(resolve, 100));
 				}
-				await new Promise(resolve => setTimeout(resolve, 100));
+				// The new chat never showed up: not sending beats sending into the previous chat.
+				return undefined;
+			} finally {
+				adoptNextChat = false;
+				canvas.focus();
 			}
-			adoptNextChat = false;
-			canvas.focus();
-			return chatResource;
 		};
 		let pendingReveal: { readonly imageUrl: string | undefined; readonly view: CanvasView | undefined } | undefined = { imageUrl, view };
 		const modelStore = store.add(new DisposableStore());
@@ -261,7 +297,7 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 			const currentKey = chatResource?.toString();
 			const all = [...otherGroups.filter(group => !currentLoaded || group.source?.key !== currentKey), ...currentGroups, ...uploadGroups]
 				.sort((a, b) => a.timestamp - b.timestamp);
-			canvas.setGroups(all, 'all');
+			canvas.setGroups(all, currentKey);
 			if (pendingReveal) {
 				canvas.reveal(pendingReveal.imageUrl, pendingReveal.view);
 				pendingReveal = undefined;
@@ -467,16 +503,18 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 
 	/**
 	 * A small preview of an image, made once from its saved file and kept
-	 * across openings; hosted-only images and videos show their original.
+	 * across openings; hosted-only images show their original.
 	 */
-	private thumbnailUrl(image: ICanvasImage, blobUrls: string[]): Promise<string | undefined> {
-		if (image.kind === 'video') {
-			return this.fullUrl(image, blobUrls);
-		}
+	private thumbnailUrl(image: ICanvasImage): Promise<string | undefined> {
 		let url = this.thumbnailUrls.get(image.key);
 		if (!url) {
 			url = this.makeThumbnail(image);
 			this.thumbnailUrls.set(image.key, url);
+			void url.then(made => {
+				if (!made) {
+					this.thumbnailUrls.delete(image.key);
+				}
+			});
 		}
 		return url;
 	}
@@ -500,9 +538,17 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 	}
 
 
+	/**
+	 * The chat's own widget. Never another chat's (such as the last focused):
+	 * an edit or model change must not land in a chat the user isn't looking at.
+	 */
+	private chatWidget(chatResource: URI) {
+		return this.chatWidgetService.getWidgetBySessionResource(chatResource);
+	}
+
 	/** The chat's model picker for this kind: the model list, or the older on/off image switch. */
 	private mediaOption(chatResource: URI, kind: CanvasMediaKind) {
-		const widget = this.chatWidgetService.getWidgetBySessionResource(chatResource) ?? this.chatWidgetService.lastFocusedWidget;
+		const widget = this.chatWidget(chatResource);
 		const options = widget?.input.getBackboardGenericConfigOptions() ?? [];
 		const ids = kind === 'video' ? ['videoModel'] : ['imageModel', 'imageGeneration'];
 		return ids.map(id => options.find(option => option.id === id)).find(isDefined);
@@ -552,10 +598,10 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 				}
 			}
 			const models = { values: [...rows.values()], labels: [...rows.keys()], current: undefined };
-			this.modelChoices.set(kind, models);
+			this.modelChoices.set(`${chatResource}|${kind}`, models);
 			return models;
 		});
-		const cached = this.modelChoices.get(kind);
+		const cached = this.modelChoices.get(`${chatResource}|${kind}`);
 		const withCurrent = (models: ICanvasModelChoices | undefined) => models && {
 			...models,
 			// The current pick shows under its own name even when another provider's copy is listed.
@@ -575,7 +621,7 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 	 * result when it arrives. A hosted-only item is referenced by URL.
 	 */
 	private async sendEdit(chatResource: URI, images: readonly ICanvasImage[], prompt: string, kind: CanvasMediaKind, seconds: number | undefined): Promise<void> {
-		const widget = this.chatWidgetService.getWidgetBySessionResource(chatResource) ?? this.chatWidgetService.lastFocusedWidget;
+		const widget = this.chatWidget(chatResource);
 		if (!widget || !images.length) {
 			this.warnNotSent();
 			return;
@@ -585,16 +631,25 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 			// Turn on the generator the user picked in Canvas, with the chat's default model.
 			option.setValue(option.activationValue);
 		}
+		if (option && kind === 'video' && images.some(image => image.kind === 'video')) {
+			// A clip only reaches models that take video input; move the chat to one when its pick can't.
+			const accepted = images.some(image => image.kind !== 'video') ? [CLIP_WITH_IMAGES_VIDEO_MODEL] : CLIP_VIDEO_MODELS;
+			if (!accepted.includes(option.getEnumInfo()?.current ?? '')) {
+				const catalog = await Promise.resolve(option.getDynamicEnumInfo?.() ?? option.getEnumInfo()).catch(() => undefined);
+				if (catalog?.values.includes(CLIP_WITH_IMAGES_VIDEO_MODEL)) {
+					option.setValue(CLIP_WITH_IMAGES_VIDEO_MODEL);
+				}
+			}
+		}
 		await this.setComposerImages(chatResource, images);
-		// Generated items share labels ("Generated image"), so each is named by its file (or URL) too.
-		const subject = (image: ICanvasImage) => image.localFile ? `${image.label} (${basename(image.localFile)})` : `${image.label} (${image.key})`;
+		const subject = (image: ICanvasImage) => image.kind === 'video' ? localize('sessionsCanvas.videoSubject', "{0}, a video", itemName(image)) : itemName(image);
 		let message: string;
 		if (images.length === 1) {
 			const [image] = images;
 			const named = `${subject(image)}, @${referenceName(0)}`;
 			message = kind === 'video'
 				? image.kind === 'video'
-					// Worded as a new video guided by the clip: edit wording puts Seedance in an editing mode OpenRouter cannot run.
+					// Worded as a new video guided by the clip, the phrasing video models followed in live tests.
 					? localize('sessionsCanvas.editVideo', "Make a new video that uses the attached video \"{0}\" as its reference, following its camera motion, framing, movement and scene: {1}", named, prompt)
 					: localize('sessionsCanvas.videoFromImage', "Make a video from the attached image \"{0}\": {1}", named, prompt)
 				: image.kind === 'video'
@@ -609,7 +664,10 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 					? localize('sessionsCanvas.videoPerImage', "Make a separate video for each image below, following the instruction given for that image. The attached images are referred to as:\n{0}\n\n{1}", legend, prompt)
 					: localize('sessionsCanvas.editPerImage', "Edit each image below separately, following the instruction given for that image. The attached images are referred to as:\n{0}\n\n{1}", legend, prompt)
 				: kind === 'video'
-					? localize('sessionsCanvas.videoFromImages', "Make a video from the attached images. They are referred to as:\n{0}\n\n{1}", legend, prompt)
+					? images.some(image => image.kind === 'video')
+						// Reference wording: the new video follows the clip, with the stills built in.
+						? localize('sessionsCanvas.videoFromClipAndImages', "Make a new video that follows the attached video's camera motion, framing, movement and scene, using the attached images as references. They are referred to as:\n{0}\n\n{1}", legend, prompt)
+						: localize('sessionsCanvas.videoFromImages', "Make a video from the attached images. They are referred to as:\n{0}\n\n{1}", legend, prompt)
 					: localize('sessionsCanvas.editImages', "Edit the attached images. They are referred to as:\n{0}\n\n{1}", legend, prompt);
 		}
 		// A picked length answers the agent's "Video length" question up front; Auto tells it to choose rather than ask.
@@ -635,6 +693,11 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 		const used = new Set<string>();
 		const saved: URI[] = [];
 		for (const [index, entry] of entries.entries()) {
+			// Canvas lists only these types: anything else (HEIC, TIFF, SVG) would be saved and never shown.
+			if (!UPLOAD_EXTENSIONS.includes(entry.name.split('.').pop()?.toLowerCase() ?? '')) {
+				this.notificationService.warn(localize('sessionsCanvas.uploadUnsupported', "Canvas can't show {0}. Upload a PNG, JPEG, WebP, GIF, AVIF or BMP image, or an MP4, MOV, M4V or WebM video.", entry.name));
+				continue;
+			}
 			let name = entry.name.replace(/[\\/:*?"<>|]/g, '_') || `upload-${index + 1}`;
 			if (used.has(name)) {
 				name = `${index + 1}-${name}`;
@@ -678,7 +741,8 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 
 	/** Saves a copy of the item: the session's saved file, or the hosted original. */
 	private async saveAs(image: ICanvasImage): Promise<void> {
-		const name = basename(image.localFile ?? image.src) || (image.kind === 'video' ? 'video.mp4' : 'image.png');
+		const fallbackName = image.kind === 'video' ? 'video.mp4' : 'image.png';
+		const name = (image.localFile ? basename(image.localFile) : image.src.scheme === Schemas.data ? undefined : basename(image.src)) || fallbackName;
 		const target = await this.fileDialogService.showSaveDialog({
 			title: image.kind === 'video' ? localize('sessionsCanvas.saveVideo', "Download Video") : localize('sessionsCanvas.saveImage', "Download Image"),
 			defaultUri: joinPath(await this.fileDialogService.defaultFilePath(), name),
@@ -691,6 +755,9 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 				await this.fileService.copy(image.localFile, target, true);
 			} else {
 				const response = await fetch(image.key);
+				if (!response.ok) {
+					throw new Error(`HTTP ${response.status}`);
+				}
 				await this.fileService.writeFile(target, VSBuffer.wrap(new Uint8Array(await response.arrayBuffer())));
 			}
 		} catch (error) {
@@ -705,7 +772,7 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 
 	/** The composer's plain message: sent to the chat without the images Canvas attached. */
 	private async sendMessage(chatResource: URI, prompt: string): Promise<void> {
-		const widget = this.chatWidgetService.getWidgetBySessionResource(chatResource) ?? this.chatWidgetService.lastFocusedWidget;
+		const widget = this.chatWidget(chatResource);
 		if (!widget) {
 			this.warnNotSent();
 			return;
@@ -730,7 +797,7 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 	 * with the current selection, leaving the user's own attachments alone.
 	 */
 	private async setComposerImages(chatResource: URI, images: readonly ICanvasImage[]): Promise<void> {
-		const widget = this.chatWidgetService.getWidgetBySessionResource(chatResource) ?? this.chatWidgetService.lastFocusedWidget;
+		const widget = this.chatWidget(chatResource);
 		if (!widget) {
 			return;
 		}
@@ -750,15 +817,16 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 	 * and spells out each numbered note with where it was pinned.
 	 */
 	private async sendComments(chatResource: URI, comments: ReadonlyMap<ICanvasImage, readonly ICanvasComment[]>): Promise<void> {
-		const widget = this.chatWidgetService.getWidgetBySessionResource(chatResource) ?? this.chatWidgetService.lastFocusedWidget;
+		const widget = this.chatWidget(chatResource);
 		if (!widget) {
+			this.warnNotSent();
 			return;
 		}
 		await this.setComposerImages(chatResource, [...comments.keys()]);
 		const lines: string[] = [localize('sessionsCanvas.batchEditIntro', "Edit these images based on my comments:")];
 		let number = 0;
 		for (const [image, notes] of comments) {
-			lines.push('', image.label);
+			lines.push('', itemName(image));
 			for (const note of notes) {
 				number++;
 				lines.push(localize('sessionsCanvas.batchEditNote', "{0}. At {1}% across, {2}% down: {3}", number, Math.round(note.x * 100), Math.round(note.y * 100), note.text));

@@ -8,6 +8,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { localize } from '../../../../nls.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
+import { guestApiKey } from './backboardGuest.js';
 import { IAgentModelInfo } from '../../common/agentService.js';
 import { createAgentModelPricingMeta } from '../../common/agentModelPricing.js';
 import { billingRouteForProvider, BYOK_KEY_PROVIDER_SUFFIX, isKeyBilledProvider, type ModelRouteSource, vendorOfProvider } from '../../common/byokProviders.js';
@@ -190,6 +191,8 @@ export const BUNDLED_CLAUDE_SUBSCRIPTION_MODELS: readonly BridgeModel[] = [
 
 interface BackboardConfigJson {
 	readonly env?: unknown;
+	/** Signed-out device's guest key (see backboardGuest.ts). */
+	readonly guest?: unknown;
 	readonly api_url?: unknown;
 	readonly apiUrl?: unknown;
 	readonly api_key?: unknown;
@@ -352,6 +355,30 @@ function bridgeModelBillingSource(source: string | undefined): BridgeModelBillin
 	return BRIDGE_MODEL_BILLING_SOURCES.find(candidate => candidate === normalized);
 }
 
+/** Providers whose per-request cost is reported upstream, so a $0 catalog row can be trusted. */
+const REPORTED_COST_PROVIDERS = new Set(['openrouter', 'cerebras']);
+/** Router aliases pick an upstream per request, so no row can promise their price. */
+const ROUTER_MODEL_NAMES = new Set(['openrouter/auto', 'openrouter/auto-beta', 'openrouter/free']);
+
+/**
+ * True when Backboard runs this model with no credit or plan. Same rule as the
+ * server's `is_free_llm_model` and cli-ts `isFreeCatalogModel`: an
+ * OpenRouter-family row, not a router alias, whose every price is exactly 0.
+ */
+export function isFreeBackboardModel(model: BridgeModel): boolean {
+	if (!REPORTED_COST_PROVIDERS.has(model.provider.trim().toLowerCase()) || ROUTER_MODEL_NAMES.has(model.name.trim().toLowerCase())) {
+		return false;
+	}
+	if (!isZeroPrice(model.input_cost_per_1m_tokens) || !isZeroPrice(model.output_cost_per_1m_tokens)) {
+		return false;
+	}
+	return Object.entries(model).every(([key, value]) => !/(?:^|_)(?:cost|price)(?:_|$)/.test(key) || value === null || isZeroPrice(value));
+}
+
+function isZeroPrice(value: unknown): boolean {
+	return value === 0 || (typeof value === 'string' && value.trim() !== '' && Number(value) === 0);
+}
+
 function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 	const id = `${model.provider}/${model.name}`;
 	const billingSource = bridgeModelBillingSource(model.source);
@@ -365,6 +392,7 @@ function toAgentModelInfo(model: BridgeModel): IAgentModelInfo {
 		cacheCost,
 		cacheWriteCost,
 		outputCost,
+		priceCategory: billingSource !== 'byok' && isFreeBackboardModel(model) ? 'free' : undefined,
 	});
 	const contextLimit = model.contextLimit ?? model.context_limit;
 	const openRouterProviders = normalizeOpenRouterProviders(model.openrouter_providers);
@@ -993,11 +1021,14 @@ export function bridgeConfig(): Record<string, unknown> {
 	const accessToken = process.env.BACKBOARD_ACCESS_TOKEN
 		|| process.env.VSCODE_BACKBOARD_ACCESS_TOKEN
 		|| backboardConfigAccessToken(persisted);
+	// Signed out: the device's guest key runs Backboard's free models only.
+	const guestKey = !apiKey && !accessToken ? guestApiKey(persisted) : undefined;
 	return {
 		env,
 		...(apiUrl ? { apiUrl } : {}),
-		...(apiKey ? { apiKey } : {}),
+		...(apiKey || guestKey ? { apiKey: apiKey || guestKey } : {}),
 		...(accessToken ? { accessToken } : {}),
+		...(guestKey ? { guest: true } : {}),
 	};
 }
 

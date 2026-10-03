@@ -428,6 +428,13 @@ export interface ModelInfo extends ThinkingModelMetadata {
 	source?: ModelSource;
 	/** Context window in tokens, when the catalog reports one. */
 	contextLimit?: number;
+	/**
+	 * Backboard runs this model with no credit or plan behind it (every catalog
+	 * price is exactly $0). Mirrors the server's `is_free_llm_model` gate.
+	 */
+	free?: boolean;
+	/** False when the catalog says the model cannot call tools. */
+	supportsTools?: boolean;
 }
 
 export interface ModelCatalogItem {
@@ -453,6 +460,9 @@ export interface ModelCatalogItem {
 	context_limit?: number | null;
 	/** Live OpenRouter serving routes returned by Backboard's billing catalog. */
 	openrouter_providers?: OpenRouterModelProvider[];
+	input_cost_per_1m_tokens?: number | null;
+	output_cost_per_1m_tokens?: number | null;
+	supports_tools?: boolean | null;
 }
 
 export interface OpenRouterModelProvider {

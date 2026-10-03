@@ -561,6 +561,11 @@
 	display: none;
 }
 
+/* "Claude subscription" / "ChatGPT subscription" needs more room than a provider name. */
+.monaco-workbench.agent-sessions-workbench .session-item .session-simple-provider.subscription {
+	max-width: 150px;
+}
+
 /* Folder view uses compact project rows and indented chat titles. */
 .monaco-workbench.agent-sessions-workbench .sessions-list-control .monaco-list-row:has(.simple-session-compact) {
 	margin: 0;
@@ -954,6 +959,19 @@
 	}
 
 	.simple-session-compact .session-simple-provider {
+		display: none;
+	}
+
+	/* Folder rows still name the Claude / ChatGPT subscription a chat runs on. */
+	.simple-session-compact .session-simple-provider.subscription:not(.hidden) {
+		display: flex;
+		flex: 0 0 auto;
+		margin-left: auto;
+		padding-left: 8px;
+	}
+
+	/* The row's hover actions take that slot. */
+	.monaco-list-row:is(:hover, .focused:not(.selected)) .simple-session-compact .session-simple-provider.subscription {
 		display: none;
 	}
 

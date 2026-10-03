@@ -48,7 +48,43 @@ export function normalizeModel(model: ModelCatalogItem): ModelInfo | null {
 		...(typeof model.context_limit === "number" && model.context_limit > 0
 			? { contextLimit: model.context_limit }
 			: {}),
+		...(isFreeCatalogModel(model) ? { free: true } : {}),
+		...(model.supports_tools === false ? { supportsTools: false } : {}),
 	};
+}
+
+/** Providers whose per-request cost is reported by the upstream, so a $0 row can be trusted. */
+const REPORTED_COST_PROVIDERS = new Set(["openrouter", "cerebras"]);
+/** Router aliases pick their upstream per request, so no row can promise their price. */
+const ROUTER_MODELS = new Set([
+	"openrouter/auto",
+	"openrouter/auto-beta",
+	"openrouter/free",
+]);
+
+/**
+ * True when Backboard admits this model with no credit: the same rule as the
+ * server's `is_free_llm_model` (app/services/billing_service.py). Every price
+ * the row carries must be exactly zero, and input and output must be present.
+ */
+export function isFreeCatalogModel(model: ModelCatalogItem): boolean {
+	const provider = model.provider.trim().toLowerCase();
+	const name = model.name.trim().toLowerCase();
+	if (!REPORTED_COST_PROVIDERS.has(provider) || ROUTER_MODELS.has(name)) {
+		return false;
+	}
+	if (
+		model.input_cost_per_1m_tokens !== 0 ||
+		model.output_cost_per_1m_tokens !== 0
+	) {
+		return false;
+	}
+	return Object.entries(model).every(
+		([key, value]) =>
+			!/(?:^|_)(?:cost|price)(?:_|$)/.test(key) ||
+			value === null ||
+			value === 0,
+	);
 }
 
 function isModelInfo(model: ModelInfo | null): model is ModelInfo {

@@ -341,6 +341,12 @@ for arch in "${ARCHES[@]}"; do
       exit 1
     fi
 
+    if [[ "${DRY_RUN}" -eq 0 ]]; then
+      echo "Running mandatory live model chat checks against the packaged ${CHANNEL} app"
+      bash "${REPO_ROOT}/scripts/test_macos_model_chats.sh" \
+        "${dmg_path}" "${release_dir}/model-chat-smoke.json"
+    fi
+
     previous_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${UPDATER_TEST_SOURCE_APP}/Contents/Info.plist" 2>/dev/null || true)"
     if [[ -z "${previous_version}" ]]; then
       echo "Could not read the updater E2E source version from ${UPDATER_TEST_SOURCE_APP}." >&2

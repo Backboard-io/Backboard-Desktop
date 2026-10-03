@@ -388,6 +388,20 @@
 	color: var(--vscode-descriptionForeground);
 }
 
+.agent-sessions-history-modal-body .agent-session-subscription.has-subscription {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	margin-right: 4px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}
+
+.agent-sessions-history-modal-body .agent-session-subscription-icon {
+	font-size: 12px;
+	opacity: 0.8;
+}
+
 .agent-sessions-history-modal-body .agent-session-status.has-separator::before {
 	content: none;
 }

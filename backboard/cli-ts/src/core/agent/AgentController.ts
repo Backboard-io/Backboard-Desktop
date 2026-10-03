@@ -70,9 +70,13 @@ import { AgentLoopFactory } from "./AgentLoopFactory.ts";
 import type { AgentTaskManager } from "./AgentTaskManager.ts";
 import { AgentTraceContext } from "./AgentTraceStore.ts";
 import { AssistantSessionBinding } from "./AssistantSessionBinding.ts";
-import { capacityFallbackCandidates, modelKey } from "./RuntimeRecovery.ts";
-import { isAccountBlockedError, TURN_MAX_ATTEMPTS } from "./TurnRetry.ts";
+import {
+	capacityFallbackCandidates,
+	freeFallbackCandidates,
+	modelKey,
+} from "./RuntimeRecovery.ts";
 import { Turn } from "./Turn.ts";
+import { isAccountBlockedError, TURN_MAX_ATTEMPTS } from "./TurnRetry.ts";
 
 export interface AgentControllerDeps {
 	/** Base backoff between silent retries of a failed turn; tests pass 0. */
@@ -556,6 +560,27 @@ export class AgentController {
 					) ?? null
 				);
 			};
+			const resolveFreeFallback = async (
+				_current: ModelRef,
+				attemptedModelKeys: ReadonlySet<string>,
+			): Promise<ModelRef | null> => {
+				// A key-billed turn is never blocked on Backboard credit, and must
+				// not be moved off the user's key.
+				if (route.source === "byok") return null;
+				const catalog = await this.deps.client
+					.listModels({ signal })
+					.catch(() => null);
+				if (!catalog) return null;
+				return (
+					freeFallbackCandidates(
+						normalizeSelectableModels(catalog.models),
+					).find(
+						(candidate) =>
+							!attemptedModelKeys.has(modelKey(candidate)) &&
+							this.canUseFallbackInCurrentThread(candidate),
+					) ?? null
+				);
+			};
 			const loop = this.loopFactory.createLoop({
 				scheduler: this.scheduler,
 				session,
@@ -592,6 +617,7 @@ export class AgentController {
 				displayContent: options.displayContent ?? text,
 				durableSession: this.deps.getDurableSession?.(),
 				resolveCapacityFallback,
+				resolveFreeFallback,
 				maxTurnAttempts: TURN_MAX_ATTEMPTS,
 				turnRetryBackoffMs: this.deps.turnRetryBackoffMs,
 				onModelSucceeded: async (model) => {

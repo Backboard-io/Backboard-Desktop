@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { track } from "@/lib/analytics";
 import "./install.css";
 
 // The official one-line installers, as published on backboard.io/products/cli.
@@ -49,6 +50,7 @@ function Shell({ cmd }: { cmd: string }) {
 export function InstallCommands({ className = "" }: { className?: string }) {
   const [copied, setCopied] = useState<string | null>(null);
   const copy = async (id: string, cmd: string) => {
+    track("install_command_copied", { product: "cli", platform: id });
     try {
       await navigator.clipboard.writeText(cmd);
       setCopied(id);

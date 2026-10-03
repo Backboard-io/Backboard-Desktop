@@ -14,7 +14,11 @@ import {
 	SYSTEM_ONE_DEFAULT_MODEL,
 	SYSTEM_ONE_PROVIDER,
 } from "./constants.ts";
-import { BackboardError, BackboardTransportError } from "./errors.ts";
+import {
+	BackboardError,
+	BackboardTransportError,
+	backboardHttpErrorMessage,
+} from "./errors.ts";
 import {
 	BackboardStreamEventMapper,
 	type ToolMappingTrace,
@@ -166,7 +170,7 @@ export class BackboardClient implements AgentClient {
 
 		if (!res.ok) {
 			throw new BackboardError(
-				`Backboard request failed: HTTP ${res.status}`,
+				backboardHttpErrorMessage(res.status, parsed),
 				res.status,
 				parsed,
 			);
@@ -211,7 +215,7 @@ export class BackboardClient implements AgentClient {
 
 		if (!res.ok) {
 			throw new BackboardError(
-				`Backboard request failed: HTTP ${res.status}`,
+				backboardHttpErrorMessage(res.status, parsed),
 				res.status,
 				parsed,
 			);
@@ -582,7 +586,7 @@ export class BackboardClient implements AgentClient {
 					error,
 				});
 				throw new BackboardError(
-					`Backboard request failed: HTTP ${status}`,
+					backboardHttpErrorMessage(status, parsed),
 					status,
 					parsed,
 				);

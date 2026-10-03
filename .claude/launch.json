@@ -24,6 +24,18 @@
         "dev"
       ],
       "port": 5173
+    },
+    {
+      "name": "currey-insurance",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4321",
+        "--directory",
+        "/Users/erintomorri/Desktop/currey-insurance"
+      ],
+      "port": 4321
     }
   ]
 }

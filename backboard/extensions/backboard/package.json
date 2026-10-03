@@ -31,7 +31,8 @@
     "onCommand:backboard.hasAlternativeCredentials",
     "onCommand:backboard.refreshModels",
     "onCommand:backboard.generateCommitMessage",
-    "onCommand:backboard.openUsage"
+    "onCommand:backboard.openUsage",
+    "onCommand:backboard.installTerminalCommand"
   ],
   "extensionKind": [
     "workspace",

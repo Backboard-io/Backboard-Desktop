@@ -3,8 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// Load styles for the remaining onboarding variant.
+// Load styles for the remaining onboarding variant and its sign-in screen.
 import './media/variationA.css';
+import './media/onboardingSignIn.css';
 
 import { localize2 } from '../../../../nls.js';
 import { Categories } from '../../../../platform/action/common/actionCommonCategories.js';

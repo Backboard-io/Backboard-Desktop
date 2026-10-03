@@ -1187,6 +1187,41 @@ suite('CliTsAgent tool metadata', () => {
 		}
 	});
 
+	test('restored sessions report their stored model, inferring the Claude subscription for legacy entries', async () => {
+		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-stored-model-'));
+		try {
+			const storePath = path.join(tempRoot, 'cli-ts-sessions.json');
+			const turn = (usageModel: string | undefined) => ({ id: `turn-${usageModel}`, prompt: 'hi', response: 'ok', ...(usageModel ? { usage: { model: usageModel } } : {}) });
+			fs.writeFileSync(storePath, JSON.stringify({
+				version: 1,
+				sessions: [
+					{ id: 'stored', title: 'Stored', createdAt: 3, modifiedAt: 3, model: { id: 'openai-subscription/gpt-5.5' }, turns: [turn('gpt-5.5')] },
+					{ id: 'legacy-claude', title: 'Legacy', createdAt: 2, modifiedAt: 2, turns: [turn('deepseek/deepseek-v4-flash'), turn('opus')] },
+					{ id: 'legacy-backboard', title: 'Backboard', createdAt: 1, modifiedAt: 1, turns: [turn('claude-sonnet-5-5')] },
+				],
+			}));
+			const agent = createAgent();
+			const internals = agent as unknown as {
+				_storePath(): string;
+				_session(sessionUri: URI): unknown;
+			};
+			internals._storePath = () => storePath;
+			const expected = [
+				['Stored', 'openai-subscription/gpt-5.5'],
+				['Legacy', 'anthropic-subscription/opus'],
+				['Backboard', undefined],
+			];
+
+			assert.deepStrictEqual((await agent.listSessions()).map(session => [session.summary, session.model?.id]), expected);
+
+			// Opening a stored chat loads it into memory; it must keep reporting the same model.
+			internals._session(AgentSession.uri('backboard', 'legacy-claude'));
+			assert.deepStrictEqual((await agent.listSessions()).map(session => [session.summary, session.model?.id]), expected);
+		} finally {
+			fs.rmSync(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	test('archiving removes a clean worktree and unarchiving recreates it after restart from the preserved branch', async () => {
 		const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'backboard-cli-ts-archive-'));
 		try {

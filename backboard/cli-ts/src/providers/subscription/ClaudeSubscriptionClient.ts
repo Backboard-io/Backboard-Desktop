@@ -691,7 +691,12 @@ export class ClaudeSubscriptionClient implements AgentClient {
 							`Claude Code stopped: ${message.subtype}`,
 					);
 				}
-				const usage = usageFromResult(message);
+				const usage = usageFromResult(
+					message,
+					thread.model,
+					this.modelCatalog?.find((entry) => entry.value === thread.model)
+						?.resolvedModel,
+				);
 				if (usage) yield { kind: "usage", usage };
 				if (active.segmentText || message.result) {
 					const finalText = active.segmentText || message.result;
@@ -946,8 +951,9 @@ interface ClaudeModelVersion {
 /**
  * One row per model family (Fable, Opus, Sonnet, Haiku), at the newest version
  * Claude Code reports. Aliases such as `default` and pinned older generations
- * duplicate a family and are left out; a session already pinned to one still
- * routes, it just is not listed. Newer models are never added from a compiled
+ * duplicate a family and are left out unless no other row covers that family;
+ * a session already pinned to an unlisted model still routes, it just is not
+ * listed. Newer models are never added from a compiled
  * list: an older Claude Code rejects model ids it does not know.
  */
 function curateClaudeCatalog(
@@ -957,21 +963,55 @@ function curateClaudeCatalog(
 		string,
 		{ model: ClaudeModelInfo; version: number[] }
 	>();
-	for (const model of live) {
-		if (["default", "best", "opusplan"].includes(model.value.toLowerCase())) {
-			continue;
-		}
+	const aliases = ["default", "best"];
+	const consider = (reported: ClaudeModelInfo, onlyNewFamily: boolean) => {
+		const resolvedModel =
+			reported.resolvedModel ?? inferClaudeResolvedModel(reported);
+		const model = resolvedModel ? { ...reported, resolvedModel } : reported;
 		const parsed = parseClaudeModelVersion(model.resolvedModel ?? model.value);
-		if (!parsed) continue;
+		if (!parsed) return;
 		const current = byFamily.get(parsed.family);
+		if (onlyNewFamily && current) return;
 		if (!current || compareVersions(parsed.version, current.version) > 0) {
 			byFamily.set(parsed.family, { model, version: parsed.version });
+		}
+	};
+	for (const reported of live) {
+		const value = reported.value.toLowerCase();
+		if (value === "opusplan" || aliases.includes(value)) continue;
+		consider(reported, false);
+	}
+	// Older Claude Code lists Opus only as `default`; keep such an alias row
+	// when it is the sole row for its family.
+	for (const reported of live) {
+		if (aliases.includes(reported.value.toLowerCase())) {
+			consider(reported, true);
 		}
 	}
 	const order = ["fable", "opus", "sonnet", "haiku"];
 	return [...byFamily.entries()]
 		.sort(([a], [b]) => order.indexOf(a) - order.indexOf(b))
 		.map(([, entry]) => entry.model);
+}
+
+/**
+ * Claude Code before ~2.1.2xx reports alias rows (`sonnet`, `haiku`, `opus[1m]`)
+ * without `resolvedModel`; the version only appears in the description
+ * ("Sonnet 4.6 · Efficient for routine tasks"). Without this, every alias row
+ * was dropped and the picker showed a single model.
+ */
+function inferClaudeResolvedModel(model: ClaudeModelInfo): string | undefined {
+	if (parseClaudeModelVersion(model.value)) return undefined;
+	const match = /^\s*(fable|opus|sonnet|haiku)\s+(\d+)(?:\.(\d+))?\b/i.exec(
+		model.description ?? "",
+	);
+	if (!match?.[1] || !match[2]) return undefined;
+	const family = match[1].toLowerCase();
+	const alias = model.value.toLowerCase().replace(/\[1m\]$/, "");
+	if (alias !== family && alias !== "default" && alias !== "best") {
+		return undefined;
+	}
+	return `claude-${family}-${match[2]}${match[3] ? `-${match[3]}` : ""}`;
 }
 
 function parseClaudeModelVersion(
@@ -1165,11 +1205,41 @@ function streamDelta(
 	return null;
 }
 
+/**
+ * Claude Code also makes small side calls (Haiku) inside one turn, so
+ * `modelUsage` can list several models in any order. The model that answered
+ * is the one that processed the most tokens. When it is the model the user
+ * picked, the turn reports the picked name (`sonnet`), which the picker and
+ * reply footer resolve to "Claude Sonnet 5.5"; a fallback reports its own id.
+ */
 function usageFromResult(
 	message: Extract<SDKMessage, { type: "result"; subtype: "success" }>,
+	requestedModel?: string,
+	requestedResolvedModel?: string,
 ): ProviderUsage {
-	const modelEntry = Object.entries(message.modelUsage)[0];
+	const volume = (usage: (typeof message.modelUsage)[string]) =>
+		usage.inputTokens +
+		usage.outputTokens +
+		usage.cacheReadInputTokens +
+		usage.cacheCreationInputTokens;
+	const modelEntry = Object.entries(message.modelUsage).sort(
+		([, a], [, b]) => volume(b) - volume(a),
+	)[0];
 	const modelUsage = modelEntry?.[1];
+	const usedModel = modelEntry?.[0];
+	const sameModel = (a?: string, b?: string) =>
+		!!a &&
+		!!b &&
+		a.replace(/\[1m\]$/i, "").toLowerCase() ===
+			b.replace(/\[1m\]$/i, "").toLowerCase();
+	const reportedModel =
+		requestedModel &&
+		(!usedModel ||
+			sameModel(usedModel, requestedResolvedModel) ||
+			sameModel(usedModel, requestedModel) ||
+			sameModel(modelUsage?.canonicalModel, requestedResolvedModel))
+			? requestedModel
+			: usedModel;
 	const inputTokens = message.usage.input_tokens;
 	const outputTokens = message.usage.output_tokens;
 	const cacheRead = message.usage.cache_read_input_tokens;
@@ -1190,7 +1260,7 @@ function usageFromResult(
 		contextTokens: inputTokens + cacheRead + cacheWrite + outputTokens,
 		contextLimit: modelUsage?.contextWindow,
 		provider: PROVIDER,
-		model: modelEntry?.[0],
+		model: reportedModel,
 	};
 }
 

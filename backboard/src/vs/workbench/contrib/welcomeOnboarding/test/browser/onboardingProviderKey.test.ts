@@ -12,13 +12,13 @@ suite('Backboard onboarding provider key', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
 	for (const connected of [true, false]) {
-		test(`subscription setup ${connected ? 'advances when connected' : 'stays on onboarding when cancelled'}`, async () => {
+		test(`logging in ${connected ? 'advances when connected' : 'stays on onboarding when cancelled'}`, async () => {
 			const harness = Object.create(OnboardingVariationA.prototype) as {
 				stepDisposables: DisposableStore;
 				stepFocusableElements: HTMLElement[];
 				postOnboardingSignInPromptShown: boolean;
 				commandService: { executeCommand(id: string): Promise<boolean> };
-				_createBrandLockup(): void;
+				billingService: { refresh(): Promise<void>; status: { plan: { cancel_at_period_end: boolean } } };
 				_logAction(): void;
 				_advanceOrComplete(): void;
 				_renderConnectAIStep(container: HTMLElement): void;
@@ -28,18 +28,19 @@ suite('Backboard onboarding provider key', () => {
 			harness.stepDisposables = disposables.add(new DisposableStore());
 			harness.stepFocusableElements = [];
 			harness.postOnboardingSignInPromptShown = false;
-			harness._createBrandLockup = () => undefined;
 			harness._logAction = () => undefined;
 			let advanced = false;
 			harness._advanceOrComplete = () => { advanced = true; };
 			const calls: string[] = [];
 			harness.commandService = { executeCommand: async id => { calls.push(id); return connected; } };
+			// Already subscribed, so the plan offer is skipped and sign-in moves straight on.
+			harness.billingService = { refresh: async () => { }, status: { plan: { cancel_at_period_end: false } } };
 			harness._renderConnectAIStep(container);
-			const button = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Bring Your Own Subscription')!;
+			const button = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Log in')!;
 			button.click();
 			await new Promise(resolve => setTimeout(resolve, 0));
 			assert.deepStrictEqual({ calls, advanced, suppressSignIn: harness.postOnboardingSignInPromptShown }, {
-				calls: ['backboard.setupSubscription', 'backboard.hasAlternativeCredentials'],
+				calls: ['backboard.signIn'],
 				advanced: connected, suppressSignIn: connected,
 			});
 			if (!connected) { assert.strictEqual(button.disabled, false); }

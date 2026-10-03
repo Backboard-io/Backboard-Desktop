@@ -11,7 +11,7 @@ import { IFileService } from '../../../../platform/files/common/files.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
-import { BackboardAuthContextKeys, backboardConfigResource, hasBackboardCredentials, IBackboardAuthService, isBackboardProduct } from '../common/backboardAuth.js';
+import { BackboardAuthContextKeys, backboardConfigGuestApiKey, backboardConfigResource, hasBackboardCredentials, IBackboardAuthService, isBackboardProduct, readBackboardConfigJson } from '../common/backboardAuth.js';
 
 const credentialCommands = new Set([
 	'backboard.setupSubscription',
@@ -74,7 +74,7 @@ export class BackboardAuthService extends Disposable implements IBackboardAuthSe
 			return;
 		}
 		const resource = await this.configResource;
-		const [signedIn, alternative] = await Promise.all([
+		const [signedIn, alternative, guest] = await Promise.all([
 			hasBackboardCredentials(this.fileService, resource).then(signedIn => {
 				// SSO must unblock immediately, even while a subscription probe starts.
 				if (revision === this.revision && !this._store.isDisposed) { this.signedInKey.set(signedIn); }
@@ -82,11 +82,17 @@ export class BackboardAuthService extends Disposable implements IBackboardAuthSe
 			}),
 			// A failed/starting extension host is not evidence of a logout.
 			this.commandService.executeCommand<boolean>('backboard.hasAlternativeCredentials').catch(() => undefined),
+			// A guest key runs the free models, so chat opens without a sign-in.
+			readBackboardConfigJson(this.fileService, resource).then(config => !!backboardConfigGuestApiKey(config), () => false),
 		]);
 		if (revision !== this.revision || this._store.isDisposed) { return; }
 		this.contextKeyService.bufferChangeEvents(() => {
 			this.signedInKey.set(signedIn);
-			if (typeof alternative === 'boolean') { this.alternativeKey.set(alternative); }
+			if (guest) {
+				this.alternativeKey.set(true);
+			} else if (typeof alternative === 'boolean') {
+				this.alternativeKey.set(alternative);
+			}
 		});
 	}
 }

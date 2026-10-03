@@ -38,7 +38,16 @@ const ACCOUNT_BLOCKED_PATTERNS = [
 	"insufficient credits",
 	"credit balance",
 	"no backend can serve",
+	// A guest (signed-out) key may only run Backboard's free models.
+	"sign in to use this model",
 ];
+
+/** True when the server refused a paid model because nobody is signed in. */
+export function isSignInRequiredError(error: unknown): boolean {
+	return (error instanceof Error ? error.message : String(error))
+		.toLowerCase()
+		.includes("sign in to use this model");
+}
 
 /** True when the failure needs the user to act (add credit, sign in), not a retry. */
 export function isAccountBlockedError(error: unknown): boolean {

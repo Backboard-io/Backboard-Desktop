@@ -30,6 +30,7 @@ type ImportHarnessObject = {
 	_logAction(action: string, stepOverride?: unknown, argument?: string): void;
 	_nextStep(): void;
 	_importSettingsFromSource(source: unknown, button: HTMLButtonElement, selection?: { settings: boolean; keybindings: boolean; extensions: boolean }): Promise<void>;
+	_copySettingsFromSource(source: unknown, selection: { settings: boolean; keybindings: boolean; extensions: boolean }, keepColorTheme?: string): Promise<{ imported: string[]; missing: string[] }>;
 };
 
 suite('Backboard onboarding settings import', () => {
@@ -280,5 +281,15 @@ suite('Backboard onboarding settings import', () => {
 		assert.strictEqual(harness.notifications.length, 1);
 		assert.strictEqual(harness.notifications[0].severity, Severity.Warning);
 		assert.ok(harness.notifications[0].message.includes('No selected Cursor items were found'));
+	});
+
+	test('keeps the theme picked during onboarding instead of the imported one', async () => {
+		await fileService.createFolder(sourceUserDataHome);
+		await fileService.writeFile(joinPath(sourceUserDataHome, 'settings.json'), VSBuffer.fromString('{\n\t// from VS Code\n\t"editor.fontSize": 17,\n\t"workbench.colorTheme": "Dark Modern"\n}\n'));
+
+		const harness = createImportHarness();
+		await harness.testObject._copySettingsFromSource(source(), { settings: true, keybindings: false, extensions: false }, 'Backboard Porcelain');
+
+		assert.strictEqual(await read(profile.settingsResource), '{\n\t// from VS Code\n\t"editor.fontSize": 17,\n\t"workbench.colorTheme": "Backboard Porcelain"\n}\n');
 	});
 });

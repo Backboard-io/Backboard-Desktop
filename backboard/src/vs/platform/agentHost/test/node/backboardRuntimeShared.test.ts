@@ -10,6 +10,17 @@ import { BACKBOARD_ACCESS_DEFAULT, BACKBOARD_ACCESS_FULL, BACKBOARD_MODE_MULTITA
 suite('Backboard runtime configuration', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
 
+	test('marks only exact-$0, non-router OpenRouter models as free, like the server', () => {
+		const models = backboardModelInfos([
+			{ provider: 'openrouter', name: 'cohere/north-mini-code:free', model_type: 'llm', source: 'backboard', input_cost_per_1m_tokens: 0, output_cost_per_1m_tokens: 0, cached_input_cost_per_1m_tokens: null },
+			{ provider: 'openrouter', name: 'openrouter/free', model_type: 'llm', source: 'backboard', input_cost_per_1m_tokens: 0, output_cost_per_1m_tokens: 0 },
+			{ provider: 'openrouter', name: 'x/cached-costs', model_type: 'llm', source: 'backboard', input_cost_per_1m_tokens: '0', output_cost_per_1m_tokens: 0, cached_input_cost_per_1m_tokens: 0.01 },
+			{ provider: 'openrouter', name: 'deepseek/deepseek-v4-flash', model_type: 'llm', source: 'backboard', input_cost_per_1m_tokens: 0.0785, output_cost_per_1m_tokens: 0.157 },
+			{ provider: 'openai', name: 'gpt-free', model_type: 'llm', source: 'backboard', input_cost_per_1m_tokens: 0, output_cost_per_1m_tokens: 0 },
+		]);
+		assert.deepStrictEqual(models.filter(model => model._meta?.priceCategory === 'free').map(model => model.id), ['openrouter/cohere/north-mini-code:free']);
+	});
+
 	test('advertises explicit reasoning levels with a balanced default', () => {
 		const resolved = resolveBackboardSessionConfig(undefined);
 		const intensity = resolved.schema.properties?.intensity;

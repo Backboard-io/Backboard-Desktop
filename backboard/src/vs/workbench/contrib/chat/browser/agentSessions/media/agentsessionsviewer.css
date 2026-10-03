@@ -393,6 +393,24 @@
 			display: none;
 		}
 
+		/* The Claude / ChatGPT subscription a chat bills to. */
+		.agent-session-subscription {
+			display: none;
+			flex: 0 0 auto;
+			align-items: center;
+			gap: 4px;
+			white-space: nowrap;
+
+			&.has-subscription {
+				display: inline-flex;
+			}
+
+			.agent-session-subscription-icon {
+				font-size: 11px;
+				opacity: 0.8;
+			}
+		}
+
 		.agent-session-description.has-separator::before {
 			content: '\00B7';
 			margin-right: 4px;

@@ -26,7 +26,7 @@ import { byokProviderDefinition, ByokProviderId, isByokProviderId, isKeyBilledPr
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { BackboardConnectTarget, defaultBackboardConnectTargets, IBackboardConnectState, IBackboardConnectView, renderBackboardConnect } from '../../backboardConnect.js';
-import { BackboardAuthContextKeys } from '../../../common/backboardAuth.js';
+import { BackboardAuthContextKeys, SHOW_SIGN_IN_PROMPT_COMMAND_ID } from '../../../common/backboardAuth.js';
 import { ISessionTypePickerDelegate } from '../../chat.js';
 import { ILanguageModelChatMetadataAndIdentifier, LanguageModelBillingSource, ILanguageModelsService } from '../../../common/languageModels.js';
 import { IChatInputPickerOptions } from './chatInputPickerActionItem.js';
@@ -76,6 +76,8 @@ function compareModelVersions(a: readonly number[], b: readonly number[]): numbe
 
 export const COMBINED_MODEL_SECTION_RECOMMENDED = 'recommended';
 export const COMBINED_MODEL_SECTION_ALL = 'all';
+/** Backboard models that run with no credit or plan. */
+export const COMBINED_MODEL_SECTION_FREE = 'free';
 export const COMBINED_MODEL_SECTION_CHATGPT = 'provider:openai-subscription';
 export const COMBINED_MODEL_SECTION_CLAUDE = 'provider:anthropic-subscription';
 /** Section id prefix for a provider's key-billed (BYOK) models; `provider:` covers its Backboard-billed ones. */
@@ -429,6 +431,7 @@ function providerSectionLabel(providerId: string, detail: string | undefined): s
 /** Builds the stable left-rail sections grouped by Backboard, subscriptions, then BYOK. */
 export function buildCombinedModelSections(models: readonly ILanguageModelChatMetadataAndIdentifier[]): ICombinedModelSection[] {
 	const recommendedCount = recommendedModels(models).length;
+	const freeCount = models.filter(isFreeModel).length;
 	// A provider is tallied separately for its Backboard-billed and key-billed
 	// rows, so a vendor the user holds a key for can appear in both groups.
 	const providers = new Map<string, { label: string; count: number; keyBilled: boolean }>();
@@ -452,6 +455,13 @@ export function buildCombinedModelSections(models: readonly ILanguageModelChatMe
 			kind: 'library',
 			group: 'backboard',
 		},
+		...(freeCount ? [{
+			id: COMBINED_MODEL_SECTION_FREE,
+			label: localize('combinedPicker.free', "Free"),
+			modelCount: freeCount,
+			kind: 'library' as const,
+			group: 'backboard' as const,
+		}] : []),
 		{
 			id: COMBINED_MODEL_SECTION_ALL,
 			label: localize('combinedPicker.allModels', "All models"),
@@ -499,6 +509,14 @@ export function buildCombinedModelSections(models: readonly ILanguageModelChatMe
 	return [...backboard, ...subscriptions, ...byok];
 }
 
+/**
+ * A Backboard-billed model that runs with no credit or plan; the agent host
+ * marks it with `priceCategory: 'free'` from the catalog's exact-$0 prices.
+ */
+export function isFreeModel(model: ILanguageModelChatMetadataAndIdentifier): boolean {
+	return model.metadata.priceCategory === 'free' && billingSourceOf(model) !== 'byok';
+}
+
 /** Returns the models represented by one left-rail section, or the full catalog during a search. */
 export function modelsForCombinedModelSection(
 	models: readonly ILanguageModelChatMetadataAndIdentifier[],
@@ -518,6 +536,9 @@ export function modelsForCombinedModelSection(
 	}
 	if (sectionId === COMBINED_MODEL_SECTION_RECOMMENDED) {
 		return recommendedModels(models);
+	}
+	if (sectionId === COMBINED_MODEL_SECTION_FREE) {
+		return models.filter(isFreeModel);
 	}
 	if (sectionId.startsWith(BYOK_SECTION_PREFIX)) {
 		const providerId = sectionId.slice(BYOK_SECTION_PREFIX.length);
@@ -1148,6 +1169,8 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 				dom.append(costHeading, dom.$('span.combined-model-provider-card-note')).textContent = providerId === 'openai-subscription'
 					? localize('combinedPicker.includedChatGpt', "Included with your ChatGPT plan")
 					: localize('combinedPicker.includedClaude', "Included with your Claude plan");
+			} else if (isFreeModel(model)) {
+				dom.append(costHeading, dom.$('span.combined-model-provider-card-note')).textContent = localize('combinedPicker.freeNote', "Free, no credits needed");
 			} else {
 				const score = modelCostScore(model);
 				if (score !== undefined) {
@@ -1267,7 +1290,10 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 			for (const model of filtered) {
 				const providerId = model.metadata.targetChatSessionType ?? this._railProvider ?? '';
 				const isCurrent = model.identifier === currentId;
-				const unavailable = !isReadyToUse(model);
+				// Signed out, only Backboard's free models run (on the device's guest
+				// key); every other Backboard model stays listed but needs a sign-in.
+				const needsSignIn = !connectState.signedIn && !isSubscriptionModel(model) && !isKeyBilledModel(model) && !isFreeModel(model);
+				const unavailable = !isReadyToUse(model) || needsSignIn;
 				const row = dom.append(list, dom.$('.combined-model-provider-row'));
 				modelsByRow.set(row, model);
 				row.dataset.model = model.identifier;
@@ -1293,10 +1319,14 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 				}
 
 				const meta = dom.append(row, dom.$('.combined-model-provider-row-meta'));
-				if (unavailable) {
+				if (needsSignIn) {
+					dom.append(meta, dom.$('span.combined-model-provider-row-connect')).textContent = localize('combinedPicker.signIn', "Sign In");
+				} else if (unavailable) {
 					dom.append(meta, dom.$('span.combined-model-provider-row-connect')).textContent = localize('combinedPicker.connect', "Connect");
 				} else if (isSubscriptionModel(model)) {
 					dom.append(meta, dom.$('span.combined-model-provider-row-plan')).textContent = localize('combinedPicker.plan', "Plan");
+				} else if (isFreeModel(model)) {
+					dom.append(meta, dom.$('span.combined-model-provider-row-plan')).textContent = localize('combinedPicker.freeTag', "Free");
 				} else {
 					const score = modelCostScore(model);
 					if (score !== undefined) {
@@ -1312,6 +1342,12 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 				row.setAttribute('aria-label', [formatModelLabel(model.metadata.name), effort, formatModelProviderDetail(model)].filter(Boolean).join(', '));
 
 				const commit = async () => {
+					if (needsSignIn) {
+						hideCard();
+						this._overlay.clear();
+						await this._commandService.executeCommand(SHOW_SIGN_IN_PROMPT_COMMAND_ID, formatModelLabel(model.metadata.name));
+						return;
+					}
 					if (unavailable) {
 						// Connecting lives in one place: jump there with the right row ready.
 						const { target, provider } = this._connectTargetFor(model);
@@ -1398,6 +1434,8 @@ export class CombinedModelProviderPickerActionItem extends BaseActionViewItem {
 				const providerIconKey = providerIconKeyForCombinedModelSection(section.id);
 				if (section.id === COMBINED_MODEL_SECTION_ALL) {
 					target.appendChild(renderIcon(Codicon.listFlat));
+				} else if (section.id === COMBINED_MODEL_SECTION_FREE) {
+					target.appendChild(renderIcon(Codicon.gift));
 				} else if (providerIconKey) {
 					dom.append(target, dom.$(`.combined-model-provider-rail-provider-icon.provider-${providerIconKey}`)).setAttribute('aria-hidden', 'true');
 				} else {

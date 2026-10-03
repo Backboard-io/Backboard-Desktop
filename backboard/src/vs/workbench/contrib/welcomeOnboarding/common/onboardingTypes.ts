@@ -68,7 +68,7 @@ export function getOnboardingStepTitle(stepId: OnboardingStepId): string {
 		case OnboardingStepId.Experience:
 			return localize('onboarding.backboard.step.experience', "Your Workspace. Your way.");
 		case OnboardingStepId.Theme:
-			return localize('onboarding.backboard.step.theme', "Choose Your Theme");
+			return localize('onboarding.backboard.step.customize', "Customize");
 		case OnboardingStepId.ImportSettings:
 			return localize('onboarding.backboard.step.importSettings', "Bring Your Setup");
 		case OnboardingStepId.SignIn:
@@ -90,7 +90,7 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
 		case OnboardingStepId.Experience:
 			return localize('onboarding.backboard.step.experience.subtitle', "Choose a view built around how you like to work.\nYou can change this later as your project grows.");
 		case OnboardingStepId.Theme:
-			return localize('onboarding.backboard.step.theme.subtitle', "Make it yours.");
+			return localize('onboarding.backboard.step.customize.subtitle', "Choose a color theme");
 		case OnboardingStepId.ImportSettings:
 			return localize('onboarding.backboard.step.importSettings.subtitle', "One click. Skip it if you want a fresh start.");
 		case OnboardingStepId.SignIn:
@@ -104,8 +104,8 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
  * Ordered step IDs for the onboarding flow.
  */
 export const ONBOARDING_STEPS: readonly OnboardingStepId[] = [
-	OnboardingStepId.Welcome,
 	OnboardingStepId.Theme,
+	OnboardingStepId.Welcome,
 ];
 
 /**

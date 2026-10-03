@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, addDisposableListener, append, clearNode, DragAndDropObserver, EventType, getWindow } from '../../../../base/browser/dom.js';
-import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
 import { renderMarkdown } from '../../../../base/browser/markdownRenderer.js';
 import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { IAction, Separator, toAction } from '../../../../base/common/actions.js';
@@ -56,7 +55,7 @@ export interface ICanvasSource {
 export interface ICanvasImageGroup {
 	readonly timestamp: number;
 	readonly images: readonly ICanvasImage[];
-	/** Set when the turn belongs to another chat than the one Canvas follows. */
+	/** The chat the turn belongs to (every chat shares Canvas's timeline). */
 	readonly source?: ICanvasSource;
 	/** What the user asked for in that turn. */
 	readonly prompt?: string;
@@ -139,6 +138,12 @@ interface IMediaScan {
 	videos: number;
 }
 
+/** A media link's alt text as its label, unless it is empty or names the other kind ("Generated image" on a clip). */
+function labelFor(alt: string | undefined, kind: CanvasMediaKind): string | undefined {
+	const label = alt?.trim();
+	return label && !(kind === 'video' ? /^generated image\b/i : /^generated video\b/i).test(label) ? label : undefined;
+}
+
 /** The media a response rendered that no earlier turn showed. */
 function scanMedia(request: IChatRequestModel, workingDirectory: URI | undefined, scan: IMediaScan): ICanvasImage[] {
 	const response = request.response;
@@ -166,7 +171,7 @@ function scanMedia(request: IChatRequestModel, workingDirectory: URI | undefined
 		images.push({
 			key: url,
 			src,
-			label: match.groups?.label?.trim() || fallbackLabel,
+			label: labelFor(match.groups?.label, kind) ?? fallbackLabel,
 			kind,
 			localFile: saved && workingDirectory ? joinPath(workingDirectory, saved) : src.scheme === 'file' ? src : undefined,
 		});
@@ -323,8 +328,6 @@ export interface IRightWorkbenchCanvasDelegate {
 	 * a small `thumb` for tiles and filmstrips, the `full` item for the stage.
 	 */
 	toDisplayUrl(image: ICanvasImage, size: CanvasMediaSize): Promise<string | undefined>;
-	/** Makes these images the canvas-owned attachments of the chat composer. */
-	setComposerImages(images: readonly ICanvasImage[]): void;
 	/** Sends one batch-edit request for the commented images. */
 	sendComments(comments: ReadonlyMap<ICanvasImage, readonly ICanvasComment[]>): void;
 	/**
@@ -353,11 +356,6 @@ export interface IRightWorkbenchCanvasDelegate {
 	/** The chat panel's saved width, and where to save a new one. */
 	readonly sideWidth?: number;
 	saveSideWidth?(width: number): void;
-	/**
-	 * Extra actions for an item, offered on right-click and, in the focused
-	 * view, behind a "More Actions" button. Canvas offers none when unset.
-	 */
-	getItemActions?(image: ICanvasImage): readonly IAction[];
 	/** Saves a copy of the item where the user picks. */
 	saveAs?(image: ICanvasImage): void;
 	/** Shows the item's saved file in the OS file manager. */
@@ -430,8 +428,8 @@ export function formatVideoLength(seconds: number): string | undefined {
 const timeFormatter = safeIntl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 /**
- * The image playground: every image and video from the chat — and, labelled
- * as such, from the user's other chats — as a zoomable grid grouped by turn,
+ * The image playground: every image and video from the user's chats and
+ * uploads, each turn labelled with its chat, as a zoomable grid grouped by turn,
  * and a Runway-style focused view: the item large with a filmstrip of
  * everything, and beside it the chat it came from with a composer that edits
  * the shown item (or makes a video from it) or just talks to the agent. Behaviour
@@ -482,12 +480,17 @@ export class RightWorkbenchCanvas extends Disposable {
 	private readonly composerLength: HTMLButtonElement;
 	private readonly composerSend: HTMLButtonElement;
 	private composerKind: CanvasMediaKind = 'image';
+	/** The attachments {@link composerKind} was last set for: a new set resets it to match them. */
+	private composerKindFor = '';
 	/** Chosen video length for the next send; unset (Auto) lets the agent choose or ask. */
 	private composerSeconds: number | undefined;
-	/** Set after sending an edit: the next new item in this chat becomes the focused one. */
-	private awaitingResult: ReadonlySet<string> | undefined;
+	/**
+	 * Set after sending an edit: the next new item from the chat it went to
+	 * (`chat`, or for a new chat whichever is current when it lands) becomes
+	 * the focused one. Items arriving from other chats meanwhile don't count.
+	 */
+	private awaitingResult: { readonly chat: string | undefined; readonly seen: ReadonlySet<string> } | undefined;
 	private groups: readonly ICanvasImageGroup[] = [];
-	private otherGroups: readonly ICanvasImageGroup[] = [];
 	private view: CanvasView = 'canvas';
 	private canvasZoom = 1;
 	/** The asset view's zoom: fitted to the stage, or a fixed scale. */
@@ -510,7 +513,8 @@ export class RightWorkbenchCanvas extends Disposable {
 	private readonly lazyLoads = new Map<Element, () => void>();
 	private readonly lazyObserver: IntersectionObserver;
 	private focusedStage: HTMLElement | undefined;
-	private chatKey: string | undefined;
+	/** The chat edits and messages go to (its group source key). */
+	private currentChat: string | undefined;
 	private groupsSignature: string | undefined;
 	/**
 	 * An upload is shown: it has no chat yet, so the chat panel is a fresh,
@@ -636,26 +640,25 @@ export class RightWorkbenchCanvas extends Disposable {
 		this.updateComposer();
 	}
 
-	setGroups(groups: readonly ICanvasImageGroup[], chatKey: string | undefined): void {
-		if (this.chatKey !== undefined && chatKey !== this.chatKey) {
-			this.selected.clear();
-			this.comments.clear();
-			this.draft = undefined;
-			this.awaitingResult = undefined;
-		}
+	/** Every chat's items on one timeline, and the chat edits go to (`currentChat`, a group source key). */
+	setGroups(groups: readonly ICanvasImageGroup[], currentChat: string | undefined): void {
 		groups = this.withoutBroken(groups);
 		const signature = groupsSignature(groups);
-		if (chatKey === this.chatKey && signature === this.groupsSignature) {
+		if (currentChat === this.currentChat && signature === this.groupsSignature) {
 			return; // Streaming refreshes that add nothing must not restart playing videos.
 		}
 		this.groupsSignature = signature;
-		this.chatKey = chatKey;
+		this.currentChat = currentChat;
 		this.groups = groups;
 		this.pruneState();
 		// A requested edit landed: show the new item.
 		if (this.awaitingResult) {
-			const awaiting = this.awaitingResult;
-			const fresh = groups.flatMap(group => group.images).filter(image => !awaiting.has(image.key)).pop();
+			const { chat = currentChat, seen } = this.awaitingResult;
+			const fresh = groups
+				.filter(group => !group.source || group.source.key === chat)
+				.flatMap(group => group.images)
+				.filter(image => !seen.has(image.key))
+				.pop();
 			if (fresh) {
 				this.awaitingResult = undefined;
 				this.selected.clear();
@@ -663,23 +666,8 @@ export class RightWorkbenchCanvas extends Disposable {
 				if (this.references.length <= 1) {
 					this.references = [fresh.key];
 				}
-				this.publishSelection();
 			}
 		}
-		this.render();
-	}
-
-	/** Media from the user's other chats, shown after this chat's, labelled with their chat. */
-	setOtherChatGroups(groups: readonly ICanvasImageGroup[]): void {
-		const own = new Set(this.groups.flatMap(group => group.images.map(image => image.key)));
-		const otherGroups = groups
-			.map(group => ({ ...group, images: group.images.filter(image => !own.has(image.key) && !this.broken.has(image.key)) }))
-			.filter(group => group.images.length > 0);
-		if (groupsSignature(otherGroups) === groupsSignature(this.otherGroups)) {
-			return;
-		}
-		this.otherGroups = otherGroups;
-		this.pruneState();
 		this.render();
 	}
 
@@ -740,7 +728,6 @@ export class RightWorkbenchCanvas extends Disposable {
 				this.references = [imageKey];
 				this.freshChat = !!this.allImages.find(image => image.key === imageKey)?.uploaded;
 			}
-			this.publishSelection();
 		}
 		if (view) {
 			this.view = view;
@@ -749,26 +736,9 @@ export class RightWorkbenchCanvas extends Disposable {
 		this.render();
 	}
 
-	/**
-	 * Selects exactly these items (e.g. what a side panel holds after one was
-	 * removed there), without reporting the selection back to the delegate.
-	 */
-	setSelection(imageKeys: readonly string[]): void {
-		const keys = new Set(this.allImages.map(image => image.key));
-		const next = imageKeys.filter(key => keys.has(key));
-		if (next.length === this.selected.size && next.every(key => this.selected.has(key))) {
-			return;
-		}
-		this.selected.clear();
-		for (const key of next) {
-			this.selected.add(key);
-		}
-		this.render();
-	}
-
-	/** This chat's items first, then other chats' (display and navigation order). */
+	/** Every item, in display and navigation order. */
 	private get allImages(): ICanvasImage[] {
-		return [...this.groups, ...this.otherGroups].flatMap(group => group.images);
+		return this.groups.flatMap(group => group.images);
 	}
 
 	/** Turns the filter lets through, in its order (newest first by default). */
@@ -782,9 +752,9 @@ export class RightWorkbenchCanvas extends Disposable {
 			.sort((a, b) => order === 'newest' ? b.timestamp - a.timestamp : a.timestamp - b.timestamp);
 	}
 
-	/** What the grid and filmstrip show: the filtered items, this chat's before other chats'. */
+	/** What the grid and filmstrip show: the items the filter lets through. */
 	private visibleImages(): ICanvasImage[] {
-		return [...this.filterGroups(this.groups), ...this.filterGroups(this.otherGroups)].flatMap(group => group.images);
+		return this.filterGroups(this.groups).flatMap(group => group.images);
 	}
 
 	private get filterActive(): boolean {
@@ -798,8 +768,10 @@ export class RightWorkbenchCanvas extends Disposable {
 		this.render();
 	}
 
-	private sourceOf(image: ICanvasImage): ICanvasSource | undefined {
-		return this.otherGroups.find(group => group.images.includes(image))?.source;
+	/** An item's accessible name: its label and the chat it came from. */
+	private itemLabel(image: ICanvasImage): string {
+		const source = this.groupOf(image)?.source;
+		return source ? localize('rightWorkbench.canvas.fromChat', "{0}, from {1}", image.label, source.title) : image.label;
 	}
 
 	private render(): void {
@@ -857,7 +829,7 @@ export class RightWorkbenchCanvas extends Disposable {
 		const empty = append(this.body, $('.sessions-right-workbench-review-empty.sessions-right-workbench-canvas-empty'));
 		empty.appendChild(renderIcon(Codicon.fileMedia));
 		append(empty, $('h2', {}, localize('rightWorkbench.canvas.emptyTitle', "No Images Yet")));
-		append(empty, $('p', {}, localize('rightWorkbench.canvas.emptyDescription', "Images and videos generated in this thread will appear here.")));
+		append(empty, $('p', {}, localize('rightWorkbench.canvas.emptyDescription', "Images and videos from your chats and uploads will appear here.")));
 		const pickUploads = this.delegate.pickUploads;
 		if (pickUploads) {
 			append(empty, $('p', {}, localize('rightWorkbench.canvas.emptyUpload', "You can also upload your own, or drop them here.")));
@@ -987,7 +959,6 @@ export class RightWorkbenchCanvas extends Disposable {
 		}
 		this.selected.clear();
 		uploaded.forEach(image => this.selected.add(image.key));
-		this.publishSelection();
 		this.revealPending = true;
 		this.render();
 	}
@@ -1035,28 +1006,6 @@ export class RightWorkbenchCanvas extends Disposable {
 					...(['all', 'image', 'video'] as const).map(kind => option('kind', kind, kindLabels[kind])),
 				],
 			});
-		}));
-	}
-
-	/** Shows the delegate's actions for `image` at `anchor` (an element or a pointer event). */
-	private showItemActions(image: ICanvasImage, anchor: HTMLElement | StandardMouseEvent): boolean {
-		const actions = this.delegate.getItemActions?.(image);
-		if (!actions?.length) {
-			return false;
-		}
-		this.contextMenuService.showContextMenu({
-			getAnchor: () => anchor,
-			getActions: () => actions,
-		});
-		return true;
-	}
-
-	private registerItemContextMenu(element: HTMLElement, image: ICanvasImage): void {
-		this.renderStore.add(addDisposableListener(element, EventType.CONTEXT_MENU, event => {
-			if (this.showItemActions(image, new StandardMouseEvent(getWindow(element), event))) {
-				event.preventDefault();
-				event.stopPropagation();
-			}
 		}));
 	}
 
@@ -1202,7 +1151,6 @@ export class RightWorkbenchCanvas extends Disposable {
 			this.selected.add(current.key);
 		}
 		this.commentMode = false;
-		this.publishSelection();
 		this.render();
 	}
 
@@ -1251,7 +1199,7 @@ export class RightWorkbenchCanvas extends Disposable {
 				const row = append(content, $('.sessions-right-workbench-canvas-row'));
 				const heading = append(row, $('.sessions-right-workbench-canvas-time'));
 				if (group.source) {
-					// Another chat's turn: its chat name leads, so it never reads as this chat's.
+					// Every chat shares the timeline: each turn leads with its chat's name.
 					append(heading, $('span.sessions-right-workbench-canvas-source', {}, group.source.title));
 				}
 				const time = append(heading, $('time', {}, timeFormatter.value.format(group.timestamp)));
@@ -1262,14 +1210,11 @@ export class RightWorkbenchCanvas extends Disposable {
 						selectedFrame ??= frame;
 					}
 				}
-				if (!group.source) {
-					lastRow = row;
-				}
+				lastRow = row;
 			}
 		};
 		const groups = this.filterGroups(this.groups);
-		const otherGroups = this.filterGroups(this.otherGroups);
-		if (!groups.length && !otherGroups.length) {
+		if (!groups.length) {
 			const empty = append(content, $('.sessions-right-workbench-canvas-filter-empty'));
 			append(empty, $('p', {}, localize('rightWorkbench.canvas.filterEmpty', "Nothing matches this filter.")));
 			const clear = append(empty, $('button.sessions-right-workbench-canvas-pill-send', {}, localize('rightWorkbench.canvas.clearFilter', "Show Everything"))) as HTMLButtonElement;
@@ -1277,10 +1222,6 @@ export class RightWorkbenchCanvas extends Disposable {
 			this.renderStore.add(addDisposableListener(clear, EventType.CLICK, () => this.setFilter({ ...this.filter, range: 'all', kind: 'all' })));
 		}
 		renderRows(groups);
-		if (otherGroups.length) {
-			append(content, $('h3.sessions-right-workbench-canvas-section', {}, localize('rightWorkbench.canvas.otherChats', "From Other Chats")));
-			renderRows(otherGroups);
-		}
 		if (scrollTop !== undefined) {
 			scroll.scrollTop = scrollTop;
 		} else if (selectedFrame) {
@@ -1295,8 +1236,7 @@ export class RightWorkbenchCanvas extends Disposable {
 		const frame = append(container, $('.sessions-right-workbench-canvas-frame'));
 		const tile = append(frame, $('button.sessions-right-workbench-canvas-tile')) as HTMLButtonElement;
 		tile.type = 'button';
-		const source = this.sourceOf(image);
-		tile.ariaLabel = source ? localize('rightWorkbench.canvas.fromChat', "{0}, from {1}", image.label, source.title) : image.label;
+		tile.ariaLabel = this.itemLabel(image);
 		const hasComments = !!this.comments.get(image.key)?.length;
 		// In comment mode the ring marks images carrying notes; otherwise it marks the selection.
 		const ringed = this.commentMode ? hasComments || this.draft?.key === image.key : this.selected.has(image.key);
@@ -1306,7 +1246,6 @@ export class RightWorkbenchCanvas extends Disposable {
 			append(frame, $('span.sessions-right-workbench-canvas-check')).appendChild(renderIcon(Codicon.check));
 		}
 		this.renderPins(frame, image);
-		this.registerItemContextMenu(tile, image);
 		this.renderStore.add(addDisposableListener(tile, EventType.CLICK, event => {
 			if (this.commentMode) {
 				const rect = tile.getBoundingClientRect();
@@ -1398,7 +1337,7 @@ export class RightWorkbenchCanvas extends Disposable {
 	}
 
 	private groupOf(image: ICanvasImage): ICanvasImageGroup | undefined {
-		return [...this.groups, ...this.otherGroups].find(group => group.images.includes(image));
+		return this.groups.find(group => group.images.includes(image));
 	}
 
 	/**
@@ -1415,13 +1354,11 @@ export class RightWorkbenchCanvas extends Disposable {
 		const featured = append(this.body, $('.sessions-right-workbench-canvas-featured'));
 		const stage = append(featured, $('.sessions-right-workbench-canvas-focused-stage'));
 		stage.tabIndex = 0;
-		const source = this.sourceOf(current);
-		stage.ariaLabel = source ? localize('rightWorkbench.canvas.fromChat', "{0}, from {1}", current.label, source.title) : current.label;
+		stage.ariaLabel = this.itemLabel(current);
 		this.focusedStage = stage;
 		const box = append(stage, $('.sessions-right-workbench-canvas-featured-box'));
 		const media = this.renderMedia(box, current, 'focused');
 		this.fitToStage(stage, box, media);
-		this.registerItemContextMenu(stage, current);
 		// Comment mode pins numbered notes on the shown item, as on grid tiles.
 		box.classList.toggle('commenting', this.commentMode);
 		this.renderPins(box, current);
@@ -1451,11 +1388,6 @@ export class RightWorkbenchCanvas extends Disposable {
 			const length = append(this.body, $('.sessions-right-workbench-canvas-length-chip'));
 			length.appendChild(renderIcon(Codicon.deviceCameraVideo));
 			this.showVideoLength(media, append(length, $('span')));
-		}
-		if (source) {
-			const badge = append(this.body, $('.sessions-right-workbench-canvas-source-badge'));
-			badge.appendChild(renderIcon(Codicon.commentDiscussion));
-			append(badge, $('span', {}, localize('rightWorkbench.canvas.fromOtherChat', "From another chat: {0}", source.title)));
 		}
 		const index = images.indexOf(current);
 		this.renderStore.add(addDisposableListener(stage, EventType.KEY_DOWN, event => {
@@ -1488,7 +1420,7 @@ export class RightWorkbenchCanvas extends Disposable {
 			box.classList.add('fitted');
 		};
 		this.renderStore.add(addDisposableListener(media, media instanceof HTMLVideoElement ? 'loadedmetadata' : 'load', fit));
-		const observer = new ResizeObserver(fit);
+		const observer = new (getWindow(stage).ResizeObserver)(fit);
 		observer.observe(stage);
 		this.renderStore.add(toDisposable(() => observer.disconnect()));
 		fit();
@@ -1505,10 +1437,6 @@ export class RightWorkbenchCanvas extends Disposable {
 		if (current.localFile && revealInOS) {
 			const label = isMacintosh ? localize('rightWorkbench.canvas.revealMac', "Reveal in Finder") : isWindows ? localize('rightWorkbench.canvas.revealWindows', "Reveal in File Explorer") : localize('rightWorkbench.canvas.revealLinux', "Open Containing Folder");
 			this.renderIconButton(row, Codicon.folderOpened, label, () => revealInOS(current));
-		}
-		if (this.delegate.getItemActions?.(current).length) {
-			const more = this.renderIconButton(row, Codicon.ellipsis, localize('rightWorkbench.canvas.moreActions', "More Actions"), () => this.showItemActions(current, more));
-			more.setAttribute('aria-haspopup', 'menu');
 		}
 		append(row, $('span.sessions-right-workbench-canvas-detail-divider'));
 		const prompt = group?.prompt;
@@ -1731,24 +1659,17 @@ export class RightWorkbenchCanvas extends Disposable {
 		return button;
 	}
 
-	/** Every item as a vertical filmstrip beside the focused view; other chats' come last, under a label. */
+	/** Every item as a vertical filmstrip beside the focused view. */
 	private renderRail(images: readonly ICanvasImage[], current: ICanvasImage): void {
 		const rail = append(this.body, $('.sessions-right-workbench-canvas-rail'));
 		rail.setAttribute('role', 'group');
 		rail.ariaLabel = localize('rightWorkbench.canvas.allMedia', "All Images and Videos");
-		let labelledOther = false;
 		let currentThumb: HTMLElement | undefined;
 		for (const image of images) {
-			const source = this.sourceOf(image);
-			if (source && !labelledOther) {
-				labelledOther = true;
-				append(rail, $('.sessions-right-workbench-canvas-rail-label', {}, localize('rightWorkbench.canvas.otherChatsShort', "Other Chats")));
-			}
 			const thumb = append(rail, $('button.sessions-right-workbench-canvas-rail-thumb')) as HTMLButtonElement;
 			thumb.type = 'button';
-			thumb.title = thumb.ariaLabel = source ? localize('rightWorkbench.canvas.fromChat', "{0}, from {1}", image.label, source.title) : image.label;
+			thumb.title = thumb.ariaLabel = this.itemLabel(image);
 			thumb.setAttribute('aria-pressed', String(image === current));
-			thumb.classList.toggle('other-chat', !!source);
 			const reference = this.references.indexOf(image.key);
 			if (reference >= 0 && this.references.length > 1) {
 				append(thumb, $('span.sessions-right-workbench-canvas-reference-badge', {}, String(reference + 1)));
@@ -1757,7 +1678,6 @@ export class RightWorkbenchCanvas extends Disposable {
 			if (image === current) {
 				currentThumb = thumb;
 			}
-			this.registerItemContextMenu(thumb, image);
 			if (this.multiSelect && this.selected.has(image.key)) {
 				append(thumb, $('span.sessions-right-workbench-canvas-check')).appendChild(renderIcon(Codicon.check));
 			}
@@ -1776,7 +1696,6 @@ export class RightWorkbenchCanvas extends Disposable {
 		if (this.references.length <= 1) {
 			this.references = [image.key];
 		}
-		this.publishSelection();
 		// The thread beside an item is the chat it came from.
 		const source = this.groupOf(image)?.source;
 		if (source) {
@@ -1886,7 +1805,6 @@ export class RightWorkbenchCanvas extends Disposable {
 		this.composerInput.focus();
 	}
 
-	/** Beside a wide chat the stage is narrow: the toolbar drops its labels (icons keep their tooltips). */
 	/**
 	 * Keeps the top toolbar from overlapping as the stage narrows (window
 	 * resize or chat sash): labels drop first in both views, then the centered
@@ -1946,7 +1864,7 @@ export class RightWorkbenchCanvas extends Disposable {
 			const gesture = new DisposableStore();
 			gesture.add(addDisposableListener(sash, EventType.POINTER_MOVE, (move: PointerEvent) => {
 				// Leave the stage at least 360px.
-				apply(clampSideWidth(Math.min(right - move.clientX, this.root.clientWidth - 360)));
+				apply(clampSideWidth(Math.min(right - move.clientX, this.root.clientWidth - MIN_STAGE_WIDTH)));
 			}));
 			const end = () => {
 				gesture.dispose();
@@ -2220,6 +2138,12 @@ export class RightWorkbenchCanvas extends Disposable {
 	private updateComposer(): void {
 		const references = this.referencedImages();
 		const attached = references[0];
+		// A clip opens in Video mode and a still in Image mode; the user's pick holds until the attachments change.
+		const attachedKeys = references.map(image => image.key).join('\n');
+		if (attached && attachedKeys !== this.composerKindFor) {
+			this.composerKind = references.some(image => image.kind === 'video') ? 'video' : 'image';
+		}
+		this.composerKindFor = attachedKeys;
 		for (const button of this.composerModes.children) {
 			button.setAttribute('aria-pressed', String((button as HTMLElement).dataset.kind === this.composerKind));
 		}
@@ -2266,8 +2190,11 @@ export class RightWorkbenchCanvas extends Disposable {
 		}
 		this.mentionMenu.clear();
 		// The result arrives in this chat; show it once it does.
-		this.awaitingResult = new Set(this.groups.flatMap(group => group.images.map(image => image.key)));
 		const options: ICanvasSendOptions = { newChat: this.freshChat };
+		this.awaitingResult = {
+			chat: options.newChat ? undefined : this.currentChat,
+			seen: new Set(this.groups.flatMap(group => group.images.map(image => image.key))),
+		};
 		// From here the thread follows the new chat.
 		this.freshChat = false;
 		if (references.length) {
@@ -2296,13 +2223,9 @@ export class RightWorkbenchCanvas extends Disposable {
 			this.selected.clear();
 			this.selected.add(image.key);
 		}
-		this.publishSelection();
 		this.render();
 	}
 
-	private publishSelection(): void {
-		this.delegate.setComposerImages(this.allImages.filter(image => this.selected.has(image.key)));
-	}
 
 	/**
 	 * Points `element` at the item's display URL: at once on the stage, and
@@ -2380,7 +2303,6 @@ export class RightWorkbenchCanvas extends Disposable {
 
 	private dropBroken(): void {
 		this.groups = this.withoutBroken(this.groups);
-		this.otherGroups = this.withoutBroken(this.otherGroups);
 		this.groupsSignature = groupsSignature(this.groups);
 		this.pruneState();
 		this.render();

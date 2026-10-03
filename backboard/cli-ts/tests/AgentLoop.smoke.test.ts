@@ -1311,6 +1311,69 @@ describe("AgentController loop (mocked Backboard)", () => {
 		});
 	});
 
+	it("moves a turn the account cannot pay for onto a free model", async () => {
+		const blocked =
+			"You're out of credits, so we paused LLM chat. Add credits or start a subscription on the Billing page to jump right back in.";
+		class FreeFallbackClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async listModels(): Promise<ModelsListResponse> {
+				this.listModelsCount++;
+				return {
+					models: [
+						{
+							name: "cohere/north-mini-code:free",
+							provider: "openrouter",
+							model_type: "llm",
+							input_cost_per_1m_tokens: 0,
+							output_cost_per_1m_tokens: 0,
+							supports_tools: true,
+						},
+					],
+					total: 1,
+				};
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				if (req.model_name !== "cohere/north-mini-code:free") {
+					yield { kind: "failed", error: blocked };
+					return;
+				}
+				yield { kind: "assistant_delta", text: "done for free" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new FreeFallbackClient();
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("rename the widget");
+
+		expect({
+			status,
+			models: client.messageRequests.map((request) => request.model_name),
+			errors: events.filter((event) => event.type === "run:error").length,
+			warned: events.some(
+				(event) =>
+					event.type === "system:warning" &&
+					event.message.includes("cohere/north-mini-code:free, a free model"),
+			),
+		}).toEqual({
+			status: "completed",
+			models: ["gpt-5.5", "cohere/north-mini-code:free"],
+			errors: 0,
+			warned: true,
+		});
+	});
+
 	it("queues prompts submitted while a turn is running", async () => {
 		const client = new FakeClient(
 			[

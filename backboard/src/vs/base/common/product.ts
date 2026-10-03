@@ -276,6 +276,14 @@ export interface IProductConfiguration {
 	readonly onboardingKeymaps?: readonly IProductOnboardingKeymap[];
 	readonly onboardingThemes?: readonly IProductOnboardingTheme[];
 
+	/** PostHog project for Backboard product analytics. Unset = analytics off. */
+	readonly backboardAnalytics?: {
+		readonly posthogKey?: string;
+		readonly posthogHost?: string;
+		/** Server relay that forwards conversions to the ad platforms. Unset = PostHog only. */
+		readonly conversionsUrl?: string;
+	};
+
 	/**
 	 * When running as an embedded app, the parent VS Code's policy
 	 * identity (win32RegValueName / darwinBundleIdentifier) so that

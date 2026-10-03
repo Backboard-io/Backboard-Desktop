@@ -19,7 +19,7 @@ type ExperienceHarness = {
 suite('Backboard onboarding experience', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('Simple onboarding visits welcome, AI connection and theme before completion', () => {
+	test('Simple onboarding customizes, then signs in before completion', () => {
 		const harness = Object.create(OnboardingVariationA.prototype) as {
 			selectedExperience: OnboardingExperience;
 			steps: typeof ONBOARDING_STEPS;
@@ -43,8 +43,8 @@ suite('Backboard onboarding experience', () => {
 			harness._advanceOrComplete();
 		}
 		assert.deepStrictEqual({ visible: harness._visibleSteps(), visited, outcomes }, {
-			visible: [OnboardingStepId.Welcome, OnboardingStepId.Theme],
-			visited: [OnboardingStepId.Welcome, OnboardingStepId.Theme],
+			visible: [OnboardingStepId.Theme, OnboardingStepId.Welcome],
+			visited: [OnboardingStepId.Theme, OnboardingStepId.Welcome],
 			outcomes: ['complete'],
 		});
 	});

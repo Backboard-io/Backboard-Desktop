@@ -71,6 +71,7 @@ export interface CreateLoopOptions {
 	displayContent?: string;
 	durableSession?: RunMessageOptions["durableSession"];
 	resolveCapacityFallback?: CapacityFallbackResolver;
+	resolveFreeFallback?: CapacityFallbackResolver;
 	onModelSucceeded?: ModelSucceededHandler;
 	onThinkingDisabled?: ThinkingDisabledHandler;
 	onRunError?: (error: string) => void;
@@ -145,6 +146,7 @@ export class AgentLoopFactory {
 			displayContent: options.displayContent,
 			durableSession: options.durableSession,
 			resolveCapacityFallback: options.resolveCapacityFallback,
+			resolveFreeFallback: options.resolveFreeFallback,
 			onModelSucceeded: options.onModelSucceeded,
 			onThinkingDisabled: options.onThinkingDisabled,
 			onRunError: options.onRunError,

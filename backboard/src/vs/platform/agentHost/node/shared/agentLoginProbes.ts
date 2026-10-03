@@ -148,3 +148,82 @@ export function isCodexLoggedIn(): boolean {
 		return false;
 	}
 }
+
+/** The installed Claude Code next to the release `claude update` installs. */
+export interface IClaudeCodeVersionStatus {
+	readonly installed: string;
+	readonly latest: string;
+	readonly updateAvailable: boolean;
+}
+
+const CLAUDE_CODE_RELEASES_URL = 'https://registry.npmjs.org/-/package/@anthropic-ai/claude-code/dist-tags';
+const CLAUDE_CODE_UPDATE_TIMEOUT_MS = 5 * 60_000;
+
+/** `2.1.172 (Claude Code)` → `[2, 1, 172]`. */
+export function parseClaudeCodeVersion(text: string): number[] | undefined {
+	const match = /(?<version>\d+\.\d+\.\d+)/.exec(text);
+	return match?.groups?.version.split('.').map(Number);
+}
+
+/** Whether `installed` is older than `latest`; unparseable versions never prompt. */
+export function isClaudeCodeOutdated(installed: string, latest: string): boolean {
+	const a = parseClaudeCodeVersion(installed);
+	const b = parseClaudeCodeVersion(latest);
+	if (!a || !b) {
+		return false;
+	}
+	for (let index = 0; index < 3; index++) {
+		if (a[index] !== b[index]) {
+			return a[index] < b[index];
+		}
+	}
+	return false;
+}
+
+/**
+ * Compares the installed Claude Code with the `stable` release. An outdated
+ * install reports fewer models, and newer ones (Opus 5.5, Sonnet 5.5) are
+ * rejected outright. `stable` is the floor every update channel reaches, so
+ * the prompt clears after one `claude update`. Undefined when Claude Code is
+ * missing or the release list cannot be read; that never blocks a turn.
+ */
+export async function claudeCodeVersionStatus(): Promise<IClaudeCodeVersionStatus | undefined> {
+	const claude = findBinary('claude');
+	if (!claude) {
+		return undefined;
+	}
+	const [installedOutput, latest] = await Promise.all([
+		new Promise<string | undefined>(resolve => {
+			execFile(claude, ['--version'], { timeout: 10_000, env: claudeSubscriptionProbeEnv() }, (err, stdout) => resolve(err ? undefined : stdout));
+		}),
+		fetch(CLAUDE_CODE_RELEASES_URL, { signal: AbortSignal.timeout(10_000) })
+			.then(response => response.ok ? response.json() as Promise<{ stable?: unknown }> : undefined)
+			.then(tags => typeof tags?.stable === 'string' ? tags.stable : undefined)
+			.catch(() => undefined),
+	]);
+	const installed = installedOutput && parseClaudeCodeVersion(installedOutput)?.join('.');
+	if (!installed || !latest) {
+		return undefined;
+	}
+	return { installed, latest, updateAvailable: isClaudeCodeOutdated(installed, latest) };
+}
+
+/** Runs Claude Code's own updater; rejects with its output when it fails. */
+export async function updateClaudeCode(): Promise<void> {
+	const claude = findBinary('claude');
+	if (!claude) {
+		throw new Error('Claude Code is not installed or was not found on PATH.');
+	}
+	await new Promise<void>((resolve, reject) => {
+		// An explicit Update click overrides a disabled background updater.
+		const env = claudeSubscriptionProbeEnv();
+		delete env.DISABLE_AUTOUPDATER;
+		execFile(claude, ['update'], { timeout: CLAUDE_CODE_UPDATE_TIMEOUT_MS, env }, (err, stdout, stderr) => {
+			if (err) {
+				reject(new Error((stderr || stdout).trim() || err.message));
+				return;
+			}
+			resolve();
+		});
+	});
+}

@@ -131,6 +131,18 @@
 	color: var(--vscode-descriptionForeground);
 }
 
+/* An outdated Claude Code: the action is a real button, not a quiet link. */
+.backboard-connect-row.update-available .backboard-connect-action {
+	padding: 2px 8px;
+	border-radius: 4px;
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+}
+
+.backboard-connect-row.update-available:hover .backboard-connect-action {
+	background: var(--vscode-button-hoverBackground);
+}
+
 .backboard-connect-action .codicon {
 	font-size: 12px;
 }

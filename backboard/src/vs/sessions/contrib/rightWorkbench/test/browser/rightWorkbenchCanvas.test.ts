@@ -64,6 +64,48 @@ suite('RightWorkbenchCanvas', () => {
 		]);
 	});
 
+	test('a clip whose link says "Generated image" is still named as a video', () => {
+		const clip = 'https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-video/c.mp4';
+		const groups = extractCanvasImageGroups([turn(1000, `![Generated image](${clip}) ![Generated video](https://x.test/still.png)`)], undefined);
+
+		assert.deepStrictEqual(groups.flatMap(group => group.images.map(image => `${image.kind}:${image.label}`)), ['video:Generated video 1', 'image:Generated image 1']);
+	});
+
+	test('a clip opens the composer in Video mode, and only its own chat answers the edit', () => {
+		const container = mainWindow.document.createElement('div');
+		mainWindow.document.body.appendChild(container);
+		const delegate: IRightWorkbenchCanvasDelegate = {
+			toDisplayUrl: async () => undefined,
+			sendComments: () => { },
+			sendEdit: () => { },
+			getMediaModel: () => ({ active: true, label: 'Model' }),
+		};
+		const canvas = store.add(new RightWorkbenchCanvas(container, delegate, new (mock<IContextMenuService>())(), new (mock<IClipboardService>())()));
+		const item = (name: string, kind: CanvasMediaKind = 'image'): ICanvasImage => ({ key: `https://x.test/${name}`, src: URI.parse(`https://x.test/${name}`), label: name, kind, localFile: undefined });
+		const chat = (key: string, timestamp: number, ...images: ICanvasImage[]) => ({ timestamp, images, source: { key, title: key } });
+		try {
+			canvas.setGroups([chat('chat-1', 1, item('clip.mp4', 'video'))], 'chat-1');
+			canvas.reveal('https://x.test/clip.mp4', 'focused');
+			const composer = container.querySelector<HTMLFormElement>('form.sessions-right-workbench-canvas-composer')!;
+			const mode = composer.querySelector<HTMLElement>('[data-kind][aria-pressed="true"]')?.dataset.kind;
+			composer.querySelector('textarea')!.value = 'make it night';
+			composer.dispatchEvent(new Event('submit', { cancelable: true }));
+			const shown = () => container.querySelector('.sessions-right-workbench-canvas-rail-thumb[aria-pressed="true"]')?.getAttribute('title');
+			// Another chat's media loading in meanwhile is not the result.
+			canvas.setGroups([chat('chat-1', 1, item('clip.mp4', 'video')), chat('chat-2', 2, item('other.png'))], 'chat-1');
+			const whileWaiting = shown();
+			canvas.setGroups([chat('chat-1', 1, item('clip.mp4', 'video')), chat('chat-2', 2, item('other.png')), chat('chat-1', 3, item('night.mp4', 'video'))], 'chat-1');
+
+			assert.deepStrictEqual({ mode, whileWaiting, result: shown() }, {
+				mode: 'video',
+				whileWaiting: 'clip.mp4, from chat-1',
+				result: 'night.mp4, from chat-1',
+			});
+		} finally {
+			container.remove();
+		}
+	});
+
 	test('reads each exchange of a chat as a thread turn with its attachments, answer, and media', () => {
 		const image = 'https://x.test/a.png';
 		const bytes = new Uint8Array([1, 2, 3]);
@@ -93,7 +135,7 @@ suite('RightWorkbenchCanvas', () => {
 		const [turn] = extractCanvasTurns(requests, undefined);
 		const container = mainWindow.document.createElement('div');
 		mainWindow.document.body.appendChild(container);
-		const delegate: IRightWorkbenchCanvasDelegate = { toDisplayUrl: async () => undefined, setComposerImages: () => { }, sendComments: () => { }, sendEdit: () => { }, getMediaModel: () => undefined };
+		const delegate: IRightWorkbenchCanvasDelegate = { toDisplayUrl: async () => undefined, sendComments: () => { }, sendEdit: () => { }, getMediaModel: () => undefined };
 		const canvas = store.add(new RightWorkbenchCanvas(container, delegate, new (mock<IContextMenuService>())(), new (mock<IClipboardService>())()));
 		try {
 			const item: ICanvasImage = { key: 'https://x.test/a.png', src: URI.parse('https://x.test/a.png'), label: 'a.png', kind: 'image', localFile: undefined };
@@ -119,13 +161,12 @@ suite('RightWorkbenchCanvas', () => {
 		assert.deepStrictEqual([formatVideoLength(8.04), formatVideoLength(65), formatVideoLength(Number.NaN), formatVideoLength(0)], ['0:08', '1:05', undefined, undefined]);
 	});
 
-	test('focused view shows every item in a filmstrip, labels other chats, and sends edits from its composer', async () => {
+	test('focused view shows every item in a filmstrip, names the chat of each item, and sends edits from its composer', async () => {
 		const container = mainWindow.document.createElement('div');
 		mainWindow.document.body.appendChild(container);
 		const sent: string[] = [];
 		const delegate: IRightWorkbenchCanvasDelegate = {
 			toDisplayUrl: async () => undefined,
-			setComposerImages: () => { },
 			sendComments: () => { },
 			sendEdit: (images, prompt, kind, seconds) => sent.push(`${kind}:${images.map(image => image.label).join('+')}:${prompt}:${seconds}`),
 			getMediaModel: kind => ({ active: kind === 'image', label: kind === 'image' ? 'gpt-image-1' : undefined }),
@@ -133,8 +174,10 @@ suite('RightWorkbenchCanvas', () => {
 		const canvas = store.add(new RightWorkbenchCanvas(container, delegate, new (mock<IContextMenuService>())(), new (mock<IClipboardService>())()));
 		const item = (name: string, kind: CanvasMediaKind = 'image'): ICanvasImage => ({ key: `https://x.test/${name}`, src: URI.parse(`https://x.test/${name}`), label: name, kind, localFile: undefined });
 		try {
-			canvas.setGroups([{ timestamp: 1, images: [item('a.png'), item('b.mp4', 'video')] }], 'chat-1');
-			canvas.setOtherChatGroups([{ timestamp: 0, images: [item('c.png')], source: { key: 'chat-2', title: 'Logo ideas' } }]);
+			canvas.setGroups([
+				{ timestamp: 0, images: [item('c.png')], source: { key: 'chat-2', title: 'Logo ideas' } },
+				{ timestamp: 1, images: [item('a.png'), item('b.mp4', 'video')] },
+			], 'chat-1');
 			canvas.reveal('https://x.test/c.png', 'focused');
 
 			const composer = container.querySelector<HTMLFormElement>('form.sessions-right-workbench-canvas-composer')!;
@@ -153,10 +196,9 @@ suite('RightWorkbenchCanvas', () => {
 			composer.dispatchEvent(new Event('submit', { cancelable: true }));
 
 			assert.deepStrictEqual({
-				rail: [...container.querySelectorAll('.sessions-right-workbench-canvas-rail > *')].map(el => el.classList.contains('sessions-right-workbench-canvas-rail-label') ? `[${el.textContent}]` : el.getAttribute('title')),
+				rail: [...container.querySelectorAll('.sessions-right-workbench-canvas-rail > *')].map(el => el.getAttribute('title')),
 				pressed: container.querySelector('.sessions-right-workbench-canvas-rail-thumb[aria-pressed="true"]')?.getAttribute('title'),
 				focusedVideo: !!container.querySelector('.sessions-right-workbench-canvas-rail-thumb video'),
-				badge: container.querySelector('.sessions-right-workbench-canvas-source-badge')?.textContent,
 				composerShown: !composer.hidden,
 				imageModel,
 				videoModel: model(),
@@ -167,10 +209,9 @@ suite('RightWorkbenchCanvas', () => {
 				lengthAfterSend: lengthChip.textContent,
 				cleared: input.value,
 			}, {
-				rail: ['a.png', 'b.mp4', '[Other Chats]', 'c.png, from Logo ideas'],
+				rail: ['a.png', 'b.mp4', 'c.png, from Logo ideas'],
 				pressed: 'c.png, from Logo ideas',
 				focusedVideo: true,
-				badge: 'From another chat: Logo ideas',
 				composerShown: true,
 				imageModel: 'gpt-image-1',
 				videoModel: 'Choose Model',
@@ -191,7 +232,6 @@ suite('RightWorkbenchCanvas', () => {
 		const sent: string[] = [];
 		const delegate: IRightWorkbenchCanvasDelegate = {
 			toDisplayUrl: async () => undefined,
-			setComposerImages: () => { },
 			sendComments: () => { },
 			sendEdit: (images, prompt) => sent.push(`${images.map(image => image.label).join('+')}:${prompt}`),
 			getMediaModel: () => ({ active: true, label: 'Model' }),
@@ -239,7 +279,6 @@ suite('RightWorkbenchCanvas', () => {
 		mainWindow.document.body.appendChild(container);
 		const delegate: IRightWorkbenchCanvasDelegate = {
 			toDisplayUrl: async () => undefined,
-			setComposerImages: () => { },
 			sendComments: () => { },
 			sendEdit: () => { },
 			getMediaModel: () => undefined,
@@ -273,7 +312,6 @@ suite('RightWorkbenchCanvas', () => {
 		let canvas: RightWorkbenchCanvas | undefined;
 		const delegate: IRightWorkbenchCanvasDelegate = {
 			toDisplayUrl: async () => undefined,
-			setComposerImages: () => { },
 			sendComments: () => { },
 			sendEdit: () => { },
 			getMediaModel: () => undefined,
@@ -320,7 +358,6 @@ suite('RightWorkbenchCanvas', () => {
 		mainWindow.document.body.appendChild(container);
 		const delegate: IRightWorkbenchCanvasDelegate = {
 			toDisplayUrl: async () => undefined,
-			setComposerImages: () => { },
 			sendComments: () => { },
 			sendEdit: () => { },
 			getMediaModel: () => undefined,
@@ -363,7 +400,6 @@ suite('RightWorkbenchCanvas', () => {
 		let current = 'deepseek';
 		const delegate: IRightWorkbenchCanvasDelegate = {
 			toDisplayUrl: async () => undefined,
-			setComposerImages: () => { },
 			sendComments: () => { },
 			sendEdit: () => { },
 			getMediaModel: () => undefined,

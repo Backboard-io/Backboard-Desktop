@@ -3,35 +3,80 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { localize, localize2 } from '../../../../nls.js';
+import { $, addDisposableListener, append, EventType, isHTMLElement } from '../../../../base/browser/dom.js';
+import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
 import { Codicon } from '../../../../base/common/codicons.js';
+import { KeyCode } from '../../../../base/common/keyCodes.js';
+import { DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
+import { localize, localize2 } from '../../../../nls.js';
 import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../platform/actions/common/actions.js';
-import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
-import { Registry } from '../../../../platform/registry/common/platform.js';
-import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/editor.js';
-import { EditorExtensions, IEditorFactoryRegistry, IEditorSerializer } from '../../../common/editor.js';
-import { EditorInput } from '../../../common/editor/editorInput.js';
-import { IEditorService } from '../../../services/editor/common/editorService.js';
-import { OPEN_BILLING_COMMAND_ID } from '../common/backboardBilling.js';
-import { BackboardBillingEditor } from './backboardBillingEditor.js';
-import { BackboardBillingEditorInput } from './backboardBillingEditorInput.js';
+import { ILayoutService } from '../../../../platform/layout/browser/layoutService.js';
+import { IBackboardBillingService, OPEN_BILLING_COMMAND_ID } from '../common/backboardBilling.js';
 import './backboardBillingService.js';
+import { BillingPlansView } from './billingPlansView.js';
 
-Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
-	EditorPaneDescriptor.create(BackboardBillingEditor, BackboardBillingEditor.ID, localize('billingEditor', "Billing")),
-	[new SyncDescriptor(BackboardBillingEditorInput)],
-);
-class BillingEditorSerializer implements IEditorSerializer {
-	canSerialize(_input: EditorInput): boolean { return true; }
-	serialize(_input: EditorInput): string { return ''; }
-	deserialize(_instantiationService: IInstantiationService): BackboardBillingEditorInput { return BackboardBillingEditorInput.getOrCreate(); }
+/** The open overlay in this window, if any. */
+const overlay = new MutableDisposable<DisposableStore>();
+
+/**
+ * Opens the plans overlay. When onboarding is already showing the plans
+ * (or the overlay is open) it only refreshes them.
+ */
+function openBillingOverlay(accessor: ServicesAccessor): void {
+	const billing = accessor.get(IBackboardBillingService);
+	void billing.refresh();
+	if (overlay.value || BillingPlansView.isShowing) {
+		return;
+	}
+
+	const layoutService = accessor.get(ILayoutService);
+	const instantiationService = accessor.get(IInstantiationService);
+	const store = new DisposableStore();
+	const previousFocus = layoutService.activeContainer.ownerDocument.activeElement;
+
+	const element = append(layoutService.activeContainer, $('.bb-plans-overlay'));
+	element.setAttribute('role', 'dialog');
+	element.setAttribute('aria-modal', 'true');
+	element.setAttribute('aria-label', localize('billing.aria', "Plans and billing"));
+	store.add({ dispose: () => element.remove() });
+
+	const close = () => {
+		overlay.clear();
+		if (isHTMLElement(previousFocus)) {
+			previousFocus.focus();
+		}
+	};
+
+	const closeButton = append(element, $<HTMLButtonElement>('button.bb-plans-overlay-close'));
+	closeButton.type = 'button';
+	const closeLabel = localize('billing.close', "Close");
+	closeButton.title = closeLabel;
+	closeButton.setAttribute('aria-label', closeLabel);
+	closeButton.classList.add(...ThemeIcon.asClassNameArray(Codicon.close));
+	store.add(addDisposableListener(closeButton, EventType.CLICK, close));
+	store.add(addDisposableListener(element, EventType.KEY_DOWN, (event: KeyboardEvent) => {
+		if (new StandardKeyboardEvent(event).equals(KeyCode.Escape)) {
+			event.preventDefault();
+			close();
+		}
+	}));
+
+	store.add(instantiationService.createInstance(BillingPlansView, element, { mode: 'standalone', onDone: close }));
+	overlay.value = store;
+	closeButton.focus();
 }
-Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(BackboardBillingEditorInput.ID, BillingEditorSerializer);
+
 registerAction2(class extends Action2 {
-	constructor() { super({ id: OPEN_BILLING_COMMAND_ID, title: localize2('backboard.openBilling', "Billing"), category: localize2('backboard.category', "Backboard"), f1: true }); }
-	async run(accessor: ServicesAccessor): Promise<void> { await accessor.get(IEditorService).openEditor(BackboardBillingEditorInput.getOrCreate(), { pinned: true }); }
+	constructor() {
+		super({ id: OPEN_BILLING_COMMAND_ID, title: localize2('backboard.openBilling', "Billing"), category: localize2('backboard.category', "Backboard"), f1: true });
+	}
+	run(accessor: ServicesAccessor): void {
+		openBillingOverlay(accessor);
+	}
 });
+
 MenuRegistry.appendMenuItem(MenuId.AccountsContext, {
 	command: { id: OPEN_BILLING_COMMAND_ID, title: localize('backboard.accountBilling', "Billing"), icon: Codicon.creditCard },
 	group: '2_settings', order: 3,

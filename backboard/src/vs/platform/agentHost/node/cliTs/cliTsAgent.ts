@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { AgentRewindRequest, IAgentRewindBuffer, IAgentRewindResult } from '../../common/agentRewind.js';
+import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -32,11 +33,12 @@ import { IInstantiationService } from '../../../instantiation/common/instantiati
 import { IAgentHostCheckpointService } from '../../common/agentHostCheckpointService.js';
 import { type IFileEditRecord, ISessionDatabase, ISessionDataService } from '../../common/sessionDataService.js';
 import { buildSessionDbUri, FileEditTracker } from '../shared/fileEditTracker.js';
-import { isClaudeLoggedIn, isClaudeLoggedInRecently } from '../shared/agentLoginProbes.js';
+import { claudeCodeVersionStatus, type IClaudeCodeVersionStatus, isClaudeLoggedIn, isClaudeLoggedInRecently, updateClaudeCode } from '../shared/agentLoginProbes.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { IAgentHostGitService, META_DIFF_BASE_BRANCH } from '../agentHostGitService.js';
 import { BYOK_COMMANDS, BYOK_GENERATION_ARG, BYOK_KEY_ARG, BYOK_PROVIDER_ARG, BYOK_PROVIDERS, byokProviderDefinition, type ByokProviderId, isByokProviderId, isKeyBilledProvider, keyBilledProviderId, parseBillingRoute, routeProviderFamily, vendorOfProvider } from '../../common/byokProviders.js';
 import { BACKBOARD_ACCESS_FULL, BACKBOARD_ACCESS_MANUAL, BACKBOARD_GENERATIVE_MEDIA_OFF, BACKBOARD_IMAGE_MODEL_CONFIG_KEY, BACKBOARD_MODE_PLAN, BACKBOARD_VIDEO_MODEL_CONFIG_KEY, BUNDLED_CHATGPT_SUBSCRIPTION_MODELS, BUNDLED_CLAUDE_SUBSCRIPTION_MODELS, type BridgeModel, backboardAccessSystemContext, backboardModelInfos, backboardMultitaskSystemContext, bridgeConfig, createBackboardTurnSettings, fallbackModel, isBridgeModel, resolveBackboardSessionConfig } from './backboardRuntimeShared.js';
+import { ensureBackboardGuestKey } from './backboardGuest.js';
 
 /** cli-ts tool name excluded from the turn when Web Search is toggled off. */
 const CLI_TS_WEB_SEARCH_TOOL_NAME = 'WebSearch';
@@ -163,6 +165,10 @@ const CHATGPT_SUBSCRIPTION_LOGIN_COMMAND = 'chatgptSubscription.login';
 const CLAUDE_SUBSCRIPTION_PROVIDER = 'anthropic-subscription';
 const CLAUDE_SUBSCRIPTION_LOGIN_COMMAND = 'claudeSubscription.login';
 const CLAUDE_SUBSCRIPTION_ENABLE_COMMAND = 'claudeSubscription.enable';
+const CLAUDE_CODE_VERSION_COMMAND = 'claudeSubscription.version';
+const CLAUDE_CODE_UPDATE_COMMAND = 'claudeSubscription.update';
+/** The release check reads the npm registry; one answer serves every picker open for a while. */
+const CLAUDE_CODE_VERSION_TTL_MS = 10 * 60_000;
 const CLI_TS_META_WORKTREE_BRANCH = 'backboard.worktree.branchName';
 const CLI_TS_META_WORKTREE_PATH = 'backboard.worktree.path';
 const CLI_TS_META_WORKTREE_REPOSITORY_ROOT = 'backboard.worktree.repositoryRoot';
@@ -452,6 +458,8 @@ interface CliTsStoredSession {
 	};
 	readonly createdAt: number;
 	readonly modifiedAt: number;
+	/** The chat's last selected model, so restored history can show its billing route. */
+	readonly model?: ModelSelection;
 	/** False when the first turn was interrupted before workspace setup completed. */
 	readonly materialized?: boolean;
 	readonly threadId?: string;
@@ -555,6 +563,8 @@ interface CliTsSession {
 	sourceWorkingDirectory?: URI;
 	worktree?: CliTsWorktree;
 	model?: ModelSelection;
+	/** The model recorded in the store; display-only until the IDE selects a model again. */
+	storedModel?: ModelSelection;
 	activeModel?: ModelSelection;
 	modelChangeRevision?: number;
 	appliedModelRevision?: number;
@@ -707,6 +717,8 @@ export class CliTsAgent extends Disposable implements IAgent {
 	private _rgDir: Promise<string | undefined> | undefined;
 	private _chatGptSubscriptionLoginPromise: Promise<void> | undefined;
 	private _claudeSubscriptionEnablePromise: Promise<void> | undefined;
+	private _claudeCodeVersion: { readonly checkedAt: number; readonly status: Promise<IClaudeCodeVersionStatus | undefined> } | undefined;
+	private _claudeCodeUpdatePromise: Promise<IAgentCommandResult> | undefined;
 	private _claudeSubscriptionConnected = false;
 	private _claudeSubscriptionStatusRevision = 0;
 	/** Validated provider keys pushed by the IDE. Held in memory only; never persisted or logged. */
@@ -748,6 +760,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 		));
 		void this._refreshClaudeSubscriptionConnectionState();
 		this._watchCredentials();
+		void ensureBackboardGuestKey(this._logService);
 	}
 
 	/**
@@ -765,6 +778,10 @@ export class CliTsAgent extends Disposable implements IAgent {
 				return;
 			}
 			fingerprint = next;
+			// Signing out leaves no credentials: fall back to a guest key so
+			// the free models keep working. Writing it changes the fingerprint
+			// again, which refreshes the catalog with the guest key.
+			void ensureBackboardGuestKey(this._logService);
 			this._modelsRefreshed = false;
 			this._modelRefreshPromise ??= this._refreshModelCatalog()
 				.catch(error => this._logService.warn(`[cli-ts] model refresh after a credential change failed: ${error instanceof Error ? error.message : String(error)}`))
@@ -946,6 +963,13 @@ export class CliTsAgent extends Disposable implements IAgent {
 				return {
 					message: localize('cliTsAgent.claudeSubscription.connected', "Claude subscription connected to the Backboard harness."),
 				};
+			case CLAUDE_CODE_VERSION_COMMAND: {
+				const status = await this._claudeCodeVersionStatus();
+				return { message: '', data: status ? { ...status } : undefined };
+			}
+			case CLAUDE_CODE_UPDATE_COMMAND:
+				this._claudeCodeUpdatePromise ??= this._updateClaudeCode().finally(() => { this._claudeCodeUpdatePromise = undefined; });
+				return this._claudeCodeUpdatePromise;
 			case BYOK_COMMANDS.validate:
 				return this._validateProviderKeyCommand(args);
 			case BYOK_COMMANDS.set:
@@ -1221,6 +1245,34 @@ export class CliTsAgent extends Disposable implements IAgent {
 				this._claudeSubscriptionEnablePromise = undefined;
 			});
 		await this._claudeSubscriptionEnablePromise;
+	}
+
+	private _claudeCodeVersionStatus(): Promise<IClaudeCodeVersionStatus | undefined> {
+		const cached = this._claudeCodeVersion;
+		if (cached && Date.now() - cached.checkedAt < CLAUDE_CODE_VERSION_TTL_MS) {
+			return cached.status;
+		}
+		const status = claudeCodeVersionStatus().catch(() => undefined);
+		this._claudeCodeVersion = { checkedAt: Date.now(), status };
+		return status;
+	}
+
+	/**
+	 * Runs `claude update`, then re-reads the catalog: the Claude model list is
+	 * whatever the installed Claude Code reports, so an old install lists fewer.
+	 */
+	private async _updateClaudeCode(): Promise<IAgentCommandResult> {
+		await updateClaudeCode();
+		this._claudeCodeVersion = undefined;
+		const status = await this._claudeCodeVersionStatus();
+		this._modelRefreshPromise ??= this._refreshModelCatalog().finally(() => { this._modelRefreshPromise = undefined; });
+		await this._modelRefreshPromise;
+		return {
+			message: status
+				? localize('cliTsAgent.claudeCode.updatedTo', "Claude Code updated to {0}. Every Claude model on your plan is now listed.", status.installed)
+				: localize('cliTsAgent.claudeCode.updated', "Claude Code updated. Every Claude model on your plan is now listed."),
+			data: status ? { ...status } : undefined,
+		};
 	}
 
 	/** `fresh` asks Claude Code even while an earlier check is still trusted. */
@@ -1698,14 +1750,17 @@ export class CliTsAgent extends Disposable implements IAgent {
 		session.cancelBeforeSubmit = false;
 		session.modifiedAt = Date.now();
 		session.title ??= firstPromptLine(prompt);
-		const prepared = prepareSubmitAttachments(prompt, attachments);
+		let prepared = prepareSubmitAttachments(prompt, attachments);
 		const storedConfig = this._configurationService.getSessionConfigValues(session.sessionUri.toString());
 		const settings = createBackboardTurnSettings(storedConfig, session.config, session.model);
 		if (settings.videoGeneration || settings.imageGeneration) {
 			// Hosted generation reads its inputs from the message's files, so a
 			// clip or image attached from disk (Canvas edits, "replace the dog
 			// with a cat") must travel as bytes, not as a path to read.
-			await addLocalMediaFiles(prepared, attachments, this._logService);
+			const mediaNote = await addLocalMediaFiles(prepared, attachments, this._logService);
+			if (mediaNote) {
+				prepared = { ...prepared, prompt: `${prepared.prompt}\n\n${mediaNote}` };
+			}
 		}
 		const systemContext = [
 			backboardMultitaskSystemContext(settings.rawMode),
@@ -2325,7 +2380,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 				modifiedTime: session.modifiedAt,
 				summary: session.title,
 				status: session.turn ? SessionStatus.InProgress : SessionStatus.Idle,
-				model: session.model,
+				model: session.model ?? session.storedModel,
 				workingDirectory: session.workingDirectory,
 				project: this._projectForSession(session),
 			}));
@@ -2345,6 +2400,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 					modifiedTime: entry.modifiedAt,
 					summary: entry.title,
 					status: SessionStatus.Idle,
+					model: storedSessionModel(entry),
 					workingDirectory,
 					project: projectDirectory ? { uri: projectDirectory, displayName: path.basename(projectDirectory.fsPath) } : undefined,
 				};
@@ -2600,6 +2656,7 @@ export class CliTsAgent extends Disposable implements IAgent {
 			worktree,
 			rewind: restored?.rewind,
 			title: restored?.title,
+			storedModel: restored && storedSessionModel(restored),
 			threadId: restored?.threadId,
 			forkContext: restored?.forkContext,
 			providerHandoffContext: restored?.providerHandoffContext,
@@ -2726,9 +2783,11 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 	private async _doMaterialize(session: CliTsSession, prompt: string, liveConfig?: Record<string, unknown>): Promise<void> {
 		this._throwIfDisposed(session);
-		const sourceWorkingDirectory = session.sourceWorkingDirectory ?? session.workingDirectory;
-		if (!sourceWorkingDirectory) {
-			throw new Error(localize('cliTsAgent.missingWorkingDirectory', "Select a working folder before starting a Backboard session."));
+		// A window without an open folder (an empty Editor window) still chats:
+		// like a terminal agent, the session then works from the home folder.
+		const sourceWorkingDirectory = session.sourceWorkingDirectory ?? session.workingDirectory ?? URI.file(os.homedir());
+		if (!session.workingDirectory) {
+			session.workingDirectory = sourceWorkingDirectory;
 		}
 		session.sourceWorkingDirectory = sourceWorkingDirectory;
 
@@ -4760,6 +4819,28 @@ export class CliTsAgent extends Disposable implements IAgent {
 
 // ---- helpers -----------------------------------------------------------------
 
+/** Model aliases only the Claude subscription transport reports as a turn's usage model. */
+const CLAUDE_SUBSCRIPTION_USAGE_ALIASES: ReadonlySet<string> = new Set(['opus', 'sonnet', 'haiku', 'fable', 'opusplan']);
+
+/**
+ * The model a stored session last selected. Sessions stored before the store
+ * kept `model` fall back to their turns: a turn whose usage names a
+ * bare Claude Code alias ran on the Claude subscription. Other routes report
+ * full model names that do not reveal how they were billed.
+ */
+function storedSessionModel(entry: CliTsStoredSession): ModelSelection | undefined {
+	if (entry.model) {
+		return entry.model;
+	}
+	for (let index = entry.turns.length - 1; index >= 0; index--) {
+		const usageModel = entry.turns[index].usage?.model?.trim().toLowerCase();
+		if (usageModel && CLAUDE_SUBSCRIPTION_USAGE_ALIASES.has(usageModel)) {
+			return { id: `${CLAUDE_SUBSCRIPTION_PROVIDER}/${usageModel}` };
+		}
+	}
+	return undefined;
+}
+
 /** Every session in the store file; a legacy zero-turn chat gets its prompt back as a turn. */
 function readStoredSessions(storePath: string): CliTsStoredSession[] {
 	try {
@@ -4804,6 +4885,7 @@ function storedSessionOf(session: CliTsSession): CliTsStoredSession {
 		} : {}),
 		createdAt: session.createdAt,
 		modifiedAt: session.modifiedAt,
+		model: session.model ?? session.storedModel,
 		materialized: session.materialized,
 		threadId: session.threadId,
 		forkContext: session.forkContext,
@@ -5812,11 +5894,112 @@ const LOCAL_MEDIA_MIME_TYPES: Readonly<Record<string, string>> = {
 const LOCAL_MEDIA_MAX_BYTES = 96 * 1024 * 1024;
 
 /**
+ * Longest reference clip the hosted video models accepted in live tests
+ * (2026-10-02): 5s and 10s 720p clips worked on Hailuo 3 / FLUX Video Edit /
+ * Aleph 2, while the same footage at 15s or 30s 1080p failed with a bare
+ * "Media generation failed".
+ */
+const VIDEO_REFERENCE_MAX_SECONDS = 10;
+
+/** Reads an MP4/MOV's length from its `mvhd` box, or undefined when it has none. */
+function mp4DurationSeconds(data: Uint8Array): number | undefined {
+	const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+	for (let index = 4; index + 32 <= data.length; index++) {
+		// 'mvhd'
+		if (data[index] !== 0x6d || data[index + 1] !== 0x76 || data[index + 2] !== 0x68 || data[index + 3] !== 0x64) {
+			continue;
+		}
+		const version = data[index + 4];
+		const timescale = view.getUint32(index + (version === 1 ? 24 : 16));
+		const duration = version === 1
+			? Number(view.getBigUint64(index + 28))
+			: view.getUint32(index + 20);
+		return timescale ? duration / timescale : undefined;
+	}
+	return undefined;
+}
+
+/**
+ * The clip to upload for a hosted video model: on macOS, longer or larger clips
+ * are re-encoded with the built-in `avconvert` to their first
+ * {@link VIDEO_REFERENCE_MAX_SECONDS} seconds at no more than 720p, since the
+ * models reject longer references. Elsewhere, or when conversion fails, the
+ * original goes as is.
+ */
+async function videoReference(filePath: string, data: Buffer, logService: ILogService): Promise<{ readonly data: Buffer; readonly trimmedFrom?: number }> {
+	if (process.platform !== 'darwin') {
+		return { data };
+	}
+	const seconds = mp4DurationSeconds(data);
+	const output = path.join(os.tmpdir(), `backboard-video-reference-${createHash('sha256').update(data).digest('hex').slice(0, 16)}.mp4`);
+	try {
+		await runTool('/usr/bin/avconvert', [
+			'--source', filePath, '--output', output, '--preset', 'Preset1280x720', '--replace',
+			'--duration', String(VIDEO_REFERENCE_MAX_SECONDS),
+		]);
+		const converted = await fs.promises.readFile(output);
+		return {
+			data: converted,
+			trimmedFrom: seconds !== undefined && seconds > VIDEO_REFERENCE_MAX_SECONDS + 0.5 ? seconds : undefined,
+		};
+	} catch (error) {
+		logService.info(`[cli-ts] Could not prepare video reference ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+		return { data };
+	} finally {
+		fs.promises.rm(output, { force: true }).catch(() => undefined);
+	}
+}
+
+/**
+ * Reference photos smaller than this on their short edge are scaled up before
+ * upload: a 200x200 face photo made Hailuo 3 fail with a bare "Media
+ * generation failed" (2026-10-03), and the same photo at 600x600 worked.
+ */
+const IMAGE_REFERENCE_MIN_EDGE = 400;
+const IMAGE_REFERENCE_TARGET_EDGE = 600;
+
+/** Runs a macOS command-line tool, resolving with its stdout. */
+function runTool(command: string, args: readonly string[]): Promise<string> {
+	return new Promise((resolve, reject) => cp.execFile(command, args, { timeout: 120_000 }, (error, stdout) => error ? reject(error) : resolve(stdout)));
+}
+
+/**
+ * The photo to upload for a hosted video model: on macOS, one whose short edge
+ * is under {@link IMAGE_REFERENCE_MIN_EDGE} pixels is scaled up with the
+ * built-in `sips` (as a PNG). Larger photos, GIFs, other platforms, and failed
+ * conversions keep the original.
+ */
+async function imageReference(filePath: string, data: Buffer, mimeType: string, logService: ILogService): Promise<{ readonly data: Buffer; readonly mimeType: string }> {
+	if (process.platform !== 'darwin' || mimeType === 'image/gif') {
+		return { data, mimeType };
+	}
+	const output = path.join(os.tmpdir(), `backboard-image-reference-${createHash('sha256').update(data).digest('hex').slice(0, 16)}.png`);
+	try {
+		const info = await runTool('/usr/bin/sips', ['-g', 'pixelWidth', '-g', 'pixelHeight', filePath]);
+		const width = Number(/pixelWidth: (?<value>\d+)/.exec(info)?.groups?.value);
+		const height = Number(/pixelHeight: (?<value>\d+)/.exec(info)?.groups?.value);
+		if (!width || !height || Math.min(width, height) >= IMAGE_REFERENCE_MIN_EDGE) {
+			return { data, mimeType };
+		}
+		const longest = Math.ceil(Math.max(width, height) * IMAGE_REFERENCE_TARGET_EDGE / Math.min(width, height));
+		await runTool('/usr/bin/sips', ['-s', 'format', 'png', '-Z', String(longest), filePath, '--out', output]);
+		return { data: await fs.promises.readFile(output), mimeType: 'image/png' };
+	} catch (error) {
+		logService.info(`[cli-ts] Could not prepare image reference ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+		return { data, mimeType };
+	} finally {
+		fs.promises.rm(output, { force: true }).catch(() => undefined);
+	}
+}
+
+/**
  * Adds the bytes of images and videos attached by path, for turns whose hosted
  * media tools take their inputs from the message's files. Files that are
- * missing, too large or not media keep only their path mention.
+ * missing, too large or not media keep only their path mention. Clips are
+ * trimmed and scaled to what the video models accept, and the prompt says so.
  */
-export async function addLocalMediaFiles(prepared: PreparedSubmitAttachments, attachments: readonly MessageAttachment[] | undefined, logService: ILogService): Promise<void> {
+export async function addLocalMediaFiles(prepared: PreparedSubmitAttachments, attachments: readonly MessageAttachment[] | undefined, logService: ILogService): Promise<string | undefined> {
+	const trimmed: string[] = [];
 	for (const attachment of attachments ?? []) {
 		if (attachment.type !== MessageAttachmentKind.Resource) {
 			continue;
@@ -5837,11 +6020,25 @@ export async function addLocalMediaFiles(prepared: PreparedSubmitAttachments, at
 				continue;
 			}
 			const data = await fs.promises.readFile(uri.fsPath);
-			prepared.files.push({ fileName: path.basename(uri.fsPath), mimeType, dataBase64: data.toString('base64') });
+			if (mimeType.startsWith('video/')) {
+				const reference = await videoReference(uri.fsPath, data, logService);
+				if (reference.trimmedFrom !== undefined) {
+					trimmed.push(`${path.basename(uri.fsPath)} (${Math.round(reference.trimmedFrom)}s)`);
+				}
+				const fileName = reference.data === data ? path.basename(uri.fsPath) : `${path.parse(uri.fsPath).name}.mp4`;
+				prepared.files.push({ fileName, mimeType: reference.data === data ? mimeType : 'video/mp4', dataBase64: reference.data.toString('base64') });
+				continue;
+			}
+			const image = await imageReference(uri.fsPath, data, mimeType, logService);
+			const fileName = image.data === data ? path.basename(uri.fsPath) : `${path.parse(uri.fsPath).name}.png`;
+			prepared.files.push({ fileName, mimeType: image.mimeType, dataBase64: image.data.toString('base64') });
 		} catch (error) {
 			logService.info(`[cli-ts] Could not attach media ${uri.fsPath}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
+	return trimmed.length
+		? `Uploaded clips were cut to their first ${VIDEO_REFERENCE_MAX_SECONDS} seconds at 720p, the longest reference the video models accept: ${trimmed.join(', ')}. Tell the user the edit covers only that part.`
+		: undefined;
 }
 
 /**
@@ -5934,6 +6131,10 @@ function storedFileEditContent(sessionUri: string, edit: IFileEditRecord): ToolR
  * already been retried silently, so they only invite the user to continue.
  */
 function cliTsFailureNote(error: CliTsTurnError | undefined): string {
+	const quickFix = error ? cliTsConnectQuickFix(error.message) : undefined;
+	if (quickFix) {
+		return quickFix;
+	}
 	if (error?.errorType === 'BackboardSubagentFailed') {
 		return localize('cliTsAgent.note.subagent', "_This subagent stopped early and handed its task back to the main agent._");
 	}
@@ -5944,6 +6145,29 @@ function cliTsFailureNote(error: CliTsTurnError | undefined): string {
 		return localize('cliTsAgent.note.actionable', "_This response couldn't start: {0}_", error.message.trim());
 	}
 	return localize('cliTsAgent.note.stopped', "_This response stopped before it finished. Send a message to continue from here._");
+}
+
+/**
+ * A turn that could not be routed because the account it bills to is not
+ * connected gets a plain sentence and one link that connects it, instead of
+ * the runtime's routing error. The chat renders these few command links as
+ * trusted (see `rawMarkdownToString`).
+ */
+function cliTsConnectQuickFix(message: string): string | undefined {
+	const command = (id: string, args?: readonly string[]) => `command:${id}${args ? `?${encodeURIComponent(JSON.stringify(args))}` : ''}`;
+	if (/can serve anthropic-subscription\//.test(message)) {
+		return localize('cliTsAgent.quickFix.claude', "_Claude isn't connected right now._ [Reconnect Claude]({0})", command('backboard.setupSubscription', ['backboard.claudeSubscription']));
+	}
+	if (/can serve openai-subscription\//.test(message)) {
+		return localize('cliTsAgent.quickFix.chatGpt', "_ChatGPT isn't connected right now._ [Reconnect ChatGPT]({0})", command('backboard.setupSubscription', ['backboard']));
+	}
+	if (/No API key is configured for|No API key backend can serve/.test(message)) {
+		return localize('cliTsAgent.quickFix.key', "_This model needs an API key that isn't set up._ [Add API Key]({0})", command('backboard.openApiKeys'));
+	}
+	if (/No backend can serve/.test(message)) {
+		return localize('cliTsAgent.quickFix.backboard', "_This model needs a Backboard sign-in._ [Sign In]({0})", command('backboard.signIn'));
+	}
+	return undefined;
 }
 
 function storedTurnToProtocolTurn(sessionId: string, index: number, turn: CliTsStoredTurn): Turn {
