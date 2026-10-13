@@ -3,7 +3,7 @@
 	"nameLong": "Backboard Studio",
 	"companyName": "Espri.ai",
 	"applicationName": "backboard-studio-dev",
-	"backboardVersion": "3.1.25",
+	"backboardVersion": "3.1.26",
 	"extensionsGallery": {
 		"serviceUrl": "https://open-vsx.org/vscode/gallery",
 		"itemUrl": "https://open-vsx.org/vscode/item",

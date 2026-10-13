@@ -296,6 +296,7 @@ const desktopResourcePatterns = [
 	'vs/platform/accessibilitySignal/browser/media/*.mp3',
 
 	// Media - images
+	'vs/code/electron-main/media/*.png',
 	'vs/workbench/contrib/welcomeGettingStarted/browser/media/**/*.svg',
 	'vs/workbench/contrib/welcomeGettingStarted/browser/media/**/*.png',
 	'vs/workbench/contrib/welcomeGettingStarted/common/media/**/*.svg',
