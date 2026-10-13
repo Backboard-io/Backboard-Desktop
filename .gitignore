@@ -1,0 +1,57 @@
+# Backboard Desktop (the IDE). The bbstudio.io web app lives in its own
+# repository, Backboard-io/BBStudio-Website.
+
+# OS and editor files
+.DS_Store
+
+# Dependencies (at any depth)
+node_modules/
+.npm-cache/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Release packaging output, per platform and architecture
+/VSCode-darwin-*/
+/VSCode-win32-*/
+/vscode-release/
+/vscode-release-*/
+/windows-release/
+/linux-release/
+/output/
+
+# Build output inside the IDE source tree
+/backboard/.build/
+/backboard/extensions/backboard/bin/
+/backboard/cli-ts/.*.bun-build
+/backboard/cua-driver/rust/target/
+
+# Local app state and agent output
+/.backboard/
+/.claude/
+.playwright-cli/
+/artifacts/
+/outputs/
+/generated-images/
+/generated-videos/
+
+# Local launch and debug output
+/backboard/launch_info*.json
+/backboard/launch_stderr*.log
+/backboard/launch-err*.log
+/backboard/.launch.log
+/backboard/pw_session.env
+/backboard/screenshots/
+/backboard/.claude-screenshots/
+
+# Scratch media at the repository root
+/*.mp4
+/*.mov
+/*.jpg
+/*.jpeg
+/*.png
+
+# The DMG installer assets under scripts/dmg-assets/ are tracked on purpose:
+# packaging only warns when they are missing, so ignoring them once shipped
+# releases with a bare Finder window.

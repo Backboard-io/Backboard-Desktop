@@ -1,0 +1,129 @@
+{
+	"name": "skillsbench-stratified-20-v1",
+	"benchmark": "skillsbench",
+	"ref": "v1.1",
+	"commit": "b63b7b2850226b6aa4fb5929a8c1ac7bc4d9a6af",
+	"condition": "with-skill",
+	"defaultModel": "xai/grok-4.5",
+	"selection": {
+		"strategy": "Within each category/difficulty quota, sort by SHA-256(seed + ':' + task id) and take the first N.",
+		"seed": "backboard-skillsbench-grok-20-v1",
+		"difficultyTotals": {
+			"easy": 1,
+			"medium": 12,
+			"hard": 7
+		},
+		"categoryTotals": {
+			"cybersecurity": 2,
+			"finance-economics": 2,
+			"industrial-physical-systems": 3,
+			"mathematics-or-formal-reasoning": 2,
+			"media-content-production": 1,
+			"natural-science": 3,
+			"office-white-collar": 3,
+			"software-engineering": 4
+		}
+	},
+	"tasks": [
+		{
+			"id": "fix-erlang-ssh-cve",
+			"category": "cybersecurity",
+			"difficulty": "hard"
+		},
+		{
+			"id": "suricata-custom-exfil",
+			"category": "cybersecurity",
+			"difficulty": "medium"
+		},
+		{
+			"id": "shock-analysis-supply",
+			"category": "finance-economics",
+			"difficulty": "hard"
+		},
+		{
+			"id": "shock-analysis-demand",
+			"category": "finance-economics",
+			"difficulty": "medium"
+		},
+		{
+			"id": "3d-scan-calc",
+			"category": "industrial-physical-systems",
+			"difficulty": "hard"
+		},
+		{
+			"id": "hvac-control",
+			"category": "industrial-physical-systems",
+			"difficulty": "medium"
+		},
+		{
+			"id": "manufacturing-codebook-normalization",
+			"category": "industrial-physical-systems",
+			"difficulty": "medium"
+		},
+		{
+			"id": "exam-block-sequencing",
+			"category": "mathematics-or-formal-reasoning",
+			"difficulty": "hard"
+		},
+		{
+			"id": "bike-rebalance",
+			"category": "mathematics-or-formal-reasoning",
+			"difficulty": "medium"
+		},
+		{
+			"id": "mario-coin-counting",
+			"category": "media-content-production",
+			"difficulty": "medium"
+		},
+		{
+			"id": "earthquake-phase-association",
+			"category": "natural-science",
+			"difficulty": "hard"
+		},
+		{
+			"id": "lake-warming-attribution",
+			"category": "natural-science",
+			"difficulty": "medium"
+		},
+		{
+			"id": "protein-expression-analysis",
+			"category": "natural-science",
+			"difficulty": "medium"
+		},
+		{
+			"id": "offer-letter-generator",
+			"category": "office-white-collar",
+			"difficulty": "easy"
+		},
+		{
+			"id": "jpg-ocr-stat",
+			"category": "office-white-collar",
+			"difficulty": "hard"
+		},
+		{
+			"id": "exceltable-in-ppt",
+			"category": "office-white-collar",
+			"difficulty": "medium"
+		},
+		{
+			"id": "fix-visual-stability",
+			"category": "software-engineering",
+			"difficulty": "hard"
+		},
+		{
+			"id": "azure-bgp-oscillation-route-leak",
+			"category": "software-engineering",
+			"difficulty": "medium"
+		},
+		{
+			"id": "llm-prefix-cache-replay",
+			"category": "software-engineering",
+			"difficulty": "medium"
+		},
+		{
+			"id": "parallel-tfidf-search",
+			"category": "software-engineering",
+			"difficulty": "medium"
+		}
+	]
+}

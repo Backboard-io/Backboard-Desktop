@@ -1,0 +1,372 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Subagent-specific styles */
+.interactive-session .interactive-response .value .chat-thinking-fixed-mode.chat-subagent-part {
+	> .chat-used-context-label {
+		display: flex;
+		min-width: 0;
+		align-items: center;
+		gap: 3px;
+
+		> .monaco-button {
+			min-width: 0;
+			flex: 1 1 auto;
+			overflow: hidden;
+		}
+	}
+
+	button.chat-subagent-open {
+		display: inline-flex;
+		width: auto;
+		min-width: max-content;
+		height: 28px;
+		min-height: 28px;
+		max-height: 28px;
+		flex: 0 0 auto;
+		align-items: center;
+		justify-content: center;
+		gap: 4px;
+		box-sizing: border-box;
+		padding: 0 8px;
+		border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+		border-radius: var(--vscode-cornerRadius-small);
+		background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+		color: var(--vscode-descriptionForeground);
+		font: inherit;
+		font-size: var(--vscode-agents-fontSize-label2);
+		line-height: 18px;
+		white-space: nowrap;
+		cursor: pointer;
+
+		&:hover {
+			border-color: color-mix(in srgb, var(--vscode-foreground) 22%, transparent);
+			background: var(--vscode-toolbar-hoverBackground);
+			color: var(--vscode-foreground);
+		}
+
+		&:focus-visible {
+			outline: 1px solid var(--vscode-focusBorder);
+			outline-offset: 1px;
+		}
+
+		&:disabled {
+			cursor: default;
+			opacity: 0.65;
+		}
+	}
+
+	.chat-subagent-open-label {
+		display: inline;
+	}
+
+	.chat-subagent-open-arrow {
+		display: inline-flex;
+		flex: 0 0 auto;
+		font-size: var(--vscode-agents-fontSize-label3);
+	}
+
+	.chat-subagent-row-status {
+		flex: 0 0 auto;
+		color: var(--vscode-descriptionForeground);
+		font-size: var(--vscode-agents-fontSize-label2);
+		font-variant-numeric: tabular-nums;
+		font-weight: var(--vscode-agents-fontWeight-semiBold);
+	}
+
+	.chat-subagent-row-status-running,
+	.chat-subagent-row-status-integrating {
+		color: var(--vscode-notificationsInfoIcon-foreground);
+	}
+
+	.chat-subagent-row-status-completed,
+	.chat-subagent-row-status-integrated {
+		color: var(--vscode-testing-iconPassed);
+	}
+
+	.chat-subagent-row-status-failed,
+	.chat-subagent-row-status-cancelled,
+	.chat-subagent-row-status-conflict {
+		color: var(--vscode-errorForeground);
+	}
+
+	.chat-subagent-task {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.chat-subagent-worker-metadata {
+		display: flex;
+		min-width: 0;
+		flex-wrap: wrap;
+		gap: 4px 10px;
+		padding: 2px 12px 5px 26px;
+		color: var(--vscode-descriptionForeground);
+		font-size: var(--vscode-agents-fontSize-label2);
+		line-height: 16px;
+	}
+
+	.chat-subagent-worker-metadata-item {
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.chat-subagent-worker-status {
+		color: var(--vscode-testing-iconPassed);
+		font-weight: 600;
+	}
+
+	.chat-subagent-worker-conflict .chat-subagent-worker-status,
+	.chat-subagent-worker-conflicts {
+		color: var(--vscode-testing-iconFailed);
+	}
+
+	.chat-subagent-worker-failed .chat-subagent-worker-status {
+		color: var(--vscode-descriptionForeground);
+	}
+
+	.chat-subagent-worker-integration {
+		color: var(--vscode-textLink-foreground);
+	}
+
+	/* Collapsed + streaming: show only the last item with max-height */
+	&.chat-used-context-collapsed .chat-used-context-list.chat-thinking-collapsible.chat-thinking-streaming {
+		max-height: var(--chat-subagent-last-item-height, 200px);
+		overflow: hidden;
+		display: block;
+	}
+
+	/* Expanded: show all content, no max-height, no scrolling */
+	.chat-used-context-list.chat-thinking-collapsible {
+		max-height: none;
+		overflow: visible;
+	}
+
+	/* Prompt and result section styling */
+	.chat-subagent-section {
+		padding: 4px 12px 4px 18px;
+
+		.chat-used-context {
+			margin-bottom: 0px;
+			margin-left: 2px;
+			padding-left: 2px;
+		}
+
+		/* Hide the border for subagent prompt/result sections */
+		.chat-used-context-list {
+			border: none;
+			padding: 0px 2px;
+		}
+	}
+
+	.chat-thinking-tool-wrapper {
+
+		/* Hide the collapsible button's icon since we use the thinking icon */
+		.codicon:not(.chat-thinking-icon) {
+			display: none;
+		}
+
+		/* renable icons in confirmation widget */
+		.chat-confirmation-widget-container .codicon:not(.codicon-terminal) {
+			display: inline-flex;
+		}
+
+		/* Remove padding from tool invocation part when it displays a confirmation widget */
+		.chat-tool-invocation-part.has-confirmation {
+			padding: 4px;
+		}
+
+		.chat-collapsible-markdown-content {
+			.rendered-markdown {
+				font-size: var(--vscode-chat-font-size-body-s);
+				line-height: 1.5em;
+			}
+		}
+	}
+
+	button.chat-subagent-confirmation-placeholder {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 12px 6px 24px;
+		background: none;
+		border: none;
+		outline: none;
+		color: var(--vscode-descriptionForeground);
+		cursor: pointer;
+		font-size: var(--vscode-chat-font-size-body-s);
+		position: relative;
+
+		&::before {
+			content: '\2022';
+			position: absolute;
+			left: 8px;
+			color: var(--vscode-descriptionForeground);
+		}
+
+		&:hover {
+			color: var(--vscode-textLink-foreground);
+		}
+
+		&:focus-visible {
+			outline: 1px solid var(--vscode-focusBorder);
+			outline-offset: 2px;
+		}
+	}
+}
+
+/* Simple mode keeps worker updates beside the Worked disclosure. The child
+ * transcript is revealed deliberately, without adding another card surface. */
+.monaco-workbench .backboard-clean-chat .chat-backboard-turn-work > .chat-subagent-strip {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 0;
+	margin: 2px 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+
+	> .chat-subagent-summary {
+		display: flex;
+		width: fit-content;
+		max-width: 100%;
+		min-height: 24px;
+		align-items: center;
+		gap: 6px;
+		margin: 0;
+		padding: 0 2px;
+		border: 0;
+		border-radius: 3px;
+		background: transparent;
+		color: var(--vscode-descriptionForeground);
+		font: inherit;
+		font-size: 13px;
+		line-height: 20px;
+		text-align: left;
+		cursor: pointer;
+
+		&:hover {
+			color: var(--vscode-foreground);
+		}
+
+		&:focus-visible {
+			outline: 1px solid var(--vscode-focusBorder);
+			outline-offset: 1px;
+		}
+
+		> .chat-subagent-summary-status {
+			display: inline-flex;
+			width: 16px;
+			height: 20px;
+			flex: 0 0 16px;
+			align-items: center;
+			justify-content: center;
+			border-radius: 0;
+			background: transparent;
+			color: var(--vscode-notificationsInfoIcon-foreground, #54b9e6);
+			font-size: 14px;
+		}
+
+		> .chat-subagent-summary-status-attention {
+			color: var(--vscode-errorForeground);
+		}
+
+		> .chat-subagent-summary-label {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		> .chat-subagent-summary-chevron {
+			flex: 0 0 12px;
+			font-size: 12px;
+			opacity: 0;
+		}
+
+		&:hover > .chat-subagent-summary-chevron,
+		&:focus-visible > .chat-subagent-summary-chevron,
+		&[aria-expanded='true'] > .chat-subagent-summary-chevron {
+			opacity: 0.7;
+		}
+	}
+
+	> .chat-subagent-items {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 2px;
+		padding-left: 20px;
+
+		&[hidden] {
+			display: none;
+		}
+
+		> .chat-thinking-fixed-mode.chat-subagent-part {
+			display: block;
+			width: 100%;
+			min-width: 0;
+			margin: 0;
+			padding: 0;
+			border: 0;
+			border-radius: 0;
+			background: transparent;
+			box-shadow: none;
+
+			> .chat-used-context-label {
+				display: flex;
+				min-height: 26px;
+				gap: 4px;
+				padding: 0;
+				background: transparent;
+
+				> .monaco-button {
+					min-height: 26px;
+					padding: 0;
+					border: 0;
+					background: transparent;
+					color: var(--vscode-descriptionForeground);
+				}
+			}
+
+			.chat-subagent-row-status {
+				padding: 0;
+				background: transparent;
+				font-size: 12px;
+				font-weight: normal;
+			}
+
+			.chat-subagent-task {
+				font-size: 12px;
+			}
+
+			button.chat-subagent-open {
+				height: 24px;
+				min-height: 24px;
+				max-height: 24px;
+				padding: 0 3px;
+				border: 0;
+				border-radius: 0;
+				background: transparent;
+			}
+
+			&.chat-used-context-collapsed > .chat-subagent-worker-metadata,
+			&.chat-used-context-collapsed > .chat-used-context-list,
+			&.chat-used-context-collapsed > .monaco-scrollable-element {
+				display: none;
+			}
+
+			.chat-subagent-model {
+				display: none;
+			}
+		}
+	}
+}

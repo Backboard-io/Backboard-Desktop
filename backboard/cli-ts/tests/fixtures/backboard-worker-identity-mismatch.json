@@ -1,0 +1,6 @@
+[
+	{"type":"tool_call_start","tool_call_id":"synthetic_worker_call","name":"agent_spawn"},
+	{"type":"tool_call_ready","tool_call":{"id":"synthetic_worker_call","type":"function","function":{"name":"agent_spawn","arguments":"{\"patterns\":[\"src/**/*.ts\"]}"}}},
+	{"type":"tool_submit_required","run_id":"synthetic_run","tool_calls":[{"id":"synthetic_worker_call","type":"function","function":{"name":"glob","arguments":"{\"patterns\":[\"src/**/*.ts\"]}"}}]},
+	{"type":"run_ended","final_content":"This tail must not override a protocol failure."}
+]

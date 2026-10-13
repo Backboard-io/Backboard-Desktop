@@ -1,0 +1,4 @@
+services:
+  main:
+    image: backboard-terminal-bench-2.1/fix-git:20260403-arm64
+    platform: linux/arm64

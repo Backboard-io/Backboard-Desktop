@@ -1,0 +1,97 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.monaco-workbench .backboard-mode-titlebar-widget {
+	display: inline-flex;
+	align-items: center;
+	height: 32px;
+	padding: 0;
+	/* Align with the Simple/Advanced mode switchers (x = 78 after the
+	   traffic lights). */
+	margin-left: 6px;
+	color: var(--vscode-titleBar-activeForeground);
+	-webkit-app-region: no-drag;
+	white-space: nowrap;
+}
+
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item.backboard-mode-titlebar-widget.active,
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item.backboard-mode-titlebar-widget.focused,
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item.backboard-mode-titlebar-widget:focus,
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item.backboard-mode-titlebar-widget:focus-visible {
+	background: transparent !important;
+	outline: none !important;
+}
+
+.monaco-workbench .backboard-mode-titlebar-widget > .backboard-mode-titlebar-widget-trigger {
+	all: unset;
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 28px;
+	padding: 0 7px;
+	border-radius: 4px;
+	color: var(--vscode-commandCenter-foreground, var(--vscode-titleBar-activeForeground));
+	cursor: pointer;
+	font: inherit;
+	line-height: 28px;
+	gap: 6px;
+}
+
+.monaco-workbench .backboard-mode-titlebar-widget > .backboard-mode-titlebar-widget-trigger:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .backboard-mode-titlebar-widget.active > .backboard-mode-titlebar-widget-trigger,
+.monaco-workbench .backboard-mode-titlebar-widget.focused > .backboard-mode-titlebar-widget-trigger,
+.monaco-workbench .backboard-mode-titlebar-widget > .backboard-mode-titlebar-widget-trigger:focus,
+.monaco-workbench .backboard-mode-titlebar-widget > .backboard-mode-titlebar-widget-trigger:active {
+	background: transparent !important;
+	outline: none !important;
+	box-shadow: none !important;
+}
+
+.monaco-workbench .backboard-mode-titlebar-widget > .backboard-mode-titlebar-widget-trigger:focus-visible {
+	outline: none;
+}
+
+.monaco-workbench .backboard-mode-titlebar-widget-icon {
+	font-size: 15px;
+	opacity: 0.7;
+}
+
+.monaco-workbench .backboard-mode-titlebar-widget-label {
+	font-size: 13px;
+	font-weight: 400;
+}
+
+.monaco-workbench .backboard-mode-titlebar-widget-chevron {
+	font-size: 12px;
+	opacity: 0.72;
+}
+
+/* Keep the 24px controls centered in the titlebar's content box. */
+.monaco-workbench.mac:not(.web) .part.titlebar > .titlebar-container {
+	padding-top: 0;
+}
+
+.monaco-workbench .backboard-update-pill {
+	appearance: none;
+	border: 0;
+	border-radius: 12px;
+	padding: 0 12px;
+	height: 24px;
+	font: 600 12px/24px var(--vscode-font-family);
+	background: #1769d2;
+	color: #ffffff;
+	cursor: pointer;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench .backboard-update-pill:hover { background: #125bb8; }
+.monaco-workbench .backboard-update-pill:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}

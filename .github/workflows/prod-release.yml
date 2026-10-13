@@ -1,0 +1,284 @@
+name: Prod Release
+
+# Every push to prod builds, signs and publishes Backboard Studio for Apple
+# silicon, Intel macOS, Windows x64 and Linux x64 as one GitHub release.
+#
+# The version is backboardVersion in backboard/product.json; bump it in the
+# commit you push. A version whose v<version> tag already exists is refused,
+# so a push that forgets the bump fails fast instead of overwriting a release.
+#
+# Windows builds from the branch in the WINDOWS_RELEASE_REF repository
+# variable (default: windows), which carries the Windows-only signing and
+# packaging fixes. Set the variable to prod to build Windows from the pushed
+# commit instead.
+#
+# Repository secrets:
+#   MACOS_CERTIFICATE_P12_BASE64      base64 Developer ID Application .p12
+#   MACOS_CERTIFICATE_PASSWORD        password for that .p12
+#   APPLE_NOTARIZATION_KEY_P8_BASE64  base64 App Store Connect API key (.p8)
+#   APPLE_NOTARIZATION_KEY_ID
+#   APPLE_NOTARIZATION_ISSUER_ID
+#   BACKBOARD_GITHUB_OAUTH_CLIENT_SECRET
+#   BACKBOARD_POSTHOG_KEY             optional; product analytics key stamped into product.json
+#   CUA_DRIVER_POSTHOG_KEY            optional; computer-use driver telemetry key
+#   plus the Azure secrets release-windows.yml already uses.
+# Repository variables:
+#   BACKBOARD_UPDATE_MANIFEST_BASE_URL  update feed stamped into the macOS app
+#   WINDOWS_RELEASE_REF                 optional, see above
+
+on:
+  push:
+    branches: [prod]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Override the version from product.json (for example, 3.1.24)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve release version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Resolve and validate version
+        id: version
+        env:
+          VERSION_OVERRIDE: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != "refs/heads/prod" ]]; then
+            echo "Prod releases must run from the prod branch (got ${GITHUB_REF})." >&2
+            exit 1
+          fi
+          version="${VERSION_OVERRIDE:-$(node -p "require('./backboard/product.json').backboardVersion")}"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: ${version}" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v${version}" >/dev/null; then
+            echo "Tag v${version} already exists. Bump backboardVersion in backboard/product.json." >&2
+            exit 1
+          fi
+          echo "Releasing Backboard Studio ${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            runner: macos-15
+          # Building on Intel hardware avoids the cross-compile toolchain
+          # problems of producing an x86_64 app on Apple silicon.
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      ARCH: ${{ matrix.arch }}
+      CHANNEL: stable
+      # Keep the build scripts from sourcing a developer's local release.env.
+      BACKBOARD_RELEASE_ENV_FILE: /nonexistent
+      BACKBOARD_UPDATE_MANIFEST_BASE_URL: ${{ vars.BACKBOARD_UPDATE_MANIFEST_BASE_URL }}
+      BACKBOARD_GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.BACKBOARD_GITHUB_OAUTH_CLIENT_SECRET }}
+      # Compiled into the computer-use driver; without it the driver sends no telemetry.
+      CUA_DRIVER_POSTHOG_KEY: ${{ secrets.CUA_DRIVER_POSTHOG_KEY }}
+      APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
+      APPLE_NOTARIZATION_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          lfs: true
+
+      # The source ships without analytics keys; release builds stamp
+      # Backboard's from the BACKBOARD_POSTHOG_KEY secret (if set).
+      - name: Stamp analytics key
+        shell: bash
+        env:
+          BACKBOARD_POSTHOG_KEY: ${{ secrets.BACKBOARD_POSTHOG_KEY }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const key = (process.env.BACKBOARD_POSTHOG_KEY || "").trim();
+            if (!key) { console.log("BACKBOARD_POSTHOG_KEY is not set; this build ships without product analytics."); process.exit(0); }
+            const file = "backboard/product.json";
+            const product = JSON.parse(fs.readFileSync(file, "utf8"));
+            product.backboardAnalytics = { ...product.backboardAnalytics, posthogKey: key };
+            fs.writeFileSync(file, JSON.stringify(product, null, "\t") + "\n");
+          '
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: backboard/.nvmrc
+          cache: npm
+          cache-dependency-path: backboard/package-lock.json
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Write signing material
+        env:
+          P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          ASC_KEY_BASE64: ${{ secrets.APPLE_NOTARIZATION_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          for name in P12_BASE64 P12_PASSWORD ASC_KEY_BASE64 APPLE_NOTARIZATION_KEY_ID APPLE_NOTARIZATION_ISSUER_ID BACKBOARD_GITHUB_OAUTH_CLIENT_SECRET BACKBOARD_UPDATE_MANIFEST_BASE_URL; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing ${name}; see the header of prod-release.yml." >&2
+              exit 1
+            fi
+          done
+          # Same layout package_vscode_update_macos.sh expects in SIGNING_DIR.
+          signing_dir="${RUNNER_TEMP}/signing"
+          mkdir -p "${signing_dir}"
+          chmod 700 "${signing_dir}"
+          printf '%s' "${P12_BASE64}" | base64 --decode > "${signing_dir}/developer-id-application.p12"
+          printf '%s' "${P12_PASSWORD}" > "${signing_dir}/p12-password.txt"
+          printf '%s' "${ASC_KEY_BASE64}" | base64 --decode > "${signing_dir}/AuthKey_${APPLE_NOTARIZATION_KEY_ID}.p8"
+          echo "SIGNING_DIR=${signing_dir}" >> "${GITHUB_ENV}"
+
+      - name: Build, sign, notarize and validate
+        run: ./scripts/build_vscode_release_macos.sh
+
+      - name: Remove signing material
+        if: always()
+        run: rm -rf "${RUNNER_TEMP}/signing"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: vscode-release/${{ needs.prepare.outputs.version }}/${{ matrix.arch }}/Backboard-Studio-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  linux:
+    name: Linux x86_64
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      ARCH: x86_64
+      CHANNEL: stable
+      BACKBOARD_RELEASE_ENV_FILE: /nonexistent
+      BACKBOARD_GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.BACKBOARD_GITHUB_OAUTH_CLIENT_SECRET }}
+    steps:
+      # The VS Code build plus its dependencies does not fit in the runner's
+      # default free space.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af >/dev/null
+          df -h /
+
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          lfs: true
+
+      # The source ships without analytics keys; release builds stamp
+      # Backboard's from the BACKBOARD_POSTHOG_KEY secret (if set).
+      - name: Stamp analytics key
+        shell: bash
+        env:
+          BACKBOARD_POSTHOG_KEY: ${{ secrets.BACKBOARD_POSTHOG_KEY }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const key = (process.env.BACKBOARD_POSTHOG_KEY || "").trim();
+            if (!key) { console.log("BACKBOARD_POSTHOG_KEY is not set; this build ships without product analytics."); process.exit(0); }
+            const file = "backboard/product.json";
+            const product = JSON.parse(fs.readFileSync(file, "utf8"));
+            product.backboardAnalytics = { ...product.backboardAnalytics, posthogKey: key };
+            fs.writeFileSync(file, JSON.stringify(product, null, "\t") + "\n");
+          '
+
+      - name: Build in the Linux release container
+        run: ./scripts/build_vscode_release_linux.sh
+
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-linux-x86_64
+          path: |
+            linux-release/${{ needs.prepare.outputs.version }}/x86_64/Backboard-Studio-linux-x86_64.tar.gz
+            linux-release/${{ needs.prepare.outputs.version }}/x86_64/Backboard-Studio-linux-x86_64.deb
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  windows:
+    name: Windows x64
+    needs: prepare
+    uses: ./.github/workflows/release-windows.yml
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      channel: stable
+      source_ref: ${{ vars.WINDOWS_RELEASE_REF == 'prod' && github.sha || vars.WINDOWS_RELEASE_REF || 'windows' }}
+    secrets: inherit
+
+  publish:
+    name: Publish GitHub release
+    needs: [prepare, macos, linux, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download build outputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: downloads
+
+      - name: Collect release files
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp downloads/release-macos-aarch64/Backboard-Studio-aarch64.dmg release/
+          cp downloads/release-macos-x86_64/Backboard-Studio-x86_64.dmg release/
+          cp downloads/release-linux-x86_64/Backboard-Studio-linux-x86_64.tar.gz release/
+          cp downloads/release-linux-x86_64/Backboard-Studio-linux-x86_64.deb release/
+          windows="downloads/Backboard-Studio-${VERSION}-windows-x64-signed"
+          cp "${windows}"/*.exe "${windows}/Backboard-Studio-win32-x64.zip" release/
+          (cd release && sha256sum * > SHA256SUMS)
+          ls -lh release
+
+      - name: Create tag and release
+        run: |
+          set -euo pipefail
+          gh release create "v${VERSION}" release/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "Backboard Studio ${VERSION}" \
+            --generate-notes

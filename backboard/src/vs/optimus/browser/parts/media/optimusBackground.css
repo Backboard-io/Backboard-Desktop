@@ -1,0 +1,224 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Use the existing persisted picker image across Board, Kanban and focused
+ * sessions. Clearing it removes the marker, restoring the normal opaque UI. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) {
+	isolation: isolate;
+	--optimus-scrollbar-track: transparent;
+	--optimus-glass-surface: color-mix(in srgb, var(--vscode-editor-background) 72%, transparent);
+	--optimus-glass-blur: blur(24px);
+	--optimus-glass-border: color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
+	background-image: var(--new-chat-background-image) !important;
+	background-size: cover !important;
+	background-position: center !important;
+	background-repeat: no-repeat !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light)::before {
+	content: '';
+	display: block;
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+	background: transparent !important;
+	backdrop-filter: none;
+}
+
+/* The shell and transcript wrappers must reveal the surface behind them;
+ * tint only the card itself, so nested backgrounds do not compound opacity. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) :is(
+	.monaco-grid-view,
+	.monaco-grid-branch-node,
+	.split-view-container,
+	.split-view-view:has(.optimus-grid-content),
+	.split-view-view:has(.terminal-outer-container),
+	.part.sessionspart,
+	.part.sessionspart > .content,
+	.optimus-grid,
+	.optimus-kanban,
+	.optimus-kanban-column,
+	.optimus-card-content,
+	.optimus-card-chat,
+	.optimus-card-chat .monaco-list,
+	.optimus-card-chat .monaco-list-rows,
+	.optimus-card-chat .monaco-list-row,
+	.optimus-card-chat .monaco-scrollable-element,
+	.optimus-card-chat .interactive-item-container,
+	.optimus-focused-session-body,
+	.optimus-focused-session-body .session-view,
+	.optimus-focused-session-body .session-view-content,
+	.optimus-focused-session-body .sessions-chat-widget,
+	.optimus-focused-session-body .chat-view-chat,
+	.optimus-focused-session-body .interactive-session,
+	.optimus-focused-session-body .interactive-list,
+	.optimus-focused-session-body .monaco-list,
+	.optimus-focused-session-body .monaco-list-rows,
+	.optimus-focused-session-body .monaco-list-row,
+	.optimus-focused-session-body .monaco-scrollable-element,
+	.part.panel,
+	.part.panel > .content,
+	.part.editor:has(.terminal-editor),
+	.part.editor:has(.terminal-editor) > .content,
+	.editor-group-container:has(.terminal-editor),
+	.editor-container:has(.terminal-editor),
+	.terminal-editor,
+	.part.auxiliarybar:has(.terminal-outer-container),
+	.part.auxiliarybar:has(.terminal-outer-container) .content,
+	.part.auxiliarybar:has(.terminal-outer-container) .pane-body,
+	.part.auxiliarybar:has(.terminal-outer-container) .sessions-right-workbench-shell,
+	.terminal-wrapper,
+	.terminal-instance,
+	.xterm,
+	.xterm-viewport
+) {
+	background: transparent !important;
+}
+
+/* Keep non-card surfaces clear; each tile supplies its own frosted backing. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) :is(
+	.optimus-focused-session,
+	.terminal-outer-container
+) {
+	backdrop-filter: none;
+}
+
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) :is(
+	.optimus-card,
+	.optimus-empty-hero,
+	.optimus-focused-session,
+	.terminal-outer-container,
+	.optimus-dashboard-header,
+	.optimus-grid-pager,
+	.optimus-kanban-column-header
+) {
+	background: transparent !important;
+	border-color: var(--optimus-glass-border);
+}
+
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-grid-content .optimus-card:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 3%, var(--optimus-glass-surface)) !important;
+}
+
+/* High contrast themes deliberately keep their solid, accessible surfaces. */
+@media (prefers-reduced-transparency: reduce) {
+	.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background {
+		--optimus-glass-surface: var(--vscode-editor-background) !important;
+		--optimus-glass-blur: none !important;
+	}
+}
+
+/* The first-run action is an occupied glass surface too. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-empty-hero {
+	border-style: solid;
+	box-shadow: inset 0 1px 0 color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background .optimus-empty-hero:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: 3px;
+}
+
+/* Reveal the shared image beneath the panels' rounded edges instead of
+ * painting an opaque rectangle behind each panel. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.phone-layout):not(.hc-black):not(.hc-light) .monaco-grid-view .split-view-view:has(> .part.sidebar),
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.phone-layout):not(.hc-black):not(.hc-light) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.sidebar),
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.phone-layout):not(.hc-black):not(.hc-light) .monaco-grid-view .split-view-view:has(> .monaco-grid-branch-node .part.auxiliarybar),
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.phone-layout):not(.hc-black):not(.hc-light) .monaco-grid-view .split-view-view:has(> .part.auxiliarybar) {
+	background: transparent !important;
+	box-shadow: none !important;
+}
+
+/* Continue the image beneath the right tool panel, with one glass layer on
+ * the panel rather than opaque backgrounds on each nested chat wrapper. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .part.auxiliarybar {
+	--rwb-bg: transparent;
+	--bb-panel-surface: transparent;
+	background: transparent !important;
+	backdrop-filter: none;
+}
+
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .part.auxiliarybar :is(
+	.content,
+	.pane-body,
+	.composite.title,
+	.sessions-right-workbench-shell,
+	.sessions-right-workbench-body,
+	.sessions-right-workbench-editor-chat,
+	.sessions-right-workbench-editor-activity,
+	.optimus-chat-view,
+	.optimus-chat-editor-host,
+	.interactive-session,
+	.chat-welcome-view-container,
+	.backboard-panel-empty-home,
+	.interactive-list,
+	.monaco-list,
+	.monaco-list-rows,
+	.monaco-list-row
+) {
+	background: transparent !important;
+}
+
+/* Reveal the shared backing through the dashboard without stacking filters. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .part.sessionspart > .content.optimus-grid-content {
+	backdrop-filter: none;
+	background: transparent !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-grid-content :is(.optimus-card, .optimus-empty-hero, .optimus-dashboard-header button, .optimus-grid-pager-label) {
+	background: var(--optimus-glass-surface) !important;
+	backdrop-filter: var(--optimus-glass-blur);
+}
+
+/* Frost individual toolbar buttons while keeping their container clear. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-grid-content .optimus-dashboard-header button:is(:hover:not(:disabled), .active, [aria-expanded='true']) {
+	background: color-mix(in srgb, var(--vscode-foreground) 10%, var(--optimus-glass-surface)) !important;
+}
+
+/* Advanced's embedded Editor panel uses the same themed surface for editable
+ * input, sent requests and tool cards, even without the Editor tab bar. */
+.monaco-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .optimus-chat-view .backboard-composer {
+	--bb-composer-surface: var(--vscode-editorWidget-background, var(--vscode-input-background));
+}
+.monaco-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)) .part.auxiliarybar .optimus-chat-view .backboard-clean-chat .interactive-list.backboard-cursor-transcript {
+	--bb-cursor-transcript-surface: var(--vscode-editorWidget-background, var(--vscode-input-background));
+	--bb-cursor-diff-surface: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+}
+
+/* Panel wrappers reveal the same dark backing through their exposed corners. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.phone-layout):not(.hc-black):not(.hc-light) .monaco-grid-view .split-view-view:is(:has(> .part.sidebar), :has(> .part.auxiliarybar)) {
+	backdrop-filter: none;
+	background: transparent !important;
+}
+
+/* Avoid compounding the shared blur inside the right panel. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.phone-layout):not(.hc-black):not(.hc-light) .part.auxiliarybar {
+	backdrop-filter: none;
+}
+
+/* Keep the entire layout above one dark frosted backing. It covers native
+ * scrollbar gutters and exposed panel corners regardless of grid nesting. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) > .monaco-grid-view {
+	position: relative;
+	z-index: 1;
+	background: transparent !important;
+}
+
+
+/* Focused sessions use the shared Simple-mode session rules. Only clear the
+ * extra dashboard wrappers, which the regular Sessions part does not have. */
+.monaco-workbench.optimus-window.sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-grid-content.focused-session,
+.monaco-workbench.optimus-window.sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-focused-session,
+.monaco-workbench.optimus-window.sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-focused-session-header,
+.monaco-workbench.optimus-window.sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-focused-session-body {
+	background: transparent !important;
+	backdrop-filter: none;
+}
+
+/* Selection retains the frosted surface, including on hover. */
+.monaco-workbench.agent-sessions-workbench.optimus-window:not(:has(.optimus-grid-content.focused-session)).sessions-chat-custom-background:not(.hc-black):not(.hc-light) .optimus-grid-content .optimus-card.active {
+	background: color-mix(in srgb, var(--vscode-foreground) 10%, var(--optimus-glass-surface)) !important;
+}

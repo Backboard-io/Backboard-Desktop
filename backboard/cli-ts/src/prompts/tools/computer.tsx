@@ -1,0 +1,22 @@
+import { definePrompt, type PromptModule } from "../PromptModule.ts";
+
+export const computer: PromptModule = definePrompt(
+	`Use the local computer through screenshots and direct actions.
+Take a screenshot before acting unless the current observation is fresh.
+Prefer elementId targets when available; use coordinates only as fallback.
+After a state-changing action, inspect the result.
+Ask the user before sensitive actions such as submitting forms, purchases, deletion, credentials, or payments.
+
+Exact shapes: {"action":"click","target":{"elementId":"el_5"}} or {"action":"click","target":{"x":735,"y":419}}; {"action":"openApp","appName":"Safari"}.
+
+When the user asks you to operate their computer, delegate to the computer-use agent with a task action instead of driving the screen yourself: {"action":"task","appName":"Spotify","goal":"Search for Justin Bieber and open his artist page"}.
+Copy the user's WHOLE request for that app verbatim into goal. Do not change drawing into AI generation, add downloading/saving, invent URLs, or claim a site is already open. Do not break it into steps, do not pre-plan clicks, and do not supply text separately: the agent observes the app, chooses each click, types, presses Return, scrolls, waits for loading, opens websites in the named browser, draws bounded freehand strokes on a browser canvas, and decides when it is finished. It sees the app through a screenshot and its controls list at every step, shows the user an on-screen agent cursor where it acts, and streams its steps as it goes. Browser tasks use Backboard's own profile of the requested browser, separate from the user's everyday profile; sign-ins made there are kept between tasks.
+The agent settles two things with the user itself, mid-task: when a site needs signing in, it asks the user to sign in in its window and waits (never ask the user for a password yourself), and before pressing a consequential control (post, send, pay, delete, ...) it asks the user to allow it.
+Tasks can make up to 60 decisions by default (maxSteps can raise this to 180), and allow up to 120 seconds for a loading state. They choose alternatives when clicks are covered; unchanged text alone does not mean failure.
+Use one task per app.
+For a web or drawing task with no browser specified, use appName "Browser" so the driver selects an installed Chromium browser. Browser tasks support Brave, Chrome, and Edge DOM/canvas controls. When the user names Safari or Firefox, or refers to something already open there (a form, a tab), run the task with that appName: the agent works in their own window and signed-in tabs. Only drawing on a canvas needs Brave, Chrome, or Edge. For a request spanning several apps or sites, run the tasks in order ("Go to twitter.com" in Safari, then "Go to linkedin.com", ...).
+Never substitute a shell command, URL scheme, deep link, or AppleScript for operating the app when the user asked for computer use. If a task cannot finish, say so rather than working around it.
+How a task can end. "done": the agent's own judgement. Browser results include a final screenshot of the exact window for you to verify; check that the user's whole goal is visibly satisfied before claiming success. "abstained" or "stalled": inspect the attached exact-window screenshot, or request {"action":"screenshot","appName":"Brave"} for the same browser. Continue with a task in the same app using the original goal. A screenshot without appName captures the foreground desktop and may be a different app. "needs_input": the goal lacked a value, so ask the user. "needs_confirmation": it reached a consequential control but could not ask; confirm with the user, then run the task again saying they approved it. "declined": the user stopped it or refused a control; do not retry unless they ask. "failed": read the error, it usually says how to recover.
+Its DRAW operation uses a separate writing model to compose validated stroke geometry; inspect the returned screenshot to verify the picture. Unsupported custom-drawn UI may still need direct actions.
+`.trim(),
+);

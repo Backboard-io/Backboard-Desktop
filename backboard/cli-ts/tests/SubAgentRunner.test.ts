@@ -1,0 +1,952 @@
+import { describe, expect, it } from "bun:test";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AgentTraceContext } from "../src/core/agent/AgentTraceStore.ts";
+import {
+	SubAgentRunner,
+	type SubAgentRunParams,
+} from "../src/core/agent/SubAgentRunner.ts";
+import { EventBus } from "../src/core/bus/EventBus.ts";
+import type { AgentEvent } from "../src/core/bus/events.ts";
+import {
+	emptyRuleSet,
+	parseRuleSet,
+} from "../src/core/permissions/PermissionRules.ts";
+import type { OpenAITool } from "../src/core/tools/schema.ts";
+import type { Tool } from "../src/core/tools/Tool.ts";
+import type { AgentClient } from "../src/providers/AgentClient.ts";
+import {
+	BackboardClient,
+	type RequestOptions,
+} from "../src/providers/backboard/BackboardClient.ts";
+import type {
+	AssistantInfo,
+	ProviderEvent,
+	SendMessageRequest,
+	SubmitToolOutputsRequest,
+} from "../src/providers/backboard/types.ts";
+import { ClientRouter } from "../src/providers/ClientRouter.ts";
+import { TodoWriteTool } from "../src/tools/TodoWriteTool.tsx";
+import { WriteTool } from "../src/tools/WriteTool.tsx";
+import { TEST_BACKBOARD_ENV, TEST_MODEL } from "./helpers/agent.ts";
+import { TestTool } from "./helpers.ts";
+
+/** Yields one assistant message then completes. */
+class CompletingClient extends BackboardClient {
+	messageRequests: SendMessageRequest[] = [];
+	listAssistantsSignal: AbortSignal | undefined;
+	createAssistantSignal: AbortSignal | undefined;
+
+	constructor() {
+		super(TEST_BACKBOARD_ENV);
+	}
+
+	override async *runMessage(
+		req: SendMessageRequest,
+	): AsyncIterable<ProviderEvent> {
+		this.messageRequests.push(req);
+		yield { kind: "thread", threadId: "thr_sub" };
+		yield {
+			kind: "usage",
+			usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+		};
+		yield { kind: "assistant_delta", text: "final report from sub-agent" };
+		yield { kind: "completed" };
+	}
+	override async *runToolOutputs(
+		_req: SubmitToolOutputsRequest,
+	): AsyncIterable<ProviderEvent> {
+		yield { kind: "completed" };
+	}
+	override async listAssistants(
+		options: RequestOptions = {},
+	): Promise<AssistantInfo[]> {
+		this.listAssistantsSignal = options.signal;
+		return [];
+	}
+	override async createAssistant(
+		_req: { name: string; system_prompt: string; tools: OpenAITool[] },
+		options: RequestOptions = {},
+	): Promise<AssistantInfo> {
+		this.createAssistantSignal = options.signal;
+		return { assistant_id: "asst_sub", name: "test assistant" };
+	}
+}
+
+class RepeatingToolCallClient extends CompletingClient {
+	toolOutputRequests: SubmitToolOutputsRequest[] = [];
+
+	constructor(private readonly rounds = Number.POSITIVE_INFINITY) {
+		super();
+	}
+
+	override async *runMessage(): AsyncIterable<ProviderEvent> {
+		yield { kind: "thread", threadId: "thr_sub" };
+		yield {
+			kind: "requires_action",
+			runId: "run_0",
+			calls: [{ id: "call_0", name: "Read", input: {} }],
+		};
+	}
+
+	override async *runToolOutputs(
+		req: SubmitToolOutputsRequest,
+	): AsyncIterable<ProviderEvent> {
+		this.toolOutputRequests.push(req);
+		const round = this.toolOutputRequests.length;
+		if (round >= this.rounds) {
+			yield {
+				kind: "assistant_delta",
+				text: "finished after repeated tool use",
+			};
+			yield { kind: "completed" };
+			return;
+		}
+		yield {
+			kind: "requires_action",
+			runId: `run_${round}`,
+			calls: [{ id: `call_${round}`, name: "Read", input: {} }],
+		};
+	}
+}
+
+/**
+ * Subscription backends own their thread ids (stable prefixes) and have no
+ * assistant records, so a worker turn must land on the subscription client
+ * for both the initial message and every tool-output continuation.
+ */
+class SubscriptionWorkerClient {
+	readonly messageRequests: SendMessageRequest[] = [];
+	readonly toolOutputRequests: SubmitToolOutputsRequest[] = [];
+	readonly capabilities = { assistants: false, threads: true, memory: true };
+
+	constructor(private readonly threadId: string) {}
+
+	async *runMessage(req: SendMessageRequest): AsyncIterable<ProviderEvent> {
+		this.messageRequests.push(req);
+		yield { kind: "thread", threadId: this.threadId };
+		yield {
+			kind: "requires_action",
+			runId: "run_0",
+			calls: [{ id: "call_0", name: "Read", input: {} }],
+		};
+	}
+
+	async *runToolOutputs(
+		req: SubmitToolOutputsRequest,
+	): AsyncIterable<ProviderEvent> {
+		this.toolOutputRequests.push(req);
+		yield { kind: "assistant_delta", text: "subscription worker report" };
+		yield { kind: "completed" };
+	}
+}
+
+class RelativeWriteClient extends CompletingClient {
+	toolOutputRequests: SubmitToolOutputsRequest[] = [];
+
+	override async *runMessage(): AsyncIterable<ProviderEvent> {
+		yield { kind: "thread", threadId: "thr_write" };
+		yield {
+			kind: "requires_action",
+			runId: "run_write",
+			calls: [
+				{
+					id: "call_write",
+					name: "Write",
+					input: {
+						file_path: "js/result.js",
+						content: "export const result = true;\n",
+					},
+				},
+			],
+		};
+	}
+
+	override async *runToolOutputs(
+		req: SubmitToolOutputsRequest,
+	): AsyncIterable<ProviderEvent> {
+		this.toolOutputRequests.push(req);
+		yield { kind: "assistant_delta", text: "write complete" };
+		yield { kind: "completed" };
+	}
+}
+
+function runnerWith(client: BackboardClient, tools: Tool[]): SubAgentRunner {
+	return new SubAgentRunner({
+		client,
+		getRoute: () => ({ ...TEST_MODEL, source: "byok" }),
+		memory: "off",
+		memoryProfile: "code",
+		getThinking: async () => undefined,
+		systemPrompt: "you are a sub-agent",
+		toolFactory: () => tools,
+		retryBackoffMs: 0,
+	});
+}
+
+describe("SubAgentRunner", () => {
+	it("returns only the sub-agent's final report and aggregates usage", async () => {
+		const client = new CompletingClient();
+		const runner = runnerWith(client, [
+			new TestTool({ name: "Read", readOnly: true }),
+		]);
+
+		const result = await runner.run({
+			prompt: "summarize the module\n\nReturn one sentence.",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+
+		expect(result.report).toBe("final report from sub-agent");
+		expect(result.status).toBe("completed");
+		expect(result.usage.totalTokens).toBe(5);
+		expect(client.messageRequests[0]?.content).toBe(
+			"summarize the module\n\nReturn one sentence.",
+		);
+		expect(client.messageRequests[0]?.system_prompt).toBe(
+			"you are a sub-agent",
+		);
+		// The worker bills to the route its parent captured, never to a guess.
+		expect(client.messageRequests[0]?.source).toBe("byok");
+	});
+
+	it("uses the submitting turn's route even when a worker starts after the picker changes", async () => {
+		const client = new CompletingClient();
+		const runner = runnerWith(client, []);
+		await runner.run({
+			route: { provider: "google", model: "gemini-2.5-flash", source: "byok" },
+			prompt: "report",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+		expect(
+			client.messageRequests.map((request) => [
+				request.llm_provider,
+				request.model_name,
+				request.source,
+			]),
+		).toEqual([["google", "gemini-2.5-flash", "byok"]]);
+	});
+
+	it("propagates the depth into the sub-agent tool context", async () => {
+		let seenDepth = -1;
+		const probe = new TestTool({ name: "Read", readOnly: true });
+		const original = probe.execute.bind(probe);
+		probe.execute = (input, ctx) => {
+			seenDepth = ctx.agentDepth ?? -1;
+			return original(input, ctx);
+		};
+
+		class OneRoundClient extends CompletingClient {
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				yield { kind: "thread", threadId: "t" };
+				yield {
+					kind: "requires_action",
+					runId: "r",
+					calls: [{ id: "c1", name: "Read", input: {} }],
+				};
+			}
+			override async *runToolOutputs(): AsyncIterable<ProviderEvent> {
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		}
+
+		const runner = runnerWith(new OneRoundClient(), [probe]);
+		await runner.run({
+			prompt: "x",
+			depth: 2,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+		expect(seenDepth).toBe(2);
+	});
+
+	it("enforces the native worktree boundary in isolated worker context", async () => {
+		let isolatedRoot: string | undefined;
+		let permissionMode: string | undefined;
+		const probe = new TestTool({ name: "Read", readOnly: true });
+		const original = probe.execute.bind(probe);
+		probe.execute = (input, ctx) => {
+			isolatedRoot = ctx.isolatedWorkspaceRoot;
+			permissionMode = ctx.permissions?.mode;
+			return original(input, ctx);
+		};
+		class OneRoundClient extends CompletingClient {
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.messageRequests.push(req);
+				yield { kind: "thread", threadId: "t" };
+				yield {
+					kind: "requires_action",
+					runId: "r",
+					calls: [{ id: "c1", name: "Read", input: {} }],
+				};
+			}
+			override async *runToolOutputs(): AsyncIterable<ProviderEvent> {
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new OneRoundClient();
+		const runner = runnerWith(client, [probe]);
+
+		await runner.run({
+			prompt: "change the worker checkout",
+			depth: 1,
+			parentCwd: "/repo.backboard-workers/session/worker-a",
+			parentSignal: new AbortController().signal,
+			isolatedWorkspace: true,
+			parentPermissions: {
+				mode: "bypass",
+				rules: emptyRuleSet(),
+				interactive: true,
+			},
+		});
+
+		expect(isolatedRoot).toBe("/repo.backboard-workers/session/worker-a");
+		expect(permissionMode).toBe("bypass");
+		expect(client.messageRequests[0]?.system_prompt).toContain(
+			"isolated native Git worktree at /repo.backboard-workers/session/worker-a",
+		);
+		expect(client.messageRequests[0]?.system_prompt).toContain(
+			"automatically collects and integrates successful file-tool edits",
+		);
+		expect(client.messageRequests[0]?.system_prompt).toContain(
+			"never tell the parent to copy, merge, cherry-pick, or open files",
+		);
+	});
+
+	it("allows a parent-approved manual write worker to use relative paths", async () => {
+		const worker = await mkdtemp(join(tmpdir(), "subagent-relative-write-"));
+		try {
+			const client = new RelativeWriteClient();
+			const result = await runnerWith(client, [new WriteTool()]).run({
+				prompt: "write the assigned module",
+				depth: 1,
+				parentCwd: worker,
+				parentSignal: new AbortController().signal,
+				isolatedWorkspace: true,
+				parentPermissions: {
+					mode: "manual",
+					rules: emptyRuleSet(),
+					interactive: true,
+				},
+			});
+
+			expect(result.status).toBe("completed");
+			expect(client.toolOutputRequests[0]?.tool_outputs[0]?.output).toContain(
+				"Wrote js/result.js",
+			);
+			expect(await readFile(join(worker, "js/result.js"), "utf8")).toBe(
+				"export const result = true;\n",
+			);
+		} finally {
+			await rm(worker, { recursive: true, force: true });
+		}
+	});
+
+	it("maps inherited absolute deny rules from a worker to the coordinator", async () => {
+		const coordinator = await mkdtemp(join(tmpdir(), "subagent-coordinator-"));
+		const worker = await mkdtemp(join(tmpdir(), "subagent-denied-worker-"));
+		try {
+			const client = new RelativeWriteClient();
+			const result = await runnerWith(client, [new WriteTool()]).run({
+				prompt: "write the assigned module",
+				depth: 1,
+				parentCwd: worker,
+				permissionCwd: coordinator,
+				parentSignal: new AbortController().signal,
+				isolatedWorkspace: true,
+				parentPermissions: {
+					mode: "manual",
+					rules: parseRuleSet({
+						deny: [`write(=${join(coordinator, "js/result.js")})`],
+					}),
+					interactive: true,
+				},
+			});
+
+			expect(result.status).toBe("completed");
+			expect(client.toolOutputRequests[0]?.tool_outputs[0]?.output).toContain(
+				"Denied by permission rule",
+			);
+			await expect(access(join(worker, "js/result.js"))).rejects.toThrow();
+		} finally {
+			await Promise.all([
+				rm(coordinator, { recursive: true, force: true }),
+				rm(worker, { recursive: true, force: true }),
+			]);
+		}
+	});
+
+	it("reuses one private scratch directory for the worker and removes it afterward", async () => {
+		class TwoRoundClient extends CompletingClient {
+			private round = 0;
+
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				yield { kind: "thread", threadId: "thr_scratch" };
+				yield {
+					kind: "requires_action",
+					runId: "run_scratch_0",
+					calls: [{ id: "call_scratch_0", name: "Read", input: {} }],
+				};
+			}
+
+			override async *runToolOutputs(): AsyncIterable<ProviderEvent> {
+				this.round++;
+				if (this.round === 1) {
+					yield {
+						kind: "requires_action",
+						runId: "run_scratch_1",
+						calls: [{ id: "call_scratch_1", name: "Read", input: {} }],
+					};
+					return;
+				}
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		}
+
+		const scratchPaths: string[] = [];
+		const probe = new TestTool({ name: "Read", readOnly: true });
+		const original = probe.execute.bind(probe);
+		probe.execute = async (input, ctx) => {
+			expect(ctx.isolatedScratchRoot).toBeString();
+			await access(ctx.isolatedScratchRoot as string);
+			scratchPaths.push(ctx.isolatedScratchRoot as string);
+			return original(input, ctx);
+		};
+
+		await runnerWith(new TwoRoundClient(), [probe]).run({
+			prompt: "inspect twice",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			isolatedWorkspace: true,
+			parentPermissions: {
+				mode: "bypass",
+				rules: emptyRuleSet(),
+				interactive: true,
+			},
+		});
+
+		expect(scratchPaths).toHaveLength(2);
+		expect(new Set(scratchPaths).size).toBe(1);
+		await expect(access(scratchPaths[0] as string)).rejects.toThrow();
+	});
+
+	it("ends the child row and removes scratch when a worker loop fails", async () => {
+		class FailingAfterToolClient extends CompletingClient {
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				yield { kind: "thread", threadId: "thr_failure" };
+				yield {
+					kind: "requires_action",
+					runId: "run_failure",
+					calls: [{ id: "call_failure", name: "Read", input: {} }],
+				};
+			}
+
+			override async *runToolOutputs(): AsyncIterable<ProviderEvent> {
+				yield { kind: "assistant_delta", text: "" };
+				throw new Error("provider failed after worker setup");
+			}
+		}
+
+		let scratchPath: string | undefined;
+		const probe = new TestTool({ name: "Read", readOnly: true });
+		const original = probe.execute.bind(probe);
+		probe.execute = (input, ctx) => {
+			scratchPath = ctx.isolatedScratchRoot;
+			return original(input, ctx);
+		};
+		const parentBus = new EventBus();
+		const childStatuses: string[] = [];
+		parentBus.on("agent:child_end", (event) =>
+			childStatuses.push(event.status),
+		);
+
+		const result = await runnerWith(new FailingAfterToolClient(), [probe]).run({
+			prompt: "fail after setup",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			isolatedWorkspace: true,
+			parentBus,
+			parentToolCallId: "agent_failure",
+			parentPermissions: {
+				mode: "bypass",
+				rules: emptyRuleSet(),
+				interactive: true,
+			},
+		});
+
+		expect(result.status).toBe("failed");
+		expect(childStatuses).toEqual(["failed"]);
+		expect(scratchPath).toBeString();
+		await expect(access(scratchPath as string)).rejects.toThrow();
+	});
+
+	it("retries a failed worker turn silently and resumes on the same thread", async () => {
+		class FlakyClient extends CompletingClient {
+			failuresLeft = 2;
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				if (this.failuresLeft > 0) {
+					this.failuresLeft--;
+					this.messageRequests.push(req);
+					yield { kind: "thread", threadId: "thr_flaky" };
+					throw new Error("upstream exploded");
+				}
+				yield* super.runMessage(req);
+			}
+		}
+		const client = new FlakyClient();
+		const parentBus = new EventBus();
+		const parentEvents: string[] = [];
+		parentBus.onAny((event) => {
+			parentEvents.push(
+				event.type === "agent:child_event"
+					? `child:${event.event.type}`
+					: event.type,
+			);
+		});
+
+		const result = await runnerWith(client, []).run({
+			prompt: "do the thing",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			parentBus,
+			parentToolCallId: "agent_flaky",
+		});
+
+		expect(result.status).toBe("completed");
+		expect(result.report).toBe("final report from sub-agent");
+		expect(client.messageRequests).toHaveLength(3);
+		expect(client.messageRequests[2]?.content).toContain(
+			"Request:\ndo the thing",
+		);
+		expect(parentEvents).not.toContain("child:run:error");
+		expect(parentEvents.at(-1)).toBe("agent:child_end");
+	});
+
+	it("hands the task back after five failed attempts without a run error", async () => {
+		class AlwaysFailingClient extends CompletingClient {
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.messageRequests.push(req);
+				yield { kind: "thread", threadId: "thr_down" };
+				throw new Error("upstream exploded");
+			}
+		}
+		const client = new AlwaysFailingClient();
+		const parentBus = new EventBus();
+		const childEventTypes: string[] = [];
+		parentBus.on("agent:child_event", (event) =>
+			childEventTypes.push(event.event.type),
+		);
+
+		const result = await runnerWith(client, []).run({
+			prompt: "do the thing",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			parentBus,
+			parentToolCallId: "agent_down",
+		});
+
+		expect(client.messageRequests).toHaveLength(5);
+		expect(result.status).toBe("failed");
+		expect(result.report).toContain(
+			"Complete the remaining work directly in this turn",
+		);
+		expect(childEventTypes).not.toContain("run:error");
+	});
+
+	it("runs worker turns without creating a Backboard assistant", async () => {
+		const controller = new AbortController();
+		const client = new CompletingClient();
+		const runner = runnerWith(client, []);
+
+		await runner.run({
+			prompt: "x",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: controller.signal,
+		});
+
+		expect(client.listAssistantsSignal).toBeUndefined();
+		expect(client.createAssistantSignal).toBeUndefined();
+		expect(client.messageRequests[0]?.assistant_id).toBeUndefined();
+		expect(client.messageRequests[0]?.tools).toEqual([]);
+	});
+
+	it("runs worker agents past the former tool round cap", async () => {
+		const client = new RepeatingToolCallClient(25);
+		const runner = runnerWith(client, [
+			new TestTool({ name: "Read", readOnly: true }),
+		]);
+
+		const result = await runner.run({
+			prompt: "keep using tools",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+		});
+
+		expect(result.status).toBe("completed");
+		expect(result.toolRounds).toBeGreaterThan(20);
+		expect(client.toolOutputRequests.length).toBeGreaterThan(20);
+	});
+
+	it("records worker child events when trace logging is configured", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "cli-worker-trace-"));
+		try {
+			const client = new CompletingClient();
+			const runner = runnerWith(client, []);
+			const clientLogPath = join(dir, "agents", "call_worker", "client.jsonl");
+			const parentBus = new EventBus();
+			let durableLogAtChildEnd: Promise<string> | undefined;
+			parentBus.on("agent:child_end", () => {
+				durableLogAtChildEnd = readFile(clientLogPath, "utf8");
+			});
+
+			await runner.run({
+				prompt: "summarize",
+				depth: 1,
+				parentCwd: dir,
+				parentSignal: new AbortController().signal,
+				parentBus,
+				parentToolCallId: "call_worker",
+				trace: {
+					sessionId: "sess_parent",
+					context: new AgentTraceContext({
+						sessionId: "sess_parent",
+						sessionRoot: join(dir, ".backboard", "sessions", "sess_parent"),
+						cwd: dir,
+					}),
+					clientLogPath,
+				},
+			});
+
+			const text = await readFile(clientLogPath, "utf8");
+			const records = text
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => JSON.parse(line) as { type: string });
+			expect(records[0]?.type).toBe("session:created");
+			expect(records.map((record) => record.type)).toContain(
+				"assistant:message",
+			);
+			expect(records.map((record) => record.type)).toContain("turn:end");
+			expect(durableLogAtChildEnd).toBeDefined();
+			const recordsVisibleAtEnd = (await durableLogAtChildEnd)
+				?.split("\n")
+				.filter(Boolean)
+				.map((line) => JSON.parse(line) as { type: string });
+			expect(recordsVisibleAtEnd?.map((record) => record.type)).toContain(
+				"turn:end",
+			);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("coalesces rapid child text before relaying it to the parent", async () => {
+		class BurstClient extends CompletingClient {
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				for (let index = 0; index < 100; index++) {
+					yield { kind: "assistant_delta", text: "x" };
+				}
+				yield { kind: "completed" };
+			}
+		}
+		const parentBus = new EventBus();
+		const relayed: ProviderEvent[] = [];
+		parentBus.on("agent:child_event", (event) => {
+			if (event.event.type === "assistant:delta") {
+				relayed.push({ kind: "assistant_delta", text: event.event.text });
+			}
+		});
+
+		await runnerWith(new BurstClient(), []).run({
+			prompt: "stream a burst",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			parentBus,
+			parentToolCallId: "call_burst",
+		});
+
+		expect(relayed).toEqual([
+			{ kind: "assistant_delta", text: "x".repeat(100) },
+		]);
+	});
+
+	it("does not relay child TodoWrite updates to the parent bus", async () => {
+		const parentBus = new EventBus();
+		const parentTodoUpdates: unknown[] = [];
+		const childProgress: unknown[] = [];
+		parentBus.on("todos:updated", (event) => parentTodoUpdates.push(event));
+		parentBus.on("agent:child_event", (event) => {
+			if (event.event.type === "tool:start") childProgress.push(event);
+		});
+
+		class TodoClient extends CompletingClient {
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				yield { kind: "thread", threadId: "thr_sub" };
+				yield {
+					kind: "requires_action",
+					runId: "run_todo",
+					calls: [
+						{
+							id: "call_todo",
+							name: "TodoWrite",
+							input: {
+								todos: [{ content: "child task", status: "in_progress" }],
+							},
+						},
+					],
+				};
+			}
+			override async *runToolOutputs(): AsyncIterable<ProviderEvent> {
+				yield { kind: "assistant_delta", text: "child done" };
+				yield { kind: "completed" };
+			}
+		}
+
+		const runner = runnerWith(new TodoClient(), [new TodoWriteTool()]);
+		const result = await runner.run({
+			prompt: "track child work",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			parentBus,
+			parentToolCallId: "agent_1",
+		});
+
+		expect(result.report).toBe("child done");
+		expect(parentTodoUpdates).toEqual([]);
+		expect(childProgress).toHaveLength(1);
+	});
+
+	it("stops relaying child events once the parent signal is aborted", () => {
+		const parentBus = new EventBus();
+		const relayed: string[] = [];
+		parentBus.on("agent:child_event", (event) =>
+			relayed.push(event.event.type),
+		);
+
+		const childBus = new EventBus();
+		const controller = new AbortController();
+		const runner = runnerWith(new CompletingClient(), []);
+		const detach = (
+			runner as unknown as {
+				attachParentProgressRelay: (
+					params: SubAgentRunParams,
+					bus: EventBus,
+				) => () => void;
+			}
+		).attachParentProgressRelay(
+			{
+				prompt: "x",
+				depth: 1,
+				parentCwd: process.cwd(),
+				parentSignal: controller.signal,
+				parentBus,
+				parentToolCallId: "agent_1",
+			},
+			childBus,
+		);
+
+		childBus.emit({
+			type: "tool:start",
+			toolCallId: "c1",
+			name: "Read",
+			inputSummary: "",
+		});
+		expect(relayed).toEqual(["tool:start"]);
+
+		// After cancel the winding-down child keeps emitting, but nothing may
+		// reach the parent - it would resurrect the committed "Interrupted" row.
+		controller.abort();
+		childBus.emit({
+			type: "tool:result",
+			toolCallId: "c1",
+			name: "Read",
+			title: "ok",
+		});
+		detach();
+
+		expect(relayed).toEqual(["tool:start"]);
+	});
+
+	it("still emits the lifecycle-only child end edge after cancellation", async () => {
+		const controller = new AbortController();
+		class CancellingClient extends CompletingClient {
+			override async *runMessage(): AsyncIterable<ProviderEvent> {
+				controller.abort();
+				yield { kind: "completed" };
+			}
+		}
+		const parentBus = new EventBus();
+		const statuses: string[] = [];
+		const childEvents: AgentEvent[] = [];
+		parentBus.on("agent:child_end", (event) => statuses.push(event.status));
+		parentBus.on("agent:child_event", (event) => childEvents.push(event.event));
+
+		await runnerWith(new CancellingClient(), []).run({
+			prompt: "cancel",
+			depth: 1,
+			parentCwd: process.cwd(),
+			parentSignal: controller.signal,
+			parentBus,
+			parentToolCallId: "agent_cancelled",
+		});
+
+		expect(statuses).toHaveLength(1);
+		expect(childEvents).toEqual([]);
+	});
+
+	it("defers the terminal edge until isolated workspace integration settles", async () => {
+		const parentBus = new EventBus();
+		const statuses: string[] = [];
+		parentBus.on("agent:child_end", (event) => statuses.push(event.status));
+
+		await runnerWith(new CompletingClient(), []).run({
+			prompt: "finish the model work",
+			depth: 1,
+			parentCwd: process.cwd(),
+			permissionCwd: process.cwd(),
+			parentSignal: new AbortController().signal,
+			parentBus,
+			parentToolCallId: "agent_deferred",
+			isolatedWorkspace: true,
+			deferParentEnd: true,
+		});
+
+		expect(statuses).toEqual([]);
+	});
+
+	it("projects private worker edit paths onto the coordinator checkout", () => {
+		const parentBus = new EventBus();
+		const relayed: AgentEvent[] = [];
+		parentBus.on("agent:child_event", (event) => relayed.push(event.event));
+		const childBus = new EventBus();
+		const runner = runnerWith(new CompletingClient(), []);
+		const detach = (
+			runner as unknown as {
+				attachParentProgressRelay: (
+					params: SubAgentRunParams,
+					bus: EventBus,
+				) => () => void;
+			}
+		).attachParentProgressRelay(
+			{
+				prompt: "edit",
+				depth: 1,
+				parentCwd: "/private/worktrees/worker-a",
+				permissionCwd: "/coordinator/project",
+				parentSignal: new AbortController().signal,
+				parentBus,
+				parentToolCallId: "agent_1",
+				isolatedWorkspace: true,
+			},
+			childBus,
+		);
+
+		childBus.emit({
+			type: "tool:result",
+			toolCallId: "write_1",
+			name: "Write",
+			title: "Wrote /private/worktrees/worker-a/src/a.ts",
+			detail: "Updated /private/worktrees/worker-a/src/a.ts",
+			fileEdits: [
+				{
+					path: "/private/worktrees/worker-a/src/a.ts",
+					before: "",
+					after: "export {};\n",
+				},
+			],
+		});
+		detach();
+
+		const result = relayed[0];
+		expect(result?.type).toBe("tool:result");
+		if (result?.type !== "tool:result") throw new Error("missing tool result");
+		expect(result.fileEdits?.[0]?.path).toBe("/coordinator/project/src/a.ts");
+		expect(result.title).toBe("Wrote /coordinator/project/src/a.ts");
+		expect(result.detail).toBe("Updated /coordinator/project/src/a.ts");
+	});
+
+	it("routes worker sub-agent turns to the selected subscription backend", async () => {
+		const routes = [
+			{
+				provider: "anthropic-subscription",
+				model: "default",
+				threadPrefix: "claude_sub_",
+			},
+			{
+				provider: "openai-subscription",
+				model: "gpt-5.6-sol",
+				threadPrefix: "sub_",
+			},
+		] as const;
+
+		for (const route of routes) {
+			const subscription = new SubscriptionWorkerClient(
+				`${route.threadPrefix}worker`,
+			);
+			// A signed-in Backboard backend stays available so the router had a
+			// choice; the worker turn must still land on the subscription client.
+			const backboard = new CompletingClient();
+			const router = new ClientRouter({
+				backboard: backboard as unknown as AgentClient,
+				subscriptions: {
+					[route.provider]: {
+						client: subscription as unknown as AgentClient,
+						threadPrefix: route.threadPrefix,
+					},
+				},
+				getModel: () => ({ provider: route.provider, model: route.model }),
+				hasBackboardAuth: () => true,
+				hasKeyFor: () => false,
+			});
+			const runner = new SubAgentRunner({
+				client: router,
+				getRoute: () => ({ provider: route.provider, model: route.model }),
+				memory: "off",
+				memoryProfile: "code",
+				getThinking: async () => undefined,
+				systemPrompt: "you are a sub-agent",
+				toolFactory: () => [new TestTool({ name: "Read", readOnly: true })],
+			});
+
+			const result = await runner.run({
+				prompt: "inspect the module",
+				depth: 1,
+				parentCwd: process.cwd(),
+				parentSignal: new AbortController().signal,
+			});
+
+			expect(result.status).toBe("completed");
+			expect(result.report).toBe("subscription worker report");
+			expect(subscription.messageRequests).toHaveLength(1);
+			expect(subscription.messageRequests[0]?.llm_provider).toBe(
+				route.provider,
+			);
+			expect(subscription.messageRequests[0]?.model_name).toBe(route.model);
+			expect(subscription.toolOutputRequests[0]?.thread_id).toBe(
+				`${route.threadPrefix}worker`,
+			);
+			expect(backboard.messageRequests).toHaveLength(0);
+		}
+	});
+});

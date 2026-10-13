@@ -1,0 +1,32 @@
+[
+	{
+		"type": "response.output_item.done",
+		"item": {
+			"type": "reasoning",
+			"id": "reasoning-fixture",
+			"encrypted_content": "synthetic-opaque-content"
+		}
+	},
+	{
+		"type": "response.output_item.done",
+		"item": {
+			"type": "function_call",
+			"call_id": "execute-fixture",
+			"name": "execute",
+			"arguments": "{\"command\":\"printf fixture\"}"
+		}
+	},
+	{
+		"type": "response.output_item.done",
+		"item": {
+			"type": "function_call",
+			"call_id": "execute-fixture",
+			"name": "execute",
+			"arguments": "{\"command\":\"printf fixture\"}"
+		}
+	},
+	{
+		"type": "response.completed",
+		"response": { "id": "response-fixture", "output": [] }
+	}
+]

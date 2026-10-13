@@ -1,0 +1,18 @@
+FROM --platform=linux/amd64 alexgshaw/fix-git:20260403 AS official
+
+FROM --platform=linux/arm64 python:3.13-slim-bookworm
+
+WORKDIR /app
+
+RUN sed -i \
+    -e 's|URIs: http://deb.debian.org/debian$|URIs: https://snapshot.debian.org/archive/debian/20260824T000000Z|' \
+    -e 's|URIs: http://deb.debian.org/debian-security$|URIs: https://snapshot.debian.org/archive/debian-security/20260824T000000Z|' \
+    /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=official /app /app
+COPY --from=official /root/.gitconfig /root/.gitconfig
+
+WORKDIR /app/personal-site

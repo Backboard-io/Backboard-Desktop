@@ -1,0 +1,2334 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) {
+	height: 100% !important;
+	min-height: 0 !important;
+	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
+	border-left: none !important;
+}
+
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) > .title,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) > .composite.title {
+	display: none !important;
+	height: 0 !important;
+	min-height: 0 !important;
+	padding: 0 !important;
+	border: 0 !important;
+}
+
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) > .content {
+	height: 100% !important;
+	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))) !important;
+	background-color: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background))) !important;
+}
+
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .pane-header {
+	display: none !important;
+}
+
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .pane-body {
+	height: 100% !important;
+	padding: 0 !important;
+}
+
+.sessions-right-workbench-shell {
+	--rwb-bg: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
+	--rwb-bg-muted: var(--vscode-sideBarSectionHeader-background, var(--rwb-bg));
+	--rwb-chrome: var(--vscode-editorGroupHeader-tabsBackground, var(--rwb-bg-muted));
+	--rwb-chrome-soft: var(--vscode-sideBar-background, var(--rwb-bg));
+	--rwb-border: var(--vscode-sideBar-border, var(--vscode-panel-border, transparent));
+	--rwb-border-strong: var(--vscode-input-border, var(--rwb-border));
+	--rwb-hover: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground, var(--rwb-bg-muted)));
+	--rwb-selection: var(--vscode-list-activeSelectionBackground, var(--rwb-hover));
+	--rwb-rail-selection: var(--vscode-list-inactiveSelectionBackground, color-mix(in srgb, var(--vscode-focusBorder, var(--rwb-foreground)) 16%, transparent));
+	--rwb-selection-border: var(--vscode-list-activeSelectionOutline, var(--vscode-focusBorder, transparent));
+	--rwb-foreground: var(--vscode-foreground, var(--vscode-editor-foreground));
+	--rwb-muted: var(--vscode-descriptionForeground, var(--vscode-input-placeholderForeground, var(--rwb-foreground)));
+	--rwb-success: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-testing-iconPassed, var(--rwb-foreground)));
+	--rwb-danger: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-errorForeground, var(--rwb-foreground)));
+	--rwb-warning: var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-editorWarning-foreground, var(--rwb-foreground)));
+	--rwb-inserted-line-background: var(--vscode-diffEditor-insertedLineBackground, color-mix(in srgb, var(--rwb-success) 22%, transparent));
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+	box-sizing: border-box;
+	overflow: hidden;
+	color: var(--rwb-foreground);
+	background: var(--rwb-bg);
+	font-size: 13px;
+	container-type: inline-size;
+}
+
+.optimus-window .sessions-right-workbench-shell:not(.sessions-right-workbench-simple) {
+	border-left: 1px solid var(--vscode-sideBar-border, var(--vscode-panel-border, transparent));
+}
+
+.sessions-right-workbench-editor-activity {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	height: 36px;
+	min-height: 36px;
+	padding: 0 7px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--rwb-border);
+	background: var(--rwb-chrome);
+}
+
+.sessions-right-workbench-editor-activity-button {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 29px;
+	height: 29px;
+	padding: 0;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	color: var(--vscode-activityBar-inactiveForeground, var(--rwb-muted));
+	cursor: pointer;
+}
+
+.sessions-right-workbench-editor-activity-button:hover {
+	background: var(--vscode-toolbar-hoverBackground, var(--rwb-hover));
+	color: var(--vscode-activityBar-foreground, var(--rwb-foreground));
+}
+
+.sessions-right-workbench-editor-activity-button.active {
+	color: var(--vscode-activityBar-foreground, var(--rwb-foreground));
+}
+
+.sessions-right-workbench-editor-activity-button.active::after {
+	content: '';
+	position: absolute;
+	left: 6px;
+	right: 6px;
+	bottom: -4px;
+	height: 2px;
+	border-radius: var(--vscode-cornerRadius-circle);
+	background: var(--vscode-activityBarTop-activeBorder, var(--vscode-focusBorder));
+}
+
+.sessions-right-workbench-editor-activity-button .codicon {
+	font-size: 16px;
+}
+
+.sessions-right-workbench-editor-section-header {
+	display: flex;
+	align-items: center;
+	height: 34px;
+	min-height: 34px;
+	padding: 0 6px 0 12px;
+	box-sizing: border-box;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-editor-section-title {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	color: var(--vscode-sideBarTitle-foreground, var(--rwb-foreground));
+	font-size: 11px;
+	font-weight: 500;
+	letter-spacing: .04em;
+	line-height: 1;
+	text-overflow: ellipsis;
+	text-transform: uppercase;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-editor-folder {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	max-width: min(52%, 190px);
+	height: 24px;
+	margin-right: 3px;
+	padding: 0 7px;
+	box-sizing: border-box;
+	border: 1px solid var(--vscode-sideBar-border, var(--rwb-border));
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-button-secondaryBackground, transparent);
+	color: var(--vscode-sideBar-foreground, var(--rwb-foreground));
+	font: inherit;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-editor-folder:hover {
+	background: var(--vscode-toolbar-hoverBackground, var(--rwb-hover));
+}
+
+.sessions-right-workbench-editor-folder:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.sessions-right-workbench-editor-folder > .codicon:first-child {
+	color: var(--vscode-icon-foreground, var(--rwb-muted));
+}
+
+.sessions-right-workbench-editor-folder-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-editor-section-header .sessions-right-workbench-icon-button {
+	width: 24px;
+	height: 24px;
+}
+
+.sessions-right-workbench-editor-explorer,
+.sessions-right-workbench-extensions {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-editor-search {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	height: 28px;
+	min-height: 28px;
+	margin: 4px 8px 7px;
+	padding: 0 8px;
+	box-sizing: border-box;
+	border: 1px solid var(--vscode-input-border, var(--rwb-border));
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+}
+
+.sessions-right-workbench-editor-search:focus-within {
+	border-color: var(--vscode-focusBorder);
+}
+
+.sessions-right-workbench-editor-search .codicon {
+	flex: 0 0 auto;
+	color: var(--vscode-input-placeholderForeground, var(--rwb-muted));
+	font-size: 13px;
+}
+
+.sessions-right-workbench-editor-search input {
+	min-width: 0;
+	width: 100%;
+	height: 100%;
+	padding: 0;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+}
+
+.sessions-right-workbench-editor-search input::placeholder {
+	color: var(--vscode-input-placeholderForeground, var(--rwb-muted));
+}
+
+.sessions-right-workbench-editor-explorer-host {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.sessions-right-workbench-workspace-tree {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	padding: 0 0 8px;
+	box-sizing: border-box;
+}
+
+.sessions-right-workbench-workspace-section-header,
+.sessions-right-workbench-workspace-auxiliary-row {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	height: 22px;
+	padding: 0 8px;
+	box-sizing: border-box;
+	border: 0;
+	background: var(--vscode-sideBarSectionHeader-background, transparent);
+	color: var(--vscode-sideBarSectionHeader-foreground, var(--rwb-foreground));
+	font: inherit;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: .02em;
+	text-align: left;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-workspace-section-header:hover,
+.sessions-right-workbench-workspace-auxiliary-row:hover {
+	background: var(--vscode-list-hoverBackground, var(--rwb-hover));
+}
+
+.sessions-right-workbench-workspace-section-twistie,
+.sessions-right-workbench-workspace-auxiliary-row > .codicon:first-child {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	margin-right: 1px;
+	flex: 0 0 auto;
+}
+
+.sessions-right-workbench-workspace-section-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-workspace-section-children {
+	padding: 1px 0 4px;
+}
+
+.sessions-right-workbench-workspace-auxiliary {
+	flex: 0 0 auto;
+	border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--rwb-border));
+}
+
+.sessions-right-workbench-workspace-auxiliary-row {
+	gap: 3px;
+	height: 23px;
+}
+
+.sessions-right-workbench-workspace-auxiliary-row + .sessions-right-workbench-workspace-auxiliary-row {
+	border-top: 1px solid var(--vscode-sideBarSectionHeader-border, var(--rwb-border));
+}
+
+.sessions-right-workbench-workspace-row {
+	width: 100%;
+	height: 22px;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 0 8px 0 var(--workspace-tree-indent);
+	border: 0;
+	background: transparent;
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+	font: inherit;
+	font-size: 12px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-workspace-row:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.sessions-right-workbench-workspace-row.selected {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+}
+
+.sessions-right-workbench-workspace-twistie,
+.sessions-right-workbench-workspace-icon {
+	width: 16px;
+	height: 16px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	color: var(--vscode-icon-foreground);
+}
+
+.sessions-right-workbench-workspace-twistie.leaf {
+	visibility: hidden;
+}
+
+.sessions-right-workbench-workspace-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-workspace-empty,
+.sessions-right-workbench-workspace-empty-row {
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+}
+
+.sessions-right-workbench-workspace-empty {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	padding: 10px 12px;
+}
+
+.sessions-right-workbench-workspace-empty-copy {
+	display: flex;
+	align-items: flex-start;
+	flex-direction: column;
+	gap: 7px;
+}
+
+.sessions-right-workbench-workspace-choose {
+	padding: 2px 8px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	font: inherit;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-workspace-choose:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.sessions-right-workbench-editor-preview {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-editor-preview-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	height: 32px;
+	min-height: 32px;
+	padding: 0 5px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--rwb-border);
+}
+
+.sessions-right-workbench-editor-preview-name {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-editor-preview > .sessions-right-workbench-embedded-editor-host {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+}
+
+.sessions-right-workbench-code-editor,
+.sessions-right-workbench-native-extensions,
+.sessions-right-workbench-editor-chat {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	min-width: 0;
+	min-height: 0;
+	box-sizing: border-box;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-editor-chat {
+	display: flex;
+	overflow: hidden;
+}
+
+.sessions-right-workbench-editor-chat > .pane {
+	position: absolute;
+	inset: 0;
+	min-width: 0;
+	min-height: 0;
+}
+
+.sessions-right-workbench-editor-chat > .pane > .pane-body,
+.sessions-right-workbench-editor-chat .optimus-chat-view {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100% !important;
+	min-width: 0;
+	min-height: 0;
+	padding: 0 !important;
+	background: var(--rwb-bg) !important;
+}
+
+/* ChatViewTitleControl is the Editor panel's real New Agent/session strip.
+ * In Editor it is re-parented into the auxiliary title bar; inside Advanced
+ * it stays with the embedded chat so the custom tool rail remains available. */
+.sessions-right-workbench-editor-chat .chat-view-title-container.visible {
+	display: flex;
+	height: 34px;
+	min-height: 34px;
+	border-bottom-color: var(--rwb-border);
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-inner {
+	min-width: 0;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-navigation {
+	display: flex;
+	flex: 0 0 44px;
+	height: 44px;
+	min-width: 0;
+	align-items: center;
+	gap: 8px;
+	box-sizing: border-box;
+	padding: 4px 10px;
+	border-bottom: 1px solid color-mix(in srgb, var(--rwb-border) 70%, transparent);
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-navigation[hidden] {
+	display: none;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-back {
+	appearance: none;
+	display: inline-flex;
+	max-width: 132px;
+	height: 28px;
+	min-width: 0;
+	align-items: center;
+	gap: 6px;
+	box-sizing: border-box;
+	padding: 0 8px 0 6px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: inherit;
+	font-size: var(--vscode-agents-fontSize-label1);
+	cursor: pointer;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-back:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-back:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-back-label,
+.sessions-right-workbench-editor-chat .optimus-chat-navigation-title,
+.sessions-right-workbench-editor-chat .optimus-chat-navigation-meta {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-navigation-separator {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+	opacity: 0.6;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-navigation-identity {
+	display: flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	flex-direction: column;
+	justify-content: center;
+	line-height: 16px;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-navigation-title {
+	color: var(--vscode-foreground);
+	font-size: var(--vscode-agents-fontSize-label1);
+	font-weight: var(--vscode-agents-fontWeight-semiBold);
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-navigation-meta {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-agents-fontSize-label2);
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-tabs {
+	padding: 4px 6px;
+	mask-image: none;
+	-webkit-mask-image: none;
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-tab {
+	width: auto;
+	min-width: 70px;
+	max-width: 160px;
+	flex: 0 1 auto;
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-tab-active {
+	border-color: transparent;
+	background: transparent;
+	box-shadow: inset 0 -2px var(--vscode-focusBorder);
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-container .chat-view-title-actions-toolbar {
+	display: flex !important;
+	align-items: center;
+	margin-left: auto;
+	padding: 0 5px 0 2px;
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-actions-toolbar .actions-container {
+	align-items: center;
+}
+
+.sessions-right-workbench-editor-chat .chat-view-title-actions-toolbar .action-label {
+	border-radius: var(--vscode-cornerRadius-small);
+	padding: 4px;
+}
+
+.sessions-right-workbench-editor-chat .optimus-chat-editor-host {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+}
+
+.sessions-right-workbench-code-editor {
+	display: flex;
+	flex-direction: column;
+}
+
+.sessions-right-workbench-code-editor-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	height: 32px;
+	min-height: 32px;
+	padding: 0 5px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--rwb-border);
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-code-editor-name {
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-code-editor > .sessions-right-workbench-embedded-editor-host {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+}
+
+.sessions-right-workbench-code-editor-empty {
+	display: flex;
+	flex: 1;
+	min-height: 0;
+	align-items: center;
+	justify-content: center;
+	flex-direction: column;
+	gap: 8px;
+	padding: 24px;
+	box-sizing: border-box;
+	text-align: center;
+	color: var(--rwb-muted);
+}
+
+.sessions-right-workbench-code-editor-empty > .codicon {
+	font-size: 28px;
+	color: var(--vscode-descriptionForeground, var(--rwb-muted));
+}
+
+.sessions-right-workbench-code-editor-empty h2,
+.sessions-right-workbench-code-editor-empty p {
+	margin: 0;
+}
+
+.sessions-right-workbench-code-editor-empty h2 {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-code-editor-empty button {
+	margin-top: 4px;
+	padding: 4px 10px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	font: inherit;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-code-editor-empty button:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.sessions-right-workbench-native-extensions {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+}
+
+.sessions-right-workbench-extension-detail-body {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	overflow-y: auto;
+	padding: 16px;
+	box-sizing: border-box;
+}
+
+.sessions-right-workbench-extension-detail-hero {
+	display: grid;
+	grid-template-columns: 38px minmax(0, 1fr);
+	align-items: center;
+	gap: 10px;
+}
+
+.sessions-right-workbench-extension-detail-hero > .codicon {
+	color: var(--vscode-extensionIcon-starForeground, var(--vscode-icon-foreground));
+	font-size: 30px;
+}
+
+.sessions-right-workbench-extension-detail-identity {
+	min-width: 0;
+}
+
+.sessions-right-workbench-extension-detail-identity h2,
+.sessions-right-workbench-extension-detail-identity p,
+.sessions-right-workbench-extension-detail-description {
+	margin: 0;
+}
+
+.sessions-right-workbench-extension-detail-identity h2 {
+	overflow: hidden;
+	font-size: 15px;
+	font-weight: 600;
+	line-height: 20px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-extension-detail-identity p,
+.sessions-right-workbench-extension-detail-description {
+	color: var(--rwb-muted);
+	font-size: 11px;
+	line-height: 16px;
+}
+
+.sessions-right-workbench-extension-detail-badges,
+.sessions-right-workbench-extension-detail-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.sessions-right-workbench-extension-detail-badges > span {
+	padding: 2px 6px;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+	font-size: 10px;
+}
+
+.sessions-right-workbench-extension-detail-primary,
+.sessions-right-workbench-extension-detail-secondary {
+	height: 26px;
+	padding: 0 10px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: var(--vscode-cornerRadius-small);
+	font: inherit;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-extension-detail-primary {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+}
+
+.sessions-right-workbench-extension-detail-primary:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+.sessions-right-workbench-extension-detail-secondary {
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+}
+
+.sessions-right-workbench-extension-detail-secondary:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.sessions-right-workbench-extension-detail-installed {
+	color: var(--vscode-testing-iconPassed, var(--rwb-success));
+	font-size: 11px;
+}
+
+.sessions-right-workbench-workspace-empty-row {
+	padding: 4px 12px 4px 38px;
+}
+
+.sessions-right-workbench-editor-explorer-host > .pane {
+	position: absolute;
+	inset: 0;
+}
+
+.sessions-right-workbench-editor-explorer-host > .pane > .pane-header {
+	display: none !important;
+}
+
+.sessions-right-workbench-editor-explorer-host > .pane > .pane-body,
+.sessions-right-workbench-editor-explorer-host .explorer-folders-view,
+.sessions-right-workbench-editor-explorer-host .monaco-list,
+.sessions-right-workbench-editor-explorer-host .monaco-scrollable-element {
+	height: 100% !important;
+	background: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-extension-status {
+	min-height: 18px;
+	padding: 0 10px 5px;
+	box-sizing: border-box;
+	color: var(--rwb-muted);
+	font-size: 11px;
+}
+
+.sessions-right-workbench-extension-list {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 0 5px 8px;
+}
+
+.sessions-right-workbench-extension-row {
+	display: grid;
+	grid-template-columns: 26px minmax(0, 1fr);
+	gap: 8px;
+	width: 100%;
+	padding: 8px 7px;
+	box-sizing: border-box;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-medium);
+	background: transparent;
+	color: var(--rwb-foreground);
+	text-align: left;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-extension-row:hover,
+.sessions-right-workbench-extension-row.selected {
+	background: var(--vscode-list-hoverBackground, var(--rwb-hover));
+}
+
+.sessions-right-workbench-extension-row > .codicon {
+	padding-top: 2px;
+	color: var(--vscode-extensionIcon-starForeground, var(--vscode-icon-foreground, var(--rwb-muted)));
+	font-size: 19px;
+}
+
+.sessions-right-workbench-extension-copy {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.sessions-right-workbench-extension-name {
+	overflow: hidden;
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 18px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-extension-description {
+	display: -webkit-box;
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	color: var(--rwb-muted);
+	font-size: 11px;
+	line-height: 15px;
+}
+
+.sessions-right-workbench-extension-meta {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	color: var(--rwb-muted);
+	font-size: 10px;
+	line-height: 14px;
+}
+
+.sessions-right-workbench-extension-meta > span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-extension-badge {
+	padding: 0 4px;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+}
+
+.sessions-right-workbench-extension-empty {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 120px;
+	padding: 18px;
+	box-sizing: border-box;
+	color: var(--rwb-muted);
+	font-size: 12px;
+	text-align: center;
+}
+
+/* Exclude the full interactive strips from native window dragging, including
+ * tab labels, close/add buttons and the browser address field. */
+.sessions-right-workbench-header,
+.sessions-right-workbench-browser-chrome {
+	-webkit-app-region: no-drag;
+}
+
+.sessions-right-workbench-header {
+	display: flex;
+	align-items: center;
+	min-height: 44px;
+	padding: 6px 10px;
+	box-sizing: border-box;
+	border-bottom: 0;
+	background: var(--rwb-bg);
+}
+
+/* The strip scrolls horizontally when tabs overflow instead of letting tab
+ * content shrink below its min-content and bleed over the header controls.
+ * The scrollbar is hidden — the active tab is kept in view programmatically. */
+.sessions-right-workbench-tabs {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+	min-width: 0;
+	flex: 1;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+}
+
+.sessions-right-workbench-tab-separator {
+	width: 1px;
+	height: 12px;
+	margin: 0 3px;
+	flex: 0 0 1px;
+	background: var(--rwb-border);
+}
+
+.sessions-right-workbench-tab.active + .sessions-right-workbench-tab-separator,
+.sessions-right-workbench-tab-separator:has(+ .sessions-right-workbench-tab.active) {
+	visibility: hidden;
+}
+
+.sessions-right-workbench-tabs::-webkit-scrollbar {
+	display: none;
+}
+
+.sessions-right-workbench-tab,
+.sessions-right-workbench-tab-add,
+.sessions-right-workbench-icon-button {
+	border: 0;
+	color: var(--rwb-muted);
+	background: transparent;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-tab {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 30px;
+	padding: 0 10px;
+	border-radius: var(--vscode-cornerRadius-large);
+	font-size: 13px;
+	font-weight: 500;
+	line-height: 1;
+	white-space: nowrap;
+	min-width: 0;
+	flex-shrink: 0;
+	overflow: hidden;
+}
+
+.sessions-right-workbench-tab-label {
+	min-width: 0;
+	max-width: 140px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.sessions-right-workbench-tab.active {
+	color: var(--rwb-foreground);
+	background: var(--rwb-hover);
+}
+
+.sessions-right-workbench-tab .codicon {
+	font-size: 14px;
+}
+
+.sessions-right-workbench-tab-close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	margin-left: 1px;
+	border-radius: var(--vscode-cornerRadius-small);
+	color: var(--rwb-muted);
+	visibility: hidden;
+}
+
+.sessions-right-workbench-tab:hover .sessions-right-workbench-tab-close,
+.sessions-right-workbench-tab.active .sessions-right-workbench-tab-close {
+	visibility: visible;
+}
+
+.sessions-right-workbench-tab-close:hover {
+	color: var(--rwb-foreground);
+	background: var(--rwb-hover);
+}
+
+.sessions-right-workbench-tab-close .codicon {
+	font-size: 12px;
+}
+
+.sessions-right-workbench-tab-add {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: var(--vscode-cornerRadius-large);
+	flex-shrink: 0;
+}
+
+.sessions-right-workbench-tab-add .codicon {
+	color: currentColor;
+	font-size: 15px;
+}
+
+.sessions-right-workbench-frame-controls {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 4px;
+	padding-left: 8px;
+	/* Never shrinks or gets painted over by an overflowing tab strip — the
+	 * folder toggle must stay pinned and clickable at the panel's top right. */
+	flex-shrink: 0;
+	position: relative;
+	z-index: 1;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-icon-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: var(--vscode-cornerRadius-large);
+}
+
+.sessions-right-workbench-icon-button:hover,
+.sessions-right-workbench-tab:hover,
+.sessions-right-workbench-tab-add:hover {
+	background: var(--rwb-hover);
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-icon-button.active {
+	background: var(--rwb-hover);
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-icon-button .codicon {
+	font-size: 14px;
+}
+
+.sessions-right-workbench-body {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-mode-picker {
+	position: absolute;
+	z-index: 10;
+	width: 280px;
+	padding: 5px;
+	box-sizing: border-box;
+	border: 1px solid var(--rwb-border-strong);
+	border-radius: var(--vscode-cornerRadius-large);
+	/* Popups need their own opaque surface when the panel chrome is transparent. */
+	background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+	color: var(--vscode-menu-foreground, var(--rwb-foreground));
+	box-shadow: 0 10px 28px var(--vscode-widget-shadow, transparent);
+}
+
+.sessions-right-workbench-mode-picker-row {
+	display: grid;
+	grid-template-columns: 17px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	height: 32px;
+	padding: 0 8px;
+	box-sizing: border-box;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-medium);
+	color: var(--rwb-foreground);
+	background: transparent;
+	text-align: left;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-mode-picker-row:hover,
+.sessions-right-workbench-mode-picker-row.active {
+	background: var(--rwb-hover);
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-mode-picker-row .codicon {
+	color: var(--vscode-icon-foreground, var(--rwb-muted));
+	font-size: 13px;
+}
+
+.sessions-right-workbench-mode-picker-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 13px;
+	line-height: 18px;
+}
+
+.sessions-right-workbench-mode-picker-shortcut {
+	color: var(--rwb-muted);
+	font-size: 11px;
+	line-height: 16px;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-launcher-center {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+	padding: 52px 9% 40px;
+	box-sizing: border-box;
+}
+
+.sessions-right-workbench-launcher-rows {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	width: min(100%, 536px);
+}
+
+.sessions-right-workbench-launcher-row {
+	display: grid;
+	grid-template-columns: 18px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	height: 40px;
+	padding: 0 12px;
+	box-sizing: border-box;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-large);
+	color: var(--rwb-foreground);
+	background: var(--rwb-selection);
+	text-align: left;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-launcher-row:hover {
+	background: var(--rwb-hover);
+}
+
+.sessions-right-workbench-launcher-row .codicon {
+	font-size: 15px;
+	color: var(--vscode-icon-foreground, var(--rwb-muted));
+}
+
+.sessions-right-workbench-launcher-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 14px;
+	line-height: 19px;
+}
+
+.sessions-right-workbench-launcher-shortcut {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 34px;
+	height: 18px;
+	padding: 0 6px;
+	border-radius: var(--vscode-cornerRadius-circle);
+	color: var(--rwb-muted);
+	background: var(--rwb-bg-muted);
+	font-size: 11px;
+	line-height: 1;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-browser-chrome {
+	position: relative;
+	z-index: 2;
+	min-height: 42px;
+	border-bottom: 1px solid var(--rwb-border);
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-browser-nav {
+	display: grid;
+	grid-template-columns: 28px 28px 28px minmax(120px, 1fr) 28px;
+	align-items: center;
+	gap: 5px;
+	height: 42px;
+	padding: 0 10px;
+	box-sizing: border-box;
+}
+
+.sessions-right-workbench-browser-url {
+	width: 100%;
+	height: 28px;
+	border: 0;
+	outline: 0;
+	color: var(--vscode-input-foreground, var(--rwb-foreground));
+	background: transparent;
+	text-align: center;
+	font-size: 13px;
+}
+
+.sessions-right-workbench-browser-address {
+	position: relative;
+	min-width: 0;
+}
+
+.sessions-right-workbench-browser-address .sessions-right-workbench-browser-url {
+	padding-right: 36px !important;
+}
+
+.sessions-right-workbench-browser-address .sessions-right-workbench-icon-button {
+	position: absolute;
+	top: 0;
+	right: 0;
+}
+
+.sessions-right-workbench-browser-url::placeholder {
+	color: var(--vscode-input-placeholderForeground, var(--rwb-muted));
+	opacity: 1;
+}
+
+.sessions-right-workbench-browser-content {
+	position: relative;
+	z-index: 1;
+	height: calc(100% - 42px);
+	min-height: 0;
+	overflow: hidden;
+}
+
+/* Shared empty-state pattern for the browser, files, and review pages. */
+.sessions-right-workbench-browser-empty,
+.sessions-right-workbench-file-empty,
+.sessions-right-workbench-review-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	position: absolute;
+	inset: 0;
+	padding: 16px;
+	box-sizing: border-box;
+	text-align: center;
+}
+
+.sessions-right-workbench-browser-empty .codicon,
+.sessions-right-workbench-file-empty .codicon,
+.sessions-right-workbench-review-empty .codicon {
+	margin-bottom: 10px;
+	color: var(--rwb-muted);
+	font-size: 32px;
+}
+
+.sessions-right-workbench-browser-empty h2,
+.sessions-right-workbench-file-empty h2,
+.sessions-right-workbench-review-empty h2 {
+	margin: 0;
+	color: var(--rwb-foreground);
+	font-size: 16px;
+	font-weight: 600;
+	line-height: 22px;
+}
+
+.sessions-right-workbench-browser-empty p,
+.sessions-right-workbench-file-empty p,
+.sessions-right-workbench-review-empty p {
+	margin: 6px 0 0;
+	color: var(--rwb-muted);
+	font-size: 13px;
+	line-height: 18px;
+}
+
+.sessions-right-workbench-review {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	min-height: 0;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-review-workspace {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(220px, 32%);
+	flex: 1;
+	min-height: 0;
+}
+
+.sessions-right-workbench-review-workspace.rail-hidden,
+.sessions-right-workbench-review.sessions-right-workbench-review-empty-state .sessions-right-workbench-review-workspace {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.sessions-right-workbench-review-workspace.rail-hidden .sessions-right-workbench-review-rail {
+	display: none;
+}
+
+.sessions-right-workbench-review-toolbar {
+	flex: 0 0 auto;
+	padding: 8px 12px 7px;
+	border-bottom: 1px solid var(--rwb-border);
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-review-toolbar-row {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+}
+
+.sessions-right-workbench-review-toolbar-row.primary {
+	height: 34px;
+}
+
+.sessions-right-workbench-review-toolbar-row.secondary {
+	height: 24px;
+	gap: 10px;
+	color: var(--rwb-muted);
+	font-size: 12px;
+}
+
+.sessions-right-workbench-review-toolbar-row.secondary .codicon {
+	font-size: 12px;
+}
+
+.sessions-right-workbench-review-branch,
+.sessions-right-workbench-review-commit {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	height: 28px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-large);
+	color: var(--rwb-foreground);
+	background: transparent;
+	font: inherit;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-review-branch:hover,
+.sessions-right-workbench-review-commit:hover {
+	background: var(--rwb-hover);
+}
+
+.sessions-right-workbench-review-branch:disabled,
+.sessions-right-workbench-review-commit:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
+.sessions-right-workbench-review-total-stats {
+	display: inline-flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+	min-width: 0;
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+}
+
+.sessions-right-workbench-review-total-stats .files {
+	margin-right: 6px;
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-review-total-stats .additions {
+	color: var(--rwb-success);
+}
+
+.sessions-right-workbench-review-total-stats .deletions {
+	color: var(--rwb-danger);
+}
+
+.sessions-right-workbench-review-actions {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-left: auto;
+}
+
+.sessions-right-workbench-review-commit {
+	margin-left: 4px;
+	padding: 0 10px;
+	border: 1px solid var(--rwb-border-strong);
+	font-size: 13px;
+}
+
+.sessions-right-workbench-review-main {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-review-file-header {
+	display: flex;
+	align-items: center;
+	flex: 0 0 34px;
+	min-width: 0;
+	padding: 0 12px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--rwb-border);
+	color: var(--rwb-foreground);
+	background: var(--rwb-chrome-soft);
+}
+
+.sessions-right-workbench-review-file-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.sessions-right-workbench-review.sessions-right-workbench-review-empty-state .sessions-right-workbench-review-main {
+	border-right: 0;
+}
+
+.sessions-right-workbench-review-rail {
+	position: relative;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-review-rail::before {
+	content: '';
+	position: absolute;
+	inset: 10px auto 10px 0;
+	width: 1px;
+	background: var(--rwb-border);
+	opacity: 0.7;
+}
+
+.sessions-right-workbench-review.sessions-right-workbench-review-empty-state .sessions-right-workbench-review-rail {
+	display: none;
+}
+
+.sessions-right-workbench-review-rail .monaco-list,
+.sessions-right-workbench-review-rail .monaco-list-rows,
+.sessions-right-workbench-review-rail .monaco-scrollable-element {
+	background: transparent !important;
+}
+
+.sessions-right-workbench-review-rail .monaco-list-row {
+	font-size: 13px;
+	line-height: 22px;
+	background: transparent !important;
+}
+
+.sessions-right-workbench-review-rail .monaco-list-row:hover {
+	background: var(--rwb-hover) !important;
+}
+
+.sessions-right-workbench-review-rail .monaco-list-row.selected,
+.sessions-right-workbench-review-rail .monaco-list-row.focused,
+.sessions-right-workbench-review-rail .monaco-list-row[aria-selected='true'],
+.sessions-right-workbench-review-rail .monaco-list:focus .monaco-list-row.selected,
+.sessions-right-workbench-review-rail .monaco-list:focus .monaco-list-row.focused,
+.sessions-right-workbench-review-rail .monaco-list.last-focused .monaco-list-row.focused {
+	outline: 1px solid color-mix(in srgb, var(--rwb-selection-border) 60%, transparent) !important;
+	outline-offset: -1px;
+	color: var(--rwb-foreground);
+	background: var(--rwb-rail-selection) !important;
+}
+
+.sessions-right-workbench-review-editor {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.sessions-right-workbench-review-scm-rail {
+	display: flex;
+	flex-direction: column;
+	position: absolute;
+	inset: 0;
+	min-height: 0;
+	padding: 8px 9px;
+	box-sizing: border-box;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-review-scm-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	min-height: 24px;
+	padding: 0 5px;
+	box-sizing: border-box;
+	border: 0;
+	border-radius: 0;
+	color: var(--rwb-foreground);
+	background: transparent;
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.sessions-right-workbench-review-scm-header-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-review-scm-header-label .codicon {
+	flex: 0 0 auto;
+	color: var(--vscode-icon-foreground, var(--rwb-muted));
+	font-size: 14px;
+}
+
+.sessions-right-workbench-review-scm-rail .sessions-right-workbench-review-scm-header {
+	padding: 0 5px;
+	border-bottom: 0;
+}
+
+.sessions-right-workbench-review-scm-count {
+	color: var(--rwb-success);
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.sessions-right-workbench-review-scm-list {
+	flex: 1;
+	min-height: 0;
+	margin-top: 4px;
+}
+
+.sessions-right-workbench-review-scm-list .monaco-list {
+	height: 100%;
+}
+
+@container (max-width: 760px) {
+	.sessions-right-workbench-review-workspace {
+		grid-template-columns: minmax(0, 1fr) 220px;
+	}
+
+	.sessions-right-workbench-review-scm-rail {
+		padding: 10px 8px;
+	}
+}
+
+@container (max-width: 620px) {
+	.sessions-right-workbench-review-workspace {
+		grid-template-columns: minmax(0, 1fr) 176px;
+	}
+
+	.sessions-right-workbench-review-scm-header {
+		font-size: 11px;
+	}
+
+}
+
+.sessions-right-workbench-review-filter {
+	flex: 0 0 28px;
+	margin-bottom: 6px;
+}
+
+.sessions-right-workbench-review-scm-stats {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: baseline;
+	gap: 4px;
+	margin-left: 6px;
+	font-size: 11px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-review-scm-stats.empty {
+	display: none;
+}
+
+.sessions-right-workbench-review-scm-additions {
+	color: var(--rwb-success);
+}
+
+.sessions-right-workbench-review-scm-deletions {
+	color: var(--rwb-danger);
+}
+
+.sessions-right-workbench-files {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(220px, 32%);
+	height: 100%;
+	min-height: 0;
+}
+
+.sessions-right-workbench-files-tree-hidden .sessions-right-workbench-files {
+	grid-template-columns: minmax(0, 1fr) 0;
+}
+
+.sessions-right-workbench-file-editor {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	border-right: 1px solid var(--rwb-border);
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-file-path {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 46px;
+	padding: 0 12px;
+	box-sizing: border-box;
+	color: var(--rwb-foreground);
+	font-size: 14px;
+	font-weight: 400;
+	line-height: 18px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	background: var(--rwb-bg);
+	border-bottom: 1px solid var(--rwb-border);
+}
+
+.sessions-right-workbench-file-workspace {
+	color: var(--rwb-muted);
+}
+
+.sessions-right-workbench-file-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-file-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-left: auto;
+}
+
+.sessions-right-workbench-file-action,
+.sessions-right-workbench-file-open {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	height: 30px;
+	padding: 0 9px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-large);
+	color: var(--rwb-foreground);
+	background: transparent;
+	font: inherit;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-file-action:hover,
+.sessions-right-workbench-file-open:hover {
+	background: var(--rwb-hover);
+}
+
+.sessions-right-workbench-file-open {
+	border: 1px solid var(--rwb-border-strong);
+}
+
+.sessions-right-workbench-file-editor-body {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-embedded-editor-host {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host.review-context-hidden {
+	visibility: hidden;
+}
+
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-editor,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-editor-background,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .margin,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .margin-view-overlays,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .glyph-margin,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .line-numbers,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .current-line,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-diff-editor,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-diff-editor .diffOverview {
+	background: var(--rwb-bg) !important;
+	background-color: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .minimap,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .decorationsOverviewRuler,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .diffOverview {
+	display: none !important;
+}
+
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-editor .line-numbers {
+	color: color-mix(in srgb, var(--rwb-muted) 72%, transparent);
+}
+
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-scrollable-element > .scrollbar.vertical {
+	width: 8px !important;
+}
+
+.sessions-right-workbench-file-tree {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	padding: 10px 9px;
+	box-sizing: border-box;
+	background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-files-tree-hidden .sessions-right-workbench-file-tree {
+	overflow: hidden;
+	padding: 0;
+	border: 0;
+	opacity: 0;
+	pointer-events: none;
+}
+
+.sessions-right-workbench-file-filter {
+	display: grid;
+	grid-template-columns: 16px minmax(0, 1fr);
+	align-items: center;
+	gap: 6px;
+	height: 30px;
+	padding: 0 8px;
+	box-sizing: border-box;
+	border: 1px solid var(--rwb-border-strong);
+	border-radius: var(--vscode-cornerRadius-large);
+	color: var(--rwb-muted);
+	background: var(--vscode-input-background, var(--rwb-chrome));
+}
+
+.sessions-right-workbench-file-filter .codicon {
+	font-size: 13px;
+}
+
+.sessions-right-workbench-file-filter input {
+	border: 0;
+	outline: 0;
+	width: 100%;
+	min-width: 0;
+	color: var(--vscode-input-foreground, var(--rwb-foreground));
+	-webkit-text-fill-color: var(--vscode-input-foreground, var(--rwb-foreground));
+	caret-color: var(--vscode-input-foreground, var(--rwb-foreground));
+	background: transparent;
+	font-size: 13px;
+}
+
+.sessions-right-workbench-file-filter input:focus {
+	color: var(--vscode-input-foreground, var(--rwb-foreground));
+	-webkit-text-fill-color: var(--vscode-input-foreground, var(--rwb-foreground));
+	caret-color: var(--vscode-input-foreground, var(--rwb-foreground));
+}
+
+.sessions-right-workbench-file-filter input::selection {
+	background: color-mix(in srgb, var(--vscode-focusBorder) 55%, transparent);
+}
+
+.sessions-right-workbench-file-filter input::placeholder {
+	color: var(--vscode-input-placeholderForeground, var(--rwb-muted));
+}
+
+.sessions-right-workbench-file-explorer-host {
+	flex: 1;
+	min-height: 0;
+	margin-top: 7px;
+	overflow: hidden;
+}
+
+.sessions-right-workbench-file-explorer-host > .pane {
+	height: 100%;
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+.sessions-right-workbench-file-explorer-host > .pane > .pane-header {
+	display: none;
+}
+
+.sessions-right-workbench-file-explorer-host > .pane > .pane-body {
+	height: 100% !important;
+	padding: 0;
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+.sessions-right-workbench-file-explorer-host .explorer-folders-view,
+.sessions-right-workbench-file-explorer-host .monaco-list,
+.sessions-right-workbench-file-explorer-host .files-empty-view-body,
+.sessions-right-workbench-file-explorer-host .files-empty-welcome,
+.sessions-right-workbench-file-explorer-host .welcome-view,
+.sessions-right-workbench-file-explorer-host .welcome-view-content {
+	background: transparent !important;
+}
+
+.sessions-right-workbench-file-explorer-host .monaco-list-row {
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.sessions-right-workbench-terminal {
+	position: relative;
+	height: 100%;
+	box-sizing: border-box;
+	background: var(--rwb-bg);
+	color: var(--rwb-foreground);
+	font-family: Menlo, Monaco, Consolas, monospace;
+	font-size: 13px;
+}
+
+.sessions-right-workbench-terminal pre {
+	margin: 0;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .modal-editor-header,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .modal-editor-header,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-header,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-header {
+	display: none !important;
+	height: 0 !important;
+	min-height: 0 !important;
+	border: 0 !important;
+}
+
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .editor-group-container > .title {
+	display: none !important;
+}
+
+.sessions-right-workbench-mode-editor .sessions-right-workbench-embedded-editor-host .modal-editor-header,
+.sessions-right-workbench-mode-editor .sessions-right-workbench-embedded-editor-host .editor-group-container > .title {
+	display: none !important;
+	height: 0 !important;
+	min-height: 0 !important;
+	border: 0 !important;
+}
+
+.sessions-right-workbench-mode-editor .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part {
+	grid-template-rows: 1fr !important;
+}
+
+.sessions-right-workbench-mode-editor .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content {
+	grid-row: 1 !important;
+	grid-column: 1 !important;
+}
+
+.sessions-right-workbench-mode-editor .sessions-right-workbench-embedded-editor-host :is(
+	.monaco-modal-editor-block.embedded,
+	.modal-editor-resizable,
+	.modal-editor-shadow,
+	.part.editor.modal-editor-part,
+	.content,
+	.grid-view-container,
+	.monaco-grid-view,
+	.monaco-grid-branch-node,
+	.monaco-split-view2,
+	.monaco-scrollable-element,
+	.split-view-container,
+	.split-view-view,
+	.editor-group-container,
+	.editor-container,
+	.editor-instance,
+	.monaco-editor,
+	.monaco-editor-background,
+	.overflow-guard,
+	.margin,
+	.margin-view-overlays,
+	.lines-content,
+	.view-lines,
+	.view-overlays
+) {
+	background: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part {
+	grid-template-rows: 1fr !important;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content {
+	grid-row: 1 !important;
+	grid-column: 1 !important;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-navbar {
+	display: none !important;
+	height: 0 !important;
+	min-height: 0 !important;
+	padding: 0 !important;
+	border: 0 !important;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-root {
+	width: 100% !important;
+	height: 100% !important;
+	overflow: hidden !important;
+	background: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container-wrapper {
+	flex: 1 1 auto;
+	position: relative;
+	min-width: 0;
+	min-height: 0;
+	width: 100% !important;
+	height: 100% !important;
+	overflow: hidden !important;
+	contain: strict;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container {
+	overflow: visible !important;
+	max-width: 100% !important;
+	max-height: 100% !important;
+	border-radius: 0 !important;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container:not(:has(> .monaco-sash:not(.disabled))) {
+	overflow: hidden !important;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container::before,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-container::after {
+	display: none !important;
+	background-image: none !important;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .browser-placeholder-contents {
+	overflow: hidden !important;
+	background: transparent !important;
+}
+
+.sessions-right-workbench-embedded-editor-host .monaco-modal-editor-block.embedded,
+.sessions-right-workbench-embedded-editor-host .modal-editor-resizable,
+.sessions-right-workbench-embedded-editor-host .modal-editor-shadow,
+.sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part {
+	inset: 0 !important;
+	left: 0 !important;
+	top: 0 !important;
+	width: 100% !important;
+	height: 100% !important;
+	max-width: none !important;
+	max-height: none !important;
+}
+
+.sessions-right-workbench-embedded-editor-host .modal-editor-resizable {
+	transform: none !important;
+}
+
+.sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part > .content,
+.sessions-right-workbench-embedded-editor-host .grid-view-container,
+.sessions-right-workbench-embedded-editor-host .monaco-grid-view,
+.sessions-right-workbench-embedded-editor-host .monaco-grid-branch-node,
+.sessions-right-workbench-embedded-editor-host .monaco-split-view2,
+.sessions-right-workbench-embedded-editor-host .split-view-container,
+.sessions-right-workbench-embedded-editor-host .split-view-view,
+.sessions-right-workbench-embedded-editor-host .editor-group-container,
+.sessions-right-workbench-embedded-editor-host .editor-container,
+.sessions-right-workbench-embedded-editor-host .editor-instance {
+	width: 100% !important;
+	height: 100% !important;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-browser-url {
+	border-radius: var(--vscode-cornerRadius-large);
+	background: var(--vscode-input-background, var(--rwb-chrome));
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-icon-button:disabled {
+	opacity: 0.38;
+	cursor: default;
+}
+
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .monaco-modal-editor-block.embedded,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-modal-editor-block.embedded,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-modal-editor-block.embedded,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-modal-editor-block.embedded,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .modal-editor-resizable,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .modal-editor-resizable,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-resizable,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-resizable,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .modal-editor-shadow,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .modal-editor-shadow,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-shadow,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-shadow,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .content,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .content,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .content,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .content,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .grid-view-container,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .grid-view-container,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .grid-view-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .grid-view-container,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .monaco-grid-view,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-grid-view,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-grid-view,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-grid-view,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .monaco-grid-branch-node,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-grid-branch-node,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-grid-branch-node,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-grid-branch-node,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .monaco-split-view2,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-split-view2,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-split-view2,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-split-view2,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .monaco-scrollable-element,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .monaco-scrollable-element,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-scrollable-element,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-scrollable-element,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .split-view-container,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .split-view-container,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .split-view-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .split-view-container,
+.sessions-right-workbench-mode-browser .sessions-right-workbench-embedded-editor-host .split-view-view,
+.sessions-right-workbench-mode-review .sessions-right-workbench-embedded-editor-host .split-view-view,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .split-view-view,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .split-view-view,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-modal-editor-block.embedded,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-resizable,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-shadow,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .content,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .grid-view-container,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-grid-view,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-grid-branch-node,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-split-view2,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-scrollable-element,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .split-view-container,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .split-view-view,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .editor-group-container,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .editor-container,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .editor-instance,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-editor,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-editor-background,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .overflow-guard,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .margin,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .margin-view-overlays,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .lines-content,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .view-lines,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .view-overlays {
+	background: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-header {
+	height: 32px;
+	min-height: 32px;
+	border-bottom: 1px solid var(--rwb-border);
+	background: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-title,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-icon-label {
+	height: 31px;
+	color: var(--rwb-muted);
+	background: transparent !important;
+	font-size: 12px;
+}
+
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .label-name {
+	color: var(--rwb-muted);
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-modal-editor-block.embedded,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-resizable,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-shadow,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .content,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .grid-view-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-grid-view,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-grid-branch-node,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-split-view2,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .monaco-scrollable-element,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .split-view-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .split-view-view,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .editor-group-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .editor-container,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .editor-instance,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .terminal-overflow-guard.terminal-editor,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .terminal-wrapper,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .xterm,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .xterm-viewport,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .xterm-screen {
+	background: var(--rwb-bg) !important;
+	background-color: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host {
+	--vscode-terminal-background: var(--rwb-bg);
+	--vscode-editor-background: var(--rwb-bg);
+	--vscode-editorPane-background: var(--rwb-bg);
+}
+
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .modal-editor-shadow,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .part.editor.modal-editor-part,
+.sessions-right-workbench-mode-terminal .sessions-right-workbench-embedded-editor-host .terminal-wrapper {
+	border: 0 !important;
+	border-radius: 0 !important;
+	box-shadow: none !important;
+}
+
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-action-container,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-action-container .monaco-toolbar,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-action-container .monaco-action-bar,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-action-container .actions-container {
+	height: 24px;
+	background: transparent !important;
+}
+
+.sessions-right-workbench-embedded-editor-host .modal-editor-action-container {
+	display: none !important;
+}
+
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-action-container .action-label {
+	width: 24px;
+	height: 24px;
+	border-radius: var(--vscode-cornerRadius-medium);
+	color: var(--rwb-muted);
+	background: transparent !important;
+}
+
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-action-container .action-label:hover {
+	color: var(--rwb-foreground);
+	background: var(--rwb-hover) !important;
+}
+
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .modal-editor-action-container .action-label.checked {
+	color: var(--rwb-foreground);
+	background: transparent !important;
+	outline: 1px solid var(--rwb-border-strong);
+	outline-offset: -1px;
+}
+
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-sash,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .drop-block-overlay {
+	background: transparent !important;
+}
+
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-editor .minimap,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-editor .minimap-decorations-layer,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-editor .minimap-shadow-visible,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-editor .minimap-shadow-hidden,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-editor .decorationsOverviewRuler {
+	display: none !important;
+}
+
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .scrollbar .slider {
+	border-radius: var(--vscode-cornerRadius-circle);
+	background: var(--vscode-scrollbarSlider-background, var(--rwb-border-strong)) !important;
+}
+
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-editor .current-line,
+.sessions-right-workbench-mode-files .sessions-right-workbench-embedded-editor-host .monaco-editor .view-overlays .current-line {
+	border-color: transparent !important;
+	background: var(--vscode-editor-lineHighlightBackground, transparent) !important;
+}
+
+.sessions-right-workbench-file-explorer-host .monaco-list-row {
+	border-radius: 0;
+	color: var(--rwb-foreground);
+	background: transparent !important;
+}
+
+.sessions-right-workbench-file-explorer-host .monaco-list-row:hover {
+	background: var(--rwb-hover) !important;
+}
+
+.sessions-right-workbench-file-explorer-host .monaco-list-row.selected,
+.sessions-right-workbench-file-explorer-host .monaco-list-row.focused,
+.sessions-right-workbench-file-explorer-host .monaco-list-row[aria-selected='true'],
+.sessions-right-workbench-file-explorer-host .monaco-list:focus .monaco-list-row.selected,
+.sessions-right-workbench-file-explorer-host .monaco-list:focus .monaco-list-row.focused,
+.sessions-right-workbench-file-explorer-host .monaco-list:focus .monaco-list-row.focused.selected,
+.sessions-right-workbench-file-explorer-host .monaco-list.last-focused .monaco-list-row.focused {
+	outline: 1px solid var(--rwb-selection-border) !important;
+	outline-offset: -1px;
+	color: var(--rwb-foreground);
+	background: var(--rwb-selection) !important;
+}
+
+.sessions-right-workbench-file-explorer-host .monaco-tl-twistie,
+.sessions-right-workbench-file-explorer-host .monaco-icon-label,
+.sessions-right-workbench-file-explorer-host .label-name {
+	color: inherit;
+}
+
+.sessions-right-workbench-file-explorer-host .monaco-tl-indent > .indent-guide {
+	border-color: var(--vscode-tree-indentGuidesStroke, var(--rwb-border)) !important;
+}
+
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host > .pane,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host > .pane > .pane-body,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .files-empty-view-body,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .files-empty-welcome,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .welcome-view,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .welcome-view-content,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .monaco-list,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .monaco-list-rows,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .monaco-tree,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .monaco-tree-rows,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .monaco-scrollable-element {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-explorer-host .monaco-tree-type-filter {
+	position: absolute !important;
+	width: 1px !important;
+	height: 1px !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	overflow: hidden !important;
+	opacity: 0 !important;
+	pointer-events: none !important;
+}
+
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-body,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-editor,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-editor-body,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-file-tree,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-embedded-editor-host {
+	background: var(--rwb-bg) !important;
+	background-color: var(--rwb-bg) !important;
+}
+
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .pane-composite-part,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .composite,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .composite > .content,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .pane-body,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .monaco-scrollable-element,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .monaco-split-view2,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .split-view-container,
+.agent-sessions-workbench :is(.part.auxiliarybar, .session-split-right-panel) .split-view-view {
+	background: var(--rwb-bg) !important;
+	background-color: var(--rwb-bg) !important;
+}
+
+/* Match the Advanced chat shell and header to the shared chat surface. */
+.monaco-workbench.optimus-window .sessions-right-workbench-editor-chat,
+.monaco-workbench.optimus-window .optimus-chat-view {
+	--rwb-bg: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+/* Advanced keeps the workspace in the header instead of a session tab strip. */
+.optimus-chat-folder-header {
+	background: var(--rwb-bg, var(--vscode-sideBar-background));
+	display: flex;
+	align-items: center;
+	flex: 0 0 34px;
+	min-width: 0;
+	padding: 0 8px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--rwb-border);
+}
+.optimus-chat-folder-header .optimus-chat-header-folder.new-session-workspace-picker-container {
+	display: flex;
+	align-items: center;
+	width: auto;
+	margin: 0;
+	padding: 0;
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+}
+.optimus-chat-editor-host .agent-sessions-history-modal-panel {
+	--agent-sessions-history-surface: var(--vscode-editorWidget-background);
+	border: 1px solid var(--vscode-widget-border, var(--rwb-border));
+	border-radius: 6px;
+}
+.optimus-chat-editor-host .agent-sessions-history-modal-body .monaco-list-rows {
+	background: var(--agent-sessions-history-surface) !important;
+}

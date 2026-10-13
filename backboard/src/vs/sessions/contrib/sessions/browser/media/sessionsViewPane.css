@@ -1,0 +1,812 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.agent-sessions-viewpane {
+	--agent-sidebar-bg: var(--vscode-sideBar-background, var(--vscode-editor-background));
+		/* Strong (near-white) text base for the dark glass sidebar; the theme's
+		 * sideBar.foreground is a mid grey that dims into the glass, so primary
+		 * text uses the strong tier and secondary/muted derive from it via
+		 * alpha to keep hierarchy. Light themes reset this below. */
+	--agent-sidebar-primary: var(--vscode-strongForeground, var(--vscode-sideBar-foreground, var(--vscode-foreground)));
+	/* Low-alpha white overlays — on the glass anything brighter reads as an
+	 * opaque light-grey block instead of a soft highlight (user-rejected). */
+	--agent-sidebar-raised-bg: color-mix(in srgb, var(--agent-sidebar-primary) 5%, var(--agent-sidebar-bg));
+	--agent-sidebar-hover-bg: color-mix(in srgb, var(--agent-sidebar-primary) 4%, transparent);
+	--agent-sidebar-active-bg: color-mix(in srgb, var(--agent-sidebar-primary) 7%, transparent);
+	--agent-sidebar-border: var(--vscode-sideBar-border, var(--vscode-panel-border, var(--vscode-contrastBorder, transparent)));
+	--agent-sidebar-secondary: color-mix(in srgb, var(--agent-sidebar-primary) 84%, transparent);
+	--agent-sidebar-muted: color-mix(in srgb, var(--agent-sidebar-primary) 62%, transparent);
+	/* Apple system font stack for the sidebar — the sidebar reads as its own
+	 * comfortable, roomy surface rather than the dense workbench chrome. */
+	--agent-sidebar-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Inter", sans-serif;
+	/* NO background here: the sidebar Part paints the single opaque sidebar
+	 * surface (see sessions/browser/media/style.css); painting another one on
+	 * this pane risks desyncing from it. */
+	background: transparent;
+	font-family: var(--agent-sidebar-font);
+
+	.agent-sessions-container {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		overflow: hidden;
+		box-sizing: border-box;
+		/* One horizontal inset for the whole column (walls). The native macOS
+		 * overlay scrollbar does not reserve space, so left and right stay
+		 * symmetric without a scroll gutter, and the pinned block / content /
+		 * footer all share this same left edge. */
+		padding: 16px 10px 12px;
+		background: transparent;
+		color: var(--agent-sidebar-primary);
+	}
+
+	/* Sessions section - fills remaining space above customizations */
+	.agent-sessions-section {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		overflow: hidden;
+		min-height: 0;
+		margin: 0;
+	}
+
+	/* Pinned top block: New chat / Search / Marketplace stay static while the
+	 * content column below owns the scroll. No horizontal padding — it shares
+	 * the container's inset so its rows line up with the list below. */
+	.agent-sessions-pinned {
+		display: flex;
+		flex-direction: column;
+		flex: 0 0 auto;
+		gap: 1px;
+		margin-bottom: 8px;
+		min-width: 0;
+	}
+
+	.agent-sessions-content {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		/* Keep a bounded viewport so the sessions tree can recycle off-screen
+		 * rows. The tree owns vertical scrolling; expanding this column to its
+		 * content height disables virtualization and retains every row widget. */
+		overflow: hidden;
+		gap: 4px;
+		min-width: 0;
+		min-height: 0;
+	}
+
+	/* The Projects header must never be squished by the flex column when the
+	 * list below it overflows — it scrolls out of view, not shrinks. */
+	.agent-sessions-content > .agent-sessions-workspaces-header {
+		flex: 0 0 auto;
+	}
+
+	.agent-sessions-content.collapsed {
+		display: none;
+	}
+
+	/* Header row: brand + collapse button */
+	.agent-sessions-header-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		min-height: 32px;
+		padding: 0;
+		box-sizing: border-box;
+		-webkit-user-select: none;
+		user-select: none;
+	}
+
+	.agent-sessions-header-row.agent-sessions-header-hidden {
+		display: none;
+	}
+
+	.agent-sessions-header-label {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--agent-sidebar-primary);
+		font-size: 14px;
+		font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+		line-height: 20px;
+	}
+
+	.agent-sessions-header-actions {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 4px;
+		margin-left: 0;
+		flex-shrink: 0;
+	}
+
+	.agent-sessions-collapse-button,
+	.agent-sessions-filter-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		flex: 0 0 28px;
+		padding: 0;
+		border: none;
+		border-radius: var(--vscode-cornerRadius-large);
+		background: transparent;
+		color: var(--agent-sidebar-secondary);
+		cursor: pointer;
+	}
+
+	.agent-sessions-collapse-button:hover,
+	.agent-sessions-collapse-button:focus-visible,
+	.agent-sessions-filter-button:hover,
+	.agent-sessions-filter-button:focus-visible,
+	.agent-sessions-filter-button[aria-expanded="true"] {
+		background: var(--agent-sidebar-hover-bg);
+		color: var(--agent-sidebar-primary);
+	}
+
+	.agent-sessions-collapse-button:focus-visible,
+	.agent-sessions-filter-button:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: -1px;
+	}
+
+	.agent-sessions-primary-actions {
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 1px;
+	}
+
+	.agent-sessions-sidebar-action {
+		display: flex;
+		align-items: center;
+		/* 8px gap keeps the label on the shared 42px text column (icon rail 18
+		 * + 16px icon box + 8px = 42), matching the folder names / session titles. */
+		gap: 8px;
+		width: 100%;
+		height: 30px;
+		padding: 0 8px;
+		border: none;
+		border-radius: var(--vscode-cornerRadius-large);
+		background: transparent;
+		color: var(--agent-sidebar-primary);
+		font-family: inherit;
+		font-size: 13px;
+		font-weight: 500;
+		line-height: 18px;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.agent-sessions-sidebar-action:hover,
+	.agent-sessions-sidebar-action:focus-visible {
+		background: var(--agent-sidebar-hover-bg);
+		color: var(--agent-sidebar-primary);
+	}
+
+	.agent-sessions-sidebar-action:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: 2px;
+	}
+
+	.agent-sessions-sidebar-action-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		flex: 0 0 16px;
+		color: color-mix(in srgb, var(--agent-sidebar-primary) 78%, transparent);
+	}
+
+	.agent-sessions-sidebar-action-icon .codicon {
+		font-size: 16px;
+	}
+
+	.agent-sessions-sidebar-action-label {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.agent-sessions-workspaces-header {
+		position: relative;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		height: 24px;
+		flex: 0 0 24px;
+		/* Align the "Projects" label with the folder-icon rail (matches the
+		 * pinned action icons / avatar below). */
+		padding-left: 8px;
+		margin-top: 12px;
+	}
+
+	/* De-emphasized section label (Codex-style): the content below is the
+	 * bright layer, the header just quietly groups it. */
+	.agent-sessions-workspaces-title {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--agent-sidebar-muted);
+		font-size: 11px;
+		font-weight: var(--vscode-agents-fontWeight-medium, 500);
+		line-height: 16px;
+	}
+
+	.agent-sessions-filter-popover {
+		position: absolute;
+		top: 36px;
+		right: 0;
+		z-index: 50;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		width: min(258px, calc(100vw - 48px));
+		padding: 6px;
+		box-sizing: border-box;
+		border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border, var(--agent-sidebar-border)));
+		border-radius: var(--vscode-cornerRadius-large);
+		/* Opaque surface: the sidebar background is translucent under native vibrancy,
+		   so a floating menu must use a solid widget/menu color to avoid showing content behind it. */
+		background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+		color: var(--vscode-menu-foreground, var(--agent-sidebar-primary));
+		box-shadow: 0 8px 24px var(--vscode-widget-shadow);
+	}
+
+	.agent-sessions-filter-popover-section {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.agent-sessions-filter-popover-section + .agent-sessions-filter-popover-section {
+		margin-top: 4px;
+		padding-top: 6px;
+		border-top: 1px solid var(--vscode-menu-separatorBackground, var(--agent-sidebar-border));
+	}
+
+	.agent-sessions-filter-popover-section.collapsed .agent-sessions-filter-popover-options {
+		display: none;
+	}
+
+	.agent-sessions-filter-popover-header,
+	.agent-sessions-filter-popover-option {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		height: 32px;
+		box-sizing: border-box;
+		border: none;
+		border-radius: var(--vscode-cornerRadius-small);
+		background: transparent;
+		color: var(--agent-sidebar-secondary);
+		font-family: inherit;
+		font-size: var(--vscode-agents-fontSize-label1, 12px);
+		line-height: 18px;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.agent-sessions-filter-popover-header {
+		padding: 0 8px 0 10px;
+	}
+
+	.agent-sessions-filter-popover-option {
+		height: 30px;
+		padding: 0 8px 0 12px;
+	}
+
+	.agent-sessions-filter-popover-header:hover,
+	.agent-sessions-filter-popover-option:hover {
+		background: var(--agent-sidebar-hover-bg);
+	}
+
+	.agent-sessions-filter-popover-header:focus-visible,
+	.agent-sessions-filter-popover-option:focus-visible,
+	.agent-sessions-filter-popover-option[aria-checked="true"] {
+		background: var(--agent-sidebar-active-bg);
+	}
+
+	.agent-sessions-filter-popover-header:focus-visible,
+	.agent-sessions-filter-popover-option:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: -1px;
+	}
+
+	.agent-sessions-filter-popover-label {
+		flex: 0 0 auto;
+		color: var(--agent-sidebar-secondary);
+	}
+
+	.agent-sessions-filter-popover-value {
+		min-width: 0;
+		flex: 1 1 auto;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--agent-sidebar-primary);
+		text-align: right;
+	}
+
+	.agent-sessions-filter-popover-chevron {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 14px;
+		height: 14px;
+		flex: 0 0 14px;
+		color: var(--agent-sidebar-muted);
+	}
+
+	.agent-sessions-filter-popover-header[aria-expanded="false"] .agent-sessions-filter-popover-chevron {
+		transform: rotate(-90deg);
+	}
+
+	.agent-sessions-filter-popover-options {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.agent-sessions-filter-popover-check {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		flex: 0 0 16px;
+		color: var(--agent-sidebar-primary);
+	}
+
+	.agent-sessions-filter-popover-option-label {
+		min-width: 0;
+		flex: 1 1 auto;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--agent-sidebar-secondary);
+	}
+
+	.agent-sessions-filter-popover-option[aria-checked="true"] .agent-sessions-filter-popover-option-label {
+		color: var(--agent-sidebar-primary);
+	}
+
+	/* Inline search input — replaces label + actions when active */
+	.agent-sessions-find-widget-container {
+		width: 100%;
+		min-width: 0;
+	}
+
+	.agent-sessions-find-widget-container > .monaco-tree-type-filter {
+		position: static;
+		display: flex;
+		width: 100%;
+		max-width: none;
+		margin: 0;
+		padding: 0;
+		border: none;
+		border-radius: 0;
+		box-shadow: none !important;
+		background: transparent;
+		background-color: transparent !important;
+	}
+
+	.agent-sessions-find-widget-container .monaco-tree-type-filter .monaco-tree-type-filter-input {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.agent-sessions-find-widget-container > .monaco-tree-type-filter .monaco-tree-type-filter-input > .monaco-findInput > .monaco-inputbox {
+		display: flex;
+		align-items: center;
+		min-height: 32px;
+		box-sizing: border-box;
+		border-radius: var(--vscode-cornerRadius-large);
+		background: var(--agent-sidebar-raised-bg);
+	}
+
+	.agent-sessions-find-widget-container > .monaco-tree-type-filter .monaco-tree-type-filter-input > .monaco-findInput > .controls {
+		top: 4px;
+		right: 6px;
+		display: flex;
+		align-items: center;
+		gap: 5px;
+	}
+
+	.agent-sessions-find-widget-container > .monaco-tree-type-filter .monaco-tree-type-filter-input > .monaco-findInput > .controls .monaco-custom-toggle {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		box-sizing: border-box;
+		border: 1px solid transparent;
+		border-radius: var(--vscode-cornerRadius-medium);
+		background: transparent;
+		color: var(--agent-sidebar-secondary);
+	}
+
+	.agent-sessions-find-widget-container > .monaco-tree-type-filter .monaco-tree-type-filter-input > .monaco-findInput > .controls .monaco-custom-toggle:hover,
+	.agent-sessions-find-widget-container > .monaco-tree-type-filter .monaco-tree-type-filter-input > .monaco-findInput > .controls .monaco-custom-toggle:focus-visible {
+		background: var(--agent-sidebar-hover-bg);
+		color: var(--agent-sidebar-primary);
+	}
+
+	.agent-sessions-find-widget-container > .monaco-tree-type-filter .monaco-tree-type-filter-input > .monaco-findInput > .controls .monaco-custom-toggle.checked {
+		border-color: color-mix(in srgb, var(--vscode-focusBorder) 38%, transparent);
+		background: color-mix(in srgb, var(--vscode-focusBorder) 15%, transparent);
+		color: var(--agent-sidebar-primary);
+	}
+
+	.agent-sessions-find-widget-container > .monaco-tree-type-filter > .monaco-tree-type-filter-actionbar {
+		margin-left: 10px;
+	}
+
+	/* Match the find widget's close button size to the header toolbar action buttons (22x22) */
+	.agent-sessions-find-widget-container > .monaco-tree-type-filter > .monaco-tree-type-filter-actionbar .monaco-action-bar .action-label {
+		width: 22px;
+		height: 22px;
+		padding: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.agent-sessions-find-widget-container > .monaco-tree-type-filter > .monaco-tree-type-filter-actionbar .monaco-action-bar .action-label:hover,
+	.agent-sessions-find-widget-container > .monaco-tree-type-filter > .monaco-tree-type-filter-actionbar .monaco-action-bar .action-label:focus-visible {
+		border-radius: var(--vscode-cornerRadius-medium);
+		background: var(--agent-sidebar-hover-bg);
+		color: var(--agent-sidebar-primary);
+	}
+
+	.agent-sessions-empty-state {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 20px;
+		pointer-events: none;
+	}
+
+	.agent-sessions-empty-state[hidden] {
+		display: none;
+	}
+
+	.agent-sessions-empty-state .agent-sessions-sidebar-action {
+		width: 100%;
+		max-width: 240px;
+		height: auto;
+		min-height: 100px;
+		padding: 20px 12px;
+		flex-direction: column;
+		justify-content: center;
+		gap: 12px;
+		border: 1px solid var(--vscode-widget-border, var(--vscode-sideBar-border, #ffffff20));
+		background: var(--agent-sidebar-hover-bg);
+		text-align: center;
+		pointer-events: auto;
+	}
+
+	.agent-sessions-control-container {
+		position: relative;
+		/* Fill only the remaining visible height. Negative top margin cancels the
+		 * first folder header's
+		 * group-gap (its 16px margin-top) so it doesn't stack on top of the
+		 * Projects header's own spacing (inter-group gaps further down are
+		 * unaffected). */
+		flex: 1 1 auto;
+		overflow: hidden;
+		min-height: 0;
+		margin-top: -14px;
+	}
+
+	/* Bottom-pinned footer: the signed-in user identity row (avatar + name),
+	 * with a small update icon on its right edge when an update is staged. Sits
+	 * below the scrolling content and shares the container's left inset so the
+	 * avatar lines up on the icon rail with the rows above. */
+	.agent-sessions-footer {
+		display: flex;
+		flex-direction: column;
+		flex: 0 0 auto;
+		gap: 6px;
+		padding: 10px 0 2px;
+		margin-top: 6px;
+		min-width: 0;
+		border-top: 1px solid color-mix(in srgb, var(--agent-sidebar-primary) 8%, transparent);
+	}
+
+	/* Update affordance = a small accent icon on the right edge of the identity
+	 * row (not a bar). Hidden unless the footer is flagged `.has-update`.
+	 * Accent = charts-blue so it tracks the theme and quietly signals the update. */
+	--agent-update-accent: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
+
+	.agent-sessions-update-icon {
+		display: none;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		width: 26px;
+		height: 26px;
+		padding: 0;
+		border: none;
+		border-radius: var(--vscode-cornerRadius-large);
+		background: transparent;
+		color: var(--agent-update-accent);
+		cursor: pointer;
+		transition: background 120ms ease, color 120ms ease;
+	}
+
+	.agent-sessions-footer.has-update .agent-sessions-update-icon {
+		display: inline-flex;
+	}
+
+	.agent-sessions-update-icon:hover,
+	.agent-sessions-update-icon:focus-visible {
+		background: color-mix(in srgb, var(--agent-update-accent) 16%, transparent);
+	}
+
+	.agent-sessions-update-icon:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: 1px;
+	}
+
+	.agent-sessions-update-icon .codicon {
+		font-size: 16px;
+	}
+
+	/* Windows-only app menu cog on the right edge of the identity row: hosts
+	 * the entries macOS keeps under the application menu (About, Settings,
+	 * Themes). Same footprint as the update icon, muted until hovered. */
+	.agent-sessions-app-menu-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		width: 26px;
+		height: 26px;
+		padding: 0;
+		border: none;
+		border-radius: var(--vscode-cornerRadius-large);
+		background: transparent;
+		color: var(--agent-sidebar-muted);
+		cursor: pointer;
+		transition: background 120ms ease, color 120ms ease;
+	}
+
+	.agent-sessions-app-menu-icon:hover,
+	.agent-sessions-app-menu-icon:focus-visible {
+		background: color-mix(in srgb, var(--agent-sidebar-primary) 10%, transparent);
+		color: var(--agent-sidebar-primary);
+	}
+
+	.agent-sessions-app-menu-icon:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: 1px;
+	}
+
+	.agent-sessions-app-menu-icon .codicon {
+		font-size: 16px;
+	}
+
+	/* When the cog is present (Windows), the footer lays the identity card and
+	 * the cog out side by side instead of stacking them. */
+	.agent-sessions-footer:has(> .agent-sessions-app-menu-icon) {
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.agent-sessions-footer:has(> .agent-sessions-app-menu-icon) .agent-sessions-user {
+		width: auto;
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+
+	.agent-sessions-footer > .agent-sessions-app-menu-icon {
+		margin-right: 8px;
+	}
+
+	/* User identity card: avatar initials + name + plan/email. Fades in once the
+	 * signed-in user resolves; the avatar aligns with the folder icons above. */
+	.agent-sessions-user {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		width: 100%;
+		/* border-box so width:100% + the 8px side padding stays inside the
+		 * container; without it the card is 16px too wide and its right edge —
+		 * where the update icon sits — spills past the container's overflow:hidden
+		 * clip and the icon gets cut off ("invisible wall"). */
+		box-sizing: border-box;
+		min-width: 0;
+		/* Left pad puts the avatar on the shared icon rail (action icons / folder
+		 * icons / update icon); vertical pad gives the row breathing room. */
+		padding: 5px 8px;
+		opacity: 0;
+		transition: opacity 160ms ease-out;
+	}
+
+	.agent-sessions-user.visible {
+		opacity: 1;
+	}
+
+	.agent-sessions-user-avatar {
+		flex: 0 0 auto;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 26px;
+		height: 26px;
+		border-radius: 50%;
+		background: var(--vscode-profileBadge-background);
+		color: var(--vscode-profileBadge-foreground);
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		-webkit-user-select: none;
+		user-select: none;
+	}
+
+	.agent-sessions-user-text {
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		/* Fill the row so the update icon is pushed to the right edge; the name
+		 * ellipsizes within this column rather than shoving the icon off. */
+		flex: 1 1 auto;
+		min-width: 0;
+		gap: 1px;
+	}
+
+	.agent-sessions-user-name {
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 16px;
+		color: var(--agent-sidebar-primary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.agent-sessions-user-subtitle {
+		font-size: 11px;
+		line-height: 14px;
+		color: var(--agent-sidebar-muted);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+}
+
+/* Light themes: the pure-white text base is designed for the dark glass;
+ * fall back to the theme foreground so the sidebar stays readable. */
+.vs .agent-sessions-viewpane {
+	--agent-sidebar-primary: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+}
+
+/* Advanced has a two-row dashboard toolbar whose bottom edge sits 134px from
+ * the top of the window. Keep the sidebar's pinned actions inside that same
+ * header band so the divider continues cleanly through both parts. Advanced
+ * now shares Simple's sidebar chrome, so the container inset comes from the
+ * Simple parity layer (`codexTheme.css`: `padding: 8px 8px 10px`) rather than
+ * an override here: 32px panel chrome + 8px top inset + 93px of actions + 1px
+ * divider = 134px. Simple's pinned block is shorter than the stacked rows this
+ * band was originally sized for, so `min-height` now holds the band open and
+ * the divider stays aligned with the dashboard toolbar. */
+.agent-sessions-workbench.optimus-window .agent-sessions-viewpane .agent-sessions-pinned {
+	min-height: 93px;
+	box-sizing: border-box;
+	/* Bleed the divider to the container walls. Must track the horizontal
+	 * inset above (8px), not the 10px used before Advanced adopted Simple. */
+	margin-right: -8px;
+	margin-left: -8px;
+	padding-right: 8px;
+	padding-left: 8px;
+	border-bottom: 1px solid color-mix(in srgb, var(--agent-sidebar-border) 72%, transparent);
+}
+
+/* The interior must not paint any opaque surface of its own: the sidebar
+ * Part paints the single sidebar background, and every layer above it stays
+ * transparent so the panel reads as one solid sheet (an inner opaque layer
+ * here historically desynced from the part's surface). */
+.agent-sessions-workbench.shell-gradient-background .agent-sessions-viewpane,
+.agent-sessions-workbench.shell-gradient-background .agent-sessions-viewpane .agent-sessions-container {
+	background: transparent !important;
+}
+
+.agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .pane-body,
+.agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .monaco-scrollable-element,
+.agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .monaco-list,
+.agent-sessions-workbench.shell-gradient-background .part.sidebar > .content .monaco-list-rows {
+	background: transparent !important;
+}
+
+/* Sessions-app-specific overrides for the agent sessions viewer.
+ * These styles only apply within the agent-sessions-workbench context. */
+
+.agent-sessions-workbench {
+
+	/*
+	 * Show-more / show-less: content always rendered, list row height
+	 * controls visibility (1px = clipped, 26px = visible).
+	 * Height animation is driven by JS (requestAnimationFrame) since
+	 * the virtualized list uses absolute positioning.
+	 */
+	.agent-session-show-more {
+		justify-content: center;
+		align-items: center;
+		padding: 0 6px;
+		font-size: var(--vscode-agents-fontSize-label2, 11px);
+		color: var(--agent-sidebar-muted, var(--vscode-descriptionForeground));
+		min-height: 26px;
+
+		.agent-session-show-more-label {
+			padding: 0 6px;
+			flex-shrink: 0;
+			white-space: nowrap;
+		}
+
+		/* Lines on both sides of the text as flex items */
+		&::before,
+		&::after {
+			content: '';
+			flex: 1;
+			height: 1px;
+			background: var(--vscode-widget-border, var(--vscode-contrastBorder));
+		}
+	}
+
+	/* Brighter text on direct hover */
+	.monaco-list-row:hover .agent-session-show-more:hover {
+		color: var(--agent-sidebar-primary);
+	}
+}
+
+/* High-contrast themes: the sidebar chrome is built from low-opacity text and
+ * near-invisible raised/hover tints (color-mix against transparent). That fails
+ * the maximum-contrast requirement of HC and leaves containers with no visible
+ * boundary. Restore full-opacity text and give every interactive surface a solid
+ * contrast outline so both text and containers read clearly. */
+.hc-black .agent-sessions-viewpane,
+.hc-light .agent-sessions-viewpane {
+	--agent-sidebar-secondary: var(--agent-sidebar-primary);
+	--agent-sidebar-muted: var(--agent-sidebar-primary);
+}
+
+.hc-black .agent-sessions-viewpane .agent-sessions-sidebar-action-icon,
+.hc-light .agent-sessions-viewpane .agent-sessions-sidebar-action-icon {
+	color: var(--vscode-icon-foreground);
+}
+
+.hc-black .agent-sessions-viewpane .agent-sessions-collapse-button:hover,
+.hc-black .agent-sessions-viewpane .agent-sessions-filter-button:hover,
+.hc-black .agent-sessions-viewpane .agent-sessions-filter-button[aria-expanded="true"],
+.hc-black .agent-sessions-viewpane .agent-sessions-sidebar-action:hover,
+.hc-black .agent-sessions-viewpane .agent-sessions-filter-popover-header:hover,
+.hc-black .agent-sessions-viewpane .agent-sessions-filter-popover-option:hover,
+.hc-black .agent-sessions-viewpane .agent-sessions-filter-popover-option[aria-checked="true"],
+.hc-light .agent-sessions-viewpane .agent-sessions-collapse-button:hover,
+.hc-light .agent-sessions-viewpane .agent-sessions-filter-button:hover,
+.hc-light .agent-sessions-viewpane .agent-sessions-filter-button[aria-expanded="true"],
+.hc-light .agent-sessions-viewpane .agent-sessions-sidebar-action:hover,
+.hc-light .agent-sessions-viewpane .agent-sessions-filter-popover-header:hover,
+.hc-light .agent-sessions-viewpane .agent-sessions-filter-popover-option:hover,
+.hc-light .agent-sessions-viewpane .agent-sessions-filter-popover-option[aria-checked="true"] {
+	outline: 1px dashed var(--vscode-contrastActiveBorder, var(--vscode-contrastBorder));
+	outline-offset: -1px;
+}
+
+.agent-sessions-simple-actions .agent-sessions-sidebar-action.active {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+	border-radius: 9px;
+}

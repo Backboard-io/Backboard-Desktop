@@ -1,0 +1,376 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.agent-host-chat-input-picker-host {
+	display: inline-flex;
+	align-items: center;
+	margin: 0 1px;
+}
+
+/*
+ * When the host is also a toolbar `.action-item`, the action-bar's
+ * `.monaco-action-bar .action-item { display: block }` rule wins on
+ * specificity and turns the host into a block. That leaves the
+ * inline-flex slot sitting in an anonymous line box whose height is
+ * driven by the inherited line-height (not the chip's 22px content),
+ * producing ~23.2px outer height. Re-assert inline-flex with matching
+ * specificity so the host sizes to its flex content.
+ */
+.monaco-action-bar .action-item.agent-host-chat-input-picker-host {
+	display: inline-flex;
+}
+
+.agent-host-chat-input-picker-host:empty {
+	display: none;
+}
+
+.agent-host-chat-input-picker-host .codicon.codicon-backboard-logo {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	font-size: 0;
+	background-color: currentColor;
+	-webkit-mask: url('../../../media/backboard_icon.svg') center / contain no-repeat;
+	mask: url('../../../media/backboard_icon.svg') center / contain no-repeat;
+}
+
+.agent-host-chat-input-picker-host .codicon.codicon-backboard-logo::before {
+	content: '';
+}
+
+.agent-host-chat-input-picker-slot {
+	display: inline-flex;
+	align-items: center;
+	height: 100%;
+}
+
+.agent-host-chat-input-picker-slot a.action-label,
+.agent-host-chat-input-picker-slot span.action-label {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	position: relative;
+	min-height: 24px;
+	width: 26px;
+	height: 24px;
+	padding: 0;
+	box-sizing: border-box;
+	border: 1px solid transparent;
+	border-radius: 5px;
+	background-color: transparent;
+	color: var(--vscode-icon-foreground);
+	font-weight: 500;
+	line-height: 20px;
+	opacity: 0.88;
+	transition: background-color 80ms ease, border-color 80ms ease, color 80ms ease, opacity 80ms ease;
+}
+
+.agent-host-chat-input-picker-slot a.action-label:hover,
+.agent-host-chat-input-picker-slot span.action-label:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+	border-color: var(--vscode-focusBorder);
+	color: var(--vscode-foreground);
+	opacity: 1;
+}
+
+.agent-host-chat-input-picker-slot a.action-label:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+	background-color: var(--vscode-toolbar-hoverBackground);
+	opacity: 1;
+}
+
+.agent-host-chat-input-picker-slot .action-label .codicon {
+	font-size: 13px;
+	line-height: 1;
+}
+
+.agent-host-chat-input-picker-slot .action-label .codicon-chevron-down {
+	display: none;
+}
+
+.agent-host-chat-input-picker-slot.disabled span.action-label {
+	opacity: 0.45;
+	cursor: default;
+}
+
+/*
+ * Generic-fallback chip lane: container for direct-rendered chips
+ * (`AgentHostGenericConfigChips`) that handle agent-host config properties
+ * not claimed by a dedicated picker. Lays out the chip slots horizontally
+ * with the same gap the secondary toolbar uses between its own children.
+ *
+ * The generic chip is rendered directly (not via MenuWorkbenchToolBar), so
+ * it is not inside `.monaco-action-bar > .action-item` and misses the
+ * cursor/font-size/hover styles those ancestors provide. Restore them here
+ * to match the dedicated chip styling.
+ */
+.chat-secondary-generic-chips {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	flex-shrink: 0;
+	margin-left: 1px;
+
+	&:empty {
+		display: none;
+	}
+
+	> .agent-host-generic-chip-slot {
+		cursor: pointer;
+
+		.action-label {
+			font-size: 11px;
+			min-height: 24px;
+			width: 26px;
+			height: 24px;
+			padding: 0;
+			box-sizing: border-box;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			border: 1px solid transparent;
+			border-radius: 5px;
+			background-color: transparent;
+			color: var(--vscode-icon-foreground);
+			font-weight: 500;
+			opacity: 0.88;
+			transition: background-color 80ms ease, border-color 80ms ease, color 80ms ease, opacity 80ms ease;
+
+			&:hover {
+				background-color: var(--vscode-toolbar-hoverBackground);
+				border-color: var(--vscode-focusBorder);
+				color: var(--vscode-foreground);
+				opacity: 1;
+			}
+
+			&:focus-visible {
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: -1px;
+				background-color: var(--vscode-toolbar-hoverBackground);
+				opacity: 1;
+			}
+		}
+
+		.codicon {
+			font-size: 13px;
+			line-height: 1;
+		}
+	}
+
+	> .agent-host-generic-chip-slot + .agent-host-generic-chip-slot {
+		box-shadow: none;
+	}
+}
+
+.interactive-session .chat-input-toolbars > .chat-secondary-generic-chips {
+	order: 1;
+}
+
+.interactive-session .chat-input-toolbars > .chat-execute-toolbar {
+	order: 2;
+}
+
+.agent-host-folder-picker-host .action-label {
+	width: 26px;
+	min-width: 26px;
+	height: 24px;
+	padding: 0;
+	box-sizing: border-box;
+	justify-content: center;
+}
+
+.agent-host-chat-input-picker-slot .action-label[data-config-value="off"],
+.agent-host-chat-input-picker-slot .action-label[data-config-value="false"] {
+	color: var(--vscode-descriptionForeground);
+	opacity: 0.68;
+}
+
+.agent-host-chat-input-picker-slot .action-label[data-config-value="on"],
+.agent-host-chat-input-picker-slot .action-label[data-config-value="true"] {
+	color: var(--vscode-charts-blue);
+	opacity: 1;
+}
+
+.agent-host-folder-picker-host .chat-input-picker-label,
+.agent-host-folder-picker-host .codicon-chevron-down {
+	display: none;
+}
+
+/*
+ * Elevated auto-approve levels get themed colors on the chip trigger:
+ *   .warning → Autopilot (red/orange)
+ *   .info    → Bypass / autoApprove (blue)
+ * Toggled in `AgentHostChatInputPicker._renderTrigger`.
+ */
+.agent-host-chat-input-picker-slot .action-label.warning {
+	color: var(--vscode-problemsWarningIcon-foreground);
+}
+
+.agent-host-chat-input-picker-slot .action-label.warning .codicon {
+	color: var(--vscode-problemsWarningIcon-foreground) !important;
+}
+
+.agent-host-chat-input-picker-slot .action-label.warning:hover {
+	color: var(--vscode-problemsWarningIcon-foreground);
+}
+
+.agent-host-chat-input-picker-slot .action-label.info {
+	color: var(--vscode-problemsInfoIcon-foreground);
+}
+
+.agent-host-chat-input-picker-slot .action-label.info .codicon {
+	color: var(--vscode-problemsInfoIcon-foreground) !important;
+}
+
+.agent-host-chat-input-picker-slot .action-label.info:hover {
+	color: var(--vscode-problemsInfoIcon-foreground);
+}
+
+.agent-host-chat-input-picker-label {
+	display: none;
+	max-width: 16em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Access is a primary composer choice, not an icon-only utility. Keep its
+ * current value readable beside Add while the other agent-host pickers retain
+ * their compact icon treatment. */
+.monaco-workbench .interactive-session .chat-input-toolbar .agent-host-chat-input-picker-slot .action-label.agent-host-config-mode {
+	width: auto;
+	min-width: 0;
+	height: 28px;
+	padding: 0 6px;
+	gap: 0;
+	border-radius: 10px;
+	font-size: 12.5px !important;
+	font-weight: 400;
+}
+
+.monaco-workbench .interactive-session .chat-input-toolbar .agent-host-config-mode .agent-host-chat-input-picker-label {
+	display: inline;
+	font-size: inherit;
+}
+
+.monaco-workbench .interactive-session .chat-input-toolbars .agent-host-chat-input-picker-slot .action-label.agent-host-config-mode.warning,
+.monaco-workbench .interactive-session .chat-input-toolbars .agent-host-chat-input-picker-slot .action-label.agent-host-config-mode.warning .codicon {
+	color: var(--vscode-problemsWarningIcon-foreground) !important;
+}
+
+.monaco-workbench .interactive-session .chat-input-toolbars .agent-host-chat-input-picker-slot .action-label.agent-host-config-mode.warning .codicon-shield,
+.backboard-access-picker-row.warning .codicon-shield {
+	position: relative;
+}
+
+.monaco-workbench .interactive-session .chat-input-toolbars .agent-host-chat-input-picker-slot .action-label.agent-host-config-mode.warning .codicon-shield::after,
+.backboard-access-picker-row.warning .codicon-shield::after {
+	content: '!';
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	padding-top: 1px;
+	font-family: var(--vscode-font-family);
+	font-size: 7px;
+	font-weight: 800;
+	line-height: 1;
+}
+
+/* Match the composer's compact plus menu. */
+.context-view.backboard-access-picker-overlay,
+.backboard-access-picker-overlay {
+	border-radius: 10px;
+}
+
+.backboard-access-picker {
+	box-sizing: border-box;
+	width: min(224px, calc(100vw - 20px));
+	padding: 4px;
+	overflow: hidden;
+	font: 13px/1.5 var(--vscode-font-family);
+	color: var(--vscode-foreground);
+	background: var(--vscode-editorWidget-background);
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+	border-radius: 10px;
+	box-shadow: 0 8px 24px #00000020, 0 2px 6px #00000010;
+	transform-origin: bottom left;
+	animation: backboard-access-enter 120ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.backboard-access-picker-header,
+.backboard-access-picker-description { display: none; }
+
+.backboard-access-picker-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+}
+
+.monaco-workbench .backboard-access-picker-row {
+	display: grid;
+	grid-template-columns: 14px minmax(0, 1fr) 14px;
+	gap: 8px;
+	align-items: center;
+	box-sizing: border-box;
+	min-height: 28px;
+	margin: 0;
+	padding: 4px 8px;
+	color: var(--vscode-foreground);
+	font: inherit;
+	line-height: 20px;
+	text-align: left;
+	background: transparent;
+	border: 0;
+	border-radius: 5px;
+	box-shadow: none !important;
+	cursor: pointer;
+}
+
+.monaco-workbench .backboard-access-picker-row:hover,
+.monaco-workbench .backboard-access-picker-row:focus-visible {
+	background: var(--vscode-list-hoverBackground);
+}
+.monaco-workbench .backboard-access-picker-row:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.backboard-access-picker-icon,
+.backboard-access-picker-check {
+	display: grid;
+	place-items: center;
+	color: var(--vscode-descriptionForeground);
+}
+.backboard-access-picker-icon .codicon,
+.backboard-access-picker-check .codicon {
+	font-size: 14px;
+	color: currentColor !important;
+}
+.backboard-access-picker-copy { min-width: 0; }
+.backboard-access-picker-title {
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 20px;
+}
+
+.backboard-access-hand-icon {
+	display: inline-block;
+	width: 16px;
+	height: 16px;
+	background: currentColor;
+	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 11V6a2 2 0 0 0-4 0v5'/%3E%3Cpath d='M14 10V4a2 2 0 0 0-4 0v6'/%3E%3Cpath d='M10 10.5V6a2 2 0 0 0-4 0v8'/%3E%3Cpath d='M6 14v-2a2 2 0 0 0-4 0v2c0 4.418 3.582 8 8 8h2a8 8 0 0 0 8-8V8a2 2 0 0 0-4 0v3'/%3E%3C/svg%3E") center / contain no-repeat;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 11V6a2 2 0 0 0-4 0v5'/%3E%3Cpath d='M14 10V4a2 2 0 0 0-4 0v6'/%3E%3Cpath d='M10 10.5V6a2 2 0 0 0-4 0v8'/%3E%3Cpath d='M6 14v-2a2 2 0 0 0-4 0v2c0 4.418 3.582 8 8 8h2a8 8 0 0 0 8-8V8a2 2 0 0 0-4 0v3'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+@keyframes backboard-access-enter {
+	from { opacity: 0; transform: translateY(4px) scale(.97); }
+	to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.monaco-workbench.monaco-reduce-motion .backboard-access-picker { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+	.backboard-access-picker { animation: none; }
+}

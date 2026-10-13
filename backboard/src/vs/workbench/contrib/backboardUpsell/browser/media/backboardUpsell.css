@@ -1,0 +1,303 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* -- Shared buttons ------------------------------------------------------------------------ */
+
+.bb-upsell-button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: 100%;
+	height: 36px;
+	padding: 0 14px;
+	font: inherit;
+	font-size: 13px;
+	font-weight: 500;
+	border-radius: 8px;
+	cursor: pointer;
+	transition: background .12s ease;
+}
+
+/* The editor's text colour inverted: near-white on dark themes, near-black on light. */
+.bb-upsell-button-primary {
+	color: var(--vscode-editor-background);
+	background: color-mix(in srgb, var(--vscode-editor-foreground) 92%, var(--vscode-editor-background));
+	border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 70%, transparent);
+}
+
+.bb-upsell-button-primary:hover {
+	background: var(--vscode-editor-foreground);
+}
+
+.bb-upsell-button:focus-visible,
+.bb-upsell-card-link:focus-visible,
+.bb-upsell-card-close:focus-visible,
+.bb-upsell-card-media:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+/* -- Balance card (bottom left) --------------------------------------------------------------- */
+
+.bb-upsell-card {
+	position: fixed;
+	/* Clear of the window's left icon rail (activity bar or Simple rail), whose
+	   account and settings buttons live in the bottom-left corner. */
+	left: 60px;
+	bottom: 16px;
+	z-index: 1000;
+	box-sizing: border-box;
+	width: 280px;
+	padding: 10px;
+	color: var(--vscode-foreground);
+	background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+	border-radius: 18px;
+	box-shadow: 0 18px 48px rgba(0, 0, 0, .3);
+	animation: bb-upsell-rise .35s cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.bb-upsell-card-media {
+	display: block;
+	width: 100%;
+	aspect-ratio: 16 / 9;
+	padding: 0;
+	overflow: hidden;
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+	border: 0;
+	border-radius: 12px;
+	cursor: pointer;
+}
+
+.bb-upsell-card-media {
+	position: relative;
+}
+
+/* No art (not shipped, failed to load): each card's own gradient instead. */
+.bb-upsell-card-media.bb-upsell-card-media-fallback img {
+	display: none;
+}
+
+.bb-upsell-card[data-kind="signin"] .bb-upsell-card-media-fallback {
+	background: linear-gradient(160deg, #8fb6e8 0%, #e7d3b0 55%, #6f8f5a 100%);
+}
+
+.bb-upsell-card[data-kind="low"] .bb-upsell-card-media-fallback {
+	background: linear-gradient(160deg, #f2c27a 0%, #d97a4a 50%, #4e5b3a 100%);
+}
+
+.bb-upsell-card[data-kind="out"] .bb-upsell-card-media-fallback {
+	background: linear-gradient(160deg, #1d2333 0%, #3c4a66 55%, #c9d3e6 100%);
+}
+
+/* The art drifts slowly, like a paused film, with a light sweeping across. */
+.bb-upsell-card-media img {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	object-position: center;
+	animation: bb-upsell-drift 20s ease-in-out infinite alternate;
+}
+
+.bb-upsell-card-media::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, .16) 50%, transparent 65%);
+	transform: translateX(-120%);
+	animation: bb-upsell-sheen 7s ease-in-out infinite;
+	pointer-events: none;
+}
+
+/* Sign-in: model logos rising through the clouds. */
+.bb-upsell-card-float {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+.bb-upsell-card-bubble {
+	position: absolute;
+	left: calc(10% + var(--i) * 18%);
+	bottom: -30px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	background: rgba(255, 255, 255, .78);
+	border: 1px solid rgba(255, 255, 255, .9);
+	border-radius: 50%;
+	box-shadow: 0 6px 16px rgba(0, 0, 0, .18);
+	backdrop-filter: blur(4px);
+	animation: bb-upsell-rise-float 6.5s ease-in-out infinite;
+	animation-delay: calc(var(--i) * -1.3s);
+}
+
+.bb-upsell-card-bubble .combined-model-logo {
+	display: inline-block;
+	width: 16px;
+	height: 16px;
+}
+
+/* xAI's mark is drawn in the text colour, which is near-white on dark themes. */
+.bb-upsell-card-bubble .combined-model-logo.provider-x-ai {
+	background-color: #111;
+}
+
+.bb-upsell-card-close {
+	position: absolute;
+	top: 18px;
+	right: 18px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	font-size: 14px;
+	color: #fff;
+	background: rgba(0, 0, 0, .5);
+	border: 0;
+	border-radius: 50%;
+	cursor: pointer;
+}
+
+.bb-upsell-card-close:hover {
+	background: rgba(0, 0, 0, .7);
+}
+
+.bb-upsell-card-body {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 12px 6px 4px;
+}
+
+.bb-upsell-card-title {
+	margin: 0;
+	font-size: 16px;
+	font-weight: 600;
+	line-height: 1.3;
+}
+
+.bb-upsell-card-text {
+	margin: 0;
+	font-size: 13px;
+	line-height: 1.45;
+	color: var(--vscode-descriptionForeground);
+}
+
+.bb-upsell-card-label {
+	margin-top: 6px;
+	font-size: 10.5px;
+	font-weight: 600;
+	letter-spacing: .1em;
+	text-transform: uppercase;
+	color: var(--vscode-descriptionForeground);
+}
+
+.bb-upsell-card-marquee {
+	overflow: hidden;
+	mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+}
+
+.bb-upsell-card-track {
+	display: flex;
+	gap: 18px;
+	width: max-content;
+	padding: 4px 0 8px;
+	animation: bb-upsell-marquee 24s linear infinite;
+}
+
+.bb-upsell-card-model {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 13px;
+	white-space: nowrap;
+}
+
+.bb-upsell-card-model .combined-model-logo {
+	display: inline-block;
+	flex: none;
+	width: 15px;
+	height: 15px;
+}
+
+.bb-upsell-card .bb-upsell-button {
+	margin-top: 4px;
+}
+
+.bb-upsell-card-link {
+	align-self: center;
+	margin-top: 2px;
+	padding: 2px 0;
+	font: inherit;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	background: transparent;
+	border: 0;
+	cursor: pointer;
+}
+
+.bb-upsell-card-link:hover {
+	color: var(--vscode-foreground);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+/* Sign-in: opens in the model picker's place (left/top set from code). */
+.bb-upsell-card.bb-upsell-card-anchored {
+	bottom: auto;
+	z-index: 2600;
+	transform-origin: bottom right;
+	animation: bb-upsell-pop .22s cubic-bezier(.16, 1, .3, 1) both;
+}
+
+@keyframes bb-upsell-marquee {
+	from { transform: translateX(0); }
+	to { transform: translateX(-50%); }
+}
+
+@keyframes bb-upsell-rise {
+	from { opacity: 0; transform: translateY(8px); }
+	to { opacity: 1; transform: none; }
+}
+
+@keyframes bb-upsell-drift {
+	from { transform: scale(1.04) translate(-1.5%, 1%); }
+	to { transform: scale(1.14) translate(1.5%, -1.5%); }
+}
+
+@keyframes bb-upsell-sheen {
+	0%, 55% { transform: translateX(-120%); }
+	100% { transform: translateX(120%); }
+}
+
+@keyframes bb-upsell-rise-float {
+	0% { transform: translateY(0) scale(.85); opacity: 0; }
+	15% { opacity: 1; }
+	50% { transform: translateY(-95px) translateX(6px) scale(1); }
+	85% { opacity: 1; }
+	100% { transform: translateY(-190px) translateX(-4px) scale(.9); opacity: 0; }
+}
+
+@keyframes bb-upsell-pop {
+	from { opacity: 0; transform: scale(.96) translateY(6px); }
+	to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.bb-upsell-card-track,
+	.bb-upsell-card,
+	.bb-upsell-card-media img,
+	.bb-upsell-card-media::after,
+	.bb-upsell-card-bubble {
+		animation: none;
+	}
+}

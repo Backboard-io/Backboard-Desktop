@@ -1,0 +1,1619 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Simple mode uses one quiet canvas and a compact strip shared by every tool. */
+.sessions-right-workbench-simple:not(.sessions-right-workbench-mode-launcher) {
+	border: 1px solid var(--rwb-border-strong);
+	border-radius: 12px;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-header {
+	height: 44px;
+	min-height: 44px;
+	padding: 0 8px;
+	gap: 4px;
+	/* Let the single panel surface continue through the title strip. */
+	background: transparent;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-tabs {
+	flex: 0 1 auto;
+	gap: 2px;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-tab {
+	flex: 0 1 156px;
+	min-width: 64px;
+	max-width: 168px;
+	height: 28px;
+	padding: 0 8px;
+	gap: 8px;
+	border-radius: 8px;
+	font-size: 13px;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-tab > .codicon {
+	font-size: 14px;
+	flex-shrink: 0;
+}
+
+.sessions-right-workbench-tab-close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-tab-close:hover {
+	background: var(--rwb-hover);
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-tab:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.sessions-right-workbench-header > .sessions-right-workbench-tab-add {
+	flex: 0 0 28px;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls {
+	margin-left: auto;
+	padding-left: 8px;
+	flex-shrink: 0;
+	gap: 6px;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-icon-button {
+	width: 28px;
+	height: 28px;
+	border-radius: 8px;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-files,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-review-workspace {
+	grid-template-columns: minmax(0, 1fr) clamp(200px, 34%, 300px);
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-file-editor {
+	display: flex;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple.sessions-right-workbench-files-tree-hidden .sessions-right-workbench-files,
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-review-workspace.rail-hidden {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-file-tree {
+	border-left: 1px solid var(--rwb-border);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-file-path {
+	min-height: 40px;
+	height: 40px;
+	padding: 0 12px;
+	grid-column: 1 / -1;
+	grid-row: 1;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-files {
+	grid-template-rows: 40px minmax(0, 1fr);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-file-editor,
+.sessions-right-workbench-simple .sessions-right-workbench-file-tree {
+	grid-row: 2;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-file-header,
+.sessions-right-workbench-simple .sessions-right-workbench-review-total-stats .files {
+	display: none;
+}
+
+.sessions-right-workbench-review-scope {
+	margin-right: 12px;
+	white-space: nowrap;
+	font-size: 13px;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-toolbar-row.primary {
+	min-height: 40px;
+	height: 40px;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-file-actions {
+	flex-shrink: 0;
+}
+
+.sessions-right-workbench-file-action[hidden],
+.sessions-right-workbench-file-open[hidden] {
+	display: none;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-browser-address {
+	position: relative;
+	border: 1px solid var(--rwb-border-strong);
+	border-radius: 10px;
+	background: transparent;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-browser-nav {
+	grid-template-columns: 24px 24px 24px minmax(0, 1fr) 24px;
+	gap: 6px;
+	padding: 0 12px;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-browser-url {
+	text-align: left;
+	font-size: 13px;
+	padding: 0 8px;
+	border: 0;
+	box-shadow: none;
+	background: transparent;
+}
+
+.sessions-right-workbench-browser-address:focus-within {
+	border-color: var(--vscode-focusBorder);
+}
+
+.sessions-right-workbench-browser-suggestions {
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	right: 0;
+	z-index: 100;
+	padding: 4px;
+	border: 1px solid var(--rwb-border-strong);
+	border-radius: 12px;
+	background: var(--vscode-menu-background, var(--rwb-bg));
+	box-shadow: 0 8px 24px var(--vscode-widget-shadow);
+}
+
+.sessions-right-workbench-browser-suggestions[hidden] {
+	display: none;
+}
+
+.sessions-right-workbench-browser-suggestion {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	height: 36px;
+	padding: 0 8px;
+	border-radius: 8px;
+	cursor: pointer;
+	font-size: 13px;
+}
+
+.sessions-right-workbench-browser-suggestion:hover,
+.sessions-right-workbench-browser-suggestion[aria-selected="true"] {
+	background: var(--rwb-hover);
+}
+
+.sessions-right-workbench-browser-suggestion .title,
+.sessions-right-workbench-browser-suggestion .url {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-browser-suggestion .title {
+	flex: 0 1 auto;
+}
+
+.sessions-right-workbench-browser-suggestion .url {
+	flex: 1 2 auto;
+	color: var(--rwb-muted);
+}
+
+.sessions-right-workbench-browser-suggestion .remove {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 22px;
+	height: 22px;
+	padding: 0;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--rwb-muted);
+	cursor: pointer;
+}
+
+.sessions-right-workbench-browser-suggestion .remove:hover {
+	background: var(--rwb-selection);
+}
+
+@container (max-width: 480px) {
+	.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-files,
+	.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-review-workspace {
+		grid-template-columns: minmax(0, 1fr) 184px;
+	}
+	.sessions-right-workbench-simple .sessions-right-workbench-file-workspace {
+		display: none;
+	}
+}
+
+/* Keep the virtualized editor's 40px header geometry, with a compact 32px row. */
+.sessions-right-workbench-simple .multiDiffEditor {
+	--vscode-multiDiffEditor-background: var(--rwb-bg);
+	--vscode-multiDiffEditor-headerBackground: color-mix(in srgb, var(--vscode-editor-background) 94%, var(--vscode-editor-foreground));
+	--vscode-multiDiffEditor-border: var(--rwb-border);
+	/* Derive every diff tint from the theme's git colors so light, dark, and
+	 * high-contrast themes each get legible added/removed rows. */
+	--vscode-diffEditor-insertedLineBackground: color-mix(in srgb, var(--rwb-success) 13%, transparent);
+	--vscode-diffEditor-removedLineBackground: color-mix(in srgb, var(--rwb-danger) 13%, transparent);
+	--vscode-diffEditor-insertedTextBackground: color-mix(in srgb, var(--rwb-success) 26%, transparent);
+	--vscode-diffEditor-removedTextBackground: color-mix(in srgb, var(--rwb-danger) 26%, transparent);
+	--vscode-diffEditorGutter-insertedLineBackground: color-mix(in srgb, var(--rwb-success) 20%, transparent);
+	--vscode-diffEditorGutter-removedLineBackground: color-mix(in srgb, var(--rwb-danger) 20%, transparent);
+	--vscode-diffEditor-unchangedRegionBackground: color-mix(in srgb, var(--rwb-foreground) 6%, transparent);
+	--vscode-diffEditor-unchangedRegionForeground: var(--rwb-muted);
+	--vscode-diffEditor-unchangedRegionShadow: transparent;
+	--vscode-diffEditor-diagonalFill: transparent;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header-content {
+	box-sizing: border-box;
+	height: 32px;
+	margin-top: 8px;
+	padding: 0 8px;
+	border-color: var(--rwb-border);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .file-path .title.modified {
+	min-width: 0;
+	flex: 1;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-label-container {
+	display: flex;
+	align-items: baseline;
+	min-width: 0;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-description-container {
+	order: -1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-label .label-description {
+	margin-left: 0;
+	font-size: inherit;
+}
+
+/* The separator ends the directory, so it disappears with it when a long
+ * file name needs the whole row. */
+.sessions-right-workbench-simple .multiDiffEditor .label-description:not(:empty)::after {
+	content: '/';
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .change-counts {
+	display: flex;
+	gap: 5px;
+	flex-shrink: 0;
+	margin-left: 8px;
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .change-counts .additions {
+	color: var(--vscode-gitDecoration-addedResourceForeground);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .change-counts .deletions {
+	color: var(--vscode-gitDecoration-deletedResourceForeground);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .actions {
+	padding: 0 0 0 4px;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .status:empty {
+	display: none;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-name-container {
+	/* The directory (sized from zero) yields first; the name only
+	 * ellipsizes once no directory is left. */
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header .header-content {
+	background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-editor-foreground));
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-description-container {
+	/* Sized from zero: the path only fills what the name leaves over. */
+	flex: 1 1 0;
+	/* Truncate from the start ("…dia/") so the folder nearest the file stays. */
+	direction: rtl;
+	text-align: left;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-description-container .label-description {
+	unicode-bidi: plaintext;
+}
+
+/* Reveal the shared wallpaper without adding a second tint inside the panel. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple {
+	--rwb-bg: transparent;
+	--rwb-chrome-soft: transparent;
+	--vscode-editor-background: transparent;
+	--vscode-editorPane-background: transparent;
+	--vscode-multiDiffEditor-background: transparent;
+	--vscode-sideBar-background: transparent;
+	background: transparent !important;
+
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(
+	.sessions-right-workbench-header,
+	.sessions-right-workbench-body,
+	.sessions-right-workbench-review,
+	.sessions-right-workbench-files,
+	.sessions-right-workbench-terminal,
+	.sessions-right-workbench-browser-chrome,
+	.sessions-right-workbench-browser-content,
+	.sessions-right-workbench-review-workspace,
+	.sessions-right-workbench-review-toolbar,
+	.sessions-right-workbench-review-rail,
+	.sessions-right-workbench-review-scm-rail,
+	.sessions-right-workbench-review-scm-list,
+	.monaco-list,
+	.monaco-tree,
+	.sessions-right-workbench-file-tree,
+	.sessions-right-workbench-file-editor,
+	.sessions-right-workbench-file-editor-body,
+	.sessions-right-workbench-embedded-editor-host,
+	.monaco-modal-editor-block.embedded,
+	.modal-editor-resizable,
+	.modal-editor-shadow,
+	.part.editor,
+	.editor-group-container,
+	.editor-container,
+	.editor-instance,
+	.multiDiffEditor,
+	.multiDiffEntry > .header,
+	.monaco-list-rows
+) {
+	background-color: transparent !important;
+	background-image: none !important;
+}
+
+/* The empty review canvas and its embedded editor use the panel surface. */
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple .multiDiffEditor {
+	background: var(--rwb-bg) !important;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header .header-content {
+	border-bottom: 1px solid var(--rwb-border);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .collapse-button a {
+	border: 0;
+	border-radius: 4px;
+	padding: 2px;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .collapse-button a:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+}
+
+/* Keep controls above tab content without painting a square over wallpaper. */
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls {
+	background: transparent;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls .sessions-right-workbench-icon-button {
+	padding: 0;
+	background: transparent;
+	border: 0;
+	border-radius: 8px;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-shell.sessions-right-workbench-simple .sessions-right-workbench-frame-controls .sessions-right-workbench-icon-button:hover {
+	background: var(--rwb-hover);
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-frame-controls .sessions-right-workbench-icon-button:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -2px;
+}
+
+/* Chat and right panel share one image, tint, and blur on the window underlay. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) {
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
+
+/* Header glyphs share their control's foreground instead of independently
+ * inheriting a theme accent that may disappear against the header surface. */
+.monaco-workbench.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple .sessions-right-workbench-header .codicon {
+	color: inherit !important;
+}
+
+/* Wallpaper uses a fixed dark tint in every theme. Keep these tokens local
+ * to the header so tool content and menus retain their normal theme colors. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple .sessions-right-workbench-header {
+	--rwb-foreground: #ffffff;
+	--rwb-muted: #e2e5e9;
+	--rwb-hover: rgba(255, 255, 255, 0.12);
+	--vscode-focusBorder: #ffffff;
+}
+
+/* The selected tab has an opaque theme surface, unlike its surroundings. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple .sessions-right-workbench-header .sessions-right-workbench-tab.active {
+	--rwb-foreground: var(--vscode-foreground);
+	--rwb-muted: var(--vscode-foreground);
+	color: var(--vscode-foreground);
+}
+
+/* Text on the transparent panel chrome must use the same foreground as the
+ * wallpaper header. Keep these overrides off editors and terminal content. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(
+	.sessions-right-workbench-file-path,
+	.sessions-right-workbench-browser-chrome,
+	.sessions-right-workbench-browser-empty,
+	.sessions-right-workbench-file-empty,
+	.sessions-right-workbench-review-empty,
+	.sessions-right-workbench-review-toolbar,
+	.sessions-right-workbench-review-rail,
+	.sessions-right-workbench-review-scm-rail,
+	.sessions-right-workbench-file-explorer-host) {
+	--rwb-foreground: #ffffff;
+	--rwb-muted: #e2e5e9;
+	--rwb-hover: rgba(255, 255, 255, 0.12);
+	color: var(--rwb-foreground);
+}
+
+/* Explorer rows are transparent even in light themes. Pair hover/selection
+ * surfaces and labels locally instead of inheriting dark editor text. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple .sessions-right-workbench-file-explorer-host {
+	--vscode-list-activeSelectionForeground: #ffffff;
+	--vscode-list-inactiveSelectionForeground: #ffffff;
+	--vscode-list-hoverForeground: #ffffff;
+	--vscode-list-focusForeground: #ffffff;
+	--vscode-list-activeSelectionBackground: rgba(255, 255, 255, 0.18);
+	--vscode-list-inactiveSelectionBackground: rgba(255, 255, 255, 0.12);
+	--vscode-list-hoverBackground: rgba(255, 255, 255, 0.10);
+	--vscode-list-focusBackground: rgba(255, 255, 255, 0.12);
+
+	.monaco-list-row,
+	.monaco-icon-label,
+	.monaco-tl-twistie {
+		color: #ffffff !important;
+	}
+
+	.monaco-icon-description {
+		color: #e2e5e9 !important;
+	}
+}
+
+/* Filled controls still need the foreground paired with their theme surface. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(
+	.sessions-right-workbench-file-filter,
+	.sessions-right-workbench-browser-address) {
+	color: var(--vscode-input-foreground);
+}
+
+/* Transparent tool chrome uses wallpaper contrast, including native controls
+ * that read VS Code tokens instead of the right-workbench foreground tokens. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(
+	.sessions-right-workbench-browser-chrome,
+	.browser-navbar,
+	.sessions-right-workbench-file-path,
+	.sessions-right-workbench-file-explorer-host,
+	.sessions-right-workbench-review-toolbar,
+	.sessions-right-workbench-review-rail,
+	.sessions-right-workbench-review-scm-rail,
+	.multiDiffEntry > .header) {
+	--vscode-icon-foreground: #e2e5e9;
+	--vscode-descriptionForeground: #e2e5e9;
+	--vscode-disabledForeground: #b2b8c1;
+	--vscode-foreground: #ffffff;
+	--vscode-input-foreground: #ffffff;
+	--vscode-input-placeholderForeground: #d3d8df;
+	--vscode-input-background: #252c35;
+	--vscode-input-border: #8793a2;
+	--vscode-focusBorder: #c1ddff;
+	--vscode-gitDecoration-addedResourceForeground: #8ce6a6;
+	--vscode-gitDecoration-deletedResourceForeground: #ffa5ac;
+	color: #ffffff;
+
+	.action-label,
+	.sessions-right-workbench-icon-button,
+	.monaco-tl-twistie {
+		color: #e2e5e9 !important;
+	}
+
+	.additions { color: #8ce6a6 !important; }
+	.deletions { color: #ffa5ac !important; }
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(
+	.sessions-right-workbench-browser-address,
+	.sessions-right-workbench-browser-url,
+	.sessions-right-workbench-file-filter,
+	.browser-url-container) {
+	--vscode-input-foreground: #ffffff;
+	--vscode-input-placeholderForeground: #d3d8df;
+	--vscode-input-background: #252c35;
+	--vscode-focusBorder: #c1ddff;
+	background: #252c35 !important;
+	color: #ffffff !important;
+	-webkit-text-fill-color: #ffffff;
+	caret-color: #ffffff;
+
+	input { color: #ffffff !important; -webkit-text-fill-color: #ffffff; }
+	&::placeholder, input::placeholder { color: #d3d8df !important; -webkit-text-fill-color: #d3d8df; opacity: 1; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Codex-style Review and Files.
+ * Unified stacked diffs with quiet file headers and folded context, an icon
+ * toolbar whose toggles show their state, and a file rail that favours names
+ * over counts. Colors come only from --rwb-* / theme tokens so every theme
+ * (and the wallpaper overrides above) restyles this without extra rules.
+ * ------------------------------------------------------------------------- */
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-toolbar {
+	padding: 0 8px 0 12px;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-toolbar-row.primary {
+	gap: 8px;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-scope {
+	margin-right: 0;
+	font-weight: 500;
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-total-stats {
+	flex-wrap: nowrap;
+	gap: 4px;
+	font-size: var(--vscode-bodyFontSize);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-actions {
+	gap: 2px;
+	min-width: 0;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-actions > .sessions-right-workbench-icon-button {
+	width: 26px;
+	height: 26px;
+	border-radius: var(--vscode-cornerRadius-medium);
+	color: var(--rwb-muted);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-actions > .sessions-right-workbench-icon-button:hover {
+	color: var(--rwb-foreground);
+	background: var(--rwb-hover);
+}
+
+/* Pressed toggles read as "on" without the accent-coloured focus look. */
+.sessions-right-workbench-simple .sessions-right-workbench-review-actions > .sessions-right-workbench-icon-button[aria-pressed='true'] {
+	color: var(--rwb-foreground);
+	background: color-mix(in srgb, var(--rwb-foreground) 10%, transparent);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-commit {
+	height: 26px;
+	margin-left: 6px;
+	padding: 0 8px;
+	gap: 5px;
+	border-radius: var(--vscode-cornerRadius-medium);
+	font-size: var(--vscode-bodyFontSize-small);
+}
+
+/* In a narrow panel the commit menu collapses to its icon + chevron so the
+ * view toggles never wrap or clip. */
+@container (max-width: 560px) {
+	.sessions-right-workbench-simple .sessions-right-workbench-review-commit > span:not(.codicon) {
+		display: none;
+	}
+}
+
+/* File headers: muted directory, bright name, counts, then actions. */
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header-content {
+	height: 34px;
+	margin-top: 0;
+	padding: 0 8px 0 4px;
+	border-top: 1px solid var(--rwb-border);
+	border-bottom: 1px solid var(--rwb-border);
+	font-size: var(--vscode-bodyFontSize-small);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry:first-child .header-content {
+	border-top-color: transparent;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-label .label-name {
+	color: var(--rwb-foreground);
+	font-weight: 500;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .monaco-icon-label .label-description {
+	color: var(--rwb-muted);
+	opacity: 1;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .change-counts {
+	font-size: var(--vscode-bodyFontSize-small);
+	font-weight: 500;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .change-counts .additions {
+	color: var(--rwb-success);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .change-counts .deletions {
+	color: var(--rwb-danger);
+}
+
+/* Per-file actions float over the header's end on hover instead of
+ * reserving width the file name needs in a narrow panel. */
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header-content {
+	position: relative;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header .actions {
+	position: absolute;
+	top: 0;
+	right: 4px;
+	bottom: 0;
+	display: flex;
+	align-items: center;
+	padding-left: 12px;
+	opacity: 0;
+	pointer-events: none;
+	background: linear-gradient(to right, transparent, var(--vscode-multiDiffEditor-headerBackground) 12px);
+	transition: opacity 120ms ease;
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header:hover .actions,
+.sessions-right-workbench-simple .multiDiffEditor .multiDiffEntry .header:focus-within .actions {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+/* Folded context: a flat row that names what it hides, not a dark slab. */
+.sessions-right-workbench-simple .multiDiffEditor .diff-hidden-lines .center {
+	height: 26px;
+	line-height: 26px;
+	border-radius: 0;
+	box-shadow: none;
+	font-size: var(--vscode-bodyFontSize-small);
+	font-family: var(--vscode-font-family);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .diff-hidden-lines .center:hover {
+	background: color-mix(in srgb, var(--rwb-foreground) 10%, transparent);
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .diff-hidden-lines .center .codicon {
+	color: inherit !important;
+}
+
+/* The editor's hidden input layer mirrors the document at z-index -10 and
+ * relies on an opaque editor background to stay invisible. Over the
+ * wallpaper that background is transparent, so the text bled through. */
+.sessions-right-workbench-simple .monaco-editor .native-edit-context {
+	color: transparent;
+	-webkit-text-fill-color: transparent;
+}
+
+/* Split view leaves the missing side empty instead of hatched. */
+.sessions-right-workbench-simple .multiDiffEditor .diagonal-fill {
+	background-image: none;
+	background-color: color-mix(in srgb, var(--rwb-foreground) 3%, transparent);
+}
+
+/* A changed line carries a solid edge in the gutter, like a change bar. */
+.sessions-right-workbench-simple .multiDiffEditor .gutter-insert {
+	box-shadow: inset 2px 0 0 var(--rwb-success);
+}
+
+.sessions-right-workbench-simple .multiDiffEditor .gutter-delete {
+	box-shadow: inset 2px 0 0 var(--rwb-danger);
+}
+
+/* File rail: no section header, full names, and a status badge instead of
+ * counts (counts are in each file's diff header and the row tooltip). */
+.sessions-right-workbench-simple .sessions-right-workbench-review-scm-header {
+	display: none;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-scm-rail {
+	padding: 8px 8px 8px 10px;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-rail::before {
+	inset: 0 auto 0 0;
+	opacity: 1;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-scm-stats {
+	display: none;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-rail .monaco-icon-label {
+	display: flex;
+	align-items: center;
+	min-width: 0;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-rail .monaco-icon-label-container {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-rail .monaco-list-row {
+	border-radius: var(--vscode-cornerRadius-medium);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-rail .monaco-list-row.selected,
+.sessions-right-workbench-simple .sessions-right-workbench-review-rail .monaco-list-row.focused,
+.sessions-right-workbench-simple .sessions-right-workbench-review-rail .monaco-list-row[aria-selected='true'],
+.sessions-right-workbench-simple .sessions-right-workbench-review-rail .monaco-list:focus .monaco-list-row.focused,
+.sessions-right-workbench-simple .sessions-right-workbench-review-rail .monaco-list:focus .monaco-list-row.selected,
+.sessions-right-workbench-simple .sessions-right-workbench-review-rail .monaco-list.last-focused .monaco-list-row.focused {
+	outline: 0 !important;
+	background: color-mix(in srgb, var(--rwb-foreground) 10%, transparent) !important;
+}
+
+.sessions-right-workbench-review-scm-badge {
+	display: none;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-scm-badge:not(.empty) {
+	--rwb-badge-color: var(--rwb-warning);
+	position: relative;
+	display: block;
+	flex: 0 0 auto;
+	box-sizing: border-box;
+	width: 12px;
+	height: 12px;
+	margin: 0 4px 0 8px;
+	border: 1.5px solid var(--rwb-badge-color);
+	border-radius: var(--vscode-cornerRadius-small);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-scm-badge:not(.empty)::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	margin: auto;
+	width: 4px;
+	height: 4px;
+	border-radius: 50%;
+	background: var(--rwb-badge-color);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-scm-badge[data-kind='added'] {
+	--rwb-badge-color: var(--rwb-success);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-scm-badge:is([data-kind='added'], [data-kind='deleted'])::after {
+	width: 6px;
+	height: 6px;
+	border-radius: 0;
+	background: linear-gradient(var(--rwb-badge-color), var(--rwb-badge-color)) center / 6px 1.5px no-repeat;
+}
+
+/* Added draws a plus: the shared bar plus a vertical one. */
+.sessions-right-workbench-simple .sessions-right-workbench-review-scm-badge[data-kind='added']::after {
+	background:
+		linear-gradient(var(--rwb-badge-color), var(--rwb-badge-color)) center / 6px 1.5px no-repeat,
+		linear-gradient(var(--rwb-badge-color), var(--rwb-badge-color)) center / 1.5px 6px no-repeat;
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-review-scm-badge[data-kind='deleted'] {
+	--rwb-badge-color: var(--rwb-danger);
+}
+
+/* Files: a quieter path bar above the editor and tree. */
+.sessions-right-workbench-simple .sessions-right-workbench-file-path {
+	gap: 4px;
+	font-size: var(--vscode-bodyFontSize);
+	color: var(--rwb-muted);
+	border-bottom: 1px solid var(--rwb-border);
+}
+
+.sessions-right-workbench-simple .sessions-right-workbench-file-path > .codicon {
+	font-size: var(--vscode-bodyFontSize-small);
+	opacity: 0.7;
+}
+
+/* ---------------------------------------------------------------------------
+ * Wallpaper legibility for tool content.
+ * The wallpaper sits under a fixed dark tint in every theme, so every tool's
+ * text (not just the chrome) must be bright or it sinks into the image. The
+ * launcher and tab strip keep their opaque surfaces and paired colors.
+ * ------------------------------------------------------------------------- */
+.monaco-workbench.agent-sessions-workbench.vs-dark.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) {
+	--rwb-foreground: #ffffff;
+	--rwb-muted: #e8ebef;
+	--rwb-hover: rgba(255, 255, 255, 0.12);
+	--rwb-success: #8ce6a6;
+	--rwb-danger: #ffa5ac;
+	--rwb-warning: #ffd479;
+	--vscode-foreground: #ffffff;
+	--vscode-descriptionForeground: #e8ebef;
+	--vscode-icon-foreground: #e8ebef;
+	--vscode-editor-foreground: #ffffff;
+	--vscode-editorLineNumber-foreground: rgba(255, 255, 255, 0.85);
+	--vscode-editorLineNumber-activeForeground: #ffffff;
+	--vscode-editorIndentGuide-background1: rgba(255, 255, 255, 0.16);
+	--vscode-editorIndentGuide-activeBackground1: rgba(255, 255, 255, 0.36);
+	--vscode-editorWhitespace-foreground: rgba(255, 255, 255, 0.3);
+	--vscode-editorCodeLens-foreground: #e8ebef;
+	--vscode-gitDecoration-addedResourceForeground: #8ce6a6;
+	--vscode-gitDecoration-untrackedResourceForeground: #8ce6a6;
+	--vscode-gitDecoration-modifiedResourceForeground: #ffd479;
+	--vscode-gitDecoration-deletedResourceForeground: #ffa5ac;
+	--vscode-textLink-foreground: #9cd1ff;
+	color: #ffffff;
+}
+
+/* The shared review style mutes line numbers for opaque surfaces; over the
+ * wallpaper they stay near-white. */
+.monaco-workbench.agent-sessions-workbench.vs-dark.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-editor .line-numbers {
+	color: var(--vscode-editorLineNumber-foreground);
+}
+
+.monaco-workbench.agent-sessions-workbench.vs-dark.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-editor .line-numbers.active-line-number {
+	color: var(--vscode-editorLineNumber-activeForeground);
+}
+
+/* Syntax colors come from the theme's token map, not variables. Dark themes
+ * get a lift so comments and punctuation read over the image; light themes'
+ * dark tokens are flipped to their bright counterparts (hue preserved). Only
+ * text rows are filtered, so diff tints and selections keep their colors. */
+.monaco-workbench.agent-sessions-workbench.vs-dark.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-editor.vs-dark .view-line {
+	filter: brightness(1.25) saturate(1.1);
+}
+
+.monaco-workbench.agent-sessions-workbench.vs-dark.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-editor.vs .view-line {
+	filter: invert(1) hue-rotate(180deg) brightness(1.15);
+}
+
+/* Tree rows (review rail and Files explorer): white labels on a translucent
+ * white selection — theme list colors are literal and would pair white text
+ * with a white light-theme selection. */
+.monaco-workbench.agent-sessions-workbench.vs-dark.sessions-chat-custom-background:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused):not(.hc-black):not(.hc-light) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-simple :is(.sessions-right-workbench-review, .sessions-right-workbench-files, .sessions-right-workbench-terminal) .monaco-list {
+	.monaco-list-row,
+	.monaco-icon-label,
+	.label-name {
+		color: #ffffff !important;
+	}
+
+	.monaco-tl-twistie,
+	.label-description,
+	.monaco-icon-label::before {
+		color: #e8ebef !important;
+	}
+
+	.monaco-list-row:hover {
+		background-color: rgba(255, 255, 255, 0.10) !important;
+	}
+
+	.monaco-list-row.selected,
+	.monaco-list-row.focused,
+	.monaco-list-row[aria-selected='true'] {
+		outline: 0 !important;
+		background-color: rgba(255, 255, 255, 0.18) !important;
+	}
+}
+
+/* ---------------------------------------------------------------------------
+ * Canvas: the thread's generated images as Codex's image playground. Metrics
+ * are measured from Codex (tiles 15px radius, 292px tall, 8px apart, rows 24px
+ * apart under a 12px time; a 58×32 view switch, a centered 32px tools pill, a
+ * 28px zoom chip) and every color is derived from the theme.
+ * ------------------------------------------------------------------------- */
+.sessions-right-workbench-canvas {
+	--rwb-canvas-accent: var(--vscode-button-background, var(--vscode-focusBorder));
+	--rwb-canvas-surface: var(--vscode-editor-background, var(--rwb-bg));
+	position: relative;
+	height: 100%;
+	min-height: 0;
+	container-type: size;
+}
+
+.sessions-right-workbench-canvas-views {
+	position: absolute;
+	top: 8px;
+	left: 8px;
+	z-index: 3;
+	display: flex;
+	gap: 2px;
+	padding: 4px;
+	border-radius: 12.5px;
+	background: color-mix(in srgb, var(--rwb-foreground) 2%, var(--rwb-canvas-surface));
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--rwb-foreground) 8%, transparent), 0 1px 2px -1px rgba(0, 0, 0, 0.08);
+}
+
+.sessions-right-workbench-canvas-view-button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 10px;
+	color: color-mix(in srgb, var(--rwb-foreground) 50%, transparent);
+	background: transparent;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-canvas-view-button .codicon {
+	font-size: 16px;
+}
+
+.sessions-right-workbench-canvas-view-button:hover,
+.sessions-right-workbench-canvas-view-button[aria-pressed='true'] {
+	color: var(--rwb-foreground);
+	background: color-mix(in srgb, var(--rwb-foreground) 5%, transparent);
+}
+
+.sessions-right-workbench-canvas-grid-icon {
+	display: grid;
+	grid-template-columns: repeat(2, 5px);
+	grid-auto-rows: 5px;
+	gap: 2px;
+}
+
+.sessions-right-workbench-canvas-grid-icon > span {
+	box-sizing: border-box;
+	border: 1.25px solid currentColor;
+	border-radius: 1.5px;
+}
+
+.sessions-right-workbench-canvas-pill-anchor {
+	position: absolute;
+	top: 8px;
+	left: 0;
+	right: 0;
+	z-index: 3;
+	display: flex;
+	justify-content: center;
+	padding: 0 16px;
+	pointer-events: none;
+}
+
+/* Codex hides the tools below 630px so they never collide with the controls. */
+@container (max-width: 630px) {
+	.sessions-right-workbench-canvas-pill-anchor {
+		display: none;
+	}
+}
+
+.sessions-right-workbench-canvas-pill {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	max-width: 100%;
+	padding: 2px;
+	overflow: hidden;
+	border-radius: 9999px;
+	background: color-mix(in srgb, color-mix(in srgb, var(--rwb-foreground) 13%, var(--rwb-canvas-surface)) 95%, transparent);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--rwb-foreground) 4%, transparent), 0 2px 4px -1px rgba(0, 0, 0, 0.08);
+	backdrop-filter: blur(8px);
+	pointer-events: auto;
+	user-select: none;
+}
+
+.sessions-right-workbench-canvas-pill-button,
+.sessions-right-workbench-canvas-pill-send,
+.sessions-right-workbench-canvas-pill-close {
+	display: inline-flex;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	box-sizing: border-box;
+	height: 28px;
+	padding: 0 6px;
+	border: 1px solid transparent;
+	border-radius: 9999px;
+	color: var(--rwb-foreground);
+	background: transparent;
+	font: inherit;
+	font-size: 13px;
+	line-height: 18px;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-canvas-pill-button .codicon {
+	font-size: 16px;
+}
+
+.sessions-right-workbench-canvas-pill-button .label {
+	font-size: 14px;
+	line-height: 21px;
+}
+
+.sessions-right-workbench-canvas-pill-button:hover,
+.sessions-right-workbench-canvas-pill-button[aria-pressed='true'],
+.sessions-right-workbench-canvas-pill-close:hover {
+	background: color-mix(in srgb, var(--rwb-foreground) 5%, transparent);
+}
+
+.sessions-right-workbench-canvas-pill-hint {
+	min-width: 0;
+	padding: 0 6px;
+	overflow: hidden;
+	color: color-mix(in srgb, var(--rwb-foreground) 50%, transparent);
+	font-size: 14px;
+	line-height: 18px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Send is the one inverted control: foreground-filled like Codex's. */
+.sessions-right-workbench-canvas-pill-send {
+	border-color: color-mix(in srgb, var(--rwb-foreground) 8%, transparent);
+	color: var(--rwb-canvas-surface);
+	background: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-canvas-pill-send:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+.sessions-right-workbench-canvas-pill-close {
+	width: 28px;
+	padding: 0;
+}
+
+/* Top-right controls: the filter chip, then zoom. */
+.sessions-right-workbench-canvas-corner {
+	position: absolute;
+	top: 10px;
+	right: 8px;
+	z-index: 3;
+	display: flex;
+	gap: 6px;
+}
+
+.sessions-right-workbench-canvas-zoom,
+.sessions-right-workbench-canvas-filter {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	box-sizing: border-box;
+	height: 28px;
+	padding: 0 8px;
+	border: 1px solid transparent;
+	border-radius: 12.5px;
+	color: color-mix(in srgb, var(--rwb-foreground) 50%, transparent);
+	background: color-mix(in srgb, var(--rwb-foreground) 8%, transparent);
+	font: inherit;
+	font-size: 13px;
+	line-height: 18px;
+	font-variant-numeric: tabular-nums;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-canvas-zoom:hover,
+.sessions-right-workbench-canvas-filter:hover,
+.sessions-right-workbench-canvas-filter.active {
+	color: var(--rwb-foreground);
+}
+
+.sessions-right-workbench-canvas-filter .codicon {
+	font-size: 14px;
+}
+
+.sessions-right-workbench-canvas-filter .value {
+	max-width: 220px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-canvas-filter-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 24px 4px;
+	color: color-mix(in srgb, var(--rwb-foreground) 60%, transparent);
+	font-size: 13px;
+}
+
+.sessions-right-workbench-canvas-filter-empty p {
+	margin: 0;
+}
+
+.sessions-right-workbench-canvas-zoom .value:empty {
+	display: none;
+}
+
+.sessions-right-workbench-canvas-scroll {
+	box-sizing: border-box;
+	height: 100%;
+	overflow: auto;
+	padding: 56px 64px 24px 12px;
+}
+
+.sessions-right-workbench-canvas-content {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 24px;
+	min-width: max-content;
+	zoom: var(--rwb-canvas-zoom, 1);
+}
+
+.sessions-right-workbench-canvas-row {
+	position: relative;
+	display: flex;
+	gap: 8px;
+	padding-top: 24px;
+}
+
+/* Each turn is headed by its chat's name and time. */
+.sessions-right-workbench-canvas-time {
+	position: absolute;
+	top: 0;
+	left: 0;
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	color: color-mix(in srgb, var(--rwb-foreground) 50%, transparent);
+	font-size: 12px;
+	line-height: 16px;
+	white-space: nowrap;
+	user-select: none;
+}
+
+.sessions-right-workbench-canvas-frame {
+	position: relative;
+	flex-shrink: 0;
+}
+
+.sessions-right-workbench-canvas-tile {
+	position: relative;
+	display: block;
+	padding: 0;
+	border: 0;
+	border-radius: 15px;
+	overflow: hidden;
+	line-height: 0;
+	background: color-mix(in srgb, var(--rwb-foreground) 4%, transparent);
+	cursor: pointer;
+	outline: none;
+}
+
+.sessions-right-workbench-canvas-tile:active {
+	transform: scale(0.995);
+}
+
+.sessions-right-workbench-canvas-tile:focus-visible {
+	box-shadow: 0 0 0 2px var(--vscode-focusBorder);
+}
+
+.sessions-right-workbench-canvas-tile[aria-pressed='true'] {
+	box-shadow: 0 0 0 2px var(--rwb-canvas-accent);
+}
+
+.sessions-right-workbench-canvas-tile img {
+	display: block;
+	width: auto;
+	max-width: 100%;
+	height: auto;
+	max-height: 292px;
+	object-fit: contain;
+}
+
+/* Until a tile's media loads (they load as they scroll near), it keeps a square placeholder so the grid doesn't jump. */
+.sessions-right-workbench-canvas-tile :is(img, video):not([src]) {
+	width: 292px;
+	height: 292px;
+}
+
+.sessions-right-workbench-canvas.comment-mode .sessions-right-workbench-canvas-tile {
+	cursor: crosshair;
+}
+
+.sessions-right-workbench-canvas-check {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	color: var(--vscode-button-foreground);
+	background: var(--rwb-canvas-accent);
+	box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.35);
+	pointer-events: none;
+}
+
+.sessions-right-workbench-canvas-check .codicon {
+	font-size: 12px;
+}
+
+/* A numbered speech-bubble pin whose tail sits on the commented point. */
+.sessions-right-workbench-canvas-pin {
+	position: absolute;
+	z-index: 2;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	min-width: 24px;
+	height: 24px;
+	padding: 0 6px;
+	border: 2px solid #ffffff;
+	border-radius: 12px 12px 12px 2px;
+	color: #ffffff;
+	background: var(--vscode-focusBorder);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1;
+	transform: translate(0, -100%);
+}
+
+.sessions-right-workbench-canvas-comment {
+	position: absolute;
+	z-index: 4;
+	display: flex;
+	align-items: center;
+	box-sizing: border-box;
+	width: 294px;
+	height: 44px;
+	margin: 0;
+	padding: 8px 8px 8px 16px;
+	border-radius: 22px;
+	background: color-mix(in srgb, var(--rwb-foreground) 10%, var(--rwb-canvas-surface));
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--rwb-foreground) 4%, transparent), 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+	transform: translate(32px, -34px);
+}
+
+.sessions-right-workbench-canvas-comment.flip {
+	transform: translate(calc(-100% - 8px), -34px);
+}
+
+.sessions-right-workbench-canvas-comment input {
+	flex: 1;
+	min-width: 0;
+	padding: 0;
+	border: 0;
+	outline: none;
+	color: var(--rwb-foreground);
+	background: transparent;
+	font: inherit;
+	font-size: 14px;
+	line-height: 21px;
+}
+
+.sessions-right-workbench-canvas-comment input::placeholder {
+	color: color-mix(in srgb, var(--rwb-foreground) 50%, transparent);
+}
+
+.sessions-right-workbench-canvas-focused-stage {
+	box-sizing: border-box;
+	display: grid;
+	place-items: safe center;
+	height: 100%;
+	padding: 56px 16px 16px;
+	overflow: auto;
+	outline: none;
+}
+
+.sessions-right-workbench-canvas-body {
+	height: 100%;
+}
+
+.sessions-right-workbench-canvas-source {
+	max-width: 320px;
+	padding: 0 6px;
+	overflow: hidden;
+	border-radius: 6px;
+	color: var(--rwb-foreground);
+	background: color-mix(in srgb, var(--rwb-canvas-accent) 22%, transparent);
+	font-weight: 500;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* --- Videos: tiles and thumbs preview muted, a play badge marks them --- */
+
+.sessions-right-workbench-canvas-tile video {
+	display: block;
+	width: auto;
+	max-width: 100%;
+	height: auto;
+	max-height: 292px;
+	object-fit: contain;
+}
+
+.sessions-right-workbench-canvas-video-badge {
+	position: absolute;
+	left: 8px;
+	bottom: 8px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	border-radius: 50%;
+	color: #ffffff;
+	background: rgba(0, 0, 0, 0.45);
+	backdrop-filter: blur(12px);
+	pointer-events: none;
+}
+
+.sessions-right-workbench-canvas-video-badge .codicon {
+	font-size: 12px;
+}
+
+/* --- Focused view: filmstrip on the left, composer floating at the bottom --- */
+
+.sessions-right-workbench-canvas.focused .sessions-right-workbench-canvas-focused-stage {
+	padding: 56px 16px 136px 108px;
+}
+
+.sessions-right-workbench-canvas-rail {
+	position: absolute;
+	top: 52px;
+	bottom: 12px;
+	left: 8px;
+	z-index: 2;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	box-sizing: border-box;
+	width: 84px;
+	padding: 4px;
+	overflow-y: auto;
+	scrollbar-width: thin;
+}
+
+.sessions-right-workbench-canvas-rail-thumb {
+	position: relative;
+	flex-shrink: 0;
+	box-sizing: border-box;
+	width: 72px;
+	height: 72px;
+	padding: 0;
+	border: 1px solid color-mix(in srgb, var(--rwb-foreground) 8%, transparent);
+	border-radius: 12px;
+	overflow: hidden;
+	background: color-mix(in srgb, var(--rwb-foreground) 4%, transparent);
+	cursor: pointer;
+}
+
+.sessions-right-workbench-canvas-rail-thumb :is(img, video) {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.sessions-right-workbench-canvas-rail-thumb[aria-pressed='true'] {
+	box-shadow: 0 0 0 2px var(--rwb-canvas-accent);
+}
+
+.sessions-right-workbench-canvas-rail-thumb:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+}
+
+.sessions-right-workbench-canvas-rail-thumb .sessions-right-workbench-canvas-video-badge {
+	left: 4px;
+	bottom: 4px;
+	width: 18px;
+	height: 18px;
+}
+
+.sessions-right-workbench-canvas-composer {
+	position: absolute;
+	right: 16px;
+	bottom: 16px;
+	left: 108px;
+	z-index: 3;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	box-sizing: border-box;
+	max-width: 680px;
+	margin: 0 auto;
+	padding: 12px 12px 8px 14px;
+	border-radius: 20px;
+	background: color-mix(in srgb, color-mix(in srgb, var(--rwb-foreground) 9%, var(--rwb-canvas-surface)) 94%, transparent);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--rwb-foreground) 8%, transparent), 0 8px 24px -8px rgba(0, 0, 0, 0.35);
+	backdrop-filter: blur(16px);
+}
+
+.sessions-right-workbench-canvas-composer[hidden] {
+	display: none;
+}
+
+.sessions-right-workbench-canvas-composer-input {
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 20px;
+	max-height: 120px;
+	padding: 0;
+	border: 0;
+	outline: none;
+	resize: none;
+	color: var(--rwb-foreground);
+	background: transparent;
+	font: inherit;
+	font-size: 14px;
+	line-height: 20px;
+}
+
+.sessions-right-workbench-canvas-composer-input::placeholder {
+	color: color-mix(in srgb, var(--rwb-foreground) 50%, transparent);
+}
+
+.sessions-right-workbench-canvas-composer-footer {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.sessions-right-workbench-canvas-composer-modes {
+	display: flex;
+	flex-shrink: 0;
+	gap: 2px;
+	padding: 2px;
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--rwb-foreground) 6%, transparent);
+}
+
+.sessions-right-workbench-canvas-composer-mode,
+.sessions-right-workbench-canvas-composer-model {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	box-sizing: border-box;
+	height: 24px;
+	padding: 0 8px;
+	border: 0;
+	border-radius: 8px;
+	color: color-mix(in srgb, var(--rwb-foreground) 60%, transparent);
+	background: transparent;
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.sessions-right-workbench-canvas-composer-mode .codicon {
+	font-size: 14px;
+}
+
+.sessions-right-workbench-canvas-composer-mode[aria-pressed='true'] {
+	color: var(--rwb-foreground);
+	background: var(--rwb-canvas-surface);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+.sessions-right-workbench-canvas-composer-model {
+	min-width: 0;
+	max-width: 220px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sessions-right-workbench-canvas-composer-model:hover,
+.sessions-right-workbench-canvas-composer-mode:hover {
+	color: var(--rwb-foreground);
+	background: color-mix(in srgb, var(--rwb-foreground) 6%, transparent);
+}
+
+.sessions-right-workbench-canvas-composer-model.inactive {
+	color: var(--rwb-canvas-accent);
+}
+
+.sessions-right-workbench-canvas-composer-send {
+	display: flex;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	margin-left: auto;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	color: var(--rwb-canvas-surface);
+	background: var(--rwb-foreground);
+	cursor: pointer;
+}
+
+.sessions-right-workbench-canvas-composer-send:disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+
+.sessions-right-workbench-canvas-composer :is(button, textarea):focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+}
+
+/* --- Video length: on each video badge and as a chip in the grid --- */
+
+.sessions-right-workbench-canvas-video-badge.has-length {
+	gap: 3px;
+	width: auto;
+	padding: 0 7px 0 5px;
+	border-radius: 11px;
+	font-size: 11px;
+	font-weight: 500;
+	font-variant-numeric: tabular-nums;
+}
+
+.sessions-right-workbench-canvas-video-badge .length:empty {
+	display: none;
+}
+
+.sessions-right-workbench-canvas-rail-thumb .sessions-right-workbench-canvas-video-badge.has-length {
+	padding: 0 5px 0 3px;
+	font-size: 10px;
+}
+
+.sessions-right-workbench-canvas-length-chip {
+	position: absolute;
+	top: 10px;
+	right: 96px;
+	z-index: 3;
+	display: none;
+	align-items: center;
+	gap: 5px;
+	box-sizing: border-box;
+	height: 28px;
+	padding: 0 10px;
+	border-radius: 12.5px;
+	color: var(--rwb-foreground);
+	background: color-mix(in srgb, var(--rwb-foreground) 8%, transparent);
+	font-size: 13px;
+	font-variant-numeric: tabular-nums;
+}
+
+.sessions-right-workbench-canvas-length-chip.has-length {
+	display: inline-flex;
+}
+
+.sessions-right-workbench-canvas-length-chip .codicon {
+	font-size: 14px;
+}

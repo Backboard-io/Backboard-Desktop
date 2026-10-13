@@ -1,0 +1,403 @@
+name: Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Backboard Studio semantic version (for example, 2.6.0)
+        required: true
+        type: string
+      channel:
+        description: Release channel
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - sandbox
+      reuse_signed_run:
+        description: Optional successful release run whose signed application payload should be reused
+        type: string
+        required: false
+  # Called by prod-release.yml so a push to prod ships Windows next to the
+  # macOS and Linux builds.
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      channel:
+        required: true
+        type: string
+      source_ref:
+        description: Branch or commit to build. Defaults to the triggering commit.
+        required: false
+        type: string
+        default: ''
+      reuse_signed_run:
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: windows-release-${{ inputs.channel }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  build-sign-verify:
+    name: Build, sign, and verify Windows x64
+    # The VS Code native build prerequisite currently requires the VS 2022
+    # toolchain. windows-2025 has moved to VS 2026 and fails preinstall.
+    runs-on: windows-2022
+    environment: windows-release
+    timeout-minutes: 120
+    env:
+      RELEASE_ARCH: x64
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_CHANNEL: ${{ inputs.channel }}
+      REUSE_SIGNED_RUN: ${{ inputs.reuse_signed_run }}
+      ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+      ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+      ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+      WINDOWS_SIGNING_SUBJECT: ${{ vars.WINDOWS_SIGNING_SUBJECT }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+    steps:
+      - name: Validate release request and signing configuration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ('${{ github.ref }}' -notin 'refs/heads/main', 'refs/heads/prod', 'refs/heads/windows') {
+            throw 'Production Windows releases must run from the main, prod, or windows branch.'
+          }
+          if ($env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+            throw "Invalid semantic version: $env:RELEASE_VERSION"
+          }
+          foreach ($name in 'ARTIFACT_SIGNING_ENDPOINT', 'ARTIFACT_SIGNING_ACCOUNT', 'ARTIFACT_SIGNING_PROFILE', 'WINDOWS_SIGNING_SUBJECT', 'AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID') {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "The windows-release environment is missing $name."
+            }
+          }
+          if ($env:ARTIFACT_SIGNING_ENDPOINT -notmatch '^https://[a-z0-9-]+\.codesigning\.azure\.net/$') {
+            throw "Invalid Artifact Signing endpoint: $env:ARTIFACT_SIGNING_ENDPOINT"
+          }
+
+      # Pinned actions prevent a mutable tag from changing the release trust path.
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          lfs: true
+
+      # The source ships without analytics keys; release builds stamp
+      # Backboard's from the BACKBOARD_POSTHOG_KEY secret (if set).
+      - name: Stamp analytics key
+        shell: bash
+        env:
+          BACKBOARD_POSTHOG_KEY: ${{ secrets.BACKBOARD_POSTHOG_KEY }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const key = (process.env.BACKBOARD_POSTHOG_KEY || "").trim();
+            if (!key) { console.log("BACKBOARD_POSTHOG_KEY is not set; this build ships without product analytics."); process.exit(0); }
+            const file = "backboard/product.json";
+            const product = JSON.parse(fs.readFileSync(file, "utf8"));
+            product.backboardAnalytics = { ...product.backboardAnalytics, posthogKey: key };
+            fs.writeFileSync(file, JSON.stringify(product, null, "\t") + "\n");
+          '
+
+      # The application lives below the Git root; VS Code's build helper
+      # otherwise looks for a nonexistent backboard/.git directory.
+      # Use our own variable so bundled extensions do not enter Microsoft's
+      # BUILD_SOURCEVERSION-triggered publishing mode.
+      - name: Record source commit
+        shell: pwsh
+        run: |
+          $commit = git rev-parse HEAD
+          "BACKBOARD_SOURCE_COMMIT=$commit" | Out-File $env:GITHUB_ENV -Append
+          Write-Host "Building Windows from $commit"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          # Node 24.15.0 can fast-fail with 0xC0000409 during Windows npm
+          # installs. The libuv fix first shipped in 24.16.0 (nodejs/node#62561).
+          # Keep this on a fixed 24.x release satisfying backboard/.nvmrc.
+          node-version: '24.21.0'
+          cache: npm
+          cache-dependency-path: backboard/package-lock.json
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Parse Windows release PowerShell
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          foreach ($script in Get-ChildItem 'scripts/windows-release/*.ps1') {
+            [void][System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              throw 'Windows release PowerShell parsing failed.'
+            }
+          }
+
+      - name: Add Windows SDK signing tools to PATH
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $windowsKitsBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+          $signTool = Get-ChildItem -LiteralPath $windowsKitsBin -Recurse -File -Filter 'signtool.exe' |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]signtool\.exe$' } |
+            Sort-Object -Property FullName -Descending |
+            Select-Object -First 1
+          if (-not $signTool) {
+            throw "Could not locate the x64 Windows SDK signtool under $windowsKitsBin."
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $signTool.DirectoryName
+          Write-Host "Using Windows SDK signing tools from $($signTool.DirectoryName)"
+
+      - name: Stamp Backboard release metadata
+        if: ${{ !inputs.reuse_signed_run }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $builtAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          node scripts/windows-release/stamp-product.mjs `
+            --product backboard/product.json `
+            --package backboard/package.json `
+            --version $env:RELEASE_VERSION `
+            --arch $env:RELEASE_ARCH `
+            --channel $env:RELEASE_CHANNEL `
+            --built-at $builtAt `
+            --source-commit $env:BACKBOARD_SOURCE_COMMIT `
+            --build-info windows-build-info.json
+
+      - name: Install Windows build dependencies
+        if: ${{ !inputs.reuse_signed_run }}
+        shell: pwsh
+        working-directory: backboard
+        env:
+          npm_config_arch: x64
+          npm_config_cpu: x64
+          npm_config_foreground_scripts: 'true'
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+          # Keep native dependency installs serialized on the Windows runner.
+          VSCODE_NPM_INSTALL_CONCURRENCY: '1'
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm ci
+
+      - name: Build Backboard Studio application
+        if: ${{ !inputs.reuse_signed_run }}
+        shell: pwsh
+        working-directory: backboard
+        env:
+          BACKBOARD_CLI_TARGET: bun-windows-x64
+          # The bundled Copilot extension packages this marker. Its own build
+          # invokes postinstall again, so preserve the marker during packaging.
+          BACKBOARD_KEEP_COPILOT_SHIM_MARKER: '1'
+          VSCODE_ARCH: x64
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          # Produce out first so preLaunch does not start the all-target dev
+          # build (including Copilot) and compile the client a second time.
+          npm run compile-client
+          node build/lib/preLaunch.ts
+
+          Push-Location cli-ts
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test tests/ReleaseFeatures.test.ts
+          bun run build
+          Pop-Location
+
+          New-Item -ItemType Directory -Force extensions/backboard/bin | Out-Null
+          Copy-Item -Force cli-ts/backboard.exe extensions/backboard/bin/backboard-cli-ts.exe
+          npm exec -- tsgo --project ./extensions/backboard/tsconfig.json
+          npm --prefix extensions/backboard run test-updater
+
+          npm run gulp -- vscode-win32-x64
+          npm run gulp -- vscode-win32-x64-inno-updater
+
+      - name: Restore previously verified application payload
+        if: ${{ inputs.reuse_signed_run }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:REUSE_SIGNED_RUN -notmatch '^\d+$') { throw 'Invalid source run ID' }
+          $run = gh run view $env:REUSE_SIGNED_RUN --json conclusion,workflowName | ConvertFrom-Json
+          if ($run.conclusion -ne 'success' -or $run.workflowName -ne 'Windows Release') { throw 'Expected a successful Windows Release run' }
+          gh run download $env:REUSE_SIGNED_RUN -n "Backboard-Studio-$env:RELEASE_VERSION-windows-x64-verified-payload" -D .
+          $info = Get-Content -Raw windows-build-info.json | ConvertFrom-Json
+          if ($info.version -ne $env:RELEASE_VERSION -or $info.channel -ne $env:RELEASE_CHANNEL -or $info.arch -ne 'x64') { throw 'Source payload does not match requested release' }
+
+      - name: Validate complete Windows application payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = Join-Path '${{ github.workspace }}' 'VSCode-win32-x64'
+          $productJson = Get-ChildItem -LiteralPath $app -Recurse -File -Filter 'product.json' |
+            Where-Object { $_.FullName -match '[\\/]resources[\\/]app[\\/]product\.json$' }
+          $mainExecutables = Get-ChildItem -LiteralPath $app -File -Filter '*.exe'
+          if (-not $productJson) {
+            throw "The packaged application is incomplete: resources/app/product.json is missing from $app."
+          }
+          if (-not $mainExecutables) {
+            throw "The packaged application is incomplete: no top-level executable exists in $app."
+          }
+          Write-Host "Validated packaged application: $($mainExecutables.Name -join ', ')"
+
+      - name: Sign in to Azure with GitHub OIDC
+        if: ${{ !inputs.reuse_signed_run }}
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign application binaries with Azure Artifact Signing
+        if: ${{ !inputs.reuse_signed_run }}
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
+        with:
+          endpoint: ${{ env.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ env.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\VSCode-win32-x64
+          files-folder-filter: exe,dll,node
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Backboard Studio
+          description-url: https://github.com/${{ github.repository }}
+
+      - name: Verify signed application payload
+        shell: pwsh
+        run: |
+          ./scripts/windows-release/Verify-Authenticode.ps1 `
+            -Path '${{ github.workspace }}\VSCode-win32-x64' `
+            -ExpectedSubject $env:WINDOWS_SIGNING_SUBJECT
+
+      - name: Preserve verified payload for installer recovery
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Backboard-Studio-${{ inputs.version }}-windows-x64-verified-payload
+          path: |
+            VSCode-win32-x64/
+            windows-build-info.json
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+      - name: Install compiler with extended path support
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.0-x64.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe' -OutFile $setup
+          $signature = Get-AuthenticodeSignature $setup
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(^|, )CN=Pyrsys B\.V\.(,|$)') { throw 'Inno Setup compiler signature verification failed' }
+          $compilerFolder = Join-Path $env:RUNNER_TEMP 'InnoSetup7'
+          $process = Start-Process $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$compilerFolder`"") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Inno Setup compiler installation failed' }
+          "BACKBOARD_INNO_SETUP_PATH=$compilerFolder\ISCC.exe" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Build installers from signed application payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = Join-Path '${{ github.workspace }}' "windows-release\$env:RELEASE_VERSION\x64"
+          New-Item -ItemType Directory -Force $release | Out-Null
+          ./scripts/windows-release/Build-Installers.ps1 -ApplicationPath VSCode-win32-x64 -RepositoryPath backboard -OutputPath $release -CompilerPath $env:BACKBOARD_INNO_SETUP_PATH
+          $info = Get-Content -Raw windows-build-info.json | ConvertFrom-Json
+          $info | Add-Member -NotePropertyName installerSourceCommit -NotePropertyValue $env:BACKBOARD_SOURCE_COMMIT -Force
+          $info | Add-Member -NotePropertyName installerCompilerVersion -NotePropertyValue '7.1.0' -Force
+          $info | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $release 'build-info.json') -Encoding utf8NoBOM
+
+      - name: Preserve compiled installer candidates
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Backboard-Studio-${{ inputs.version }}-windows-x64-installer-candidates
+          path: windows-release/${{ inputs.version }}/x64/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+      - name: Refresh Azure sign-in immediately before installer signing
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign Windows installers with Azure Artifact Signing
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
+        with:
+          endpoint: ${{ env.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ env.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\windows-release\${{ inputs.version }}\x64
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Backboard Studio Installer
+          description-url: https://github.com/${{ github.repository }}
+
+      - name: Verify installers and create portable archive
+        id: verify_installers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = Join-Path '${{ github.workspace }}' "windows-release\$env:RELEASE_VERSION\x64"
+          ./scripts/windows-release/Verify-Authenticode.ps1 `
+            -Path $release `
+            -ExpectedSubject $env:WINDOWS_SIGNING_SUBJECT
+
+          $archive = Join-Path $release 'Backboard-Studio-win32-x64.zip'
+          Compress-Archive -Path '${{ github.workspace }}\VSCode-win32-x64\*' -DestinationPath $archive -CompressionLevel Optimal
+
+          $checksums = Get-ChildItem -LiteralPath $release -File |
+            Sort-Object -Property Name |
+            ForEach-Object { "{0}  {1}" -f (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant(), $_.Name }
+          Set-Content -LiteralPath (Join-Path $release 'SHA256SUMS') -Value $checksums -Encoding utf8NoBOM
+
+      - name: Test installer registration and removal
+        shell: pwsh
+        run: ./scripts/windows-release/Test-Installers.ps1 -ReleasePath "windows-release/$env:RELEASE_VERSION/x64" -Version $env:RELEASE_VERSION
+
+      - name: Preserve installation test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Windows-installer-verification-${{ inputs.version }}
+          path: installer-test-results/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Publish signed Windows release artifact
+        if: ${{ !cancelled() && steps.verify_installers.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Backboard-Studio-${{ inputs.version }}-windows-x64-signed
+          path: windows-release/${{ inputs.version }}/x64/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

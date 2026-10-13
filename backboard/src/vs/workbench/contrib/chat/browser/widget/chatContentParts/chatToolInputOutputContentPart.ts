@@ -1,0 +1,298 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import * as dom from '../../../../../../base/browser/dom.js';
+import { ButtonWithIcon } from '../../../../../../base/browser/ui/button/button.js';
+import { Codicon } from '../../../../../../base/common/codicons.js';
+import { IMarkdownString } from '../../../../../../base/common/htmlContent.js';
+import { Disposable } from '../../../../../../base/common/lifecycle.js';
+import { autorun, ISettableObservable, observableValue } from '../../../../../../base/common/observable.js';
+import { ThemeIcon } from '../../../../../../base/common/themables.js';
+import { URI } from '../../../../../../base/common/uri.js';
+import { localize } from '../../../../../../nls.js';
+import { IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
+import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
+import { IHoverService } from '../../../../../../platform/hover/browser/hover.js';
+import { observableConfigValue } from '../../../../../../platform/observable/common/platformObservableUtils.js';
+import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
+import { IChatRendererContent } from '../../../common/model/chatViewModel.js';
+import { LanguageModelPartAudience } from '../../../common/languageModels.js';
+import { AccessibilityWorkbenchSettingId } from '../../../../accessibility/browser/accessibilityConfiguration.js';
+import { ChatTreeItem, IChatCodeBlockInfo } from '../../chat.js';
+import { CodeBlockPart, ICodeBlockData, ICodeBlockRenderOptions } from './codeBlockPart.js';
+import { IDisposableReference } from './chatCollections.js';
+import { ChatQueryTitlePart } from './chatConfirmationWidget.js';
+import { IChatContentPartRenderContext } from './chatContentParts.js';
+import { ChatToolOutputContentSubPart } from './chatToolOutputContentSubPart.js';
+import { getChatMarkdownRenderOptions } from '../chatContentMarkdownRenderer.js';
+
+export interface IChatCollapsibleIOCodePart {
+	kind: 'code';
+	data: string; // The text content to create a model from
+	languageId: string;
+	options: ICodeBlockRenderOptions;
+	codeBlockIndex: number;
+	ownerMarkdownPartId: string;
+	title?: string | IMarkdownString;
+}
+
+export interface IChatCollapsibleIODataPart {
+	kind: 'data';
+	value?: Uint8Array;
+	/**
+	 * Base64-encoded value that can be decoded lazily to avoid expensive
+	 * decoding during scroll. Takes precedence over `value` when present.
+	 */
+	base64Value?: string;
+	audience?: LanguageModelPartAudience[];
+	mimeType: string | undefined;
+	uri: URI;
+}
+
+export type ChatCollapsibleIOPart = IChatCollapsibleIOCodePart | IChatCollapsibleIODataPart;
+
+export interface IChatCollapsibleInputData extends IChatCollapsibleIOCodePart { }
+export interface IChatCollapsibleOutputData {
+	parts: ChatCollapsibleIOPart[];
+}
+
+export class ChatCollapsibleInputOutputContentPart extends Disposable {
+	private readonly _editorReferences: IDisposableReference<CodeBlockPart>[] = [];
+	private readonly _titlePart: ChatQueryTitlePart;
+	private _outputSubPart: ChatToolOutputContentSubPart | undefined;
+	public readonly domNode: HTMLElement;
+	private _contentInitialized = false;
+
+	get codeblocks(): IChatCodeBlockInfo[] {
+		const outputCodeblocks = this._outputSubPart?.codeblocks ?? [];
+		return outputCodeblocks;
+	}
+
+	public set title(s: string | IMarkdownString) {
+		this._titlePart.title = s;
+	}
+
+	public get title(): string | IMarkdownString {
+		return this._titlePart.title;
+	}
+
+	private readonly _expanded: ISettableObservable<boolean>;
+
+	public get expanded(): boolean {
+		return this._expanded.get();
+	}
+
+	constructor(
+		title: IMarkdownString | string,
+		subtitle: string | IMarkdownString | undefined,
+		progressTooltip: IMarkdownString | string | undefined,
+		private readonly context: IChatContentPartRenderContext,
+		private readonly input: IChatCollapsibleInputData,
+		private readonly output: IChatCollapsibleOutputData | undefined,
+		isError: boolean,
+		initiallyExpanded: boolean,
+		shimmer: boolean,
+		@IContextKeyService private readonly contextKeyService: IContextKeyService,
+		@IInstantiationService private readonly _instantiationService: IInstantiationService,
+		@IHoverService hoverService: IHoverService,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
+	) {
+		super();
+
+		const container = dom.h('.chat-confirmation-widget-container.chat-tool-io');
+		const titleEl = dom.h('.chat-confirmation-widget-title-inner');
+		const elements = dom.h('.chat-confirmation-widget');
+		this.domNode = container.root;
+		container.root.appendChild(elements.root);
+
+		this._titlePart = this._register(_instantiationService.createInstance(
+			ChatQueryTitlePart,
+			titleEl.root,
+			title,
+			subtitle,
+		));
+		this._titlePart.setOptions({ markdownRenderOptions: getChatMarkdownRenderOptions(), renderFileWidgets: true });
+		const spacer = document.createElement('span');
+		spacer.style.flexGrow = '1';
+
+		const activityTitle = (typeof title === 'string' ? title : title.value).trim();
+		const staticActivityRow = !!context.container.closest('.part.auxiliarybar, .agent-sessions-workbench .part.sessionspart')
+			&& (/^MCP\b/i.test(activityTitle) || /^(?:Ran|Running|Waited for|Waiting for) Playwright code(?: to complete)?(?:\.\.\.)?$/i.test(activityTitle));
+		container.root.classList.toggle('chat-tool-io-static-activity', staticActivityRow);
+		const btn = this._register(new ButtonWithIcon(elements.root, {}));
+		btn.element.classList.add('chat-confirmation-widget-title', 'monaco-text-button');
+		btn.labelElement.append(titleEl.root);
+		const inputHeader = dom.$('span.chat-tool-io-input-header');
+		inputHeader.textContent = input.data;
+		try {
+			const parsed: unknown = JSON.parse(input.data);
+			if (parsed && typeof parsed === 'object' && 'code' in parsed && typeof parsed.code === 'string') {
+				inputHeader.textContent = parsed.code;
+			} else if (parsed && typeof parsed === 'object') {
+				container.root.classList.add('chat-tool-io-activity');
+				const label = (typeof title === 'string' ? title : title.value).replace(/:\s*\{[\s\S]*$/, '');
+				inputHeader.textContent = label;
+			}
+		} catch {
+			// Plain code and text already make an appropriate prompt header.
+		}
+		if (context.container.closest('.part.auxiliarybar, .agent-sessions-workbench .part.sessionspart') && context.container.closest('.backboard-cursor-transcript')) {
+			// Plain-string MCP arguments are subjects, not tool names. Keep the
+			// actual operation in the row and put its input behind the disclosure.
+			container.root.classList.add('chat-tool-io-activity');
+			inputHeader.textContent = (typeof title === 'string' ? title : title.value).replace(/:\s*\{[\s\S]*$/, '');
+		}
+		btn.element.title = `${typeof title === 'string' ? title : title.value}\n${input.data}`;
+		btn.labelElement.appendChild(inputHeader);
+		const activityIcon = dom.$('span.chat-io-activity-icon', { 'aria-hidden': 'true' });
+		btn.labelElement.before(activityIcon);
+
+		// Add hover chevron indicator on the right (decorative, hide from screen readers)
+		const hoverChevron = dom.$('span.chat-collapsible-hover-chevron.codicon.codicon-chevron-right');
+		hoverChevron.setAttribute('aria-hidden', 'true');
+		if (!staticActivityRow) {
+			btn.element.appendChild(hoverChevron);
+		} else {
+			btn.element.removeAttribute('role');
+			btn.element.removeAttribute('href');
+			btn.element.tabIndex = -1;
+		}
+
+		// Only show leading icon for errors, or for checkmarks/loading when the accessibility setting is on
+		const showCheckmarks = observableConfigValue(AccessibilityWorkbenchSettingId.ShowChatCheckmarks, false, this.configurationService);
+
+		const expanded = this._expanded = observableValue(this, initiallyExpanded && !staticActivityRow);
+		this._register(autorun(r => {
+			const value = expanded.read(r);
+			const checkmarksEnabled = showCheckmarks.read(r);
+			elements.root.classList.toggle('collapsed', !value);
+
+			const isInProgress = !output && !isError;
+			const activityThemeIcon = isError ? Codicon.error : isInProgress ? ThemeIcon.modify(Codicon.loading, 'spin') : input.languageId === 'javascript' ? Codicon.code : Codicon.tools;
+			activityIcon.className = 'chat-io-activity-icon';
+			activityIcon.classList.add(...ThemeIcon.asClassNameArray(activityThemeIcon));
+			if (!staticActivityRow) {
+				btn.element.setAttribute('aria-expanded', String(value));
+			}
+			if (isError) {
+				btn.icon = Codicon.error;
+			} else {
+				btn.icon = output
+					? Codicon.check
+					: ThemeIcon.modify(Codicon.loading, 'spin');
+			}
+			elements.root.classList.toggle('shimmer-progress', shimmer && isInProgress);
+
+			container.root.classList.toggle('show-checkmarks', checkmarksEnabled);
+
+			// Update hover chevron direction
+			hoverChevron.classList.toggle('codicon-chevron-right', !value);
+			hoverChevron.classList.toggle('codicon-chevron-down', value);
+
+			// Lazy initialization: render content only when expanded for the first time
+			if (value && !this._contentInitialized) {
+				this._contentInitialized = true;
+				const messageContainer = dom.h('.chat-confirmation-widget-message');
+				messageContainer.root.appendChild(this.createMessageContents());
+				elements.root.appendChild(messageContainer.root);
+			}
+		}));
+
+		const toggle = (e: Event) => {
+			e.stopPropagation();
+			if (!e.defaultPrevented) {
+				const value = expanded.get();
+				expanded.set(!value, undefined);
+				if (!value) {
+					this.layout(this.context.currentWidth.get());
+				}
+				e.preventDefault();
+			}
+		};
+
+		if (!staticActivityRow) {
+			this._register(btn.onDidClick(toggle));
+		}
+
+		const topLevelResources = this.output?.parts
+			.filter(p => p.kind === 'data')
+			.filter(p => !p.audience || p.audience.includes(LanguageModelPartAudience.User));
+		if (topLevelResources?.length) {
+			const resourceSubPart = this._register(this._instantiationService.createInstance(
+				ChatToolOutputContentSubPart,
+				this.context,
+				topLevelResources,
+			));
+			const group = resourceSubPart.domNode;
+			group.classList.add('chat-collapsible-top-level-resource-group');
+			container.root.appendChild(group);
+			this._register(autorun(r => {
+				group.style.display = expanded.read(r) ? 'none' : '';
+			}));
+		}
+	}
+
+	private createMessageContents() {
+		const contents = dom.h('div.chat-tool-io-details', [
+			dom.h('h3@inputTitle'),
+			dom.h('div.chat-tool-io-input@input'),
+			dom.h('h3@outputTitle'),
+			dom.h('div.chat-tool-io-output@output'),
+		]);
+
+		const { input, output } = this;
+
+		contents.inputTitle.textContent = localize('chat.input', "Input");
+		this.addCodeBlock(input, contents.input);
+
+		if (!output) {
+			contents.output.remove();
+			contents.outputTitle.remove();
+		} else {
+			contents.outputTitle.textContent = localize('chat.output', "Output");
+			const outputSubPart = this._register(this._instantiationService.createInstance(
+				ChatToolOutputContentSubPart,
+				this.context,
+				output.parts,
+			));
+			this._outputSubPart = outputSubPart;
+			contents.output.appendChild(outputSubPart.domNode);
+		}
+
+		return contents.root;
+	}
+
+	private addCodeBlock(part: IChatCollapsibleIOCodePart, container: HTMLElement) {
+		const data: ICodeBlockData = {
+			languageId: part.languageId,
+			text: part.data,
+			codeBlockIndex: part.codeBlockIndex,
+			element: this.context.element,
+			parentContextKeyService: this.contextKeyService,
+			renderOptions: part.options,
+			chatSessionResource: this.context.element.sessionResource,
+		};
+		const key = CodeBlockPart.poolKey(this.context.element.id, part.codeBlockIndex);
+		const editorReference = this._register(this.context.editorPool.get(key));
+		editorReference.object.render(data, this.context.currentWidth.get() || 300);
+		container.appendChild(editorReference.object.element);
+		this._editorReferences.push(editorReference);
+	}
+
+	hasSameContent(other: IChatRendererContent, followingContent: IChatRendererContent[], element: ChatTreeItem): boolean {
+		// For now, we consider content different unless it's exactly the same instance
+		return false;
+	}
+
+	layout(width: number): void {
+		// The card's border and padding reduce the space available to embedded
+		// editors. Using the transcript width lets their backgrounds and content
+		// extend beyond the rounded output surface.
+		const inputWidth = this.domNode.querySelector<HTMLElement>('.chat-tool-io-input')?.clientWidth || width;
+		const outputWidth = this.domNode.querySelector<HTMLElement>('.chat-tool-io-output')?.clientWidth || width;
+		this._editorReferences.forEach(r => r.object.layout(inputWidth));
+		this._outputSubPart?.layout(outputWidth);
+	}
+}

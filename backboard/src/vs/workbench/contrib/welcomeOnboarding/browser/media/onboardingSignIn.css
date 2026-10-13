@@ -1,0 +1,655 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*
+ * The sign-in screen: flat, on the workbench background, one narrow centred
+ * column with a footer pinned to the bottom. Colours come from the theme.
+ */
+
+.onboarding-a-overlay-launch .onboarding-a-card .onboarding-a-header,
+.onboarding-a-overlay-launch .onboarding-a-card .onboarding-a-footer,
+.onboarding-a-overlay-launch .onboarding-a-close-btn {
+	display: none;
+}
+
+.onboarding-a-overlay-launch .onboarding-a-card .onboarding-a-body {
+	padding: 0;
+	justify-content: center;
+	align-items: center;
+}
+
+.onboarding-a-overlay-launch .onboarding-a-card .onboarding-a-step-content {
+	flex: 0 0 auto;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+}
+
+/* Screens fade out and in as you move through them. */
+.onboarding-a-overlay-launch .onboarding-a-body {
+	transition: opacity 100ms ease-in-out;
+}
+
+.onboarding-a-overlay-launch .onboarding-a-body.onboarding-a-body-fading {
+	opacity: 0;
+}
+
+/* While the theme picker is open, sit just below it so it shows on top. */
+.onboarding-a-overlay.onboarding-a-overlay-picking {
+	z-index: 2549;
+}
+
+/* "made by Backboard", pinned to the bottom of every launch screen. */
+.onboarding-made-by {
+	display: none;
+}
+
+.onboarding-a-overlay-launch .onboarding-made-by {
+	position: fixed;
+	bottom: 44px;
+	left: 0;
+	right: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+	pointer-events: none;
+	animation: onboarding-signin-in .6s ease both .2s;
+}
+
+.onboarding-made-by-brand {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 16px;
+	font-weight: 600;
+	letter-spacing: -.01em;
+	color: var(--vscode-foreground);
+}
+
+.onboarding-made-by-mark {
+	width: 12px;
+	height: 16px;
+}
+
+.onboarding-signin {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	width: min(350px, calc(100vw - 48px));
+	margin-top: -6vh;
+	color: var(--vscode-foreground);
+	text-align: center;
+}
+
+.onboarding-signin > * {
+	animation: onboarding-signin-in .5s cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.onboarding-signin > :nth-child(2) { animation-delay: .05s; }
+.onboarding-signin > :nth-child(3) { animation-delay: .1s; }
+.onboarding-signin > :nth-child(4) { animation-delay: .15s; }
+.onboarding-signin > :nth-child(5) { animation-delay: .2s; }
+
+.onboarding-signin-logo {
+	display: block;
+	width: 40px;
+	height: 54px;
+	margin-bottom: 34px;
+}
+
+.onboarding-signin-title {
+	margin: 0;
+	font-size: 18px;
+	font-weight: 500;
+	line-height: 1.3;
+	color: var(--vscode-foreground);
+}
+
+.onboarding-signin-subtitle {
+	margin: 10px 0 22px;
+	font-size: 13px;
+	line-height: 1.4;
+	color: var(--vscode-descriptionForeground);
+}
+
+.onboarding-signin-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	width: 100%;
+}
+
+.onboarding-signin-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	box-sizing: border-box;
+	width: 100%;
+	height: 40px;
+	padding: 0 14px;
+	font: inherit;
+	font-size: 13px;
+	font-weight: 500;
+	border-radius: 6px;
+	cursor: pointer;
+	transition: background .12s ease, border-color .12s ease;
+}
+
+/* The one filled button: the editor's text colour, inverted, so it is near-white on dark themes and near-black on light ones. */
+.onboarding-signin-btn-primary {
+	color: var(--vscode-editor-background);
+	background: color-mix(in srgb, var(--vscode-editor-foreground) 92%, var(--vscode-editor-background));
+	border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 70%, transparent);
+}
+
+.onboarding-signin-btn-primary:hover:not(:disabled) {
+	background: var(--vscode-editor-foreground);
+}
+
+.onboarding-signin-btn-secondary {
+	color: var(--vscode-foreground);
+	background: color-mix(in srgb, var(--vscode-foreground) 4%, var(--vscode-editor-background));
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+}
+
+.onboarding-signin-btn-secondary:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--vscode-foreground) 8%, var(--vscode-editor-background));
+	border-color: color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
+}
+
+.onboarding-signin-btn:focus-visible,
+.onboarding-signin-link:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+.onboarding-signin-btn:disabled {
+	cursor: wait;
+	opacity: .6;
+}
+
+.onboarding-signin-enter {
+	font-size: 12px;
+	opacity: .5;
+}
+
+.onboarding-signin-help {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 4px;
+	margin: 26px 0 0;
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.onboarding-signin-link {
+	padding: 0;
+	font: inherit;
+	color: var(--vscode-descriptionForeground);
+	background: transparent;
+	border: 0;
+	border-radius: 2px;
+	cursor: pointer;
+}
+
+.onboarding-signin-link:hover {
+	color: var(--vscode-foreground);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+/* The mark ships black; flip it for dark themes. */
+.monaco-workbench.vs-dark .onboarding-signin-logo,
+.monaco-workbench.vs-dark .onboarding-made-by-mark,
+.monaco-workbench.hc-black .onboarding-signin-logo,
+.monaco-workbench.hc-black .onboarding-made-by-mark {
+	filter: invert(1) brightness(.92);
+}
+
+/* -- Customize ------------------------------------------------------------------------- */
+
+.onboarding-customize {
+	display: flex;
+	flex-direction: column;
+	gap: 20px;
+	width: min(376px, calc(100vw - 48px));
+	margin-top: -4vh;
+	color: var(--vscode-foreground);
+	text-align: left;
+}
+
+.onboarding-customize > * {
+	animation: onboarding-signin-in .5s cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.onboarding-customize > :nth-child(2) { animation-delay: .04s; }
+.onboarding-customize > :nth-child(3) { animation-delay: .08s; }
+.onboarding-customize > :nth-child(4) { animation-delay: .12s; }
+.onboarding-customize > :nth-child(5) { animation-delay: .16s; }
+.onboarding-customize > :nth-child(n+6) { animation-delay: .2s; }
+
+.onboarding-customize-title {
+	margin: 0;
+	font-size: 17px;
+	font-weight: 500;
+	line-height: 1.3;
+}
+
+.onboarding-customize-label {
+	margin: 0;
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.onboarding-theme-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+}
+
+.onboarding-theme-card {
+	position: relative;
+	display: flex;
+	height: 80px;
+	padding: 0;
+	overflow: hidden;
+	font: inherit;
+	color: var(--vscode-foreground);
+	text-align: left;
+	background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+	border-radius: 6px;
+	cursor: pointer;
+	transition: border-color .12s ease;
+}
+
+.onboarding-theme-card:hover {
+	border-color: color-mix(in srgb, var(--vscode-foreground) 24%, transparent);
+}
+
+.onboarding-theme-card-head {
+	position: relative;
+	z-index: 1;
+	display: flex;
+	flex: 1;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 8px 10px;
+}
+
+.onboarding-theme-card-label {
+	overflow: hidden;
+	font-size: 13px;
+	font-weight: 500;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* A miniature editor tucked into the card's corner. */
+.onboarding-theme-preview {
+	position: absolute;
+	right: -20px;
+	bottom: -20px;
+	width: 128px;
+	height: 64px;
+	overflow: hidden;
+	border: 1px solid;
+	border-radius: 3px;
+	pointer-events: none;
+}
+
+.onboarding-theme-preview-titlebar {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 6px;
+	border-bottom: 1px solid;
+}
+
+.onboarding-theme-preview-gutter {
+	position: absolute;
+	top: 6px;
+	bottom: 0;
+	left: 0;
+	width: 20px;
+	border-right: 1px solid;
+}
+
+.onboarding-theme-preview-code {
+	position: absolute;
+	top: 10px;
+	left: 24px;
+	right: 22px;
+	font-family: var(--monaco-monospace-font, "SF Mono", Menlo, monospace);
+	font-size: 5px;
+	line-height: 7px;
+	white-space: pre;
+	overflow: hidden;
+}
+
+.onboarding-theme-preview-side {
+	position: absolute;
+	top: 6px;
+	bottom: 0;
+	right: 0;
+	width: 20px;
+	border-left: 1px solid;
+	overflow: hidden;
+}
+
+.onboarding-theme-preview-side > * {
+	position: absolute;
+	left: 2px;
+	right: 2px;
+	border-radius: 1px;
+}
+
+.onboarding-theme-preview-side-title { top: 2px; height: 6px; opacity: .5; }
+.onboarding-theme-preview-side-card { top: 10px; height: 28px; border: 1px solid; }
+.onboarding-theme-preview-side-line { top: 38px; left: 5px; height: 3px; opacity: .5; }
+.onboarding-theme-preview-side-card-small { top: 42px; height: 16px; border: 1px solid; }
+
+/* Round radio: a muted dot, or the accent colour with a tick. */
+.onboarding-radio {
+	position: relative;
+	display: flex;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	box-sizing: border-box;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+	border-radius: 50%;
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+}
+
+.onboarding-radio-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+}
+
+.selected > .onboarding-radio,
+.selected .onboarding-radio {
+	border-color: transparent;
+	background: var(--vscode-button-background);
+}
+
+.selected .onboarding-radio-dot {
+	width: 5px;
+	height: 8px;
+	margin-top: -2px;
+	border: solid var(--vscode-button-foreground);
+	border-width: 0 1.5px 1.5px 0;
+	border-radius: 0;
+	background: transparent;
+	transform: rotate(45deg);
+}
+
+.onboarding-customize-terminal {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.onboarding-checkbox {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	cursor: pointer;
+	user-select: none;
+}
+
+.onboarding-checkbox > span {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+}
+
+.onboarding-checkbox input {
+	appearance: none;
+	display: grid;
+	place-items: center;
+	flex-shrink: 0;
+	width: 16px;
+	height: 16px;
+	margin: 0;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 22%, transparent);
+	border-radius: 4px;
+	background: transparent;
+	cursor: pointer;
+}
+
+.onboarding-checkbox input:checked {
+	border-color: transparent;
+	background: var(--vscode-button-background);
+}
+
+.onboarding-checkbox input:checked::after {
+	content: '';
+	width: 4px;
+	height: 8px;
+	margin-top: -2px;
+	border: solid var(--vscode-button-foreground);
+	border-width: 0 1.5px 1.5px 0;
+	transform: rotate(45deg);
+}
+
+.onboarding-checkbox input:focus-visible,
+.onboarding-theme-card:focus-visible,
+.onboarding-import-row:focus-visible,
+.onboarding-customize-import-toggle:focus-visible,
+.onboarding-help-icon:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+.onboarding-inline-code {
+	padding: 1px 5px;
+	font-family: var(--monaco-monospace-font, "SF Mono", Menlo, monospace);
+	font-size: 12px;
+	color: var(--vscode-foreground);
+	background: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
+	border-radius: 4px;
+}
+
+/* "?" with its explanation on hover or focus. */
+.onboarding-help-icon {
+	position: relative;
+	font-size: 14px;
+	color: color-mix(in srgb, var(--vscode-descriptionForeground) 75%, transparent);
+	border-radius: 50%;
+	cursor: help;
+}
+
+.onboarding-help-icon::after {
+	content: attr(aria-label);
+	position: absolute;
+	left: 50%;
+	bottom: calc(100% + 8px);
+	width: 260px;
+	padding: 8px 10px;
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	line-height: 1.45;
+	color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+	background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background));
+	border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border));
+	border-radius: 6px;
+	opacity: 0;
+	pointer-events: none;
+	transform: translate(-50%, 4px);
+	transition: opacity .12s ease, transform .12s ease;
+}
+
+.onboarding-help-icon:hover::after,
+.onboarding-help-icon:focus-visible::after {
+	opacity: 1;
+	transform: translate(-50%, 0);
+}
+
+.onboarding-customize-import {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.onboarding-customize-import-toggle {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	width: fit-content;
+	padding: 0;
+	font: inherit;
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+	background: transparent;
+	border: 0;
+	border-radius: 3px;
+	cursor: pointer;
+}
+
+.onboarding-customize-import-toggle:hover {
+	color: var(--vscode-foreground);
+}
+
+.onboarding-customize-import-toggle .codicon {
+	font-size: 14px;
+	transition: transform .15s ease;
+}
+
+.onboarding-customize-import-toggle.expanded .codicon {
+	transform: rotate(90deg);
+}
+
+.onboarding-customize-import-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	animation: onboarding-signin-in .3s cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.onboarding-customize-import-list[hidden] {
+	display: none;
+}
+
+.onboarding-customize-import-heading {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.onboarding-customize-optional {
+	color: color-mix(in srgb, var(--vscode-descriptionForeground) 70%, transparent);
+}
+
+.onboarding-import-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 40px;
+	padding: 0 12px;
+	font: inherit;
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+	text-align: left;
+	background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+	border-radius: 6px;
+	cursor: pointer;
+}
+
+.onboarding-import-row:hover {
+	border-color: color-mix(in srgb, var(--vscode-foreground) 24%, transparent);
+}
+
+.onboarding-import-row.selected {
+	color: var(--vscode-foreground);
+	border-color: var(--vscode-button-background);
+}
+
+.onboarding-import-row-icon {
+	width: 18px;
+	height: 18px;
+}
+
+/* Cursor's mark is black; flip it on dark themes. */
+.monaco-workbench.vs-dark .onboarding-import-row[data-id="cursor"] .onboarding-import-row-icon,
+.monaco-workbench.hc-black .onboarding-import-row[data-id="cursor"] .onboarding-import-row-icon {
+	filter: invert(1);
+}
+
+.onboarding-import-row-label {
+	flex: 1;
+}
+
+.onboarding-customize-next {
+	margin-top: 4px;
+}
+
+/* Bring-your-own-key keeps the same flat column. */
+.onboarding-a-overlay-launch .onboarding-provider-setup {
+	width: min(350px, calc(100vw - 48px));
+	animation: onboarding-signin-in .4s cubic-bezier(.16, 1, .3, 1) both;
+}
+
+.onboarding-a-overlay-launch .onboarding-provider-setup .onboarding-backboard-title {
+	color: var(--vscode-foreground);
+	font-size: 18px;
+	font-weight: 500;
+	line-height: 1.3;
+	letter-spacing: 0;
+	text-transform: none;
+}
+
+.onboarding-a-overlay-launch .onboarding-provider-setup .onboarding-backboard-sign-in-button {
+	width: 100%;
+	height: 40px;
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--vscode-editor-background);
+	background: color-mix(in srgb, var(--vscode-editor-foreground) 92%, var(--vscode-editor-background));
+	border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground) 70%, transparent);
+	border-radius: 6px;
+	box-shadow: none;
+}
+
+.onboarding-a-overlay-launch .onboarding-provider-setup .onboarding-backboard-account-link {
+	height: auto;
+	color: var(--vscode-descriptionForeground);
+}
+
+@keyframes onboarding-signin-in {
+	from { opacity: 0; transform: translateY(6px); }
+	to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.onboarding-signin > *,
+	.onboarding-customize > *,
+	.onboarding-a-overlay-launch .onboarding-made-by,
+	.onboarding-a-overlay-launch .onboarding-provider-setup {
+		animation: none;
+	}
+
+	.onboarding-a-overlay-launch .onboarding-a-body {
+		transition: none;
+	}
+}

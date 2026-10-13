@@ -1,0 +1,75 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+.simple-background-picker {
+	width: min(360px, calc(100vw - 24px));
+	box-sizing: border-box;
+	padding: 12px;
+	margin-bottom: 8px;
+	border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+	border-radius: 16px;
+	background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+	color: var(--vscode-foreground);
+	box-shadow: 0 8px 32px var(--vscode-widget-shadow, #0006);
+	font-size: 12px;
+}
+.simple-background-picker button { font: inherit; color: inherit; cursor: pointer; }
+.simple-background-picker button:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.simple-background-picker-heading, .simple-background-picker-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.simple-background-picker-heading { margin-bottom: 8px; font-weight: 600; }
+.simple-background-picker-icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: transparent; }
+.simple-background-picker-icon:hover { background: var(--vscode-toolbar-hoverBackground); }
+.simple-background-picker-preview { display: block; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; padding: 0; border: 1px solid var(--vscode-panel-border); border-radius: 10px; background: var(--vscode-editor-background); }
+.simple-background-picker-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.simple-background-picker-preview img[hidden], .simple-background-picker-placeholder[hidden] { display: none; }
+.simple-background-picker-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; height: 100%; color: var(--vscode-descriptionForeground); }
+.simple-background-picker-placeholder .codicon { font-size: 28px; }
+.simple-background-picker-preview.is-default { background: linear-gradient(125deg, var(--vscode-sideBar-background), var(--vscode-editor-background)); }
+.simple-background-picker-meta { margin-top: 8px; }
+.simple-background-picker-caption { font-size: 11px; text-align: center; }
+.simple-background-picker-filmstrip {
+	position: relative;
+	display: grid;
+	grid-auto-flow: column;
+	grid-auto-columns: calc((100% - 32px) / 5);
+	gap: 8px;
+	overflow-x: auto;
+	overscroll-behavior-x: contain;
+	scroll-snap-type: x proximity;
+	scrollbar-width: thin;
+	scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
+	padding: 5px 0 8px;
+	margin: 4px 0 10px;
+}
+.simple-background-picker-thumbnail {
+	position: relative;
+	box-sizing: border-box;
+	aspect-ratio: 4 / 3;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 2px solid transparent;
+	border-radius: 8px;
+	background: var(--vscode-editor-background);
+	overflow: hidden;
+	scroll-snap-align: start;
+	opacity: 0.7;
+	transition: opacity 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+.simple-background-picker-thumbnail img { width: 100%; height: 100%; object-fit: cover; }
+.simple-background-picker-thumbnail:hover { opacity: 1; transform: translateY(-2px); }
+.simple-background-picker-thumbnail[aria-pressed='true'] {
+	border-color: var(--vscode-focusBorder);
+	opacity: 1;
+	box-shadow: 0 2px 8px var(--vscode-widget-shadow, #0004);
+}
+.simple-background-picker-filmstrip .simple-background-picker-thumbnail:focus-visible { outline-offset: -3px; }
+@media (prefers-reduced-motion: reduce) {
+	.simple-background-picker-thumbnail { transition: none; }
+}
+.simple-background-picker-apply { width: 100%; height: 30px; border: 1px solid var(--vscode-button-border, transparent); border-radius: 8px; background: var(--vscode-button-background); color: var(--vscode-button-foreground) !important; }
+.simple-background-picker-apply:hover { background: var(--vscode-button-hoverBackground); }
+.simple-background-picker-apply:disabled { cursor: default; opacity: 0.6; }

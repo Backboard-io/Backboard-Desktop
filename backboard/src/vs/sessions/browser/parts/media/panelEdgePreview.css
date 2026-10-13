@@ -1,0 +1,88 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.sessions-panel-edge-preview {
+	display: none;
+	position: absolute;
+	top: 48px;
+	bottom: 12px;
+	width: 12px;
+	z-index: 40;
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(.modal-dialog-visible).nosidebar > .sessions-panel-edge-preview.left,
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(.modal-dialog-visible).noauxiliarybar > .sessions-panel-edge-preview.right {
+	display: block;
+}
+
+.sessions-panel-edge-preview.left { left: 0; }
+.sessions-panel-edge-preview.right { right: 0; }
+
+.sessions-panel-edge-preview > button {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--vscode-foreground);
+	cursor: pointer;
+	text-align: left;
+	font: inherit;
+	-webkit-app-region: no-drag;
+}
+
+.sessions-panel-edge-card {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	width: min(248px, 42vw);
+	box-sizing: border-box;
+	padding: 24px 20px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	border: 1px solid var(--vscode-widget-border, #ffffff26);
+	border-radius: 14px;
+	background: color-mix(in srgb, var(--vscode-sideBar-background) 88%, transparent);
+	backdrop-filter: blur(18px);
+	box-shadow: 0 8px 32px #00000030;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.left .sessions-panel-edge-card { left: 6px; transform: translateX(-12px); }
+.right .sessions-panel-edge-card { right: 6px; transform: translateX(12px); }
+
+.sessions-panel-edge-preview:not(.dismissed):is(:hover, :focus-within) .sessions-panel-edge-card {
+	opacity: 1;
+	transform: translateX(0);
+	pointer-events: auto;
+	transition-delay: 160ms;
+}
+
+.sessions-panel-edge-preview > button:focus-visible { outline: none; }
+.sessions-panel-edge-preview > button:focus-visible .sessions-panel-edge-card {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -2px;
+	transition-delay: 0ms;
+}
+.sessions-panel-edge-card > .codicon { align-self: flex-start; font-size: 18px; }
+.sessions-panel-edge-card strong { font-size: 14px; font-weight: 500; }
+.sessions-panel-edge-description,
+.sessions-panel-edge-hint { color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 1.5; }
+.sessions-panel-edge-hint { margin-top: auto; }
+.sessions-panel-edge-skeleton { display: grid; gap: 18px; margin-top: 18px; }
+.sessions-panel-edge-skeleton span { height: 7px; border-radius: 4px; background: currentColor; opacity: 0.08; }
+.sessions-panel-edge-skeleton span:nth-child(even) { width: 65%; }
+
+@media (prefers-reduced-motion: reduce) {
+	.sessions-panel-edge-card { transition: none; }
+}
+@media (hover: none) {
+	.sessions-panel-edge-preview { display: none !important; }
+}

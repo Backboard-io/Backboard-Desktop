@@ -1,0 +1,277 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+import './media/backboardModeSwitcher.css';
+import { $, addDisposableListener, append, EventHelper, EventType } from '../../../../../base/browser/dom.js';
+import { BaseActionViewItem, IBaseActionViewItemOptions } from '../../../../../base/browser/ui/actionbar/actionViewItems.js';
+import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
+import { IAction } from '../../../../../base/common/actions.js';
+import { Disposable } from '../../../../../base/common/lifecycle.js';
+import { localize, localize2 } from '../../../../../nls.js';
+import { IActionViewItemService } from '../../../../../platform/actions/browser/actionViewItemService.js';
+import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
+import { INativeHostService } from '../../../../../platform/native/common/native.js';
+import { IInstantiationService, ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
+import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
+import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
+import { ViewContainerLocation } from '../../../../common/views.js';
+import { IWorkbenchContribution } from '../../../../common/contributions.js';
+import { TERMINAL_VIEW_ID } from '../../../terminal/common/terminal.js';
+import { IEditorService } from '../../../../services/editor/common/editorService.js';
+import { IWorkbenchLayoutService, Parts } from '../../../../services/layout/browser/layoutService.js';
+import { IPaneCompositePartService } from '../../../../services/panecomposite/browser/panecomposite.js';
+import { CHAT_CATEGORY } from '../../browser/actions/chatActions.js';
+import { BACKBOARD_MODE_SWITCHER_COMMAND_ID, ChatConfiguration, OPEN_AGENTS_WINDOW_COMMAND_ID, OPEN_AGENTS_WINDOW_PRECONDITION } from '../../common/constants.js';
+import { IBackboardWorkspaceService } from '../backboardWorkspace/backboardWorkspaceService.js';
+
+const CLOSE_ACTIVE_EDITOR_COMMAND_ID = 'workbench.action.closeActiveEditor';
+const AGENT_SESSIONS_WELCOME_PAGE_ID = 'agentSessionsWelcomePage';
+
+export class BackboardModeSwitcherAction extends Action2 {
+	constructor() {
+		super({
+			id: BACKBOARD_MODE_SWITCHER_COMMAND_ID,
+			title: localize2('backboardModeSwitcher', "Backboard Mode Switcher"),
+			category: CHAT_CATEGORY,
+			precondition: OPEN_AGENTS_WINDOW_PRECONDITION,
+			f1: false,
+			menu: [{
+				id: MenuId.TitleBarLeft,
+				group: 'navigation',
+				order: 0,
+				when: ContextKeyExpr.and(
+					OPEN_AGENTS_WINDOW_PRECONDITION,
+					ContextKeyExpr.notEquals(`config.${ChatConfiguration.TitleBarOpenInAgentsWindowEnabled}`, false),
+				),
+			}],
+		});
+	}
+
+	run(): void { }
+}
+
+export class ToggleBackboardModeSwitcherTitleBarAction extends ToggleTitleBarConfigAction {
+	constructor() {
+		super(
+			ChatConfiguration.TitleBarOpenInAgentsWindowEnabled,
+			localize('toggle.backboardModeSwitcher', 'Backboard Switcher'),
+			localize('toggle.backboardModeSwitcherDescription', "Toggle visibility of the Editor / Agents switcher in the title bar"),
+			6,
+			OPEN_AGENTS_WINDOW_PRECONDITION,
+		);
+	}
+}
+
+class BackboardModeTitleBarWidget extends BaseActionViewItem {
+
+	private static readonly STORAGE_PREFIX = 'backboard.editorMode.panelClosed.';
+	private static readonly PANEL_PARTS = [Parts.SIDEBAR_PART, Parts.PANEL_PART, Parts.AUXILIARYBAR_PART] as const;
+
+	private agentButton: HTMLButtonElement | undefined;
+	private editorButton: HTMLButtonElement | undefined;
+
+	private suppressVisibilityTracking = false;
+
+	constructor(
+		action: IAction,
+		options: IBaseActionViewItemOptions | undefined,
+		@IHoverService private readonly hoverService: IHoverService,
+		@IKeybindingService private readonly keybindingService: IKeybindingService,
+		@ICommandService private readonly commandService: ICommandService,
+		@INativeHostService private readonly nativeHostService: INativeHostService,
+		@IEditorService private readonly editorService: IEditorService,
+		@IBackboardWorkspaceService private readonly workspaceService: IBackboardWorkspaceService,
+		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
+		@IStorageService private readonly storageService: IStorageService,
+		@IPaneCompositePartService private readonly paneCompositeService: IPaneCompositePartService,
+	) {
+		super(undefined, action, options);
+	}
+
+	override render(container: HTMLElement): void {
+		super.render(container);
+
+		container.classList.add('backboard-mode-titlebar-widget');
+
+		const hoverText = this.keybindingService.appendKeybinding(localize('backboardModeSwitcherHover', "Switch Backboard mode"), BACKBOARD_MODE_SWITCHER_COMMAND_ID);
+		container.setAttribute('aria-label', hoverText);
+		this._register(this.hoverService.setupManagedHover(getDefaultHoverDelegate('element'), container, hoverText));
+
+		const segments = append(container, $('.backboard-mode-segments'));
+		segments.setAttribute('role', 'group');
+		segments.setAttribute('aria-label', hoverText);
+		this.agentButton = append(segments, $('button.backboard-mode-segment'));
+		this.agentButton.type = 'button';
+		this.agentButton.textContent = localize('backboardModeSwitcher.agentTab', "Simple");
+		this.editorButton = append(segments, $('button.backboard-mode-segment'));
+		this.editorButton.type = 'button';
+		this.editorButton.textContent = localize('backboardModeSwitcher.editor', "Editor");
+		this._register(addDisposableListener(this.agentButton, EventType.CLICK, e => {
+			EventHelper.stop(e, true);
+			this.openAgents();
+		}));
+		this._register(addDisposableListener(this.editorButton, EventType.CLICK, e => {
+			EventHelper.stop(e, true);
+			if (!this.isEditorModeActive()) {
+				this.openEditor();
+			} else {
+				void this.nativeHostService.openEditorWindow();
+			}
+		}));
+
+		// The Advanced/Canvas window has no switcher segment (Canvas lives on the backboard-video-studio branch).
+
+		this._register(this.editorService.onDidActiveEditorChange(() => this.updateState()));
+		this._register(this.workspaceService.onDidChangeVisibility(() => this.updateState()));
+		this._register(this.layoutService.onDidChangePartVisibility(e => this.handlePartVisibilityChange(e)));
+
+		this.updateState();
+	}
+
+	private handlePartVisibilityChange(e: { readonly partId: string; readonly visible: boolean }): void {
+		// Only record explicit user changes while in Editor mode and not while
+		// we are programmatically restoring panel visibility on mode entry.
+		if (this.suppressVisibilityTracking) {
+			return;
+		}
+		if (!this.isEditorModeActive()) {
+			return;
+		}
+		if (!BackboardModeTitleBarWidget.PANEL_PARTS.some(p => p === e.partId)) {
+			return;
+		}
+		this.storageService.store(
+			BackboardModeTitleBarWidget.STORAGE_PREFIX + e.partId,
+			e.visible ? '0' : '1',
+			StorageScope.PROFILE,
+			StorageTarget.USER,
+		);
+	}
+
+	private isEditorModeActive(): boolean {
+		return !this.isAgentsActive() && !this.isWorkspaceActive();
+	}
+
+	private isPanelClosedByUser(part: string): boolean {
+		return this.storageService.get(BackboardModeTitleBarWidget.STORAGE_PREFIX + part, StorageScope.PROFILE, '0') === '1';
+	}
+
+	private openAgents(): void {
+		this.workspaceService.hide();
+		void this.commandService.executeCommand(OPEN_AGENTS_WINDOW_COMMAND_ID);
+	}
+
+	private openEditor(): void {
+		if (this.isWorkspaceActive()) {
+			this.workspaceService.hide();
+			return;
+		}
+
+		if (this.isAgentsActive()) {
+			void this.commandService.executeCommand(CLOSE_ACTIVE_EDITOR_COMMAND_ID);
+		}
+
+		// Entering Editor mode: ensure the left, bottom, and right panels are
+		// visible, unless the user previously closed them while in Editor mode.
+		// Suppress tracking so our own restore calls are not recorded as user
+		// intent.
+		this.suppressVisibilityTracking = true;
+		try {
+			for (const part of BackboardModeTitleBarWidget.PANEL_PARTS) {
+				if (this.isPanelClosedByUser(part)) {
+					continue;
+				}
+				if (!this.layoutService.isVisible(part)) {
+					this.layoutService.setPartHidden(false, part);
+				}
+			}
+		} finally {
+			this.suppressVisibilityTracking = false;
+		}
+
+		// When the bottom panel (terminal) is being shown, make sure the
+		// Terminal view is the active composite rather than Problems/Output.
+		if (!this.isPanelClosedByUser(Parts.PANEL_PART) && this.layoutService.isVisible(Parts.PANEL_PART)) {
+			void this.paneCompositeService.openPaneComposite(TERMINAL_VIEW_ID, ViewContainerLocation.Panel, false);
+		}
+	}
+
+	private isAgentsActive(): boolean {
+		return this.editorService.activeEditorPane?.getId() === AGENT_SESSIONS_WELCOME_PAGE_ID;
+	}
+
+	private isWorkspaceActive(): boolean {
+		return this.workspaceService.visible;
+	}
+
+	private updateState(): void {
+		const agentsActive = this.isAgentsActive();
+		this.agentButton?.setAttribute('aria-pressed', String(agentsActive));
+		this.editorButton?.setAttribute('aria-pressed', String(!agentsActive));
+	}
+}
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'workbench.action.backboardCheckForUpdates',
+			title: localize2('backboardCheckForUpdates', "Check for Updates…"),
+			menu: [{ id: MenuId.GlobalActivity, group: '7_update', order: 1 }]
+		});
+	}
+	run(accessor: ServicesAccessor): Promise<void> {
+		return accessor.get(ICommandService).executeCommand('backboard.checkForUpdates');
+	}
+});
+
+const updatePillActions = [
+	{ id: 'workbench.action.backboardUpdate', command: 'backboard.installAvailableUpdate', title: localize2('backboardUpdate', "Update"), when: ContextKeyExpr.and(ContextKeyExpr.has('backboard.updateAvailable'), ContextKeyExpr.not('backboard.updateCancellable')) },
+	{ id: 'workbench.action.backboardCancelUpdate', command: 'backboard.cancelUpdate', title: localize2('backboardCancelUpdate', "Stop Update"), when: ContextKeyExpr.has('backboard.updateCancellable') }
+];
+
+for (const item of updatePillActions) {
+	registerAction2(class extends Action2 {
+		constructor() {
+			super({ id: item.id, title: item.title, menu: [{ id: MenuId.TitleBar, group: 'navigation', order: 100, when: item.when }] });
+		}
+		run(accessor: ServicesAccessor): Promise<void> {
+			return accessor.get(ICommandService).executeCommand(item.command);
+		}
+	});
+}
+
+class BackboardUpdateTitleBarWidget extends BaseActionViewItem {
+	override render(container: HTMLElement): void {
+		super.render(container);
+		const button = append(container, $('button.backboard-update-pill'));
+		button.setAttribute('type', 'button');
+		button.textContent = this.action.label;
+		this._register(addDisposableListener(button, EventType.CLICK, event => {
+			EventHelper.stop(event, true);
+			void this.action.run();
+		}));
+	}
+}
+
+export class BackboardModeSwitcherContribution extends Disposable implements IWorkbenchContribution {
+
+	static readonly ID = 'workbench.contrib.backboardModeSwitcher.desktop';
+
+	constructor(
+		@IActionViewItemService actionViewItemService: IActionViewItemService,
+		@IInstantiationService instantiationService: IInstantiationService,
+	) {
+		super();
+		for (const item of updatePillActions) {
+			this._register(actionViewItemService.register(MenuId.TitleBar, item.id, (action, options) => new BackboardUpdateTitleBarWidget(undefined, action, options), undefined));
+		}
+		this._register(actionViewItemService.register(MenuId.TitleBarLeft, BACKBOARD_MODE_SWITCHER_COMMAND_ID, (action, options) => {
+			return instantiationService.createInstance(BackboardModeTitleBarWidget, action, options);
+		}, undefined));
+	}
+}

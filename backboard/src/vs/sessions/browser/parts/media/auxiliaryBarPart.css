@@ -1,0 +1,83 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* ===== Modern action label styling for sessions auxiliary bar ===== */
+
+.agent-sessions-workbench .monaco-grid-view .part.auxiliarybar {
+	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
+	border: none;
+	border-radius: var(--vscode-cornerRadius-large) 0 0 var(--vscode-cornerRadius-large);
+	box-sizing: border-box;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench.nomaineditorarea .monaco-grid-view .part.auxiliarybar {
+	border-right: none;
+	border-radius: var(--vscode-cornerRadius-large);
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .content {
+	background: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
+}
+
+/* Base label: lowercase text + heavier weight + pill padding */
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.icon) .action-label {
+	text-transform: capitalize;
+	font-weight: var(--vscode-agents-fontWeight-semiBold);
+	border-radius: var(--vscode-cornerRadius-medium);
+	padding: 0 10px;
+	font-size: 13px;
+	line-height: 28px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item {
+	display: flex;
+	align-items: center;
+	padding-left: 0;
+	padding-right: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .badge {
+	margin-left: -4px;
+	padding-right: 6px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title {
+	min-height: 48px;
+	padding-left: 14px;
+	padding-right: 10px;
+	background-color: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
+	border-bottom: 0;
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title .title-actions .action-item {
+	margin-right: 2px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title .action-label.codicon {
+	border-radius: var(--vscode-cornerRadius-medium);
+}
+
+/* Hide the underline indicator for non-focused items, but keep it for keyboard focus */
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(:focus-visible) .active-item-indicator:before {
+	display: none !important;
+}
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:focus-visible .active-item-indicator:before {
+	display: block !important;
+}
+
+/* Active/checked state: background container instead of underline */
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked {
+	background-color: color-mix(in srgb, var(--vscode-agentsPanel-foreground, var(--vscode-foreground)) 10%, transparent) !important;
+	border-radius: var(--vscode-cornerRadius-medium);
+}
+
+/* Override base workbench monaco editor background in auxiliary bar content */
+.agent-sessions-workbench .part.auxiliarybar > .content .monaco-editor,
+.agent-sessions-workbench .part.auxiliarybar > .content .monaco-editor .margin,
+.agent-sessions-workbench .part.auxiliarybar > .content .monaco-editor .monaco-editor-background {
+	background-color: var(--sessions-main-region-background, var(--vscode-agents-background, var(--vscode-editor-background)));
+}

@@ -1,0 +1,59 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+body {
+	display: flex;
+	flex-direction: column;
+	color: var(--vscode-foreground, #e2e4e8);
+	background: var(--vscode-editor-background, #111214);
+	font: 12px var(--vscode-font-family, system-ui, sans-serif);
+}
+[hidden] { display: none !important; }
+nav {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex: 0 0 auto;
+	gap: 12px;
+	min-height: 40px;
+	padding: 0 12px;
+	border-bottom: 1px solid var(--vscode-panel-border, #ffffff12);
+	background: var(--vscode-editorWidget-background, #17191c);
+	overflow-x: auto;
+}
+.control-group, .view-controls, .page-position { display: flex; align-items: center; flex: 0 0 auto; }
+.view-controls { gap: 4px; }
+.control-group { gap: 2px; }
+.page-position { gap: 4px; padding: 0 4px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+button, input { box-sizing: border-box; border: 1px solid transparent; border-radius: 4px; font: inherit; color: inherit; }
+nav button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 28px; width: 28px; padding: 0; background: transparent; cursor: pointer; }
+#fit { width: auto; min-width: 28px; padding: 0 6px; }
+nav button svg { width: 16px; height: 16px; flex: none; }
+button:hover:enabled { background: var(--vscode-toolbar-hoverBackground, #ffffff12); }
+button[aria-pressed="true"] { color: var(--vscode-focusBorder, #3794ff); background: var(--vscode-toolbar-activeBackground, #ffffff0a); }
+button:disabled, input:disabled { opacity: 0.35; cursor: default; }
+button:focus-visible, input:focus-visible, main:focus-visible { outline: 1px solid var(--vscode-focusBorder, #3794ff); outline-offset: -1px; }
+#page-number { width: 32px; height: 24px; padding: 0 2px; text-align: center; background: var(--vscode-input-background, #202226); appearance: textfield; -moz-appearance: textfield; }
+#page-number::-webkit-inner-spin-button, #page-number::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+#page-count { color: var(--vscode-descriptionForeground, #9499a3); min-width: 24px; }
+#zoom-level { min-width: 42px; text-align: center; font-size: 11px; font-variant-numeric: tabular-nums; }
+.separator { height: 16px; width: 1px; margin: 0 4px; background: var(--vscode-panel-border, #ffffff12); }
+.document-body { position: relative; flex: 1; min-height: 0; }
+#viewport { height: 100%; overflow: auto; padding: 16px; box-sizing: border-box; }
+#page { position: relative; margin: 0 auto; padding: 0; }
+.pdf-page { --scale-round-x: 1px; --scale-round-y: 1px; position: relative; background: white; box-shadow: 0 2px 10px #0003; }
+.pdf-page canvas { display: block; }
+#status-panel { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 48px); padding: 8px 12px; border: 1px solid var(--vscode-panel-border, #ffffff12); border-radius: 6px; color: var(--vscode-descriptionForeground, #9499a3); background: var(--vscode-editorWidget-background, #17191c); box-shadow: 0 2px 8px #0002; }
+#status-panel.error { flex-wrap: wrap; width: max-content; }
+#status-panel.error .loading-spinner { display: none; }
+.loading-spinner { flex: none; width: 10px; height: 10px; border: 1.5px solid var(--vscode-panel-border, #ffffff20); border-top-color: var(--vscode-foreground, #e2e4e8); border-radius: 50%; animation: spin 0.8s linear infinite; }
+#password-prompt { position: absolute; inset: 16px 16px auto; z-index: 3; padding: 16px; text-align: center; background: var(--vscode-editorWidget-background, #17191c); border-radius: 6px; }
+#password-label { display: block; margin-bottom: 12px; }
+#password { height: 28px; padding: 4px 6px; background: var(--vscode-input-background, #202226); }
+#unlock, #retry { min-height: 28px; padding: 4px 10px; background: var(--vscode-button-background, #0078d4); color: var(--vscode-button-foreground, white); cursor: pointer; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 420px) { nav { gap: 4px; padding: 0 6px; } .button-label { display: none; } #fit { width: 28px; padding: 0; } .view-controls { gap: 3px; } .separator { margin: 0 2px; } }
+@media (prefers-reduced-motion: reduce) { .loading-spinner { animation: none; } }

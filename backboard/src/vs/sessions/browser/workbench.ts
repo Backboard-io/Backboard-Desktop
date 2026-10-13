@@ -1,0 +1,2536 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import '../../workbench/browser/style.js';
+import './media/style.css';
+import './media/chatMarkdown.css';
+import './media/backboardChatTheme.css';
+import { Disposable, DisposableMap, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../base/common/lifecycle.js';
+import { Emitter, Event, setGlobalLeakWarningThreshold } from '../../base/common/event.js';
+import { addDisposableListener, EventType, getActiveDocument, getActiveElement, getClientArea, getWindowId, getWindow, getWindows, IDimension, isAncestorUsingFlowTo, isHTMLElement, size, Dimension, runWhenWindowIdle, scheduleAtNextAnimationFrame } from '../../base/browser/dom.js';
+import { DeferredPromise, RunOnceScheduler } from '../../base/common/async.js';
+import { isFullscreen, onDidChangeFullscreen, isChrome, isFirefox, isSafari } from '../../base/browser/browser.js';
+import { mark } from '../../base/common/performance.js';
+import { onUnexpectedError, setUnexpectedErrorHandler } from '../../base/common/errors.js';
+import { isWindows, isLinux, isWeb, isNative, isMacintosh } from '../../base/common/platform.js';
+import { Parts, Position, PanelAlignment, IWorkbenchLayoutService, SINGLE_WINDOW_PARTS, MULTI_WINDOW_PARTS, IPartVisibilityChangeEvent, positionToString } from '../../workbench/services/layout/browser/layoutService.js';
+import { ILayoutOffsetInfo } from '../../platform/layout/browser/layoutService.js';
+import { Part, updateGridPartHostClasses } from '../../workbench/browser/part.js';
+import { Direction, ISerializableView, ISerializedGrid, ISerializedLeafNode, ISerializedNode, IViewSize, Orientation, SerializableGrid } from '../../base/browser/ui/grid/grid.js';
+import { IEditorGroupsService } from '../../workbench/services/editor/common/editorGroupsService.js';
+import { IEditorService } from '../../workbench/services/editor/common/editorService.js';
+import { IWorkbenchEnvironmentService } from '../../workbench/services/environment/common/environmentService.js';
+import { IPaneCompositePartService } from '../../workbench/services/panecomposite/browser/panecomposite.js';
+import { IViewDescriptorService, ViewContainerLocation } from '../../workbench/common/views.js';
+import { ILogService } from '../../platform/log/common/log.js';
+import { IInstantiationService, refineServiceDecorator, ServicesAccessor } from '../../platform/instantiation/common/instantiation.js';
+import { ITitleService } from '../../workbench/services/title/browser/titleService.js';
+import { mainWindow, CodeWindow } from '../../base/browser/window.js';
+import { coalesce } from '../../base/common/arrays.js';
+import { ServiceCollection } from '../../platform/instantiation/common/serviceCollection.js';
+import { InstantiationService } from '../../platform/instantiation/common/instantiationService.js';
+import { getSingletonServiceDescriptors } from '../../platform/instantiation/common/extensions.js';
+import { ILifecycleService, LifecyclePhase, WillShutdownEvent } from '../../workbench/services/lifecycle/common/lifecycle.js';
+import { IStorageService, WillSaveStateReason, StorageScope, StorageTarget } from '../../platform/storage/common/storage.js';
+import { IConfigurationChangeEvent, IConfigurationService } from '../../platform/configuration/common/configuration.js';
+import { IHostService } from '../../workbench/services/host/browser/host.js';
+import { IDialogService } from '../../platform/dialogs/common/dialogs.js';
+import { INotificationService } from '../../platform/notification/common/notification.js';
+import { NotificationService } from '../../workbench/services/notification/common/notificationService.js';
+import { IHoverService, WorkbenchHoverDelegate } from '../../platform/hover/browser/hover.js';
+import { setHoverDelegateFactory } from '../../base/browser/ui/hover/hoverDelegateFactory.js';
+import { setBaseLayerHoverDelegate } from '../../base/browser/ui/hover/hoverDelegate2.js';
+import { Registry } from '../../platform/registry/common/platform.js';
+import { IWorkbenchContributionsRegistry, Extensions as WorkbenchExtensions } from '../../workbench/common/contributions.js';
+import { IEditorFactoryRegistry, EditorExtensions } from '../../workbench/common/editor.js';
+import { setARIAContainer } from '../../base/browser/ui/aria/aria.js';
+import { FontMeasurements } from '../../editor/browser/config/fontMeasurements.js';
+import { createBareFontInfoFromRawSettings } from '../../editor/common/config/fontInfoFromSettings.js';
+import { toErrorMessage } from '../../base/common/errorMessage.js';
+import { WorkbenchContextKeysHandler } from '../../workbench/browser/contextkeys.js';
+import { PixelRatio } from '../../base/browser/pixelRatio.js';
+import { AccessibilityProgressSignalScheduler } from '../../platform/accessibilitySignal/browser/progressAccessibilitySignalScheduler.js';
+import { setProgressAccessibilitySignalScheduler } from '../../base/browser/ui/progressbar/progressAccessibilitySignal.js';
+import { AccessibleViewRegistry } from '../../platform/accessibility/browser/accessibleViewRegistry.js';
+import { NotificationAccessibleView } from '../../workbench/browser/parts/notifications/notificationAccessibleView.js';
+import { NotificationsCenter } from '../../workbench/browser/parts/notifications/notificationsCenter.js';
+import { NotificationsAlerts } from '../../workbench/browser/parts/notifications/notificationsAlerts.js';
+import { NotificationsStatus } from '../../workbench/browser/parts/notifications/notificationsStatus.js';
+import { registerNotificationCommands } from '../../workbench/browser/parts/notifications/notificationsCommands.js';
+import { CommandsRegistry } from '../../platform/commands/common/commands.js';
+import { NotificationsToasts } from '../../workbench/browser/parts/notifications/notificationsToasts.js';
+import { IMarkdownRendererService } from '../../platform/markdown/browser/markdownRenderer.js';
+import { EditorMarkdownCodeBlockRenderer } from '../../editor/browser/widget/markdownRenderer/browser/editorMarkdownCodeBlockRenderer.js';
+import { SyncDescriptor } from '../../platform/instantiation/common/descriptors.js';
+import { TitleService } from './parts/titlebarPart.js';
+import { IContextKeyService } from '../../platform/contextkey/common/contextkey.js';
+import { EditorMaximizedContext, IsPhoneLayoutContext } from '../common/contextkeys.js';
+import {
+	NotificationsPosition,
+	NotificationsSettings,
+	getNotificationsPosition
+} from '../../workbench/common/notifications.js';
+import { getOptimusChatPanelWidth, IPartVisibilityDefaults, SessionsLayoutPolicy } from './layoutPolicy.js';
+import { MobileNavigationStack } from './mobileNavigationStack.js';
+import { SessionsPanelHeader } from './parts/panelHeader.js';
+import { PanelEdgePreview } from './parts/panelEdgePreview.js';
+import { MobileTitlebarPart } from './parts/mobile/mobileTitlebarPart.js';
+import { IMobileVisualViewport } from './parts/mobile/mobileVisualViewport.js';
+import { autorun } from '../../base/common/observable.js';
+import { ISessionsService } from '../services/sessions/browser/sessionsService.js';
+import { ISessionsPartService } from '../services/sessions/browser/sessionsPartService.js';
+import { ISessionsSetUpService } from './sessionsSetUpService.js';
+
+const SESSIONS_FILES_CONTAINER_ID = 'workbench.sessions.auxiliaryBar.filesContainer';
+const SESSIONS_BROWSER_VIEW_CONTAINER_ID = 'workbench.sessions.auxiliaryBar.browserContainer';
+const SIMPLE_SESSIONS_MINIMUM_WIDTH = 300;
+const SIMPLE_AUXILIARY_BAR_MINIMUM_WIDTH = 120;
+/** Smallest terminal panel height restored from saved layout state. */
+const PANEL_MINIMUM_RESTORED_HEIGHT = 160;
+
+//#region Workbench Options
+
+export interface IWorkbenchOptions {
+	/**
+	 * Extra classes to be added to the workbench container.
+	 */
+	extraClasses?: string[];
+}
+
+//#endregion
+
+//#region Layout Classes
+
+enum LayoutClasses {
+	SIDEBAR_HIDDEN = 'nosidebar',
+	MAIN_EDITOR_AREA_HIDDEN = 'nomaineditorarea',
+	PANEL_HIDDEN = 'nopanel',
+	AUXILIARYBAR_HIDDEN = 'noauxiliarybar',
+	SESSIONS_HIDDEN = 'nosessionspart',
+	STATUSBAR_HIDDEN = 'nostatusbar',
+	SHELL_GRADIENT_BACKGROUND = 'shell-gradient-background',
+	FULLSCREEN = 'fullscreen',
+	MAXIMIZED = 'maximized',
+	PHONE_LAYOUT = 'phone-layout',
+	AUXILIARY_FILES_ACTIVE = 'sessions-auxiliary-files-active',
+	AUXILIARY_BROWSER_ACTIVE = 'sessions-auxiliary-browser-active',
+	PARTS_ANIMATING = 'parts-animating',
+	BOOTING = 'workbench-booting'
+}
+
+//#endregion
+
+//#region Part Visibility State
+
+interface IPartVisibilityState {
+	sidebar: boolean;
+	auxiliaryBar: boolean;
+	editor: boolean;
+	panel: boolean;
+	sessions: boolean;
+}
+
+interface IPartSizesState {
+	sidebar?: number;
+	auxiliaryBar?: number;
+	sessions?: number;
+	editor?: number;
+	panel?: number;
+}
+
+//#endregion
+
+export interface IAgentWorkbenchLayoutService extends IWorkbenchLayoutService {
+	isEditorMaximized(): boolean;
+	setEditorMaximized(maximized: boolean): void;
+
+	readonly onDidChangeEditorMaximized: Event<void>;
+
+	/**
+	 * Suppresses the automatic editor part show/hide that normally fires from
+	 * `editorService.onWillOpenEditor` / `onDidCloseEditor`. Use this around
+	 * programmatic editor operations (e.g. applying a working set) so that the
+	 * editor part visibility is not changed as a side-effect. Dispose the
+	 * returned handle to release the suppression. Calls nest via a counter.
+	 *
+	 * Comment: We should consider movin mximization logic into layoutController
+	 */
+	suppressEditorPartAutoVisibility(): IDisposable;
+}
+
+export const IAgentWorkbenchLayoutService = refineServiceDecorator<IWorkbenchLayoutService, IAgentWorkbenchLayoutService>(IWorkbenchLayoutService);
+
+export const CLOSE_MOBILE_SIDEBAR_DRAWER_COMMAND_ID = 'sessions.closeMobileSidebarDrawer';
+
+export class Workbench extends Disposable implements IAgentWorkbenchLayoutService {
+
+	declare readonly _serviceBrand: undefined;
+
+	//#region Lifecycle Events
+
+	private readonly _onWillShutdown = this._register(new Emitter<WillShutdownEvent>());
+	readonly onWillShutdown = this._onWillShutdown.event;
+
+	private readonly _onDidShutdown = this._register(new Emitter<void>());
+	readonly onDidShutdown = this._onDidShutdown.event;
+
+	//#endregion
+
+	//#region Events
+
+	private readonly _onDidChangeZenMode = this._register(new Emitter<boolean>());
+	readonly onDidChangeZenMode = this._onDidChangeZenMode.event;
+
+	private readonly _onDidChangeMainEditorCenteredLayout = this._register(new Emitter<boolean>());
+	readonly onDidChangeMainEditorCenteredLayout = this._onDidChangeMainEditorCenteredLayout.event;
+
+	private readonly _onDidChangePanelAlignment = this._register(new Emitter<PanelAlignment>());
+	readonly onDidChangePanelAlignment = this._onDidChangePanelAlignment.event;
+
+	private readonly _onDidChangeWindowMaximized = this._register(new Emitter<{ windowId: number; maximized: boolean }>());
+	readonly onDidChangeWindowMaximized = this._onDidChangeWindowMaximized.event;
+
+	private readonly _onDidChangePanelPosition = this._register(new Emitter<string>());
+	readonly onDidChangePanelPosition = this._onDidChangePanelPosition.event;
+
+	private readonly _onDidChangePartVisibility = this._register(new Emitter<IPartVisibilityChangeEvent>());
+	readonly onDidChangePartVisibility = this._onDidChangePartVisibility.event;
+
+	private readonly _onDidChangeNotificationsVisibility = this._register(new Emitter<boolean>());
+	readonly onDidChangeNotificationsVisibility = this._onDidChangeNotificationsVisibility.event;
+
+	private readonly _onDidChangeAuxiliaryBarMaximized = this._register(new Emitter<void>());
+	private readonly _restoredLayoutFrame = this._register(new MutableDisposable());
+	readonly onDidChangeAuxiliaryBarMaximized = this._onDidChangeAuxiliaryBarMaximized.event;
+
+	private readonly _onDidChangeEditorMaximized = this._register(new Emitter<void>());
+	readonly onDidChangeEditorMaximized = this._onDidChangeEditorMaximized.event;
+
+	private readonly _onDidLayoutMainContainer = this._register(new Emitter<IDimension>());
+	readonly onDidLayoutMainContainer = this._onDidLayoutMainContainer.event;
+
+	private readonly _onDidLayoutActiveContainer = this._register(new Emitter<IDimension>());
+	readonly onDidLayoutActiveContainer = this._onDidLayoutActiveContainer.event;
+
+	private readonly _onDidLayoutContainer = this._register(new Emitter<{ container: HTMLElement; dimension: IDimension }>());
+	readonly onDidLayoutContainer = this._onDidLayoutContainer.event;
+
+	private readonly _onDidAddContainer = this._register(new Emitter<{ container: HTMLElement; disposables: DisposableStore }>());
+	readonly onDidAddContainer = this._onDidAddContainer.event;
+
+	private readonly _onDidChangeActiveContainer = this._register(new Emitter<void>());
+	readonly onDidChangeActiveContainer = this._onDidChangeActiveContainer.event;
+
+	//#endregion
+
+	//#region Properties
+
+	readonly mainContainer = document.createElement('div');
+
+	get activeContainer(): HTMLElement {
+		return this.getContainerFromDocument(getActiveDocument());
+	}
+
+	get containers(): Iterable<HTMLElement> {
+		const containers: HTMLElement[] = [];
+		for (const { window } of getWindows()) {
+			containers.push(this.getContainerFromDocument(window.document));
+		}
+		return containers;
+	}
+
+	private getContainerFromDocument(targetDocument: Document): HTMLElement {
+		if (targetDocument === this.mainContainer.ownerDocument) {
+			return this.mainContainer;
+		} else {
+			// eslint-disable-next-line no-restricted-syntax
+			return targetDocument.body.getElementsByClassName('monaco-workbench')[0] as HTMLElement;
+		}
+	}
+
+	private _mainContainerDimension!: IDimension;
+	get mainContainerDimension(): IDimension { return this._mainContainerDimension; }
+
+	get activeContainerDimension(): IDimension {
+		return this.getContainerDimension(this.activeContainer);
+	}
+
+	private getContainerDimension(container: HTMLElement): IDimension {
+		if (container === this.mainContainer) {
+			return this.mainContainerDimension;
+		} else {
+			return getClientArea(container);
+		}
+	}
+
+	get mainContainerOffset(): ILayoutOffsetInfo {
+		return this.computeContainerOffset();
+	}
+
+	get activeContainerOffset(): ILayoutOffsetInfo {
+		return this.computeContainerOffset();
+	}
+
+	private computeContainerOffset(): ILayoutOffsetInfo {
+		let top = 0;
+		let quickPickTop = 0;
+
+		if (this.mobileTopBarElement) {
+			// On phone layout the MobileTitlebarPart is the only top bar
+			top = this.mobileTopBarElement.offsetHeight;
+			quickPickTop = top;
+		} else if (this.layoutPolicy.viewportClass.get() !== 'phone') {
+			// Keep dialogs and quick picks clear of the per-panel header strips
+			top = SessionsPanelHeader.HEIGHT;
+			quickPickTop = top;
+		}
+
+		return { top, quickPickTop };
+	}
+
+	//#endregion
+
+	//#region State
+
+	private readonly parts = new Map<string, Part>();
+	private workbenchGrid!: SerializableGrid<ISerializableView>;
+
+	/** Removes the transient `.parts-animating` class after a panel toggle finishes animating. */
+	private readonly partsAnimationScheduler = this._register(new RunOnceScheduler(() => this.mainContainer.classList.remove(LayoutClasses.PARTS_ANIMATING), 300));
+	private readonly partCompositeHideSchedulers = this._register(new DisposableMap<Parts, RunOnceScheduler>());
+
+	private titleBarPartView!: ISerializableView;
+	private sideBarPartView!: ISerializableView;
+	private panelPartView!: ISerializableView;
+	private auxiliaryBarPartView!: ISerializableView;
+	private editorPartView!: ISerializableView;
+
+	private sessionsPartView!: ISerializableView;
+
+	private readonly partVisibility: IPartVisibilityState = {
+		sidebar: true,
+		auxiliaryBar: true,
+		editor: false,
+		panel: false,
+		sessions: true
+	};
+
+	// Mode switches reload this workbench in place. Read the live window state so
+	// Simple and Advanced immediately keep the mode menu at the same left-edge
+	// position as Editor instead of waiting for another fullscreen event.
+	private mainWindowFullscreen = isFullscreen(mainWindow);
+	private readonly maximized = new Set<number>();
+	private readonly layoutPolicy = this._register(new SessionsLayoutPolicy());
+	private readonly mobileNavStack = this._register(new MobileNavigationStack());
+	private mobileTopBarElement: HTMLElement | undefined;
+	private readonly mobileTopBarDisposables = this._register(new DisposableStore());
+
+	private _editorMaximized = false;
+	private _editorLastNonMaximizedVisibility: IPartVisibilityState | undefined;
+	private _auxiliaryBarLastNonMaximizedVisibility: IPartVisibilityState | undefined;
+	private _restoreAttachedEditorMaximizedOnShow = false;
+	private _restoreEditorOnAuxiliaryBarShow = false;
+	private _editorPartAutoVisibilitySuppressionCount = 0;
+	private _hasAppliedInitialEditorSplit = false;
+
+	private readonly restoredPromise = new DeferredPromise<void>();
+	readonly whenRestored = this.restoredPromise.p;
+	private restored = false;
+
+	readonly openedDefaultEditors = false;
+
+	private _savedPartSizes: IPartSizesState = {};
+
+	//#endregion
+
+	private static readonly _PART_VISIBILITY_KEY = 'workbench.sessions.partVisibility';
+	private static readonly _PART_SIZES_KEY = 'workbench.sessions.partSizes';
+
+	//#region Services
+
+	private editorGroupService!: IEditorGroupsService;
+	private editorService!: IEditorService;
+	private paneCompositeService!: IPaneCompositePartService;
+	private viewDescriptorService!: IViewDescriptorService;
+	private sessionsService!: ISessionsService;
+	private sessionsPartService!: ISessionsPartService;
+	private instantiationService!: IInstantiationService;
+	private storageService!: IStorageService;
+
+	/**
+	 * `true` only for the advanced (Optimus) window, which is a full workbench.
+	 * The simple Sessions window keeps the main editor area hidden and routes
+	 * editors to modal overlays / the right-workbench instead.
+	 */
+	private _isOptimusWindow = false;
+
+	//#endregion
+
+	constructor(
+		protected readonly parent: HTMLElement,
+		private readonly options: IWorkbenchOptions | undefined,
+		private readonly serviceCollection: ServiceCollection,
+		private readonly logService: ILogService
+	) {
+		super();
+
+		// Sessions-scoped mobile viewport tweaks. These are applied here
+		// (rather than in the shared workbench.html) so that the regular
+		// code-web workbench — which does not handle safe-area insets — is
+		// not affected on notched mobile devices.
+		// The viewport `<meta>` tag is injected by the shared workbench.html,
+		// so we cannot use dom.ts `h()` to create it. Look it up by tag name
+		// and filter by the `name` attribute to avoid a selector query.
+		// eslint-disable-next-line no-restricted-syntax
+		const metaElements = mainWindow.document.head.getElementsByTagName('meta');
+		let viewportMeta: HTMLMetaElement | undefined;
+		for (let i = 0; i < metaElements.length; i++) {
+			if (metaElements[i].name === 'viewport') {
+				viewportMeta = metaElements[i];
+				break;
+			}
+		}
+		if (viewportMeta && !viewportMeta.content.includes('viewport-fit=')) {
+			viewportMeta.content = `${viewportMeta.content}, viewport-fit=cover`;
+		}
+
+		// Perf: measure workbench startup time
+		mark('code/willStartWorkbench');
+
+		this.registerErrorHandler(logService);
+	}
+
+	//#region Error Handling
+
+	private registerErrorHandler(logService: ILogService): void {
+		// Increase stack trace limit for better errors stacks
+		if (!isFirefox) {
+			Error.stackTraceLimit = 100;
+		}
+
+		// Listen on unhandled rejection events
+		// Note: intentionally not registered as disposable to handle
+		//       errors that can occur during shutdown phase.
+		mainWindow.addEventListener('unhandledrejection', (event) => {
+			// See https://developer.mozilla.org/en-US/docs/Web/API/PromiseRejectionEvent
+			onUnexpectedError(event.reason);
+
+			// Prevent the printing of this event to the console
+			event.preventDefault();
+		});
+
+		// Install handler for unexpected errors
+		setUnexpectedErrorHandler(error => this.handleUnexpectedError(error, logService));
+	}
+
+	private previousUnexpectedError: { message: string | undefined; time: number } = { message: undefined, time: 0 };
+	private handleUnexpectedError(error: unknown, logService: ILogService): void {
+		const message = toErrorMessage(error, true);
+		if (!message) {
+			return;
+		}
+
+		const now = Date.now();
+		if (message === this.previousUnexpectedError.message && now - this.previousUnexpectedError.time <= 1000) {
+			return; // Return if error message identical to previous and shorter than 1 second
+		}
+
+		this.previousUnexpectedError.time = now;
+		this.previousUnexpectedError.message = message;
+
+		// Log it
+		logService.error(message);
+	}
+
+	//#endregion
+
+	//#region Startup
+
+	startup(): IInstantiationService {
+		try {
+			// Configure emitter leak warning threshold
+			this._register(setGlobalLeakWarningThreshold(175));
+
+			// Services
+			const instantiationService = this.initServices(this.serviceCollection);
+
+			instantiationService.invokeFunction(accessor => {
+				const lifecycleService = accessor.get(ILifecycleService);
+				const storageService = accessor.get(IStorageService);
+				const configurationService = accessor.get(IConfigurationService);
+				const hostService = accessor.get(IHostService);
+				const hoverService = accessor.get(IHoverService);
+				const dialogService = accessor.get(IDialogService);
+				const notificationService = accessor.get(INotificationService) as NotificationService;
+				const markdownRendererService = accessor.get(IMarkdownRendererService);
+
+				// On web, the configuration service needs access to the
+				// instantiation service for dynamic configuration resolution.
+				if (isWeb && typeof (configurationService as IConfigurationService & { acquireInstantiationService?(i: IInstantiationService): void }).acquireInstantiationService === 'function') {
+					(configurationService as IConfigurationService & { acquireInstantiationService(i: IInstantiationService): void }).acquireInstantiationService(instantiationService);
+				}
+
+				// Set code block renderer for markdown rendering
+				markdownRendererService.setDefaultCodeBlockRenderer(instantiationService.createInstance(EditorMarkdownCodeBlockRenderer));
+
+				// Default Hover Delegate must be registered before creating any workbench/layout components
+				setHoverDelegateFactory((placement, enableInstantHover) => instantiationService.createInstance(WorkbenchHoverDelegate, placement, { instantHover: enableInstantHover }, {}));
+				setBaseLayerHoverDelegate(hoverService);
+
+				// Layout
+				this.initLayout(accessor);
+
+				// Registries - this creates and registers all parts
+				Registry.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench).start(accessor);
+				Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).start(accessor);
+
+				// Context Keys
+				this._register(instantiationService.createInstance(WorkbenchContextKeysHandler));
+
+				// Editor Maximized Context Key
+				const editorMaximizedContext = EditorMaximizedContext.bindTo(accessor.get(IContextKeyService));
+				this._register(this.onDidChangeEditorMaximized(() => {
+					editorMaximizedContext.set(this.isEditorMaximized());
+				}));
+
+				// Phone Layout Context Key
+				const contextKeyService = accessor.get(IContextKeyService);
+				const isPhoneLayoutCtx = IsPhoneLayoutContext.bindTo(contextKeyService);
+				this._register(autorun(reader => {
+					isPhoneLayoutCtx.set(this.layoutPolicy.viewportClass.read(reader) === 'phone');
+				}));
+
+				// Virtual keyboard tracking (visualViewport): publishes the
+				// keyboard height as an observable, mirrors it onto the
+				// `--vscode-keyboard-height` CSS variable on the main
+				// container, and drives the `KeyboardVisibleContext`
+				// context key. The service is an eager singleton, so
+				// resolving it here is what triggers its constructor —
+				// the registry hands ownership/disposal to the
+				// instantiation service so we don't `_register` it.
+				accessor.get(IMobileVisualViewport);
+
+				// Orientation changes produce a window `resize` event which
+				// is already handled by `registerLayoutListeners()`. No
+				// separate matchMedia listener is needed — the previous
+				// implementation caused a redundant second layout.
+
+				// Register Listeners
+				this.registerListeners(lifecycleService, storageService, configurationService, hostService, dialogService);
+
+				// Render Workbench
+				this.renderWorkbench(instantiationService, notificationService, storageService, configurationService);
+
+				// Workbench Layout
+				this.createWorkbenchLayout();
+
+				// Create mobile navigation after grid exists (so DOM order is correct)
+				if (this.layoutPolicy.viewportClass.get() === 'phone') {
+					this.createMobileTitlebar();
+				}
+
+				// Workbench Management
+				this.createWorkbenchManagement(instantiationService);
+
+				// Layout
+				this.layout();
+
+				// Restore
+				this.restore(lifecycleService);
+			});
+
+			return instantiationService;
+		} catch (error) {
+			onUnexpectedError(error);
+
+			throw error; // rethrow because this is a critical issue we cannot handle properly here
+		}
+	}
+
+	private initServices(serviceCollection: ServiceCollection): IInstantiationService {
+		// Layout Service
+		serviceCollection.set(IAgentWorkbenchLayoutService, this);
+
+		// Title Service - agent sessions titlebar with dedicated part overrides
+		serviceCollection.set(ITitleService, new SyncDescriptor(TitleService, []));
+
+		// All Contributed Services
+		const contributedServices = getSingletonServiceDescriptors();
+		for (const [id, descriptor] of contributedServices) {
+			serviceCollection.set(id, descriptor);
+		}
+
+		const instantiationService = new InstantiationService(serviceCollection, true);
+
+		// Wrap up
+		instantiationService.invokeFunction(accessor => {
+			const lifecycleService = accessor.get(ILifecycleService);
+			lifecycleService.phase = LifecyclePhase.Ready;
+		});
+
+		return instantiationService;
+	}
+
+	private registerListeners(lifecycleService: ILifecycleService, storageService: IStorageService, configurationService: IConfigurationService, hostService: IHostService, dialogService: IDialogService): void {
+		// Command: close the mobile sidebar drawer (no-op outside phone layout).
+		// Routes through the proper close path so the mobile nav/history stack
+		// stays in sync (avoids extra Android back-button presses).
+		this._register(CommandsRegistry.registerCommand(CLOSE_MOBILE_SIDEBAR_DRAWER_COMMAND_ID, () => {
+			if (this.layoutPolicy.viewportClass.get() === 'phone') {
+				this.closeMobileSidebarDrawer();
+			}
+		}));
+
+		// Configuration changes
+		this._register(configurationService.onDidChangeConfiguration(e => this.updateFontAliasing(e, configurationService)));
+
+		// Font Info
+		if (isNative) {
+			this._register(storageService.onWillSaveState(e => {
+				if (e.reason === WillSaveStateReason.SHUTDOWN) {
+					this.storeFontInfo(storageService);
+				}
+			}));
+		} else {
+			this._register(lifecycleService.onWillShutdown(() => this.storeFontInfo(storageService)));
+		}
+
+		// Part Sizes — persist current grid sizes so they are restored on reload
+		this._register(storageService.onWillSaveState(() => this._savePartSizes()));
+
+		// Lifecycle
+		this._register(lifecycleService.onWillShutdown(event => this._onWillShutdown.fire(event)));
+		this._register(lifecycleService.onDidShutdown(() => {
+			this._onDidShutdown.fire();
+			this.dispose();
+		}));
+
+		// Flush storage on window focus loss
+		this._register(hostService.onDidChangeFocus(focus => {
+			if (!focus) {
+				storageService.flush();
+			}
+		}));
+
+		// Dialogs showing/hiding
+		this._register(dialogService.onWillShowDialog(() => this.mainContainer.classList.add('modal-dialog-visible')));
+		this._register(dialogService.onDidShowDialog(() => this.mainContainer.classList.remove('modal-dialog-visible')));
+	}
+
+	//#region Font Aliasing and Caching
+
+	private fontAliasing: 'default' | 'antialiased' | 'none' | 'auto' | undefined;
+	private updateFontAliasing(e: IConfigurationChangeEvent | undefined, configurationService: IConfigurationService) {
+		if (!isMacintosh) {
+			return; // macOS only
+		}
+
+		if (e && !e.affectsConfiguration('workbench.fontAliasing')) {
+			return;
+		}
+
+		const aliasing = configurationService.getValue<'default' | 'antialiased' | 'none' | 'auto'>('workbench.fontAliasing');
+		if (this.fontAliasing === aliasing) {
+			return;
+		}
+
+		this.fontAliasing = aliasing;
+
+		// Remove all
+		const fontAliasingValues: (typeof aliasing)[] = ['antialiased', 'none', 'auto'];
+		this.mainContainer.classList.remove(...fontAliasingValues.map(value => `monaco-font-aliasing-${value}`));
+
+		// Add specific
+		if (fontAliasingValues.some(option => option === aliasing)) {
+			this.mainContainer.classList.add(`monaco-font-aliasing-${aliasing}`);
+		}
+	}
+
+	private restoreFontInfo(storageService: IStorageService, configurationService: IConfigurationService): void {
+		const storedFontInfoRaw = storageService.get('editorFontInfo', StorageScope.APPLICATION);
+		if (storedFontInfoRaw) {
+			try {
+				const storedFontInfo = JSON.parse(storedFontInfoRaw);
+				if (Array.isArray(storedFontInfo)) {
+					FontMeasurements.restoreFontInfo(mainWindow, storedFontInfo);
+				}
+			} catch (err) {
+				/* ignore */
+			}
+		}
+
+		FontMeasurements.readFontInfo(mainWindow, createBareFontInfoFromRawSettings(configurationService.getValue('editor'), PixelRatio.getInstance(mainWindow).value));
+	}
+
+	private storeFontInfo(storageService: IStorageService): void {
+		const serializedFontInfo = FontMeasurements.serializeFontInfo(mainWindow);
+		if (serializedFontInfo) {
+			storageService.store('editorFontInfo', JSON.stringify(serializedFontInfo), StorageScope.APPLICATION, StorageTarget.MACHINE);
+		}
+	}
+
+	private _loadPartVisibility(storageService: IStorageService): { editor?: boolean; auxiliaryBar?: boolean; sidebar?: boolean } {
+		if (this.layoutPolicy.viewportClass.get() === 'phone') {
+			return {};
+		}
+
+		const raw = storageService.get(Workbench._PART_VISIBILITY_KEY, StorageScope.WORKSPACE);
+		if (raw) {
+			try {
+				return JSON.parse(raw);
+			} catch {
+				// Corrupted data — remove the bad key so we don't keep warning on every startup
+				storageService.remove(Workbench._PART_VISIBILITY_KEY, StorageScope.WORKSPACE);
+			}
+		}
+		return {};
+	}
+
+	private _savePartVisibility(): void {
+		if (this.layoutPolicy.viewportClass.get() === 'phone') {
+			return;
+		}
+
+		this.storageService.store(Workbench._PART_VISIBILITY_KEY, JSON.stringify({
+			editor: this.partVisibility.editor,
+			auxiliaryBar: this.partVisibility.auxiliaryBar,
+			sidebar: this.partVisibility.sidebar,
+		}), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+	}
+
+	private _loadPartSizes(storageService: IStorageService): IPartSizesState {
+		const raw = storageService.get(Workbench._PART_SIZES_KEY, StorageScope.WORKSPACE);
+		if (raw) {
+			try {
+				return JSON.parse(raw);
+			} catch {
+				// Corrupted data — remove the bad key so we don't keep warning on every startup
+				storageService.remove(Workbench._PART_SIZES_KEY, StorageScope.WORKSPACE);
+			}
+		}
+		return {};
+	}
+
+	private _savePartSizes(): void {
+		if (!this.workbenchGrid) {
+			return;
+		}
+
+		// For visible parts, read the current grid view size. For hidden parts,
+		// fall back to the grid's cached visible size — i.e. the size the part
+		// had the last time it was shown — so that toggling visibility later
+		// restores the same dimensions.
+		const getSize = (view: ISerializableView, dimension: 'width' | 'height', visible: boolean): number | undefined => {
+			if (visible) {
+				return this.workbenchGrid.getViewSize(view)[dimension];
+			}
+			return this.workbenchGrid.getViewCachedVisibleSize(view);
+		};
+
+		const sizes: IPartSizesState = {
+			sidebar: getSize(this.sideBarPartView, 'width', this.partVisibility.sidebar),
+			auxiliaryBar: getSize(this.auxiliaryBarPartView, 'width', this.partVisibility.auxiliaryBar),
+			sessions: getSize(this.sessionsPartView, 'width', this.partVisibility.sessions),
+			editor: getSize(this.editorPartView, 'height', this.partVisibility.editor),
+			panel: getSize(this.panelPartView, 'height', this.partVisibility.panel),
+		};
+
+		this.storageService.store(Workbench._PART_SIZES_KEY, JSON.stringify(sizes), StorageScope.WORKSPACE, StorageTarget.MACHINE);
+	}
+
+	//#endregion
+
+	/**
+	 * Part visibility to start from, before the grid is built. The Advanced
+	 * (Optimus) window overrides the shared sessions defaults: it docks the
+	 * conversation in the auxiliary bar and keeps the editor and panel hidden.
+	 *
+	 * Resolving this up front — rather than letting a workbench contribution
+	 * correct the layout after `Restored` — is what keeps a mode switch from
+	 * visibly rearranging itself once the window has already painted.
+	 */
+	private getInitialPartVisibilityDefaults(): IPartVisibilityDefaults {
+		if (this._isOptimusWindow && this.layoutPolicy.viewportClass.get() !== 'phone') {
+			return this.layoutPolicy.getOptimusPartVisibilityDefaults();
+		}
+
+		return this.layoutPolicy.getPartVisibilityDefaults();
+	}
+
+	private renderWorkbench(instantiationService: IInstantiationService, notificationService: NotificationService, storageService: IStorageService, configurationService: IConfigurationService): void {
+		// ARIA & Signals
+		setARIAContainer(this.mainContainer);
+		setProgressAccessibilitySignalScheduler((msDelayTime: number, msLoopTime?: number) => instantiationService.createInstance(AccessibilityProgressSignalScheduler, msDelayTime, msLoopTime));
+
+		// Initialize viewport classification before building layout classes
+		const initialDimension = getClientArea(this.parent);
+		this.layoutPolicy.update(initialDimension.width, initialDimension.height);
+
+		// Apply initial part visibility from layout policy (phone hides sidebar, etc.)
+		const visibilityDefaults = this.getInitialPartVisibilityDefaults();
+		this.partVisibility.sidebar = visibilityDefaults.sidebar;
+		this.partVisibility.auxiliaryBar = visibilityDefaults.auxiliaryBar;
+		this.partVisibility.panel = visibilityDefaults.panel;
+		this.partVisibility.sessions = visibilityDefaults.sessions;
+		// Load once to clear corrupt persisted data, but always start desktop/tablet with both side panels visible.
+		void this._loadPartVisibility(storageService);
+		this.partVisibility.auxiliaryBar = visibilityDefaults.auxiliaryBar;
+		this.partVisibility.editor = this.partVisibility.auxiliaryBar ? visibilityDefaults.editor : false;
+		this.partVisibility.sidebar = visibilityDefaults.sidebar;
+		this.partVisibility.sessions = visibilityDefaults.sessions;
+
+		// Load saved grid part sizes — these will be consumed when building the
+		// grid descriptor so editor/sidebar/auxbar/panel restore to their previous
+		// dimensions across reloads.
+		this._savedPartSizes = this._loadPartSizes(storageService);
+
+		// State specific classes
+		const platformClass = isWindows ? 'windows' : isLinux ? 'linux' : 'mac';
+		const workbenchClasses = coalesce([
+			'monaco-workbench',
+			'agent-sessions-workbench',
+			LayoutClasses.SHELL_GRADIENT_BACKGROUND,
+			// Held transparent until the first laid-out frame is ready (see
+			// `revealWorkbench`). Mode switching reloads the window in place,
+			// so without this a half-built workbench can reach the screen.
+			LayoutClasses.BOOTING,
+			platformClass,
+			isWeb ? 'web' : undefined,
+			isChrome ? 'chromium' : isFirefox ? 'firefox' : isSafari ? 'safari' : undefined,
+			...this.getLayoutClasses(),
+			...(this.options?.extraClasses ? this.options.extraClasses : [])
+		]);
+
+		this.mainContainer.classList.add(...workbenchClasses);
+
+		// Apply font aliasing
+		this.updateFontAliasing(undefined, configurationService);
+
+		// Warm up font cache information before building up too many dom elements
+		this.restoreFontInfo(storageService, configurationService);
+
+		// Create Parts (editor starts hidden and is shown when an editor opens)
+		for (const { id, role, classes } of [
+			{ id: Parts.TITLEBAR_PART, role: 'none', classes: ['titlebar'] },
+			{ id: Parts.SIDEBAR_PART, role: 'none', classes: ['sidebar', 'left'] },
+			{ id: Parts.AUXILIARYBAR_PART, role: 'none', classes: ['auxiliarybar', 'basepanel', 'right'] },
+			{ id: Parts.PANEL_PART, role: 'none', classes: ['panel', 'basepanel', positionToString(this.getPanelPosition())] },
+		]) {
+			const partContainer = this.createPartContainer(id, role, classes);
+
+			mark(`code/willCreatePart/${id}`);
+			this.getPart(id).create(partContainer);
+			mark(`code/didCreatePart/${id}`);
+		}
+
+		// Create Editor Part (hidden by default)
+		this.createEditorPart();
+
+		// Create Sessions Part
+		this.createSessionsPart();
+
+		// Notification Handlers
+		this.createNotificationsHandlers(instantiationService, notificationService, configurationService);
+
+		// Add Workbench to DOM
+		this.parent.appendChild(this.mainContainer);
+	}
+
+	private createMobileTitlebar(): void {
+		this.mobileTopBarDisposables.clear();
+		const mobileTitlebar = this.mobileTopBarDisposables.add(this.instantiationService.createInstance(MobileTitlebarPart, this.mainContainer));
+		this.mobileTopBarElement = mobileTitlebar.element;
+
+		// Hamburger: toggle sidebar drawer overlay
+		this.mobileTopBarDisposables.add(mobileTitlebar.onDidClickHamburger(() => {
+			this.toggleMobileSidebarDrawer();
+		}));
+
+		// New session: open new chat view and dismiss the sidebar drawer
+		// so the new session view becomes visible. createMobileTitlebar() is
+		// only invoked in phone layout, so closing the drawer here is safe.
+		this.mobileTopBarDisposables.add(mobileTitlebar.onDidClickNewSession(() => {
+			this.sessionsService.openNewSession();
+			this.closeMobileSidebarDrawer();
+			this.sessionsPartService.focusSession(this.sessionsService.activeSession.get());
+		}));
+	}
+
+	private toggleMobileSidebarDrawer(): void {
+		const isOpen = this.partVisibility.sidebar;
+		if (isOpen) {
+			this.closeMobileSidebarDrawer();
+		} else {
+			this.openMobileSidebarDrawer();
+		}
+	}
+
+	private openMobileSidebarDrawer(): void {
+		// Push a history entry so the Android back button dismisses the drawer.
+		// Must come before setSideBarHidden(false) so layoutMobileSidebar() sees
+		// the drawer state.
+		if (!this.mobileNavStack.has('sidebar')) {
+			this.mobileNavStack.push('sidebar');
+		}
+
+		// Show sidebar in grid — the actual drawer dimensions are applied by
+		// layoutMobileSidebar() from within layout(), which uses the full
+		// viewport width below the mobile top bar on phone. The toggle button
+		// in the top bar remains visible and is used to close the drawer.
+		this.setSideBarHidden(false);
+	}
+
+	private closeMobileSidebarDrawer(): void {
+		// Hide sidebar in grid
+		this.setSideBarHidden(true);
+
+		// Sync the navigation stack with the browser history: if there is a
+		// pending 'sidebar' entry (UI-initiated close), rewind history without
+		// firing onDidPop. If we're being called from the back-button path
+		// (onDidPop already fired), this is a no-op.
+		if (this.mobileNavStack.has('sidebar')) {
+			this.mobileNavStack.popSilently('sidebar');
+		}
+	}
+
+	private createNotificationsHandlers(
+		instantiationService: IInstantiationService,
+		notificationService: NotificationService,
+		configurationService: IConfigurationService
+	): void {
+		// Instantiate Notification components
+		const notificationsCenter = this._register(instantiationService.createInstance(NotificationsCenter, this.mainContainer, notificationService.model));
+		const notificationsToasts = this._register(instantiationService.createInstance(NotificationsToasts, this.mainContainer, notificationService.model));
+		this._register(instantiationService.createInstance(NotificationsAlerts, notificationService.model));
+		const notificationsStatus = this._register(instantiationService.createInstance(NotificationsStatus, notificationService.model));
+
+		// Visibility
+		this._register(notificationsCenter.onDidChangeVisibility(() => {
+			notificationsStatus.update(notificationsCenter.isVisible, notificationsToasts.isVisible);
+			notificationsToasts.update(notificationsCenter.isVisible);
+		}));
+
+		this._register(notificationsToasts.onDidChangeVisibility(() => {
+			notificationsStatus.update(notificationsCenter.isVisible, notificationsToasts.isVisible);
+		}));
+
+		// Register Commands
+		registerNotificationCommands(notificationsCenter, notificationsToasts, notificationService.model);
+
+		// Register notification accessible view
+		AccessibleViewRegistry.register(new NotificationAccessibleView());
+
+		// The shared notification controllers apply a top-right inline offset based on the
+		// default workbench custom titlebar height. The sessions workbench has its own
+		// fixed chrome, so re-apply the sessions-specific top-right offset after they run.
+		this.registerSessionsNotificationOffsets(configurationService, notificationsCenter, notificationsToasts);
+
+		// Register with Layout
+		this.registerNotifications({
+			onDidChangeNotificationsVisibility: Event.map(
+				Event.any(notificationsToasts.onDidChangeVisibility, notificationsCenter.onDidChangeVisibility),
+				() => notificationsToasts.isVisible || notificationsCenter.isVisible
+			)
+		});
+	}
+
+	private registerSessionsNotificationOffsets(
+		configurationService: IConfigurationService,
+		notificationsCenter: NotificationsCenter,
+		notificationsToasts: NotificationsToasts
+	): void {
+		const applySessionsNotificationOffsets = () => {
+			const position = getNotificationsPosition(configurationService);
+			const notificationsCenterContainer = this.getWorkbenchChildByClassName('notifications-center');
+			const notificationsToastsContainer = this.getWorkbenchChildByClassName('notifications-toasts');
+
+			if (position === NotificationsPosition.TOP_RIGHT) {
+				notificationsCenterContainer?.style.setProperty('top', '40px');
+				notificationsToastsContainer?.style.setProperty('top', '40px');
+			}
+		};
+
+		this._register(this.onDidLayoutMainContainer(() => applySessionsNotificationOffsets()));
+		this._register(notificationsCenter.onDidChangeVisibility(() => applySessionsNotificationOffsets()));
+		this._register(notificationsToasts.onDidChangeVisibility(() => applySessionsNotificationOffsets()));
+		this._register(configurationService.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration(NotificationsSettings.NOTIFICATIONS_POSITION)) {
+				applySessionsNotificationOffsets();
+			}
+		}));
+	}
+
+	private getWorkbenchChildByClassName(className: string): HTMLElement | undefined {
+		for (const child of this.mainContainer.children) {
+			if (isHTMLElement(child) && child.classList.contains(className)) {
+				return child;
+			}
+		}
+
+		return undefined;
+	}
+
+	private createPartContainer(id: string, role: string, classes: string[]): HTMLElement {
+		const part = document.createElement('div');
+		part.classList.add('part', ...classes);
+		part.id = id;
+		part.setAttribute('role', role);
+		return part;
+	}
+
+	private createEditorPart(): void {
+		const editorPartContainer = document.createElement('div');
+		editorPartContainer.classList.add('part', 'editor');
+		editorPartContainer.id = Parts.EDITOR_PART;
+		editorPartContainer.setAttribute('role', 'main');
+
+		mark('code/willCreatePart/workbench.parts.editor');
+		this.getPart(Parts.EDITOR_PART).create(editorPartContainer, { restorePreviousState: false });
+		mark('code/didCreatePart/workbench.parts.editor');
+
+		this.mainContainer.appendChild(editorPartContainer);
+	}
+
+	private createSessionsPart(): void {
+		const sessionsPartContainer = document.createElement('div');
+		sessionsPartContainer.classList.add('part', 'sessionspart', 'basepanel', 'right');
+		sessionsPartContainer.id = Parts.SESSIONS_PART;
+		sessionsPartContainer.setAttribute('role', 'main');
+
+		mark(`code/willCreatePart/${Parts.SESSIONS_PART}`);
+		this.getPart(Parts.SESSIONS_PART).create(sessionsPartContainer);
+		mark(`code/didCreatePart/${Parts.SESSIONS_PART}`);
+
+		this.mainContainer.appendChild(sessionsPartContainer);
+	}
+
+	private restore(lifecycleService: ILifecycleService): void {
+		// Update perf marks
+		mark('code/didStartWorkbench');
+		performance.measure('perf: workbench create & restore', 'code/didLoadWorkbenchMain', 'code/didStartWorkbench');
+
+		// Restore parts (open default view containers)
+		this.restoreParts();
+
+		// Restore the sessions that were visible in the grid.
+		void this.sessionsService.restoreVisibleSessions().catch(e => {
+			this.logService.error('[Workbench] restoreVisibleSessions failed', e);
+		});
+
+		// Set lifecycle phase to `Restored`
+		lifecycleService.phase = LifecyclePhase.Restored;
+
+		// Mark as restored
+		this.setRestored();
+
+		// Set lifecycle phase to `Eventually` after a short delay and when idle (min 2.5sec, max 5sec)
+		const eventuallyPhaseScheduler = this._register(new RunOnceScheduler(() => {
+			this._register(runWhenWindowIdle(mainWindow, () => lifecycleService.phase = LifecyclePhase.Eventually, 2500));
+		}, 2500));
+		eventuallyPhaseScheduler.schedule();
+
+		// Reveal the finished workbench
+		this.revealWorkbench();
+	}
+
+	/**
+	 * Reveals the workbench on the frame it first paints.
+	 *
+	 * Everything up to here — services, parts, grid, first layout, restore —
+	 * happens in one synchronous task, so the frame this runs ahead of is the
+	 * finished workbench rather than a half-built one. Revealing on this frame
+	 * rather than a later one matters: the boot splash is already torn down by
+	 * `layout()`, so staying hidden any longer would leave a blank frame
+	 * between the splash and the workbench.
+	 */
+	private revealWorkbench(): void {
+		const reveal = () => this.mainContainer.classList.remove(LayoutClasses.BOOTING);
+
+		// Never leave the workbench invisible if frames stop arriving (an
+		// occluded or fully offscreen window gets no animation frames at all).
+		const fallback = this._register(new RunOnceScheduler(reveal, 300));
+		fallback.schedule();
+
+		this._register(scheduleAtNextAnimationFrame(mainWindow, () => {
+			fallback.cancel();
+			reveal();
+		}));
+	}
+
+	private restoreParts(): void {
+		// Open default view containers for each visible part
+		const partsToRestore: { location: ViewContainerLocation; visible: boolean }[] = [
+			{ location: ViewContainerLocation.Sidebar, visible: this.partVisibility.sidebar },
+			{ location: ViewContainerLocation.Panel, visible: this.partVisibility.panel },
+			{ location: ViewContainerLocation.AuxiliaryBar, visible: this.partVisibility.auxiliaryBar },
+		];
+
+		for (const { location, visible } of partsToRestore) {
+			if (visible) {
+				const defaultViewContainer = this.viewDescriptorService.getDefaultViewContainer(location);
+				if (defaultViewContainer) {
+					this.paneCompositeService.openPaneComposite(defaultViewContainer.id, location);
+				}
+			}
+		}
+	}
+
+	//#endregion
+
+	//#region Initialization
+
+	initLayout(accessor: ServicesAccessor): void {
+		// Services - accessing these triggers their instantiation
+		// which creates and registers the parts
+		this.editorGroupService = accessor.get(IEditorGroupsService);
+		this.editorService = accessor.get(IEditorService);
+		this.paneCompositeService = accessor.get(IPaneCompositePartService);
+		this.viewDescriptorService = accessor.get(IViewDescriptorService);
+		this.sessionsService = accessor.get(ISessionsService);
+		// Forces eager creation of the sessions part so it registers itself with the
+		// layout service before renderWorkbench() looks it up via getPart().
+		this.sessionsPartService = accessor.get(ISessionsPartService);
+		this.instantiationService = accessor.get(IInstantiationService);
+		this.storageService = accessor.get(IStorageService);
+		this._isOptimusWindow = accessor.get(IWorkbenchEnvironmentService).isOptimusWindow;
+		// Root marker classes let CSS scope treatments per window mode.
+		this.mainContainer.classList.toggle('optimus-window', this._isOptimusWindow);
+		accessor.get(ITitleService);
+
+		// Register layout listeners
+		this.registerLayoutListeners();
+		this.registerAuxiliaryEmptyStateListeners();
+
+		// Editor opens should only affect the main editor part when
+		// they actually target one of the main editor groups. Modal
+		// opens stay neutral. Programmatic opens that suppress auto
+		// visibility (e.g. working set application) are ignored.
+		//
+		// The simple Sessions window never auto-reveals the main editor
+		// area: editors there open as modal overlays, so revealing the
+		// (empty) main editor part would surface the workbench watermark.
+		// Only the advanced (Optimus) windows follow editor opens.
+		if (this._isOptimusWindow) {
+			this._register(this.editorService.onWillOpenEditor(e => {
+				if (this._editorPartAutoVisibilitySuppressionCount > 0) {
+					return;
+				}
+
+				const targetsMainEditorPart = this.editorGroupService.mainPart.groups.some(group => group.id === e.groupId);
+				if (!targetsMainEditorPart) {
+					return;
+				}
+
+				if (!this.partVisibility.auxiliaryBar) {
+					this.setAuxiliaryBarHidden(false);
+				}
+
+				if (!this.partVisibility.editor) {
+					this.setEditorHidden(false);
+					this.restoreAttachedEditorMaximizedState();
+				}
+			}));
+		} else {
+			// Safety net for the simple window: the main editor area must
+			// never be visible while it holds no editors, or the empty-editor
+			// watermark ("Backboard Desktop") shows next to the chat.
+			// This catches any path that reveals it empty (restored state, a
+			// transient layout reveal) as well as closing the last editor after
+			// an explicit "Open in Editor Area".
+			this._register(this.editorService.onDidEditorsChange(() => this.enforceNoEmptyMainEditor()));
+		}
+
+		// Initialize layout state (must be done before createWorkbenchLayout)
+		this._mainContainerDimension = getClientArea(this.parent, new Dimension(800, 600));
+		this.layoutPolicy.update(this._mainContainerDimension.width, this._mainContainerDimension.height);
+
+		// Update part visibility based on final viewport classification
+		const visDefaults = this.getInitialPartVisibilityDefaults();
+		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
+		this.partVisibility.sidebar = isPhone ? visDefaults.sidebar : this.partVisibility.sidebar;
+		this.partVisibility.auxiliaryBar = isPhone ? visDefaults.auxiliaryBar : this.partVisibility.auxiliaryBar;
+		this.partVisibility.panel = visDefaults.panel;
+		this.partVisibility.sessions = visDefaults.sessions;
+		this.partVisibility.editor = isPhone ? visDefaults.editor : this.partVisibility.editor;
+
+		// A persisted-visible main editor part restores empty in the simple
+		// window (editors are not restored into it); hide it before the grid is
+		// built so the watermark never flashes.
+		this.enforceNoEmptyMainEditor();
+	}
+
+	suppressEditorPartAutoVisibility(): IDisposable {
+		this._editorPartAutoVisibilitySuppressionCount++;
+		let disposed = false;
+		return toDisposable(() => {
+			if (disposed) {
+				return;
+			}
+			disposed = true;
+			this._editorPartAutoVisibilitySuppressionCount--;
+		});
+	}
+
+	private restoreAttachedEditorMaximizedState(): void {
+		const shouldRestore = this._restoreAttachedEditorMaximizedOnShow && this.partVisibility.auxiliaryBar;
+		this._restoreAttachedEditorMaximizedOnShow = false;
+
+		if (shouldRestore) {
+			this.setEditorMaximized(true);
+		}
+	}
+
+	private registerLayoutListeners(): void {
+		// Stylesheets read `sessions-sash-dragging` instead of a root
+		// `:has(.monaco-sash.active)`, which re-checked the root on every
+		// :has-relevant change anywhere in the window (see part.ts).
+		this._register(addDisposableListener(this.mainContainer, EventType.MOUSE_DOWN, e => {
+			if (isHTMLElement(e.target) && e.target.closest('.monaco-sash')) {
+				this.mainContainer.classList.add('sessions-sash-dragging');
+			}
+		}, true));
+		this._register(addDisposableListener(mainWindow, EventType.MOUSE_UP, () => {
+			this.mainContainer.classList.remove('sessions-sash-dragging');
+		}, true));
+
+		// Fullscreen changes
+		this._register(onDidChangeFullscreen(windowId => {
+			if (windowId === getWindowId(mainWindow)) {
+				this.mainWindowFullscreen = isFullscreen(mainWindow);
+				this.updateFullscreenClass();
+				this.layout();
+			}
+		}));
+
+		// Window resize — needed for device emulation and mobile viewport changes
+		const onWindowResize = () => this.layout();
+		mainWindow.addEventListener('resize', onWindowResize);
+		this._register({ dispose: () => mainWindow.removeEventListener('resize', onWindowResize) });
+	}
+
+	private registerAuxiliaryEmptyStateListeners(): void {
+		const updateActiveAuxiliaryMode = () => {
+			const activeAuxiliaryId = this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)?.getId();
+			const filesActive = activeAuxiliaryId === SESSIONS_FILES_CONTAINER_ID;
+			const browserActive = activeAuxiliaryId === SESSIONS_BROWSER_VIEW_CONTAINER_ID;
+			this.mainContainer.classList.toggle(LayoutClasses.AUXILIARY_FILES_ACTIVE, filesActive);
+			this.mainContainer.classList.toggle(LayoutClasses.AUXILIARY_BROWSER_ACTIVE, browserActive);
+		};
+
+		this._register(this.paneCompositeService.onDidPaneCompositeOpen(e => {
+			if (e.viewContainerLocation === ViewContainerLocation.AuxiliaryBar) {
+				updateActiveAuxiliaryMode();
+			}
+		}));
+		this._register(this.paneCompositeService.onDidPaneCompositeClose(e => {
+			if (e.viewContainerLocation === ViewContainerLocation.AuxiliaryBar) {
+				updateActiveAuxiliaryMode();
+			}
+		}));
+		updateActiveAuxiliaryMode();
+	}
+
+	private updateFullscreenClass(): void {
+		if (this.mainWindowFullscreen) {
+			this.mainContainer.classList.add(LayoutClasses.FULLSCREEN);
+		} else {
+			this.mainContainer.classList.remove(LayoutClasses.FULLSCREEN);
+		}
+	}
+
+	//#endregion
+
+	//#region Workbench Layout Creation
+
+	createWorkbenchLayout(): void {
+		const titleBar = this.getPart(Parts.TITLEBAR_PART);
+		const editorPart = this.getPart(Parts.EDITOR_PART);
+		const panelPart = this.getPart(Parts.PANEL_PART);
+		const auxiliaryBarPart = this.getPart(Parts.AUXILIARYBAR_PART);
+		const sideBar = this.getPart(Parts.SIDEBAR_PART);
+		const sessionsPart = this.getPart(Parts.SESSIONS_PART);
+
+		// View references for parts in the grid
+		this.titleBarPartView = titleBar;
+		this.sideBarPartView = sideBar;
+		this.panelPartView = panelPart;
+		this.auxiliaryBarPartView = auxiliaryBarPart;
+		this.sessionsPartView = sessionsPart;
+		this.editorPartView = editorPart;
+
+		const viewMap: { [key: string]: ISerializableView } = {
+			[Parts.TITLEBAR_PART]: this.titleBarPartView,
+			[Parts.PANEL_PART]: this.panelPartView,
+			[Parts.SIDEBAR_PART]: this.sideBarPartView,
+			[Parts.AUXILIARYBAR_PART]: this.auxiliaryBarPartView,
+			[Parts.SESSIONS_PART]: this.sessionsPartView,
+			[Parts.EDITOR_PART]: this.editorPartView
+		};
+
+		const fromJSON = ({ type }: { type: string }) => viewMap[type];
+		const workbenchGrid = SerializableGrid.deserialize(
+			this.createGridDescriptor(),
+			{ fromJSON },
+			{ proportionalLayout: false }
+		);
+		// Older builds persisted the right pane's maximized grid state. Simple mode
+		// no longer exposes that control, so restore the split once during startup
+		// instead of leaving users trapped in a maximized surface.
+		if (!this._isOptimusWindow && workbenchGrid.isViewMaximized(this.auxiliaryBarPartView)) {
+			workbenchGrid.exitMaximizedView();
+		}
+
+		this.mainContainer.prepend(workbenchGrid.element);
+		this.mainContainer.setAttribute('role', 'application');
+		this.workbenchGrid = workbenchGrid;
+		this.workbenchGrid.edgeSnapping = this.mainWindowFullscreen;
+
+		// If the editor is restored visible, it already has an established
+		// size, so a later reveal must not force the initial stacked size over it.
+		this._hasAppliedInitialEditorSplit = this.partVisibility.editor;
+
+		// Listen for part visibility changes (for parts in grid)
+		for (const part of [titleBar, panelPart, sideBar, auxiliaryBarPart, sessionsPart, editorPart]) {
+			this._register(part.onDidVisibilityChange(visible => {
+				if (part === sideBar) {
+					this.setSideBarHidden(!visible);
+				} else if (part === panelPart) {
+					this.setPanelHidden(!visible);
+				} else if (part === auxiliaryBarPart) {
+					this.setAuxiliaryBarHidden(!visible);
+				} else if (part === sessionsPart) {
+					this.setSessionsHidden(!visible);
+				} else if (part === editorPart) {
+					this.setEditorHidden(!visible);
+				}
+
+				this._onDidChangePartVisibility.fire({ partId: part.getId(), visible });
+				this.handleContainerDidLayout(this.mainContainer, this._mainContainerDimension);
+			}));
+		}
+
+		// Wire up mobile nav stack: back-button pops close the corresponding part
+		this._register(this.mobileNavStack.onDidPop(layer => {
+			switch (layer) {
+				case 'sidebar':
+					this.closeMobileSidebarDrawer();
+					break;
+				case 'panel':
+					this.setPanelHidden(true);
+					break;
+				case 'auxbar':
+					this.setAuxiliaryBarHidden(true);
+					break;
+				case 'editor':
+					// Editor modal close is handled by the editor service
+					break;
+			}
+		}));
+	}
+
+	createWorkbenchManagement(instantiationService: IInstantiationService): void {
+		this._register(instantiationService.createInstance(PanelEdgePreview, this.mainContainer));
+		// Welcome — must be created early in layout so the widget can gate
+		// other UI until sign-in / chat setup is complete.
+		instantiationService.invokeFunction(accessor => accessor.get(ISessionsSetUpService));
+	}
+
+	/**
+	 * Creates the grid descriptor for the Agent Sessions layout.
+	 *
+	 * Structure (vertical orientation):
+	 * - Titlebar (full-width top row)
+	 * - Content section (horizontal):
+	 *   - Sidebar
+	 *   - Right section (vertical):
+	 *     - Top right (horizontal): Chat Bar | Right workbench
+	 *       - Right workbench: Editor | Changes/Files/Browser
+	 *     - Panel (below chat and right workbench)
+	 */
+	private createGridDescriptor(): ISerializedGrid {
+		const { width, height } = this._mainContainerDimension;
+
+		return this.createDesktopGridDescriptor(width, Math.max(0, height));
+	}
+
+	/**
+	 * Standard multi-part layout for all viewport classes.
+	 * On phone, the titlebar is hidden via CSS and a MobileTitlebarPart
+	 * is prepended before the grid. Sidebar/panel/auxbar are hidden
+	 * in the grid via partVisibility defaults.
+	 */
+	private createDesktopGridDescriptor(width: number, height: number): ISerializedGrid {
+
+		// Default sizes from layout policy
+		const sizes = this.layoutPolicy.getPartSizes(width, height);
+		// For hidden parts, still provide a reasonable cached size for when they're shown later.
+		// Saved sizes from a previous session take precedence over policy defaults.
+		const restoredSideBarSize = this._savedPartSizes.sidebar
+			?? (this.partVisibility.sidebar ? sizes.sideBarSize : Math.max(sizes.sideBarSize, 250));
+		// The Codex-style Simple shell uses a compact navigation rail. Older
+		// builds persisted the previous 360px default, so clamp that restored
+		// value here while still allowing the user to resize after launch.
+		const sideBarSize = !this._isOptimusWindow
+			? Math.min(restoredSideBarSize, 310)
+			: restoredSideBarSize;
+		// A stale saved height would open the terminal as a sliver or bury the
+		// chat above it; keep it between a usable minimum and 60% of the window.
+		const restoredPanelSize = this._savedPartSizes.panel
+			?? (this.partVisibility.panel ? sizes.panelSize : Math.max(sizes.panelSize, 250));
+		const panelSize = Math.min(Math.max(restoredPanelSize, PANEL_MINIMUM_RESTORED_HEIGHT), Math.max(PANEL_MINIMUM_RESTORED_HEIGHT, Math.floor(height * 0.6)));
+		const contentHeight = Math.max(0, height);
+
+		// Calculate right section width — when sidebar is hidden it takes no space.
+		const effectiveSideBarWidth = this.partVisibility.sidebar ? sideBarSize : 0;
+		const rightSectionWidth = Math.max(0, width - effectiveSideBarWidth);
+		// The Advanced window's right column is the chat panel alone (the editor
+		// stays hidden there). Size it from the live space at initial construction
+		// so narrow windows keep a useful board without a post-paint snap.
+		const preferredRightWorkColumnWidth = this._isOptimusWindow
+			? getOptimusChatPanelWidth(width, effectiveSideBarWidth)
+			: this._savedPartSizes.sessions !== undefined
+				? rightSectionWidth - this._savedPartSizes.sessions
+				: Math.max(sizes.auxiliaryBarSize, Math.floor(rightSectionWidth * 0.56));
+		const minimumRightWorkColumnWidth = this._isOptimusWindow
+			? Math.min(rightSectionWidth, preferredRightWorkColumnWidth)
+			: (this.partVisibility.auxiliaryBar && this.partVisibility.editor)
+				? Math.min(rightSectionWidth, Math.max(420, rightSectionWidth < 900 ? Math.floor(rightSectionWidth * 0.72) : Math.max(560, Math.floor(rightSectionWidth * 0.48))))
+				: 300;
+		// Simple mode must never restore a stale right-pane width that reduces the
+		// chat canvas to a strip. Keep its documented 300px minimum whenever the
+		// viewport can accommodate it; on narrower windows, shrink the tool pane
+		// down to its actual grid minimum first.
+		const preserveSimpleSessionsWidth = !this._isOptimusWindow && this.partVisibility.sessions && !this.partVisibility.editor;
+		const maximumRightWorkColumnWidth = preserveSimpleSessionsWidth
+			? Math.min(rightSectionWidth, Math.max(SIMPLE_AUXILIARY_BAR_MINIMUM_WIDTH, rightSectionWidth - SIMPLE_SESSIONS_MINIMUM_WIDTH))
+			: rightSectionWidth;
+		const rightWorkColumnWidth = Math.min(maximumRightWorkColumnWidth, Math.max(minimumRightWorkColumnWidth, preferredRightWorkColumnWidth));
+		const effectiveRightWorkColumnWidth = (this.partVisibility.auxiliaryBar || this.partVisibility.editor) ? rightWorkColumnWidth : 0;
+		// Prefer the saved chat bar width so the user's preferred chat bar size
+		// is preserved across reloads. Fall back to the remainder of the right
+		// section, which the grid distributes proportionally when the saved
+		// sizes don't fit the current container.
+		const sessionsWidth = preserveSimpleSessionsWidth
+			? Math.max(0, rightSectionWidth - effectiveRightWorkColumnWidth)
+			: (this._savedPartSizes.sessions !== undefined && !this._isOptimusWindow)
+				? Math.max(0, Math.min(this._savedPartSizes.sessions, rightSectionWidth - effectiveRightWorkColumnWidth))
+				: Math.max(0, rightSectionWidth - effectiveRightWorkColumnWidth);
+
+		const visiblePanelSize = this.partVisibility.panel ? panelSize : 0;
+		const topRightHeight = Math.max(0, contentHeight - visiblePanelSize);
+		const minimumAuxiliaryBarWidth = this.partVisibility.editor
+			? Math.min(400, Math.max(340, Math.floor(rightWorkColumnWidth * 0.34)))
+			: rightWorkColumnWidth;
+		const maximumAuxiliaryBarWidth = this.partVisibility.editor
+			? Math.max(minimumAuxiliaryBarWidth, Math.min(600, Math.floor(rightWorkColumnWidth * 0.52)))
+			: rightWorkColumnWidth;
+		const defaultAuxiliaryBarWidth = this.partVisibility.editor
+			? Math.min(maximumAuxiliaryBarWidth, Math.max(minimumAuxiliaryBarWidth, Math.floor(rightWorkColumnWidth * 0.44)))
+			: rightWorkColumnWidth;
+		const auxiliaryBarSize = this.partVisibility.auxiliaryBar
+			? Math.min(maximumAuxiliaryBarWidth, Math.max(minimumAuxiliaryBarWidth, this._savedPartSizes.auxiliaryBar ?? defaultAuxiliaryBarWidth))
+			: 0;
+		const editorSize = this.partVisibility.editor
+			? Math.max(0, rightWorkColumnWidth - (this.partVisibility.auxiliaryBar ? auxiliaryBarSize : 0))
+			: 0;
+
+		const sideBarNode: ISerializedLeafNode = {
+			type: 'leaf',
+			data: { type: Parts.SIDEBAR_PART },
+			size: sideBarSize,
+			visible: this.partVisibility.sidebar
+		};
+
+		const auxiliaryBarNode: ISerializedLeafNode = {
+			type: 'leaf',
+			data: { type: Parts.AUXILIARYBAR_PART },
+			size: auxiliaryBarSize,
+			visible: this.partVisibility.auxiliaryBar
+		};
+
+		const sessionsNode: ISerializedLeafNode = {
+			type: 'leaf',
+			data: { type: Parts.SESSIONS_PART },
+			size: topRightHeight,
+			visible: this.partVisibility.sessions
+		};
+
+		const editorNode: ISerializedLeafNode = {
+			type: 'leaf',
+			data: { type: Parts.EDITOR_PART },
+			size: editorSize,
+			visible: this.partVisibility.editor
+		};
+
+		const panelNode: ISerializedLeafNode = {
+			type: 'leaf',
+			data: { type: Parts.PANEL_PART },
+			size: panelSize,
+			visible: this.partVisibility.panel
+		};
+
+		// Agents column: the chat/session view with the terminal panel stacked
+		// directly beneath it (vertical). This keeps the terminal confined to the
+		// agents page rather than spanning the full width, so it can be open at the
+		// same time as the right panel without eating into it.
+		const agentsColumn: ISerializedNode = {
+			type: 'branch',
+			data: [sessionsNode, panelNode],
+			size: sessionsWidth
+		};
+
+		// Root section (horizontal): Side bar | Agents column | Editor | Right panel.
+		// The editor and right panel are full-height siblings of the agents column,
+		// so the terminal (below the agents column) and the right panel no longer
+		// compete for the same space.
+		const contentSection: ISerializedNode = {
+			type: 'branch',
+			data: [sideBarNode, agentsColumn, editorNode, auxiliaryBarNode],
+			size: contentHeight
+		};
+
+		const result: ISerializedGrid = {
+			root: {
+				...contentSection,
+				size: height
+			},
+			orientation: Orientation.HORIZONTAL,
+			width,
+			height
+		};
+
+		return result;
+	}
+
+	//#endregion
+
+	//#region Layout Methods
+
+	private _previousViewportClass: string | undefined;
+
+	layout(): void {
+		this._mainContainerDimension = getClientArea(
+			this.mainWindowFullscreen ? mainWindow.document.body : this.parent
+		);
+
+		// Update viewport classification and toggle mobile CSS classes
+		const previousClass = this._previousViewportClass;
+		this.layoutPolicy.update(this._mainContainerDimension.width, this._mainContainerDimension.height);
+		const currentClass = this.layoutPolicy.viewportClass.get();
+		this.mainContainer.classList.toggle(LayoutClasses.PHONE_LAYOUT, currentClass === 'phone');
+
+		// When viewport class changes at runtime (e.g., device emulation toggle),
+		// update part visibility and create/destroy mobile components
+		if (previousClass !== undefined && previousClass !== currentClass) {
+			if (currentClass === 'phone' && !this.mobileTopBarElement) {
+				this.createMobileTitlebar();
+				// On phone, only chat is visible — hide everything else first
+				const defaults = this.layoutPolicy.getPartVisibilityDefaults();
+				if (this.partVisibility.sidebar !== defaults.sidebar) {
+					this.setSideBarHidden(!defaults.sidebar);
+				}
+				if (this.partVisibility.auxiliaryBar !== defaults.auxiliaryBar) {
+					this.setAuxiliaryBarHidden(!defaults.auxiliaryBar);
+				}
+				if (this.partVisibility.panel !== defaults.panel) {
+					this.setPanelHidden(!defaults.panel);
+				}
+			} else if (currentClass !== 'phone' && this.mobileTopBarElement) {
+				// Remove mobile components when leaving phone layout
+				this.mobileTopBarDisposables.clear();
+				this.mobileTopBarElement = undefined;
+				// Restore desktop part visibility
+				const defaults = this.getInitialPartVisibilityDefaults();
+				if (this.partVisibility.sidebar !== defaults.sidebar) {
+					this.setSideBarHidden(!defaults.sidebar);
+				}
+				if (this.partVisibility.sessions !== defaults.sessions) {
+					this.setSessionsHidden(!defaults.sessions);
+				}
+				if (this.partVisibility.auxiliaryBar !== defaults.auxiliaryBar) {
+					this.setAuxiliaryBarHidden(!defaults.auxiliaryBar);
+				}
+				if (this.partVisibility.panel !== defaults.panel) {
+					this.setPanelHidden(!defaults.panel);
+				}
+			}
+
+			// Re-run updateStyles() on pane composite parts so that
+			// mobile Part subclasses can re-apply or clear card-chrome
+			// inline styles based on the new `.phone-layout` class.
+			for (const partId of [Parts.SESSIONS_PART, Parts.SIDEBAR_PART, Parts.AUXILIARYBAR_PART, Parts.PANEL_PART]) {
+				this.parts.get(partId)?.updateStyles();
+			}
+		}
+		this._previousViewportClass = currentClass;
+
+		this.logService.trace(`Workbench#layout, height: ${this._mainContainerDimension.height}, width: ${this._mainContainerDimension.width}`);
+
+		size(this.mainContainer, this._mainContainerDimension.width, this._mainContainerDimension.height);
+
+		// On phone, subtract the mobile top bar height from the grid
+		const mobileTopBarHeight = this.mobileTopBarElement?.offsetHeight ?? 0;
+
+		// Keep the desktop grid flush with the window edges. Individual parts own
+		// their internal borders and header strips; the workbench itself must not
+		// reserve an outer gutter or the center chat and right details pane stop
+		// short of the edge.
+		const gridWidth = this._mainContainerDimension.width;
+		const gridHeight = Math.max(0, this._mainContainerDimension.height - mobileTopBarHeight);
+
+		// Layout the grid widget
+		this.workbenchGrid.layout(gridWidth, gridHeight);
+		updateGridPartHostClasses(this.workbenchGrid.element);
+		this.normalizeSimpleAuxiliaryBarWidth();
+		this.layoutMobileSidebar();
+
+		// Emit as event
+		this.handleContainerDidLayout(this.mainContainer, this._mainContainerDimension);
+	}
+
+	private layoutMobileSidebar(): void {
+		const sidebarContainer = this.getContainer(mainWindow, Parts.SIDEBAR_PART);
+		const sidebarPart = this.getPart(Parts.SIDEBAR_PART);
+		if (!sidebarContainer) {
+			return;
+		}
+
+		// On phone the sidebar renders as a full-viewport overlay drawer.
+		// Geometry is fully expressed in CSS — see
+		// `mobileChatShell.css` (split-view-view fills the grid) and
+		// `sidebarPart.css` (drawer animation, z-index). We avoid setting
+		// inline position/size styles here because writing them after the
+		// grid has already laid out and painted the sidebar causes a
+		// visible one-frame snap on toggle.
+		const isPhone = this.layoutPolicy.viewportClass.get() === 'phone';
+		if (!isPhone || !this.partVisibility.sidebar) {
+			sidebarContainer.classList.remove('mobile-overlay-sidebar');
+			return;
+		}
+
+		sidebarContainer.classList.add('mobile-overlay-sidebar');
+
+		// Re-layout the sidebar Part with the drawer's content dimensions
+		// so its internal composite/list sizing matches the CSS-positioned
+		// drawer (grid area minus the mobile top bar).
+		const topBarHeight = this.mobileTopBarElement?.offsetHeight ?? 48;
+		const drawerWidth = this._mainContainerDimension.width;
+		const drawerHeight = Math.max(0, this._mainContainerDimension.height - topBarHeight);
+		sidebarPart.layout(drawerWidth, drawerHeight, topBarHeight, 0);
+	}
+
+	private handleContainerDidLayout(container: HTMLElement, dimension: IDimension): void {
+		this._onDidLayoutContainer.fire({ container, dimension });
+		if (container === this.mainContainer) {
+			this._onDidLayoutMainContainer.fire(dimension);
+		}
+		if (container === this.activeContainer) {
+			this._onDidLayoutActiveContainer.fire(dimension);
+		}
+	}
+
+	getLayoutClasses(): string[] {
+		return coalesce([
+			!this.partVisibility.sidebar ? LayoutClasses.SIDEBAR_HIDDEN : undefined,
+			!this.partVisibility.editor ? LayoutClasses.MAIN_EDITOR_AREA_HIDDEN : undefined,
+			!this.partVisibility.panel ? LayoutClasses.PANEL_HIDDEN : undefined,
+			!this.partVisibility.auxiliaryBar ? LayoutClasses.AUXILIARYBAR_HIDDEN : undefined,
+			!this.partVisibility.sessions ? LayoutClasses.SESSIONS_HIDDEN : undefined,
+			LayoutClasses.STATUSBAR_HIDDEN, // agents window never has a status bar
+			this.mainWindowFullscreen ? LayoutClasses.FULLSCREEN : undefined,
+			this.layoutPolicy.viewportClass.get() === 'phone' ? LayoutClasses.PHONE_LAYOUT : undefined,
+		]);
+	}
+
+	//#endregion
+
+	//#region Part Management
+
+	registerPart(part: Part): IDisposable {
+		const id = part.getId();
+		this.parts.set(id, part);
+		return toDisposable(() => this.parts.delete(id));
+	}
+
+	getPart(key: Parts): Part {
+		const part = this.parts.get(key);
+		if (!part) {
+			throw new Error(`Unknown part ${key}`);
+		}
+		return part;
+	}
+
+	hasFocus(part: Parts): boolean {
+		const container = this.getContainer(mainWindow, part);
+		if (!container) {
+			return false;
+		}
+
+		const activeElement = getActiveElement();
+		if (!activeElement) {
+			return false;
+		}
+
+		return isAncestorUsingFlowTo(activeElement, container);
+	}
+
+	focusPart(part: MULTI_WINDOW_PARTS, targetWindow: Window): void;
+	focusPart(part: SINGLE_WINDOW_PARTS): void;
+	focusPart(part: Parts, targetWindow: Window = mainWindow): void {
+		switch (part) {
+			case Parts.EDITOR_PART:
+				this.editorGroupService.activeGroup.focus();
+				break;
+			case Parts.PANEL_PART:
+				this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Panel)?.focus();
+				break;
+			case Parts.SIDEBAR_PART:
+				this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Sidebar)?.focus();
+				break;
+			case Parts.AUXILIARYBAR_PART:
+				this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)?.focus();
+				break;
+			case Parts.SESSIONS_PART:
+				// TODO: focus chat bar content once it is wired up
+				this.getPart(Parts.SESSIONS_PART).getContainer()?.focus();
+				break;
+			default: {
+				const container = this.getContainer(targetWindow, part);
+				container?.focus();
+			}
+		}
+	}
+
+	focus(): void {
+		this.focusPart(Parts.SESSIONS_PART);
+	}
+
+	//#endregion
+
+	//#region Container Methods
+
+	getContainer(targetWindow: Window): HTMLElement;
+	getContainer(targetWindow: Window, part: Parts): HTMLElement | undefined;
+	getContainer(targetWindow: Window, part?: Parts): HTMLElement | undefined {
+		if (typeof part === 'undefined') {
+			return this.getContainerFromDocument(targetWindow.document);
+		}
+
+		if (targetWindow === mainWindow) {
+			return this.parts.get(part)?.getContainer();
+		}
+
+		// For auxiliary windows, only editor part is supported
+		if (part === Parts.EDITOR_PART) {
+			const container = this.getContainerFromDocument(targetWindow.document);
+			const partCandidate = this.editorGroupService.getPart(container);
+			if (partCandidate instanceof Part) {
+				return partCandidate.getContainer();
+			}
+		}
+
+		return undefined;
+	}
+
+	whenContainerStylesLoaded(_window: CodeWindow): Promise<void> | undefined {
+		return undefined;
+	}
+
+	//#endregion
+
+	//#region Part Visibility
+
+	isActivityBarHidden(): boolean {
+		return true; // No activity bar in this layout
+	}
+
+	isVisible(part: SINGLE_WINDOW_PARTS): boolean;
+	isVisible(part: MULTI_WINDOW_PARTS, targetWindow: Window): boolean;
+	isVisible(part: Parts, targetWindow?: Window): boolean {
+		switch (part) {
+			case Parts.TITLEBAR_PART:
+				// On phone layout the grid titlebar is hidden (replaced by MobileTitlebarPart)
+				return this.layoutPolicy.viewportClass.get() !== 'phone';
+			case Parts.SIDEBAR_PART:
+				return this.partVisibility.sidebar;
+			case Parts.AUXILIARYBAR_PART:
+				return this.partVisibility.auxiliaryBar;
+			case Parts.EDITOR_PART:
+				return this.partVisibility.editor;
+			case Parts.PANEL_PART:
+				return this.partVisibility.panel;
+			case Parts.SESSIONS_PART:
+				return this.partVisibility.sessions;
+			case Parts.ACTIVITYBAR_PART:
+			case Parts.STATUSBAR_PART:
+			case Parts.BANNER_PART:
+			default:
+				return false;
+		}
+	}
+
+	setPartHidden(hidden: boolean, part: Parts): void {
+		switch (part) {
+			case Parts.SIDEBAR_PART:
+				this.setSideBarHidden(hidden);
+				break;
+			case Parts.AUXILIARYBAR_PART:
+				this.setAuxiliaryBarHidden(hidden);
+				break;
+			case Parts.EDITOR_PART:
+				this.setEditorHidden(hidden);
+				break;
+			case Parts.PANEL_PART:
+				this.setPanelHidden(hidden);
+				break;
+			case Parts.SESSIONS_PART:
+				this.setSessionsHidden(hidden);
+				break;
+		}
+	}
+
+	/**
+	 * Starts a brief geometry animation for a side or bottom panel toggle. Adds the
+	 * `.parts-animating` class (which enables the CSS transition and keeps the
+	 * toggling part rendered), commits the current sizes as the transition start
+	 * frame with a forced reflow, and schedules the class removal. Must be called
+	 * before the grid visibility is changed.
+	 */
+	private beginPartsAnimation(): void {
+		if (!this.restored || !this.workbenchGrid) {
+			return; // avoid animating the initial layout / restore
+		}
+		this.mainContainer.classList.add(LayoutClasses.PARTS_ANIMATING);
+		this.workbenchGrid.element.getBoundingClientRect(); // force reflow so the pre-toggle sizes become the animation's starting frame
+		this.partsAnimationScheduler.schedule();
+	}
+
+	private finishPartsAnimation(): void {
+		this.partsAnimationScheduler.cancel();
+		this.mainContainer.classList.remove(LayoutClasses.PARTS_ANIMATING);
+	}
+
+	/**
+	 * Pane composites do a synchronous DOM build the first time they are opened.
+	 * Build that content while the grid view is still collapsed, then start the
+	 * reveal. Otherwise the main-thread work consumes the first frames of the CSS
+	 * transition and an opening panel appears to jump straight to full size.
+	 */
+	private preparePartOpenAnimation(part: SINGLE_WINDOW_PARTS, prepare: () => Promise<unknown>, reveal: () => void): void {
+		this.partCompositeHideSchedulers.get(part)?.cancel();
+		try {
+			// openPaneComposite performs its expensive initial DOM construction before
+			// returning its promise. Run that work before the transition's first frame,
+			// but reveal synchronously so layout callers can immediately use the part.
+			void prepare().catch(onUnexpectedError);
+		} catch (error) {
+			onUnexpectedError(error);
+		}
+
+		this.beginPartsAnimation();
+		reveal();
+	}
+
+	/** Keep the active composite painted until the closing geometry settles. */
+	private schedulePartCompositeHide(part: SINGLE_WINDOW_PARTS, location: ViewContainerLocation): void {
+		let scheduler = this.partCompositeHideSchedulers.get(part);
+		if (!scheduler) {
+			scheduler = new RunOnceScheduler(() => {
+				if (!this.isVisible(part) && this.paneCompositeService.getActivePaneComposite(location)) {
+					this.paneCompositeService.hideActivePaneComposite(location);
+				}
+			}, 300);
+			this.partCompositeHideSchedulers.set(part, scheduler);
+		}
+
+		scheduler.schedule();
+	}
+
+	private setSideBarHidden(hidden: boolean): void {
+		if (this.partVisibility.sidebar === !hidden) {
+			return;
+		}
+
+		const sidebarSizeBeforeToggle = this.sideBarPartView ? this.workbenchGrid.getViewSize(this.sideBarPartView) : undefined;
+		const sessionsSizeBeforeToggle = this.sessionsPartView ? this.workbenchGrid.getViewSize(this.sessionsPartView) : undefined;
+		const showSidebar = () => {
+			this.mainContainer.classList.remove(LayoutClasses.SIDEBAR_HIDDEN);
+			this.workbenchGrid.setViewVisible(this.sideBarPartView, true);
+
+			// Re-opening restores the sidebar's last visible width, which may be at (or
+			// near) the narrow minimum. Bump it up to a comfortable width on open so the
+			// header row — traffic lights, mode switcher and sidebar toggle — isn't
+			// cramped against the window controls.
+			if (this.sideBarPartView) {
+				const restored = this.workbenchGrid.getViewSize(this.sideBarPartView);
+				const comfortableOpenWidth = 310;
+				if (restored.width > 0 && restored.width < comfortableOpenWidth) {
+					this.workbenchGrid.resizeView(this.sideBarPartView, { width: comfortableOpenWidth, height: restored.height });
+				}
+			}
+
+			this.rebalanceSessionsAfterSidebarToggle(false, sidebarSizeBeforeToggle, sessionsSizeBeforeToggle);
+			this.layout();
+			this.layoutMobileSidebar();
+		};
+
+		if (!hidden) {
+			// Mark the part logically visible before preparing its composite so
+			// openPaneComposite does not recursively reveal the grid view itself.
+			this.partVisibility.sidebar = true;
+			const viewletToOpen = this.paneCompositeService.getLastActivePaneCompositeId(ViewContainerLocation.Sidebar) ??
+				this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Sidebar)?.id;
+			const prepare = viewletToOpen && !this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Sidebar)
+				? () => this.paneCompositeService.openPaneComposite(viewletToOpen, ViewContainerLocation.Sidebar)
+				: () => Promise.resolve();
+
+			this.preparePartOpenAnimation(Parts.SIDEBAR_PART, prepare, showSidebar);
+			this._savePartVisibility();
+			return;
+		}
+
+		this.beginPartsAnimation();
+
+		this.partVisibility.sidebar = false;
+		this.mainContainer.classList.add(LayoutClasses.SIDEBAR_HIDDEN);
+
+		// Propagate to grid
+		this.workbenchGrid.setViewVisible(this.sideBarPartView, false);
+		this.rebalanceSessionsAfterSidebarToggle(true, sidebarSizeBeforeToggle, sessionsSizeBeforeToggle);
+
+		// Keep the populated pane painted as its shell closes, then tear it down.
+		if (this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Sidebar)) {
+			this.schedulePartCompositeHide(Parts.SIDEBAR_PART, ViewContainerLocation.Sidebar);
+		}
+
+		this.layout();
+		this.layoutMobileSidebar();
+		this._savePartVisibility();
+	}
+
+	private rebalanceSessionsAfterSidebarToggle(hidden: boolean, sidebarSizeBeforeToggle: IViewSize | undefined, sessionsSizeBeforeToggle: IViewSize | undefined): void {
+		if (!this.sessionsPartView || !sidebarSizeBeforeToggle || !sessionsSizeBeforeToggle) {
+			return;
+		}
+
+		const currentSessionsSize = this.workbenchGrid.getViewSize(this.sessionsPartView);
+		// On show, use the sidebar's actual current width (it may have just been
+		// bumped up to the comfortable open width); on hide, the width it had before.
+		const sidebarWidth = Math.max(0, hidden
+			? sidebarSizeBeforeToggle.width
+			: (this.workbenchGrid.getViewSize(this.sideBarPartView).width || sidebarSizeBeforeToggle.width));
+		const targetSessionsWidth = hidden
+			? Math.max(currentSessionsSize.width, sessionsSizeBeforeToggle.width + sidebarWidth)
+			: Math.max(sessionsSizeBeforeToggle.width - sidebarWidth, 280);
+
+		this.workbenchGrid.resizeView(this.sessionsPartView, {
+			width: Math.min(this._mainContainerDimension.width, targetSessionsWidth),
+			height: currentSessionsSize.height
+		});
+	}
+
+	private setAuxiliaryBarHidden(hidden: boolean): void {
+		// Restore the chat grid before hiding its maximized inspection surface.
+		if (hidden) {
+			this.setAuxiliaryBarMaximized(false);
+		}
+
+		if (this.partVisibility.auxiliaryBar === !hidden) {
+			// Mode commands call setPartHidden(false) even when the right pane is
+			// already visible. Use that shared path to repair stale restored widths
+			// for Browser, Files, Terminal and Diff alike.
+			if (!hidden) {
+				this.normalizeSimpleAuxiliaryBarWidth(true);
+			}
+			return;
+		}
+
+		if (hidden) {
+			this._restoreAttachedEditorMaximizedOnShow = false;
+			this._restoreEditorOnAuxiliaryBarShow = this.partVisibility.editor;
+			if (this.partVisibility.editor) {
+				this.setEditorHidden(true);
+			}
+		}
+
+		const showAuxiliaryBar = () => {
+			this.mainContainer.classList.remove(LayoutClasses.AUXILIARYBAR_HIDDEN);
+			this.workbenchGrid.setViewVisible(this.auxiliaryBarPartView, true);
+
+			// Simple mode has one right-hand inspection surface. Never reintroduce
+			// the main editor beside it: an empty editor becomes a thin watermark
+			// sliver, and an occupied editor turns the right side into two cramped
+			// IDE columns. Optimus retains the full-workbench restore policy.
+			if (!this._isOptimusWindow) {
+				this._restoreEditorOnAuxiliaryBarShow = false;
+				if (this.partVisibility.editor) {
+					this.setEditorHidden(true);
+				} else if (this.workbenchGrid.isViewVisible(this.editorPartView)) {
+					// Restored grid state can momentarily disagree with the persisted
+					// part flag. Repair the actual view as well as the logical state.
+					this.workbenchGrid.setViewVisible(this.editorPartView, false);
+					this.mainContainer.classList.add(LayoutClasses.MAIN_EDITOR_AREA_HIDDEN);
+				}
+			} else {
+				const editorIsDefaultSurface = this.layoutPolicy.getPartVisibilityDefaults().editor;
+				const shouldRestoreEditor = this._restoreEditorOnAuxiliaryBarShow || editorIsDefaultSurface;
+				this._restoreEditorOnAuxiliaryBarShow = false;
+				if (shouldRestoreEditor && !this.partVisibility.editor) {
+					this.setEditorHidden(false);
+				}
+			}
+
+			this.normalizeSimpleAuxiliaryBarWidth(true);
+		};
+
+		if (!hidden) {
+			this.partVisibility.auxiliaryBar = true;
+			const paneCompositeToOpen = this.paneCompositeService.getLastActivePaneCompositeId(ViewContainerLocation.AuxiliaryBar) ??
+				this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.AuxiliaryBar)?.id;
+			const prepare = paneCompositeToOpen && !this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)
+				? () => this.paneCompositeService.openPaneComposite(paneCompositeToOpen, ViewContainerLocation.AuxiliaryBar)
+				: () => Promise.resolve();
+
+			this.preparePartOpenAnimation(Parts.AUXILIARYBAR_PART, prepare, showAuxiliaryBar);
+			this._savePartVisibility();
+			return;
+		}
+
+		this.beginPartsAnimation();
+		this.partVisibility.auxiliaryBar = false;
+		this.mainContainer.classList.add(LayoutClasses.AUXILIARYBAR_HIDDEN);
+		this.workbenchGrid.setViewVisible(this.auxiliaryBarPartView, false);
+
+		if (this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.AuxiliaryBar)) {
+			this.schedulePartCompositeHide(Parts.AUXILIARYBAR_PART, ViewContainerLocation.AuxiliaryBar);
+		}
+
+		this._savePartVisibility();
+	}
+
+	private normalizeSimpleAuxiliaryBarWidth(ensureComfortableWidth = false): void {
+		if (
+			!this.workbenchGrid ||
+			!this.auxiliaryBarPartView ||
+			this._isOptimusWindow ||
+			this.partVisibility.editor ||
+			!this.partVisibility.auxiliaryBar
+		) {
+			return;
+		}
+
+		if (this.workbenchGrid.isViewMaximized(this.auxiliaryBarPartView)) {
+			// A mode click is also the recovery path for windows that were maximized
+			// before the header control was removed. Passive window layouts still
+			// preserve an explicitly requested command-palette maximization.
+			if (!ensureComfortableWidth) {
+				return;
+			}
+			this.workbenchGrid.exitMaximizedView();
+		}
+
+		const currentSize = this.workbenchGrid.getViewSize(this.auxiliaryBarPartView);
+		const sidebarWidth = this.partVisibility.sidebar && this.sideBarPartView
+			? this.workbenchGrid.getViewSize(this.sideBarPartView).width
+			: 0;
+		const availableWidth = Math.max(0, this._mainContainerDimension.width - sidebarWidth);
+		const maximumWidth = Math.min(
+			availableWidth,
+			Math.max(SIMPLE_AUXILIARY_BAR_MINIMUM_WIDTH, availableWidth - SIMPLE_SESSIONS_MINIMUM_WIDTH)
+		);
+		const comfortableWidth = Math.min(560, Math.max(460, Math.floor(this._mainContainerDimension.width * 0.34)));
+		const requestedWidth = ensureComfortableWidth && currentSize.width < 400 ? comfortableWidth : currentSize.width;
+		const targetWidth = Math.min(requestedWidth, maximumWidth);
+
+		if (targetWidth >= 0 && targetWidth !== currentSize.width) {
+			this.workbenchGrid.resizeView(this.auxiliaryBarPartView, {
+				width: targetWidth,
+				height: currentSize.height
+			});
+		}
+	}
+
+	private setEditorHidden(hidden: boolean): void {
+		if (this.partVisibility.editor === !hidden) {
+			return;
+		}
+
+		// If hiding the editor while maximized
+		if (hidden && this._editorMaximized) {
+			this.setEditorMaximized(false);
+		}
+
+		if (this.editorPartView) {
+			const editorSizeBeforeHide = this.workbenchGrid.getViewSize(this.editorPartView);
+			const auxiliaryBarSizeBeforeHide = this.auxiliaryBarPartView ? this.workbenchGrid.getViewSize(this.auxiliaryBarPartView) : undefined;
+
+			this.partVisibility.editor = !hidden;
+			this.mainContainer.classList.toggle(LayoutClasses.MAIN_EDITOR_AREA_HIDDEN, hidden);
+
+			// Size the editor only the first time it is revealed in this workbench
+			// instance. Later show/hide cycles use the grid's cached height so
+			// user resizing is preserved.
+			const shouldApplyInitialEditorSize = !hidden && !this._hasAppliedInitialEditorSplit;
+
+			this.workbenchGrid.setViewVisible(this.editorPartView, !hidden);
+
+			if (hidden && this.partVisibility.auxiliaryBar && auxiliaryBarSizeBeforeHide) {
+				this.workbenchGrid.resizeView(this.auxiliaryBarPartView, {
+					width: Math.max(auxiliaryBarSizeBeforeHide.width, auxiliaryBarSizeBeforeHide.width + editorSizeBeforeHide.width),
+					height: auxiliaryBarSizeBeforeHide.height
+				});
+			}
+
+			if (shouldApplyInitialEditorSize) {
+				this._hasAppliedInitialEditorSplit = true;
+				this._applyEditorSplitSize();
+			}
+		} else {
+			this.partVisibility.editor = !hidden;
+			this.mainContainer.classList.toggle(LayoutClasses.MAIN_EDITOR_AREA_HIDDEN, hidden);
+		}
+
+		this._savePartVisibility();
+	}
+
+	/**
+	 * Keeps the invariant that, in the simple Sessions window, the main editor
+	 * area is never visible while it holds no editors. An empty visible editor
+	 * part renders the workbench watermark ("Backboard Desktop") next
+	 * to the chat, which must never appear in simple mode. The advanced
+	 * (Optimus) window is a full workbench and is exempt.
+	 */
+	private enforceNoEmptyMainEditor(): void {
+		if (this._isOptimusWindow || !this.partVisibility.editor) {
+			return;
+		}
+
+		const hasMainEditors = this.editorGroupService.mainPart.groups.some(group => group.count > 0);
+		if (!hasMainEditors) {
+			this.setEditorHidden(true);
+		}
+	}
+
+	/**
+	 * Sizes the editor part as the primary pane next to the auxiliary rail
+	 * the first time it is revealed.
+	*/
+	private _applyEditorSplitSize(): void {
+		const currentEditorSize = this.workbenchGrid.getViewSize(this.editorPartView);
+		const auxiliaryBarSize = this.workbenchGrid.getViewSize(this.auxiliaryBarPartView);
+		const rightWorkColumnWidth = currentEditorSize.width + (this.partVisibility.auxiliaryBar ? auxiliaryBarSize.width : 0);
+		const minimumAuxiliaryBarWidth = Math.min(400, Math.max(340, Math.floor(rightWorkColumnWidth * 0.34)));
+		const targetAuxiliaryBarWidth = this.partVisibility.auxiliaryBar
+			? Math.min(600, Math.max(minimumAuxiliaryBarWidth, Math.floor(rightWorkColumnWidth * 0.44)))
+			: 0;
+		const targetEditorWidth = Math.max(0, rightWorkColumnWidth - targetAuxiliaryBarWidth);
+		if (this.partVisibility.auxiliaryBar) {
+			this.workbenchGrid.resizeView(this.auxiliaryBarPartView, {
+				width: targetAuxiliaryBarWidth,
+				height: auxiliaryBarSize.height
+			});
+		}
+		this.workbenchGrid.resizeView(this.editorPartView, {
+			width: targetEditorWidth,
+			height: currentEditorSize.height
+		});
+	}
+
+	private setPanelHidden(hidden: boolean): void {
+		if (this.partVisibility.panel === !hidden) {
+			return;
+		}
+
+		// If hiding and the panel is maximized, exit maximized state first
+		if (hidden && this.workbenchGrid.hasMaximizedView()) {
+			this.workbenchGrid.exitMaximizedView();
+		}
+
+		const panelHadFocus = !hidden || this.hasFocus(Parts.PANEL_PART);
+		const showPanel = () => {
+			this.mainContainer.classList.remove(LayoutClasses.PANEL_HIDDEN);
+			this.workbenchGrid.setViewVisible(this.panelPartView, true);
+			this.focusPart(Parts.PANEL_PART);
+		};
+
+		if (!hidden) {
+			this.partVisibility.panel = true;
+			const panelToOpen = this.paneCompositeService.getLastActivePaneCompositeId(ViewContainerLocation.Panel) ??
+				this.viewDescriptorService.getDefaultViewContainer(ViewContainerLocation.Panel)?.id;
+			const prepare = panelToOpen && !this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Panel)
+				? () => this.paneCompositeService.openPaneComposite(panelToOpen, ViewContainerLocation.Panel)
+				: () => Promise.resolve();
+
+			this.preparePartOpenAnimation(Parts.PANEL_PART, prepare, showPanel);
+			return;
+		}
+
+		this.beginPartsAnimation();
+		this.partVisibility.panel = false;
+		this.mainContainer.classList.add(LayoutClasses.PANEL_HIDDEN);
+		this.workbenchGrid.setViewVisible(this.panelPartView, false);
+
+		// If panel becomes hidden, also hide the current active pane composite
+		if (this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Panel)) {
+			this.schedulePartCompositeHide(Parts.PANEL_PART, ViewContainerLocation.Panel);
+
+			// Focus the chat bar when hiding the panel if it had focus
+			if (panelHadFocus) {
+				this.focusPart(Parts.SESSIONS_PART);
+			}
+		}
+
+	}
+
+	private setSessionsHidden(hidden: boolean): void {
+		if (this.partVisibility.sessions === !hidden) {
+			return;
+		}
+
+		this.partVisibility.sessions = !hidden;
+		this.mainContainer.classList.toggle(LayoutClasses.SESSIONS_HIDDEN, hidden);
+
+		// Propagate to grid
+		this.workbenchGrid.setViewVisible(this.sessionsPartView, !hidden);
+	}
+
+	//#endregion
+
+	//#region Position Methods (Fixed - Not Configurable)
+
+	getSideBarPosition(): Position {
+		return Position.LEFT; // Always left in this layout
+	}
+
+	getPanelPosition(): Position {
+		return Position.BOTTOM; // Always bottom in this layout
+	}
+
+	setPanelPosition(_position: Position): void {
+		// No-op: Panel position is fixed in this layout
+	}
+
+	getPanelAlignment(): PanelAlignment {
+		return 'justify'; // Full width panel
+	}
+
+	setPanelAlignment(_alignment: PanelAlignment): void {
+		// No-op: Panel alignment is fixed in this layout
+	}
+
+	//#endregion
+
+	//#region Size Methods
+
+	getSize(part: Parts): IViewSize {
+		const view = this.getPartView(part);
+		if (!view) {
+			return { width: 0, height: 0 };
+		}
+		return this.workbenchGrid.getViewSize(view);
+	}
+
+	setSize(part: Parts, size: IViewSize): void {
+		const view = this.getPartView(part);
+		if (view) {
+			this.workbenchGrid.resizeView(view, size);
+		}
+	}
+
+	resizePart(part: Parts, sizeChangeWidth: number, sizeChangeHeight: number): void {
+		const view = this.getPartView(part);
+		if (!view) {
+			return;
+		}
+
+		const currentSize = this.workbenchGrid.getViewSize(view);
+		this.workbenchGrid.resizeView(view, {
+			width: currentSize.width + sizeChangeWidth,
+			height: currentSize.height + sizeChangeHeight
+		});
+	}
+
+	private getPartView(part: Parts): ISerializableView | undefined {
+		switch (part) {
+			case Parts.TITLEBAR_PART:
+				return this.titleBarPartView;
+			case Parts.SIDEBAR_PART:
+				return this.sideBarPartView;
+			case Parts.AUXILIARYBAR_PART:
+				return this.auxiliaryBarPartView;
+			case Parts.EDITOR_PART:
+				return this.editorPartView;
+			case Parts.PANEL_PART:
+				return this.panelPartView;
+			case Parts.SESSIONS_PART:
+				return this.sessionsPartView;
+			default:
+				return undefined;
+		}
+	}
+
+	getMaximumEditorDimensions(_container: HTMLElement): IDimension {
+		// Return the available space for editor (excluding other parts)
+		const sidebarWidth = this.partVisibility.sidebar ? this.workbenchGrid.getViewSize(this.sideBarPartView).width : 0;
+		const rightWorkColumnWidth =
+			(this.partVisibility.auxiliaryBar ? this.workbenchGrid.getViewSize(this.auxiliaryBarPartView).width : 0) +
+			(this.partVisibility.editor ? this.workbenchGrid.getViewSize(this.editorPartView).width : 0);
+		const panelHeight = this.partVisibility.panel ? this.workbenchGrid.getViewSize(this.panelPartView).height : 0;
+
+		return new Dimension(
+			this._mainContainerDimension.width - sidebarWidth - rightWorkColumnWidth,
+			this._mainContainerDimension.height - panelHeight
+		);
+	}
+
+	//#endregion
+
+	//#region Unsupported Features (No-ops)
+
+	toggleMaximizedPanel(): void {
+		if (!this.workbenchGrid) {
+			return;
+		}
+
+		if (this.isPanelMaximized()) {
+			this.workbenchGrid.exitMaximizedView();
+		} else {
+			this.workbenchGrid.maximizeView(this.panelPartView, [this.sideBarPartView]);
+		}
+	}
+
+	isPanelMaximized(): boolean {
+		if (!this.workbenchGrid) {
+			return false;
+		}
+
+		return this.workbenchGrid.isViewMaximized(this.panelPartView);
+	}
+
+	toggleMaximizedAuxiliaryBar(): void {
+		this.setAuxiliaryBarMaximized(!this.isAuxiliaryBarMaximized());
+	}
+
+	setAuxiliaryBarMaximized(maximized: boolean): boolean {
+		if (!this.workbenchGrid || maximized === this.isAuxiliaryBarMaximized()) {
+			return false;
+		}
+
+		// The maximize button can be used while the auxiliary bar's opening
+		// transition is still active. Letting that width transition carry into
+		// GridView's maximized layout leaves a shrinking strip of the chat canvas
+		// beside the tool surface. Finish the open animation before applying the
+		// maximized geometry so the Browser/Terminal surface reaches the edge in a
+		// single frame.
+		this.finishPartsAnimation();
+
+		if (maximized) {
+			// Match Codex's full-width side panel: consume the main workspace,
+			// while the project sidebar remains available for navigation.
+			this._auxiliaryBarLastNonMaximizedVisibility = {
+				sidebar: this.workbenchGrid.isViewVisible(this.sideBarPartView),
+				sessions: this.workbenchGrid.isViewVisible(this.sessionsPartView),
+				editor: this.workbenchGrid.isViewVisible(this.editorPartView),
+				auxiliaryBar: this.workbenchGrid.isViewVisible(this.auxiliaryBarPartView),
+				// Simple mode's right workbench owns the auxiliary workspace. The
+				// bottom panel must stay closed across expand/restore, even when a
+				// terminal composite remains cached as the panel's active view.
+				panel: false,
+			};
+			this.workbenchGrid.maximizeView(this.auxiliaryBarPartView, [this.sideBarPartView]);
+		} else {
+			const visibility = this._auxiliaryBarLastNonMaximizedVisibility ?? { ...this.partVisibility };
+			this.workbenchGrid.exitMaximizedView();
+			// GridView restores every leaf when leaving maximized mode. Reapply
+			// Simple mode's logical visibility immediately so hidden editor/panel
+			// parts do not leak back into the layout.
+			Object.assign(this.partVisibility, visibility);
+			this.mainContainer.classList.toggle(LayoutClasses.SIDEBAR_HIDDEN, !visibility.sidebar);
+			this.mainContainer.classList.toggle(LayoutClasses.SESSIONS_HIDDEN, !visibility.sessions);
+			this.mainContainer.classList.toggle(LayoutClasses.MAIN_EDITOR_AREA_HIDDEN, !visibility.editor);
+			this.mainContainer.classList.toggle(LayoutClasses.AUXILIARYBAR_HIDDEN, !visibility.auxiliaryBar);
+			this.mainContainer.classList.toggle(LayoutClasses.PANEL_HIDDEN, !visibility.panel);
+			this.workbenchGrid.setViewVisible(this.sideBarPartView, visibility.sidebar);
+			this.workbenchGrid.setViewVisible(this.sessionsPartView, visibility.sessions);
+			this.workbenchGrid.setViewVisible(this.editorPartView, visibility.editor);
+			this.workbenchGrid.setViewVisible(this.auxiliaryBarPartView, visibility.auxiliaryBar);
+			this.workbenchGrid.setViewVisible(this.panelPartView, visibility.panel);
+			if (!visibility.panel && this.paneCompositeService.getActivePaneComposite(ViewContainerLocation.Panel)) {
+				this.paneCompositeService.hideActivePaneComposite(ViewContainerLocation.Panel);
+			}
+			this._auxiliaryBarLastNonMaximizedVisibility = undefined;
+			this._savePartVisibility();
+			// Maximizing laid the hidden chat out at 0px, and its list keeps those
+			// measured row heights (an empty transcript) until something re-lays it
+			// out. Do that once the restored parts are visible again.
+			this._restoredLayoutFrame.value = scheduleAtNextAnimationFrame(getWindow(this.mainContainer), () => this.layout());
+		}
+
+		this._onDidChangeAuxiliaryBarMaximized.fire();
+		return true;
+	}
+
+	isAuxiliaryBarMaximized(): boolean {
+		return !!this.workbenchGrid && this.workbenchGrid.isViewMaximized(this.auxiliaryBarPartView);
+	}
+
+	isEditorMaximized(): boolean {
+		return this._editorMaximized;
+	}
+
+	setEditorMaximized(maximized: boolean): void {
+		if (maximized === this._editorMaximized) {
+			return;
+		}
+
+		if (maximized) {
+			// Save current visibility state
+			this._editorLastNonMaximizedVisibility = {
+				sidebar: this.partVisibility.sidebar,
+				auxiliaryBar: this.partVisibility.auxiliaryBar,
+				editor: this.partVisibility.editor,
+				panel: this.partVisibility.panel,
+				sessions: this.partVisibility.sessions,
+			};
+
+			// Ensure editor is visible
+			if (!this.partVisibility.editor) {
+				this.setEditorHidden(false);
+			}
+
+			// Hide all other content parts
+			if (this.partVisibility.sidebar) {
+				this.setSideBarHidden(true);
+			}
+			if (this.partVisibility.sessions) {
+				this.setSessionsHidden(true);
+			}
+
+			this._editorMaximized = true;
+		} else {
+			const state = this._editorLastNonMaximizedVisibility;
+
+			// Restore previous visibility state
+			this.setSideBarHidden(!state?.sidebar);
+			this.setSessionsHidden(!state?.sessions);
+
+			this._editorMaximized = false;
+		}
+
+		this._onDidChangeEditorMaximized.fire();
+	}
+
+	toggleZenMode(): void {
+		// No-op: Zen mode not supported in this layout
+	}
+
+	toggleMenuBar(): void {
+		// No-op: Menu bar toggle not supported in this layout
+	}
+
+	isMainEditorLayoutCentered(): boolean {
+		return false; // Centered layout not supported
+	}
+
+	centerMainEditorLayout(_active: boolean): void {
+		// No-op: Centered layout not supported in this layout
+	}
+
+	hasMainWindowBorder(): boolean {
+		return false;
+	}
+
+	getMainWindowBorderRadius(): string | undefined {
+		return undefined;
+	}
+
+	//#endregion
+
+	//#region Window Maximized State
+
+	isWindowMaximized(targetWindow: Window): boolean {
+		return this.maximized.has(getWindowId(targetWindow));
+	}
+
+	updateWindowMaximizedState(targetWindow: Window, maximized: boolean): void {
+		const windowId = getWindowId(targetWindow);
+		if (maximized) {
+			this.maximized.add(windowId);
+			if (targetWindow === mainWindow) {
+				this.mainContainer.classList.add(LayoutClasses.MAXIMIZED);
+			}
+		} else {
+			this.maximized.delete(windowId);
+			if (targetWindow === mainWindow) {
+				this.mainContainer.classList.remove(LayoutClasses.MAXIMIZED);
+			}
+		}
+
+		this._onDidChangeWindowMaximized.fire({ windowId, maximized });
+	}
+
+	//#endregion
+
+	//#region Neighbor Parts
+
+	getVisibleNeighborPart(part: Parts, direction: Direction): Parts | undefined {
+		if (!this.workbenchGrid) {
+			return undefined;
+		}
+
+		const view = this.getPartView(part);
+		if (!view) {
+			return undefined;
+		}
+
+		const neighbor = this.workbenchGrid.getNeighborViews(view, direction, false);
+		if (neighbor.length === 0) {
+			return undefined;
+		}
+
+		const neighborView = neighbor[0];
+
+		if (neighborView === this.sideBarPartView) {
+			return Parts.SIDEBAR_PART;
+		}
+		if (neighborView === this.auxiliaryBarPartView) {
+			return Parts.AUXILIARYBAR_PART;
+		}
+		if (neighborView === this.editorPartView) {
+			return Parts.EDITOR_PART;
+		}
+		if (neighborView === this.panelPartView) {
+			return Parts.PANEL_PART;
+		}
+		if (neighborView === this.sessionsPartView) {
+			return Parts.SESSIONS_PART;
+		}
+
+		return undefined;
+	}
+
+	//#endregion
+
+	//#region Restore
+
+	isRestored(): boolean {
+		return this.restored;
+	}
+
+	setRestored(): void {
+		this.restored = true;
+		this.restoredPromise.complete();
+	}
+
+	//#endregion
+
+	//#region Notifications Registration
+
+	registerNotifications(delegate: { onDidChangeNotificationsVisibility: Event<boolean> }): void {
+		this._register(delegate.onDidChangeNotificationsVisibility(visible => this._onDidChangeNotificationsVisibility.fire(visible)));
+	}
+
+	//#endregion
+}

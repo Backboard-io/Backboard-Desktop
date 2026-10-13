@@ -1,0 +1,510 @@
+import type {
+	MemoryProfile,
+	ThinkingConfig,
+	ThinkingModelMetadata,
+} from "../../config/defaults.ts";
+import type { OpenAITool } from "../../core/tools/schema.ts";
+import type { BACKBOARD_STREAM_EVENTS } from "./constants.ts";
+
+export type BackboardStatus =
+	| "IN_PROGRESS"
+	| "REQUIRES_ACTION"
+	| "COMPLETED"
+	| "FAILED"
+	| "CANCELLED";
+
+export interface RawToolCall {
+	id: string;
+	type: "function";
+	function: {
+		name: string;
+		arguments: string;
+	};
+}
+
+interface BackboardStreamBase {
+	[key: string]: unknown;
+	type: string;
+	thread_id?: string;
+	run_id?: string;
+}
+
+export interface BackboardUserMessagePayload extends BackboardStreamBase {
+	type: typeof BACKBOARD_STREAM_EVENTS.userMessage;
+}
+
+export interface BackboardContentStreamingPayload extends BackboardStreamBase {
+	type: typeof BACKBOARD_STREAM_EVENTS.contentStreaming;
+	content?: string;
+	accumulated_content?: string;
+}
+
+export interface BackboardReasoningStreamingPayload
+	extends BackboardStreamBase {
+	type:
+		| typeof BACKBOARD_STREAM_EVENTS.reasoningStreaming
+		| typeof BACKBOARD_STREAM_EVENTS.reasoningDelta;
+	content?: string;
+	accumulated_reasoning?: string;
+}
+
+export interface BackboardToolCallStartPayload extends BackboardStreamBase {
+	type: typeof BACKBOARD_STREAM_EVENTS.toolCallStart;
+	tool_call_id?: string;
+	name?: string;
+}
+
+export interface BackboardToolCallReadyPayload extends BackboardStreamBase {
+	type: typeof BACKBOARD_STREAM_EVENTS.toolCallReady;
+	tool_call?: unknown;
+}
+
+export interface BackboardToolSubmitRequiredPayload
+	extends BackboardStreamBase {
+	type: typeof BACKBOARD_STREAM_EVENTS.toolSubmitRequired;
+	tool_calls?: unknown[];
+}
+
+export interface BackboardRunEndedPayload extends BackboardStreamBase {
+	type:
+		| typeof BACKBOARD_STREAM_EVENTS.runEnded
+		| typeof BACKBOARD_STREAM_EVENTS.messageComplete;
+	status?: string;
+	content?: string;
+	final_content?: string;
+	model_provider?: string;
+	model_name?: string;
+	input_tokens?: number;
+	output_tokens?: number;
+	total_tokens?: number;
+	context_usage?: BackboardContextUsage;
+}
+
+export interface BackboardContextUsage {
+	used_tokens?: number;
+	context_limit?: number;
+	percent?: number;
+	summary_tokens?: number;
+	model?: string;
+}
+
+export interface BackboardRunFailedPayload extends BackboardStreamBase {
+	type:
+		| typeof BACKBOARD_STREAM_EVENTS.runFailed
+		| typeof BACKBOARD_STREAM_EVENTS.error;
+	error?: string;
+	message?: string;
+}
+
+export interface BackboardRunCancelledPayload extends BackboardStreamBase {
+	type: typeof BACKBOARD_STREAM_EVENTS.runCancelled;
+}
+
+export type BackboardStreamPayload =
+	| BackboardUserMessagePayload
+	| BackboardContentStreamingPayload
+	| BackboardReasoningStreamingPayload
+	| BackboardToolCallStartPayload
+	| BackboardToolCallReadyPayload
+	| BackboardToolSubmitRequiredPayload
+	| BackboardRunEndedPayload
+	| BackboardRunFailedPayload
+	| BackboardRunCancelledPayload
+	| BackboardStreamBase;
+
+export interface SendMessageRequest {
+	content: string;
+	thread_id?: string;
+	assistant_id?: string;
+	llm_provider?: string;
+	model_name?: string;
+	system_prompt?: string;
+	memory?: string;
+	memory_profile?: MemoryProfile;
+	metadata?: Record<string, unknown>;
+	thinking?: ThinkingConfig | null;
+	/** OpenRouter upstream-routing controls. Omitted to use OpenRouter's automatic routing. */
+	openrouter?: OpenRouterRequestOptions;
+	tools?: OpenAITool[];
+	/** `"auto"` enables Backboard's built-in image generation for the turn. */
+	image_generation?: string;
+	image_model_provider?: string;
+	image_model_name?: string;
+	/** `"auto"` enables Backboard's built-in video generation for the turn. */
+	video_generation?: string;
+	video_model_provider?: string;
+	video_model_name?: string;
+	/** Direct media generation without a conversation-model call. */
+	operation?: string;
+	video_config?: {
+		duration?: number;
+		resolution?: string;
+		generate_audio?: boolean;
+		aspect_ratio?: string;
+	};
+	stream?: boolean;
+	/**
+	 * The billing route the turn or worker captured when it started. In
+	 * host-managed mode routing reads it instead of inferring a backend at
+	 * dispatch time; clients strip it before anything goes on the wire.
+	 */
+	source?: ModelSource;
+}
+
+export interface OpenRouterRequestOptions {
+	providers?: string[];
+	allow_fallbacks?: boolean;
+	sort?: "price" | "throughput" | "latency";
+	ignore?: string[];
+	max_price?: number;
+	allowed_models?: string[];
+	excluded_models?: string[];
+	cost_tier?: string;
+}
+
+/** One entry from `GET /models/image/all`. */
+export interface ImageModelInfo {
+	name: string;
+	provider: string;
+	model_type?: string;
+	supports_vision?: boolean | null;
+}
+
+/** One entry from `GET /models/video/all`. */
+export interface VideoModelInfo {
+	id: string;
+	name: string;
+	provider: string;
+	model_type?: string;
+	supports_video_input?: boolean | null;
+	supports_audio_input?: boolean | null;
+}
+
+export interface ImageModelsListResponse {
+	models: ImageModelInfo[];
+	total: number;
+}
+
+export interface VideoModelsListResponse {
+	models: VideoModelInfo[];
+	total: number;
+}
+
+export interface GeneratedMediaInfo {
+	document_id?: string;
+	media_type?: string;
+	mime_type?: string;
+	url: string;
+}
+
+export interface GenerateVideoRequest {
+	prompt: string;
+	video_model_provider: string;
+	video_model_name: string;
+	video_config?: {
+		duration?: number;
+		resolution?: string;
+		generate_audio?: boolean;
+		aspect_ratio?: string;
+	};
+}
+
+export interface GenerateVideoResult {
+	url: string;
+	document_id?: string;
+	label?: string;
+}
+
+/**
+ * One System One question. Backboard routes these to a decision model
+ * (TypeSafe Jev) that answers with probabilities instead of generated text.
+ */
+export type SystemOneQuestion =
+	| {
+			type: "noul";
+			instructions: string;
+			criteria?: { true: string; false: string };
+	  }
+	| { type: "choice"; instructions: string; criteria: Record<string, string> }
+	| { type: "score"; instructions: string; criteria: string[] };
+
+export type SystemOneAnswer =
+	| { type: "noul"; noul: number }
+	| {
+			type: "choice";
+			choice: string;
+			confidence: number;
+			probabilities: Record<string, number>;
+	  }
+	| {
+			type: "score";
+			score: number;
+			confidence: number;
+			probabilities: Record<string, number>;
+			legend: Record<string, string>;
+	  };
+
+export interface SystemOneRequest {
+	/** Defaults to `jev-latest`. */
+	model_name?: string;
+	/** Reuses one Backboard thread across a decision loop instead of creating one per call. */
+	thread_id?: string;
+	/** Text-only context the questions are answered against. */
+	state: Record<string, string>;
+	questions: Record<string, SystemOneQuestion>;
+}
+
+export interface SystemOneResult {
+	thread_id: string;
+	model: string;
+	answers: Record<string, SystemOneAnswer>;
+}
+
+export interface SubmitToolOutputsRequest {
+	thread_id: string;
+	run_id?: string;
+	tool_outputs: Array<{ tool_call_id: string; output: string }>;
+	thinking?: ThinkingConfig | null;
+	tools?: OpenAITool[];
+	stream?: boolean;
+	/** The turn's captured billing route; see SendMessageRequest.source. */
+	source?: ModelSource;
+}
+
+export interface BackboardResponse {
+	thread_id: string;
+	content: string | null;
+	status: BackboardStatus | null;
+	tool_calls: RawToolCall[] | null;
+	run_id?: string | null;
+	model_provider?: string | null;
+	model_name?: string | null;
+	input_tokens?: number | null;
+	output_tokens?: number | null;
+	total_tokens?: number | null;
+	generated_media?: GeneratedMediaInfo[];
+	messages?: Array<{ generated_media?: GeneratedMediaInfo[] }>;
+}
+
+export type BackboardMessageRole = "user" | "assistant" | "tool";
+
+export interface BackboardThreadMessage {
+	message_id: string;
+	role: BackboardMessageRole;
+	content?: string | null;
+	metadata_?: Record<string, unknown> | null;
+	status?: string | null;
+	created_at?: string | null;
+	model_provider?: string | null;
+	model_name?: string | null;
+}
+
+export interface BackboardThread {
+	thread_id: string;
+	assistant_id?: string | null;
+	title?: string | null;
+	first_user_message?: string | null;
+	message_count?: number | null;
+	updated_at?: string | null;
+	created_at?: string | null;
+	metadata_?: Record<string, unknown> | null;
+	messages: BackboardThreadMessage[];
+}
+
+/**
+ * Provider-neutral turn events. Backboard can yield these from either one JSON
+ * response or many SSE payloads without changing the agent loop contract.
+ */
+export type ProviderEvent =
+	/** Transport made progress without producing anything user-visible yet. */
+	| { kind: "activity" }
+	/** Bounded structural metadata only; never model text or raw provider payloads. */
+	| {
+			kind: "provider_diagnostic";
+			provider: string;
+			phase: string;
+			details: Record<string, unknown>;
+	  }
+	| {
+			kind: "thinking_resolved";
+			requested: ThinkingConfig | null | undefined;
+			effective: Record<string, unknown>;
+			reason: string;
+			model: string;
+			provider: string;
+	  }
+	| { kind: "thread"; threadId: string }
+	| { kind: "assistant_delta"; text: string }
+	| { kind: "reasoning_delta"; text: string }
+	| { kind: "tool_started"; id: string; name: string; input?: unknown }
+	| { kind: "tool_ready"; call: ProviderToolCall }
+	| {
+			kind: "requires_action";
+			runId: string | null;
+			calls: ProviderToolCall[];
+			/** Serialized opaque turn-level provider state needed for continuation. */
+			providerMetadata?: string;
+	  }
+	| { kind: "usage"; usage: ProviderUsage }
+	| { kind: "warning"; message: string }
+	| { kind: "media"; payload: Record<string, unknown> }
+	| {
+			kind: "completed";
+			providerMetadata?: string;
+			finalText?: string;
+			usage?: ProviderUsage;
+			contextUsage?: BackboardContextUsage;
+	  }
+	| { kind: "failed"; error: string; retryable?: boolean };
+
+export interface StreamMappingResult {
+	events: ProviderEvent[];
+	accumulatedContent: string;
+	accumulatedReasoning: string;
+}
+
+export interface ContentDeltaResult {
+	text: string | null;
+	accumulatedContent: string;
+}
+
+export interface ProviderToolCall {
+	id: string;
+	name: string;
+	input: unknown;
+	/**
+	 * Opaque provider token that must be echoed back with the call when the
+	 * conversation is replayed. Gemini 3 signs its function calls and rejects a
+	 * history whose calls come back unsigned; providers that do not sign leave
+	 * this unset.
+	 */
+	signature?: string;
+}
+
+export interface ProviderUsage {
+	/** Latest Backboard API measurement; never billing-token accumulation. */
+	backboardContextUsage?: {
+		source: "backboard-api";
+		usedTokens?: number;
+		contextLimit?: number;
+		percent?: number;
+		summaryTokens?: number;
+		model?: string;
+	};
+
+	inputTokens?: number;
+	outputTokens?: number;
+	totalTokens?: number;
+	cachedTokens?: number;
+	cacheWriteTokens?: number;
+	costUsd?: number;
+	contextTokens?: number;
+	contextLimit?: number;
+	provider?: string;
+	model?: string;
+}
+
+/** Which backend serves a model: a saved key, subscription, or Backboard routing. */
+export type ModelSource = "byok" | "subscription" | "backboard";
+
+/**
+ * A model selection together with the billing route it was made on. Turns and
+ * workers capture one when they start and stamp it on every request, so a
+ * later selection change can never move their billing.
+ */
+export interface ModelRoute {
+	provider: string;
+	model: string;
+	/** Undefined outside host-managed mode, where routing infers the backend. */
+	source?: ModelSource;
+}
+
+export interface ModelInfo extends ThinkingModelMetadata {
+	id: string;
+	provider: string;
+	model: string;
+	label: string;
+	releaseTimestamp?: number;
+	source?: ModelSource;
+	/** Context window in tokens, when the catalog reports one. */
+	contextLimit?: number;
+	/**
+	 * Backboard runs this model with no credit or plan behind it (every catalog
+	 * price is exactly $0). Mirrors the server's `is_free_llm_model` gate.
+	 */
+	free?: boolean;
+	/** False when the catalog says the model cannot call tools. */
+	supportsTools?: boolean;
+}
+
+export interface ModelCatalogItem {
+	name: string;
+	provider: string;
+	model_type: string;
+	/** Provider-authoritative human-readable model name. */
+	display_name?: string;
+	/** Provider-authoritative capability summary. */
+	description?: string;
+	/** Canonical model id that an alias currently resolves to. */
+	resolved_model?: string;
+	/** Explicit effort levels accepted by this model. */
+	supported_effort_levels?: string[];
+	supports_adaptive_thinking?: boolean;
+	last_updated?: string | number | null;
+	max_output_tokens?: number | null;
+	/** Whether the model accepts image input. */
+	supports_vision?: boolean | null;
+	supports_thinking?: boolean | null;
+	thinking_controls?: ThinkingModelMetadata["thinking_controls"];
+	source?: ModelSource;
+	context_limit?: number | null;
+	/** Live OpenRouter serving routes returned by Backboard's billing catalog. */
+	openrouter_providers?: OpenRouterModelProvider[];
+	input_cost_per_1m_tokens?: number | null;
+	output_cost_per_1m_tokens?: number | null;
+	supports_tools?: boolean | null;
+}
+
+export interface OpenRouterModelProvider {
+	model: string;
+	upstream_provider: string;
+	tag?: string | null;
+	quantization?: string | null;
+	input_cost_per_1m_tokens?: number | null;
+	cached_input_cost_per_1m_tokens?: number | null;
+	cache_write_input_cost_per_1m_tokens?: number | null;
+	output_cost_per_1m_tokens?: number | null;
+	context_limit?: number | null;
+	max_output_tokens?: number | null;
+	supports_tools?: boolean | null;
+	supports_thinking?: boolean | null;
+	supports_json_output?: boolean | null;
+	supports_caching?: boolean | null;
+	uptime_30m?: number | null;
+}
+
+export interface OpenRouterModelProvidersResponse {
+	total: number;
+	pricing_note?: string;
+	price_ranges?: unknown[];
+	data: OpenRouterModelProvider[];
+}
+
+export type ModelThinkingMetadataResponse = ThinkingModelMetadata;
+
+export interface ModelsListResponse {
+	models: ModelCatalogItem[];
+	total: number;
+}
+
+export interface ProvidersListResponse {
+	providers: string[];
+	total: number;
+}
+
+export interface AssistantInfo {
+	assistant_id: string;
+	name: string;
+	system_prompt?: string | null;
+	tools?: unknown[] | null;
+}

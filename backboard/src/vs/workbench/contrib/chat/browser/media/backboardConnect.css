@@ -1,0 +1,272 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* One list of ways to pay for models, shared by the model picker and the sign-in card. */
+.backboard-connect {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.backboard-connect-item {
+	border-radius: 8px;
+}
+
+.backboard-connect-item.flash {
+	animation: backboard-connect-flash 1.2s ease-out;
+}
+
+@keyframes backboard-connect-flash {
+	0% { background: color-mix(in srgb, var(--vscode-focusBorder) 22%, transparent); }
+	100% { background: transparent; }
+}
+
+.backboard-connect-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	min-height: 40px;
+	padding: 6px 10px;
+	box-sizing: border-box;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--vscode-foreground);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.backboard-connect-row:hover:not(:disabled),
+.backboard-connect-row.expanded {
+	background: color-mix(in srgb, var(--vscode-foreground) 6%, transparent);
+}
+
+.backboard-connect-row:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.backboard-connect-row:disabled {
+	cursor: default;
+}
+
+.backboard-connect-row:disabled:not(.connected):not(.busy) {
+	opacity: 0.5;
+}
+
+.backboard-connect-row > .codicon,
+.backboard-connect-icon {
+	flex: 0 0 16px;
+	width: 16px;
+	height: 16px;
+	font-size: 16px;
+	color: var(--vscode-foreground);
+	opacity: 0.85;
+}
+
+.backboard-connect-icon {
+	display: inline-block;
+	background-color: currentColor;
+	-webkit-mask: var(--backboard-connect-icon) center / contain no-repeat;
+	mask: var(--backboard-connect-icon) center / contain no-repeat;
+}
+
+.backboard-connect-icon.provider-backboard { --backboard-connect-icon: url('../widget/media/model-provider-icons/ai_backboard.svg'); }
+.backboard-connect-icon.provider-open-ai { --backboard-connect-icon: url('../widget/media/model-provider-icons/ai_open_ai.svg'); }
+.backboard-connect-icon.provider-claude { --backboard-connect-icon: url('../widget/media/model-provider-icons/ai_claude.svg'); color: #d97757; opacity: 1; }
+.backboard-connect-icon.provider-anthropic { --backboard-connect-icon: url('../widget/media/model-provider-icons/ai_anthropic.svg'); }
+.backboard-connect-icon.provider-google { --backboard-connect-icon: url('../widget/media/model-provider-icons/ai_gemini.svg'); }
+.backboard-connect-icon.provider-open-router { --backboard-connect-icon: url('../widget/media/model-provider-icons/ai_open_router.svg'); }
+.backboard-connect-icon.provider-x-ai { --backboard-connect-icon: url('../widget/media/model-provider-icons/ai_x_ai.svg'); }
+
+.backboard-connect-copy {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	gap: 1px;
+	min-width: 0;
+}
+
+.backboard-connect-title {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 13px;
+	line-height: 18px;
+}
+
+.backboard-connect-description {
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11.5px;
+	line-height: 15px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.backboard-connect-dot {
+	flex: 0 0 6px;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--vscode-testing-iconPassed, #3fb950);
+}
+
+.backboard-connect-action {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: 4px;
+	color: var(--vscode-textLink-foreground);
+	font-size: 12px;
+	white-space: nowrap;
+}
+
+.backboard-connect-row.connected .backboard-connect-action {
+	color: var(--vscode-descriptionForeground);
+}
+
+/* An outdated Claude Code: the action is a real button, not a quiet link. */
+.backboard-connect-row.update-available .backboard-connect-action {
+	padding: 2px 8px;
+	border-radius: 4px;
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+}
+
+.backboard-connect-row.update-available:hover .backboard-connect-action {
+	background: var(--vscode-button-hoverBackground);
+}
+
+.backboard-connect-action .codicon {
+	font-size: 12px;
+}
+
+/* --- Inline API key entry --- */
+.backboard-connect-key-form {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 4px 10px 10px 36px;
+}
+
+.backboard-connect-key-providers {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.backboard-connect-key-provider {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	height: 24px;
+	padding: 0 8px;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+	border-radius: 999px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: inherit;
+	font-size: 11.5px;
+	cursor: pointer;
+}
+
+.backboard-connect-key-provider .backboard-connect-icon {
+	flex-basis: 12px;
+	width: 12px;
+	height: 12px;
+}
+
+.backboard-connect-key-provider:hover {
+	color: var(--vscode-foreground);
+}
+
+.backboard-connect-key-provider.selected {
+	border-color: color-mix(in srgb, var(--vscode-focusBorder) 70%, transparent);
+	background: color-mix(in srgb, var(--vscode-focusBorder) 14%, transparent);
+	color: var(--vscode-foreground);
+}
+
+.backboard-connect-key-field {
+	display: flex;
+	gap: 6px;
+}
+
+.backboard-connect-key-input {
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 28px;
+	padding: 0 9px;
+	box-sizing: border-box;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
+	border-radius: 6px;
+	outline: none;
+	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+	color: var(--vscode-foreground);
+	font: inherit;
+	font-size: 12px;
+}
+
+.backboard-connect-key-input:focus {
+	border-color: var(--vscode-focusBorder);
+}
+
+.backboard-connect-key-save {
+	flex: 0 0 auto;
+	height: 28px;
+	padding: 0 12px;
+	border: 0;
+	border-radius: 6px;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.backboard-connect-key-save:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+.backboard-connect-key-footer {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+	font-size: 11px;
+	line-height: 15px;
+}
+
+.backboard-connect-key-note {
+	color: var(--vscode-descriptionForeground);
+}
+
+.backboard-connect-key-note.error {
+	color: var(--vscode-errorForeground);
+}
+
+.backboard-connect-key-link {
+	flex: 0 0 auto;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--vscode-textLink-foreground);
+	font: inherit;
+	cursor: pointer;
+}
+
+.backboard-connect-key-link:hover {
+	text-decoration: underline;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.backboard-connect-item.flash {
+		animation: none;
+	}
+}

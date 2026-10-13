@@ -1,0 +1,33 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import { Event } from '../../../base/common/event.js';
+import { createDecorator } from '../../instantiation/common/instantiation.js';
+import { IPartsSplash } from '../common/themeService.js';
+import { IColorScheme } from '../../window/common/window.js';
+import { ISingleFolderWorkspaceIdentifier, IWorkspaceIdentifier } from '../../workspace/common/workspace.js';
+
+export const IThemeMainService = createDecorator<IThemeMainService>('themeMainService');
+
+export interface IThemeMainService {
+
+	readonly _serviceBrand: undefined;
+
+	readonly onDidChangeColorScheme: Event<IColorScheme>;
+
+	getBackgroundColor(): string;
+
+	/**
+	 * @param options set `updateBackgroundColor: false` for windows that must
+	 * keep their native background (e.g. vibrancy windows, which need it fully
+	 * transparent); the splash is still persisted for the next launch.
+	 */
+	saveWindowSplash(windowId: number | undefined, workspace: IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier | undefined, splash: IPartsSplash, options?: { updateBackgroundColor?: boolean }): void;
+	getWindowSplash(workspace: IWorkspaceIdentifier | ISingleFolderWorkspaceIdentifier | undefined): IPartsSplash | undefined;
+
+	getColorScheme(): IColorScheme;
+
+	isAutoDetectColorScheme(): boolean;
+}

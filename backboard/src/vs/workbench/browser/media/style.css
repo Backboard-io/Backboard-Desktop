@@ -1,0 +1,501 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Animations */
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+@font-face {
+	font-family: 'JetBrains Mono';
+	src: url('./fonts/jetbrains-mono/JetBrainsMono-VariableFont_wght.ttf') format('truetype');
+	font-weight: 100 800;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'JetBrains Mono';
+	src: url('./fonts/jetbrains-mono/JetBrainsMono-Italic-VariableFont_wght.ttf') format('truetype');
+	font-weight: 100 800;
+	font-style: italic;
+	font-display: swap;
+}
+
+/* Backboard branding: render Copilot glyph slots with the octopus mark. */
+.monaco-workbench .codicon.codicon-copilot,
+.monaco-workbench .codicon.codicon-copilot-large,
+.monaco-workbench .codicon.codicon-copilot-warning,
+.monaco-workbench .codicon.codicon-copilot-warning-large {
+	display: inline-block;
+	width: 16px;
+	height: 16px;
+	background: url('../../../sessions/browser/media/sessions-icon.svg') center / contain no-repeat;
+	color: transparent !important;
+	font-size: 0;
+}
+
+.monaco-workbench .codicon.codicon-copilot-large,
+.monaco-workbench .codicon.codicon-copilot-warning-large {
+	width: 32px;
+	height: 32px;
+}
+
+.monaco-workbench .codicon.codicon-copilot::before,
+.monaco-workbench .codicon.codicon-copilot-large::before,
+.monaco-workbench .codicon.codicon-copilot-warning::before,
+.monaco-workbench .codicon.codicon-copilot-warning-large::before {
+	content: '';
+}
+
+.monaco-workbench .codicon.codicon-backboard-logo {
+	display: inline-block;
+	width: 14px;
+	height: 14px;
+	font-size: 0;
+	background-color: currentColor;
+	-webkit-mask: url('../../contrib/chat/browser/media/backboard_icon.svg') center / contain no-repeat;
+	mask: url('../../contrib/chat/browser/media/backboard_icon.svg') center / contain no-repeat;
+}
+
+.monaco-workbench .codicon.codicon-backboard-logo::before {
+	content: '';
+}
+
+/* Keep the header button's hit area separate from its compact, centered mark. */
+.monaco-workbench .part.titlebar .action-label.codicon.codicon-backboard-logo {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	line-height: 1;
+	background-color: transparent;
+	-webkit-mask: none;
+	mask: none;
+	color: var(--vscode-titleBar-activeForeground, var(--vscode-foreground));
+}
+
+.monaco-workbench .part.titlebar .action-label.codicon.codicon-backboard-logo::before {
+	content: '';
+	display: block;
+	flex: none;
+	width: 12px;
+	height: 16px;
+	background-color: currentColor;
+	-webkit-mask: url('../../contrib/chat/browser/media/backboard_icon.svg') center / 12px 16px no-repeat;
+	mask: url('../../contrib/chat/browser/media/backboard_icon.svg') center / 12px 16px no-repeat;
+}
+
+.monaco-workbench .part.titlebar .action-label.codicon.codicon-backboard-logo:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .part.titlebar.inactive .action-label.codicon.codicon-backboard-logo {
+	color: var(--vscode-titleBar-inactiveForeground, var(--vscode-foreground));
+}
+
+.monaco-workbench .backboard-titlebar-sign-in {
+	display: flex;
+	align-items: center;
+	height: 100%;
+}
+
+.monaco-workbench .backboard-titlebar-sign-in-button {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	height: 24px;
+	padding: 0 9px;
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 4px;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.monaco-workbench .backboard-titlebar-sign-in-button:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+.monaco-workbench .backboard-titlebar-sign-in.disabled .backboard-titlebar-sign-in-button {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.monaco-workbench.mac,
+.monaco-workbench.windows,
+.monaco-workbench.linux {
+	font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+	--vscode-font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+	--vscode-editor-font-family: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
+	--monaco-monospace-font: "JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
+/* Global Styles */
+
+body {
+	height: 100%;
+	width: 100%;
+	margin: 0;
+	padding: 0;
+	overflow: hidden;
+	font-size: 11px;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.monaco-workbench {
+	font-size: 13px;
+	line-height: 1.4em;
+	position: relative;
+	inset: 0;
+	z-index: 1;
+	overflow: hidden;
+	color: var(--vscode-foreground);
+
+	/* Elevation shadows */
+	--vscode-shadow-sm: 0 0 4px rgba(0, 0, 0, 0.08);
+	--vscode-shadow-md: 0 0 6px rgba(0, 0, 0, 0.08);
+	--vscode-shadow-lg: 0 0 12px rgba(0, 0, 0, 0.14);
+	--vscode-shadow-xl: 0 0 20px rgba(0, 0, 0, 0.15);
+	--vscode-shadow-active-tab: 0 8px 12px rgba(0, 0, 0, 0.02);
+
+	/* Panel depth shadows cast onto the editor surface */
+	--vscode-shadow-depth-x: 5px 0 10px -4px rgba(0, 0, 0, 0.05);
+	--vscode-shadow-depth-y: 0 5px 10px -4px rgba(0, 0, 0, 0.04);
+}
+
+/* Native overflow regions should use the same visual language as Monaco's
+   custom scrollable elements instead of falling back to bright OS scrollbars. */
+.monaco-workbench * {
+	scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
+	scrollbar-width: thin;
+}
+
+.monaco-workbench *::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+.monaco-workbench *::-webkit-scrollbar-corner,
+.monaco-workbench *::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.monaco-workbench *::-webkit-scrollbar-thumb {
+	min-width: 24px;
+	min-height: 24px;
+	border: 2px solid transparent;
+	border-radius: var(--vscode-cornerRadius-circle);
+	background: var(--vscode-scrollbarSlider-background);
+	background-clip: padding-box;
+}
+
+.monaco-workbench *::-webkit-scrollbar-thumb:hover {
+	background: var(--vscode-scrollbarSlider-hoverBackground);
+	background-clip: padding-box;
+}
+
+.monaco-workbench *::-webkit-scrollbar-thumb:active {
+	background: var(--vscode-scrollbarSlider-activeBackground);
+	background-clip: padding-box;
+}
+
+/* Disable panel/part shadows when the setting is off (preserves floating modals, notifications, etc.) */
+.monaco-workbench.no-shadows .part.titlebar,
+.monaco-workbench.no-shadows .part.activitybar,
+.monaco-workbench.no-shadows.nosidebar .part.activitybar,
+.monaco-workbench.no-shadows.activitybar-right .part.activitybar,
+.monaco-workbench.no-shadows .part.editor .tabs-container > .tab {
+	box-shadow: none;
+}
+.monaco-workbench.no-shadows .part.editor .tabs-container > .tab:hover:not(.active),
+.monaco-workbench.no-shadows .part.editor .tabs-container > .tab.active {
+	box-shadow: none;
+}
+.monaco-workbench.no-shadows {
+	/* Use zero-offset transparent shadows instead of 'none' because these
+	 * variables are interpolated into multi-value box-shadow declarations. */
+	--vscode-shadow-active-tab: 0 0 0 0 transparent;
+	--vscode-shadow-depth-x: 0 0 0 0 transparent;
+	--vscode-shadow-depth-y: 0 0 0 0 transparent;
+	--vscode-shadow-sm: 0 0 0 0 transparent;
+}
+
+.monaco-workbench.web {
+	touch-action: none; /* Disable browser handling of all panning and zooming gestures. Removes 300ms touch delay. */
+	overscroll-behavior: none; /* Prevent bounce effect */
+}
+
+.monaco-workbench.border:not(.fullscreen) {
+	box-sizing: border-box;
+	border: 1px solid var(--window-border-color);
+}
+
+.monaco-workbench.border.mac {
+	border-radius: 10px;
+}
+
+.monaco-workbench.border.mac.macos-tahoe {
+	border-radius: 16px; /* macOS Tahoe increased rounded corners size */
+}
+
+.monaco-workbench img {
+	border: 0;
+}
+
+.monaco-workbench label {
+	cursor: pointer;
+}
+
+.monaco-workbench a {
+	text-decoration: none;
+}
+
+
+.monaco-workbench p > a {
+	text-decoration: var(--text-link-decoration);
+}
+
+.monaco-workbench.underline-links {
+	--text-link-decoration: underline;
+}
+
+.monaco-workbench.hc-black p > a,
+.monaco-workbench.hc-light p > a {
+	text-decoration: underline !important;
+}
+
+.monaco-workbench a:active {
+	color: inherit;
+	background-color: inherit;
+}
+
+.monaco-workbench a.plain {
+	color: inherit;
+	text-decoration: none;
+}
+
+.monaco-workbench a.plain:hover,
+.monaco-workbench a.plain.hover {
+	color: inherit;
+	text-decoration: none;
+}
+
+.monaco-workbench input {
+	color: inherit;
+	font-family: inherit;
+	font-size: 100%;
+}
+
+.monaco-workbench table {
+	/*
+	 * Somehow this is required when tables show in floating windows
+	 * to override the user-agent style which sets a specific color
+	 * and font-size
+	 */
+	color: inherit;
+	font-size: inherit;
+}
+
+.monaco-workbench input::placeholder { color: var(--vscode-input-placeholderForeground); }
+.monaco-workbench input::-webkit-input-placeholder  { color: var(--vscode-input-placeholderForeground); }
+.monaco-workbench input::-moz-placeholder { color: var(--vscode-input-placeholderForeground); }
+
+.monaco-workbench textarea::placeholder { color: var(--vscode-input-placeholderForeground); }
+.monaco-workbench textarea::-webkit-input-placeholder { color: var(--vscode-input-placeholderForeground); }
+.monaco-workbench textarea::-moz-placeholder { color: var(--vscode-input-placeholderForeground); }
+
+.monaco-workbench .pointer {
+	cursor: pointer;
+}
+
+.monaco-workbench.mac.monaco-font-aliasing-antialiased {
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+.monaco-workbench.mac.monaco-font-aliasing-none {
+	-webkit-font-smoothing: none;
+	-moz-osx-font-smoothing: unset;
+}
+
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+	.monaco-workbench.mac.monaco-font-aliasing-auto {
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+	}
+}
+
+.monaco-workbench .context-view {
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench .codicon {
+	color: var(--vscode-icon-foreground);
+}
+
+.monaco-workbench .codicon[class*='codicon-'] {
+	font-size: 16px; /* sets font-size for codicons in workbench (https://github.com/microsoft/vscode/issues/98495) */
+}
+
+.monaco-workbench .predefined-file-icon[class*='codicon-']::before {
+	width: 16px;
+	padding-left: 3px; /* width (16px) - font-size (13px) = padding-left (3px) */
+	padding-right: 3px;
+}
+
+.predefined-file-icon::before { /* do add additional specificity to this selector, so it can be overridden by product themes */
+	font-family: 'codicon';
+}
+
+.monaco-workbench:not(.file-icons-enabled) .predefined-file-icon[class*='codicon-']::before {
+	content: unset !important;
+}
+
+.monaco-workbench.modal-dialog-visible .monaco-progress-container.infinite .progress-bit {
+	display: none; /* stop progress animations when dialogs are visible (https://github.com/microsoft/vscode/issues/138396) */
+}
+
+/* Custom Dropdown (select) Arrows */
+
+.monaco-workbench select {
+	font-family: inherit;
+	appearance: none;
+	-webkit-appearance: none;
+	-moz-appearance: none;
+	/* Hides inner border from FF */
+	border: 1px solid;
+}
+
+.monaco-workbench .select-container {
+	position: relative;
+}
+
+.monaco-workbench .select-container:after {
+	content: var(--vscode-icon-chevron-down-content);
+	font-family: var(--vscode-icon-chevron-down-font-family);
+	font-size: 16px;
+	width: 16px;
+	height: 16px;
+	line-height: 16px;
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	right: 4px;
+	margin: auto;
+	pointer-events: none;
+}
+
+/* Shared across Simple, Editor and Advanced: focus remains functional without
+ * drawing rings, including component-specific and synthetic focus styles. */
+.monaco-workbench :is(:focus, :focus-visible, .synthetic-focus, .focused),
+.monaco-workbench :is(:focus, :focus-visible, .synthetic-focus, .focused)::before,
+.monaco-workbench :is(:focus, :focus-visible, .synthetic-focus, .focused)::after {
+	outline: none !important;
+	box-shadow: none !important;
+}
+
+/* Focused controls retain their normal opacity. */
+
+.monaco-workbench [tabindex="0"]:focus,
+.monaco-workbench [tabindex="-1"]:focus,
+.monaco-workbench .synthetic-focus,
+.monaco-workbench select:focus,
+.monaco-workbench input[type="button"]:focus,
+.monaco-workbench input[type="text"]:focus,
+.monaco-workbench button:focus,
+.monaco-workbench textarea:focus,
+.monaco-workbench input[type="search"]:focus,
+.monaco-workbench input[type="checkbox"]:focus {
+	opacity: 1;
+}
+
+.monaco-workbench.hc-black .synthetic-focus input,
+.monaco-workbench.hc-light .synthetic-focus input {
+	background: transparent; /* Search input focus fix when in high contrast */
+}
+
+.monaco-workbench input[type="checkbox"]:focus {
+	outline-offset: 2px;
+}
+
+.monaco-workbench [tabindex="0"]:active,
+.monaco-workbench [tabindex="-1"]:active,
+.monaco-workbench select:active,
+.monaco-workbench input[type="button"]:active,
+.monaco-workbench input[type="checkbox"]:active {
+	outline: 0 !important; /* fixes some flashing outlines from showing up when clicking */
+}
+
+.monaco-workbench.mac select:focus {
+	border-color: transparent; /* outline is a square, but border has a radius, so we avoid this glitch when focused (https://github.com/microsoft/vscode/issues/26045) */
+}
+
+.monaco-workbench.hc-black .monaco-list:not(.element-focused):not(:active):focus:before,
+.monaco-workbench.hc-light .monaco-list:not(.element-focused):not(:active):focus:before {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	z-index: 15; /* make sure we are on top of the tree sticky scroll widget */
+	content: "";
+	pointer-events: none; /* enable click through */
+	outline: 1px solid; /* we still need to handle the empty tree or no focus item case */
+	outline-width: 1px;
+	outline-style: solid;
+	outline-offset: -1px;
+	outline-color: var(--vscode-focusBorder);
+}
+
+.monaco-workbench .monaco-list:not(:focus) .monaco-list-row.focused .monaco-highlighted-label .highlight,
+.monaco-workbench .monaco-list .monaco-list-row .monaco-highlighted-label .highlight {
+	color: var(--vscode-list-highlightForeground);
+}
+
+.monaco-workbench .monaco-list .monaco-list-row.focused .monaco-highlighted-label .highlight {
+	color: var(--vscode-list-focusHighlightForeground);
+}
+
+.monaco-workbench .synthetic-focus :focus {
+	outline: 0 !important; /* elements within widgets that draw synthetic-focus should never show focus */
+}
+
+.monaco-workbench .monaco-inputbox.info.synthetic-focus,
+.monaco-workbench .monaco-inputbox.warning.synthetic-focus,
+.monaco-workbench .monaco-inputbox.error.synthetic-focus,
+.monaco-workbench .monaco-inputbox.info input[type="text"]:focus,
+.monaco-workbench .monaco-inputbox.warning input[type="text"]:focus,
+.monaco-workbench .monaco-inputbox.error input[type="text"]:focus {
+	outline: 0 !important; /* outline is not going well with decoration */
+}
+
+.monaco-workbench .monaco-list:focus {
+	outline: 0 !important; /* tree indicates focus not via outline but through the focused item */
+}
+
+.monaco-workbench a.monaco-link:hover {
+	text-decoration: underline; /* render underline on hover for accessibility requirements */
+}
+
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-label:not(.disabled):hover,
+.monaco-workbench .monaco-action-bar:not(.vertical) .monaco-dropdown-with-primary:not(.disabled):hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item.active .action-label:not(.disabled),
+.monaco-workbench .monaco-action-bar:not(.vertical) .monaco-dropdown.active .action-label:not(.disabled) {
+	background-color: var(--vscode-toolbar-activeBackground);
+}
+
+.monaco-workbench .monaco-action-bar:not(.vertical) .action-item .action-label:hover:not(.disabled) {
+	outline: 1px dashed var(--vscode-toolbar-hoverOutline);
+	outline-offset: -1px;
+}

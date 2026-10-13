@@ -1,0 +1,6 @@
+Template: @@NAME@@/add-microsoft-repo
+Type: boolean
+Default: true
+Description: Add Backboard apt repository?
+ The installer would like to add the Backboard repository and signing
+ key to update Backboard IDE through apt.

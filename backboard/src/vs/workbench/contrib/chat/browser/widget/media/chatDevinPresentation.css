@@ -1,0 +1,1743 @@
+/* Shared Devin-style chat content for Editor and Simple mode. */
+.monaco-workbench .part.sessionspart {
+	--bb-editor-panel-gutter: 16px;
+	--bb-panel-surface: var(--vscode-editor-background);
+	--bb-devin-card-surface: color-mix(in srgb, var(--vscode-foreground) 4%, var(--vscode-editor-background));
+	--bb-devin-card-border: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
+}
+
+/* Measured from Devin’s live question DOM: 14px prompt inset, 12px choice
+ * inset, 8px marker gap, 2px row padding, and 14/20px copy. Questions share
+ * a single surface with the existing composer, which stays fully available. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-composer .interactive-session .interactive-input-part {
+	/* Pending questions and approvals pop out of the input box's top edge: a
+	 * card slightly inset from the composer, open at the bottom, whose last
+	 * 14px tuck under the input's rounded top so the two read as one piece
+	 * (the same way the changed-files tab attaches). */
+	> :is(.chat-question-carousel-widget-container, .chat-tool-confirmation-carousel-container):not(:empty) {
+		position: relative;
+		z-index: 1;
+		width: auto;
+		min-width: 0;
+		margin: 0 10px -14px !important;
+		padding: 6px 6px 20px;
+		box-sizing: border-box;
+		border: 1px solid color-mix(in srgb, var(--vscode-foreground) 9%, transparent);
+		border-bottom: 0;
+		border-radius: 16px 16px 0 0;
+		background: var(--bb-devin-card-surface, var(--vscode-editorWidget-background));
+		box-shadow: 0 -4px 12px rgb(0 0 0 / 0.12);
+		animation: backboard-composer-popout 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+	}
+
+	> :is(.chat-question-carousel-widget-container, .chat-tool-confirmation-carousel-container):empty {
+		display: none;
+	}
+
+	/* The input box stays on top of the tucked edge. */
+	> .interactive-input-and-side-toolbar {
+		position: relative;
+		z-index: 2;
+	}
+
+	.chat-question-editor-panel:not(.chat-question-carousel-used) {
+		max-height: min(420px, calc(100vh - 260px));
+		margin: 0;
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		box-shadow: none;
+	}
+
+	> .chat-tool-confirmation-carousel-container .chat-tool-confirmation-carousel {
+		margin: 0;
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+	}
+
+	.chat-question-carousel-widget-container {
+		width: 100%;
+		min-width: 0;
+	}
+
+	.chat-question-editor-panel {
+		.chat-question-carousel-content {
+			border: 0;
+			background: transparent;
+		}
+
+		.chat-question-title-row {
+			align-items: flex-start;
+			gap: 8px;
+			min-height: 32px;
+			padding: 0 4px 0 14px;
+			border: 0;
+			background: transparent;
+		}
+
+		.chat-question-title {
+			margin: 6px 10px 6px 0;
+			font-size: 13px;
+			font-weight: 400;
+			line-height: 20px;
+			white-space: normal;
+			overflow: visible;
+		}
+
+		.chat-question-title p {
+			margin: 0;
+		}
+
+		/* Multi-action permission prompts list each action under the question. */
+		.chat-question-title :is(ol, ul) {
+			margin: 4px 0 0;
+			padding-left: 18px;
+			color: var(--vscode-descriptionForeground);
+		}
+
+		.chat-question-header-actions {
+			gap: 2px;
+			margin-top: 6px;
+		}
+
+		.monaco-button.chat-question-dismiss-button,
+		.monaco-button.chat-question-close {
+			width: 20px;
+			min-width: 20px;
+			height: 20px;
+			padding: 0;
+			border: 0;
+			background: transparent !important;
+			font-size: 14px;
+		}
+
+		.chat-question-description,
+		.chat-question-carousel-message {
+			padding: 0 8px 8px;
+			font-size: 13px;
+			line-height: 20px;
+		}
+
+		.chat-question-input-container {
+			padding: 0;
+		}
+
+		.chat-question-input-container::after {
+			display: none;
+		}
+
+		.chat-question-list {
+			gap: 0;
+			padding: 0;
+			max-height: 300px;
+			overflow-y: auto;
+		}
+
+		.chat-question-list .chat-question-list-item {
+			align-items: flex-start;
+			gap: 8px;
+			min-height: 24px;
+			padding: 2px 6px 2px 12px;
+			border: 0;
+			border-radius: 6px;
+			background: transparent;
+		}
+
+		.chat-question-list .chat-question-list-label {
+			display: flex;
+			flex-direction: column;
+			gap: 2px;
+			font-size: 13px;
+			font-weight: 400;
+			line-height: 20px;
+			white-space: normal;
+		}
+
+		.chat-question-list-label-title,
+		.chat-question-list-label-desc {
+			font: inherit;
+			color: var(--vscode-foreground) !important;
+			white-space: normal;
+			overflow-wrap: anywhere;
+			-webkit-line-clamp: unset;
+		}
+
+		.chat-question-list-label-desc {
+			color: var(--vscode-descriptionForeground) !important;
+			font-size: 12px;
+			line-height: 16px;
+		}
+
+		.chat-question-list-number {
+			display: flex;
+			align-items: center;
+			align-self: flex-start;
+			flex: 0 0 auto;
+			width: auto;
+			height: 20px;
+			margin: 0 0 0 2px;
+			padding: 0;
+			border: 0;
+			border-radius: 0;
+			background: transparent;
+			color: var(--vscode-descriptionForeground);
+			font-size: 12px;
+			font-weight: 400;
+			line-height: 20px;
+		}
+
+		.chat-question-list-number::after,
+		.chat-question-list-indicator,
+		.chat-question-freeform-number {
+			display: none;
+		}
+
+		.chat-question-list-item.selected,
+		.chat-question-list:focus .chat-question-list-item.selected {
+			background: transparent;
+			color: var(--vscode-foreground);
+		}
+
+		.chat-question-list-item:hover,
+		.chat-question-list:focus-visible .chat-question-list-item.selected {
+			background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+		}
+
+		.chat-question-list-item.selected .chat-question-list-number {
+			color: var(--vscode-descriptionForeground);
+			background: transparent;
+			border: 0;
+		}
+
+		.chat-question-freeform {
+			gap: 0;
+			margin: 0;
+			padding: 8px 10px;
+			border: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+			border-radius: 12px;
+			background: color-mix(in srgb, var(--vscode-foreground) 5%, var(--bb-devin-card-surface, var(--vscode-editor-background)));
+			box-shadow: none;
+		}
+
+		.chat-question-freeform-textarea {
+			min-height: 32px;
+			align-content: start;
+			max-height: 110px;
+			padding: 0;
+			border: 0;
+			background: transparent;
+			font-size: 14px;
+			line-height: 20px;
+		}
+
+		.chat-question-freeform:focus-within {
+			border-color: color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
+			box-shadow: none;
+		}
+
+		/* Pager on the left, Answer flush with the answer box's right edge. */
+		.chat-question-footer-row {
+			min-height: 24px;
+			padding: 6px 0 0 12px;
+			border: 0;
+			background: transparent;
+		}
+
+		/* The hints are hidden here, and the dismiss hint's auto margin was what
+		   pushed Answer to the right, so the row end-aligns it instead. */
+		.chat-question-footer-right {
+			justify-content: flex-end;
+		}
+
+		.chat-question-dismiss-hint,
+		.chat-question-submit-hint {
+			display: none;
+		}
+	}
+
+	.chat-question-panel-single-select .chat-question-submit-button {
+		display: none;
+	}
+}
+
+
+/* One content rail for prose, activity, commands, and diff cards. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript {
+	--bb-cursor-transcript-gutter: var(--bb-editor-panel-gutter);
+	--bb-cursor-transcript-content-inset: 0px;
+	--bb-cursor-transcript-reading-width: 100%;
+	--bb-cursor-terminal-surface: var(--bb-devin-card-surface);
+	--bb-cursor-diff-surface: var(--bb-devin-card-surface);
+	--bb-cursor-diff-border: var(--bb-devin-card-border);
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response :is(.value, .rendered-markdown) {
+	font-size: 13px;
+	line-height: 18px;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-request > .value > .rendered-markdown {
+	padding: 8px 14px;
+	border: 0;
+	border-radius: 16px 4px 16px 16px;
+	width: fit-content;
+	max-width: 100%;
+	margin-left: auto;
+	background: var(--bb-devin-card-surface) !important;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript :is(.chat-thinking-cursor-reasoning-label, .chat-core-tool-card-header, .chat-core-tool-stack-header, .chat-thinking-group-header) {
+	min-height: 16px;
+	font-size: 12px;
+	line-height: 16px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-backboard-turn-work > .chat-backboard-turn-fold {
+	min-height: 24px;
+	padding: 2px 0;
+	margin: 0 0 4px;
+	border: 0;
+	font-size: 12px;
+}
+
+/* Command heading, blue command line, and plain output share one soft card.
+ * Real status labels (failed/denied/running) remain visible and actionable. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible {
+	--bb-cursor-terminal-surface: var(--bb-devin-card-surface);
+	--bb-cursor-terminal-inline-inset: 12px;
+	margin: 10px 0;
+	border: 1px solid var(--bb-devin-card-border);
+	border-radius: 10px;
+	background: var(--bb-devin-card-surface);
+	overflow: hidden;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .chat-terminal-card-header {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	min-width: 0;
+	box-sizing: border-box;
+	padding: 10px 12px;
+	border: 0;
+	background: transparent;
+	color: var(--bb-devin-text-secondary, var(--vscode-descriptionForeground));
+	font: inherit;
+	font-size: 13px;
+	line-height: 18.2px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .chat-terminal-card-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .chat-terminal-card-header > .codicon {
+	font-size: 14px;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .chat-terminal-card-chevron {
+	position: absolute;
+	left: 12px;
+	top: 10px;
+	width: 14px;
+	height: 18px;
+	line-height: 18px;
+	opacity: 0;
+	transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .chat-terminal-card-header:is(:hover, :focus-visible) {
+	background: rgb(128 128 128 / 6%);
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .chat-terminal-card-header:is(:hover, :focus-visible) .chat-terminal-card-chevron {
+	opacity: 1;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .chat-terminal-card-header:is(:hover, :focus-visible) > .codicon-terminal {
+	opacity: 0;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .chat-terminal-card-header[aria-expanded='true'] .chat-terminal-card-chevron {
+	transform: rotate(90deg);
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .chat-terminal-card-header:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -2px;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label .monaco-button {
+	padding-block: 5px;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-terminal-row :is(.chat-terminal-command-compact, .chat-terminal-command-full) {
+	color: var(--vscode-textLink-foreground);
+	font-size: 12px;
+	line-height: 18px;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-terminal-collapsed-output-preview {
+	padding: 4px 12px 10px;
+	font-size: 12px;
+	line-height: 16px;
+}
+
+/* The outer shell is a quiet 6px surround; the inner editor is the raised
+ * surface. No changes to model-picker markup, metrics, or interaction. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-composer .interactive-session .interactive-input-part {
+	margin-inline: var(--bb-editor-panel-gutter);
+	padding-bottom: 10px;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-composer .interactive-session .interactive-input-part .chat-input-container,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-composer .interactive-session:not(.chat-composer-empty) .interactive-input-part .chat-input-container {
+	--bb-composer-surface: color-mix(in srgb, var(--vscode-foreground) 7%, var(--bb-panel-surface));
+	min-height: 80px;
+	padding: 4px 10px 6px !important;
+	gap: 0 !important;
+	border: 1px solid var(--bb-devin-card-border) !important;
+	border-radius: var(--bb-composer-radius, 18px) !important;
+	background: var(--bb-composer-surface) !important;
+	box-shadow: 0 0 0 5px var(--bb-devin-card-surface) !important;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-composer .interactive-session .interactive-input-part .chat-input-container:focus-within {
+	border-color: color-mix(in srgb, var(--vscode-foreground) 18%, transparent) !important;
+	box-shadow: 0 0 0 5px var(--bb-devin-card-surface) !important;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-composer .interactive-session .interactive-input-part .chat-editor-container {
+	padding-inline: 0;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-composer .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label:is(.codicon-arrow-up, .codicon-newline) {
+	background: var(--vscode-foreground) !important;
+	color: var(--bb-panel-surface) !important;
+}
+
+
+/* Transcript metrics from the supplied Devin DOM and computed styles.
+ * A message/card advances 16px; adjacent activity entries advance 6px. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript {
+	--bb-cursor-transcript-muted: var(--bb-devin-text-secondary, var(--vscode-descriptionForeground));
+	--bb-cursor-transcript-thought: var(--bb-cursor-transcript-muted);
+
+	/* Codex's user-message action row: under the bubble, right-aligned with it,
+	 * 4px below, shown on hover. Pinned to the row's top corner it overlapped
+	 * the bubble and ran past its right edge. */
+	.interactive-item-container.interactive-request > .checkpoint-container {
+		position: static;
+		order: 2;
+		align-self: flex-end;
+		width: auto;
+		margin: 4px 0 0;
+	}
+
+	.interactive-item-container.interactive-response {
+		padding-top: 16px;
+	}
+
+	.interactive-item-container.interactive-response > .value {
+		padding-top: 0;
+	}
+
+	.chat-backboard-turn-work.chat-backboard-turn-work-expanded > .chat-backboard-turn-work-body {
+		margin-top: 0;
+	}
+
+	.chat-backboard-turn-work-body > .rendered-markdown {
+		margin-block: 0;
+	}
+
+	:is(.chat-backboard-turn-work-body, .interactive-item-container.interactive-response > .value) > .rendered-markdown > :first-child {
+		margin-top: 0;
+	}
+
+	:is(.chat-backboard-turn-work-body, .interactive-item-container.interactive-response > .value) > .rendered-markdown > :last-child {
+		margin-bottom: 0;
+	}
+
+	:is(.chat-thinking-cursor-reasoning-label, .chat-core-tool-card-header, .chat-core-tool-stack-header, .chat-thinking-group-header) {
+		min-height: 16px !important;
+		padding: 0 !important;
+		gap: 8px !important;
+		font-size: 12px;
+		font-weight: 400;
+		line-height: 16px;
+		color: var(--bb-cursor-transcript-muted);
+	}
+
+	.chat-thinking-cursor-reasoning-label {
+		margin-block: 6px !important;
+	}
+
+	:is(.chat-core-tool-card, .chat-core-tool-stack) {
+		margin-block: 6px !important;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+	}
+
+	.chat-core-tool-card-header {
+		display: flex;
+		width: 100%;
+		padding-inline: 0;
+		align-items: center;
+		border-radius: 0;
+		background: transparent;
+	}
+
+	.chat-core-tool-card-title {
+		font-size: 12px;
+		font-weight: 400;
+		line-height: 16px;
+	}
+
+	.chat-core-tool-card-title-line {
+		gap: 4px;
+	}
+
+	.chat-core-tool-card-summary {
+		padding: 0 3px;
+		border-radius: 3px;
+		background: rgb(128 128 128 / 10%);
+		font-size: 11px;
+		line-height: 16px;
+	}
+
+	.chat-core-tool-card-read .chat-core-tool-card-summary {
+		color: var(--vscode-textLink-foreground);
+		background: color-mix(in srgb, var(--vscode-textLink-foreground) 5%, transparent);
+	}
+
+	/* The glyph and disclosure occupy the same hit area. Both bubble to the
+	 * native header button; no separate wrapper can swallow the click. */
+	:is(.chat-core-tool-card-header, .chat-thinking-cursor-reasoning-label, .chat-core-tool-stack-header, .chat-thinking-group-header) > :is(.chat-core-tool-card-disclosure, .chat-thinking-cursor-reasoning-chevron, .chat-core-tool-stack-chevron, .chat-thinking-group-chevron-cursor) {
+		top: 0 !important;
+		left: 0 !important;
+		width: 16px !important;
+		height: 16px !important;
+		transform: none;
+		pointer-events: auto;
+		font-size: 16px;
+		line-height: 16px;
+	}
+
+	.chat-core-tool-card-expanded > .chat-core-tool-card-header > .chat-core-tool-card-disclosure {
+		transform: rotate(90deg);
+	}
+
+	:is(.chat-core-tool-card-header, .chat-thinking-cursor-reasoning-label):focus-visible {
+		outline: 1px solid var(--vscode-focusBorder) !important;
+		outline-offset: 2px;
+		text-decoration: none;
+	}
+
+	.chat-core-tool-card-heading {
+		flex: 0 1 auto;
+		min-width: 0;
+	}
+
+	.chat-core-tool-card-title-line {
+		min-width: 0;
+		gap: 4px;
+	}
+
+	.chat-core-tool-card-title {
+		flex-shrink: 0;
+	}
+
+	.chat-core-tool-card-summary {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-family: var(--monaco-monospace-font);
+	}
+
+	.chat-core-tool-card-complete .chat-core-tool-card-subtitle:not(.chat-core-tool-card-subtitle-error) {
+		display: none;
+	}
+
+	.chat-core-tool-card-count {
+		flex: 0 0 auto;
+		line-height: 16px;
+		margin-left: 0;
+	}
+
+	.chat-core-tool-card-header:hover {
+		background: transparent;
+	}
+
+	.chat-thinking-cursor-reasoning-preview:not([hidden]) {
+		margin: 6px 0 6px 24px !important;
+		padding: 0 !important;
+		border: 0 !important;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.chat-thinking-tool-wrapper.chat-thinking-core-tool-row {
+		margin: 0 !important;
+		padding: 0 !important;
+	}
+
+	/* Provider/MCP calls use the same disclosure row as native tools. */
+	.chat-tool-io {
+		margin: 6px 0 !important;
+		padding: 0 !important;
+		border: 0 !important;
+		background: transparent !important;
+	}
+
+	.chat-tool-io .chat-confirmation-widget {
+		border: 0 !important;
+		background: transparent !important;
+	}
+
+	.chat-tool-io .chat-confirmation-widget-title.monaco-button {
+		min-height: 16px !important;
+		padding: 0 0 0 24px !important;
+		border: 0 !important;
+		border-radius: 0 !important;
+		background: transparent !important;
+		color: var(--bb-cursor-transcript-muted);
+		font-size: 12px;
+		line-height: 16px;
+	}
+
+	.chat-tool-io .chat-tool-io-input-header {
+		font: 12px/16px var(--vscode-font-family);
+	}
+
+	.chat-tool-io .chat-tool-io-details {
+		margin: 6px 0 0 24px;
+		width: calc(100% - 24px);
+		padding: 8px 10px;
+		border-radius: 8px;
+		border: 1px solid var(--bb-devin-card-border);
+		background: var(--bb-devin-card-surface);
+	}
+
+	/* There is one command disclosure. The command itself is selectable text. */
+	.chat-terminal-thinking-collapsible:has(> .chat-terminal-card-header) > .chat-used-context-label {
+		display: none !important;
+	}
+
+	.chat-terminal-card-command {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		margin: 12px 0 10px;
+		padding: 0 12px;
+		color: var(--bb-devin-link, var(--vscode-textLink-foreground));
+		font: 12px/16px var(--monaco-monospace-font);
+	}
+
+	.chat-terminal-card-command::before {
+		content: '●';
+		flex: 0 0 12px;
+		font-size: 8px;
+	}
+
+	.chat-terminal-card-command code {
+		color: inherit;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		font: inherit;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+
+	.chat-external-edit-card > .chat-external-edit-expand {
+		box-sizing: border-box;
+		top: 10px;
+		left: 10px;
+		width: 18px;
+		height: 18px;
+		padding: 0;
+		border: 0;
+		border-radius: 3px;
+		background: transparent;
+		color: inherit;
+		font-size: 14px;
+		line-height: 18px;
+		cursor: pointer;
+		z-index: 2;
+	}
+
+	/* Icon paths from the supplied reference DOM. */
+	.chat-core-tool-card-read .chat-core-tool-card-icon::before {
+		content: "";
+		width: 16px;
+		height: 16px;
+		background: currentColor;
+		mask: url("data:image/svg+xml,%3Csvg%20aria-hidden%3D%22true%22%20width%3D%2216px%22%20height%3D%2216px%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20d%3D%22M4.270%203.040%20C%203.699%203.139%2C3.154%203.443%2C2.728%203.898%20C%202.440%204.206%2C2.241%204.550%2C2.113%204.960%20L%202.020%205.260%202.020%2011.500%20L%202.020%2017.740%202.113%2018.040%20C%202.256%2018.498%2C2.455%2018.822%2C2.816%2019.184%20C%203.178%2019.545%2C3.502%2019.744%2C3.960%2019.887%20L%204.260%2019.980%2012.000%2019.980%20L%2019.740%2019.980%2020.040%2019.887%20C%2020.498%2019.744%2C20.822%2019.545%2C21.184%2019.184%20C%2021.545%2018.822%2C21.744%2018.498%2C21.887%2018.040%20L%2021.980%2017.740%2021.980%2012.500%20L%2021.980%207.260%2021.887%206.960%20C%2021.625%206.118%2C20.939%205.412%2C20.109%205.131%20L%2019.780%205.020%2016.140%205.000%20C%2012.506%204.980%2C12.500%204.980%2C12.311%204.893%20C%2012.190%204.837%2C11.891%204.586%2C11.471%204.188%20C%2010.736%203.491%2C10.473%203.304%2C9.994%203.137%20L%209.660%203.020%207.060%203.014%20C%205.630%203.010%2C4.375%203.022%2C4.270%203.040%20M9.647%204.630%20C%209.809%204.709%2C10.070%204.925%2C10.560%205.389%20C%2011.150%205.948%2C11.292%206.061%2C11.573%206.199%20C%2012.213%206.512%2C11.954%206.494%2C16.000%206.518%20L%2019.620%206.540%2019.820%206.646%20C%2020.079%206.784%2C20.250%206.967%2C20.377%207.240%20C%2020.477%207.455%2C20.479%207.480%2C20.480%208.362%20L%2020.480%209.265%2020.130%209.142%20L%2019.780%209.020%2012.000%209.020%20L%204.220%209.020%203.870%209.142%20L%203.520%209.265%203.520%207.362%20L%203.521%205.460%203.623%205.240%20C%203.758%204.948%2C3.929%204.775%2C4.220%204.635%20L%204.460%204.520%206.940%204.520%20L%209.420%204.520%209.647%204.630%20M19.760%2010.623%20C%2020.052%2010.758%2C20.225%2010.929%2C20.365%2011.220%20L%2020.480%2011.460%2020.480%2014.500%20L%2020.480%2017.540%2020.366%2017.782%20C%2020.226%2018.076%2C19.954%2018.327%2C19.667%2018.428%20C%2019.470%2018.496%2C19.087%2018.500%2C12.000%2018.500%20C%204.913%2018.500%2C4.530%2018.496%2C4.333%2018.428%20C%204.046%2018.327%2C3.774%2018.076%2C3.634%2017.782%20L%203.520%2017.540%203.520%2014.500%20L%203.521%2011.460%203.623%2011.240%20C%203.758%2010.948%2C3.929%2010.775%2C4.220%2010.635%20L%204.460%2010.520%2012.000%2010.520%20L%2019.540%2010.521%2019.760%2010.623%20%22%20stroke%3D%22none%22%20fill-rule%3D%22evenodd%22%20fill%3D%22currentColor%22%3E%3C%2Fpath%3E%3C%2Fsvg%3E") center / contain no-repeat;
+	}
+	.chat-thinking-cursor-reasoning-icon::before {
+		content: "";
+		width: 16px;
+		height: 16px;
+		background: currentColor;
+		mask: url("data:image/svg+xml,%3Csvg%20aria-hidden%3D%22true%22%20width%3D%2216px%22%20height%3D%2216px%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20d%3D%22M8.741%202.062%20C%207.887%202.224%2C7.056%202.776%2C6.587%203.494%20C%206.233%204.035%2C6.059%204.527%2C6.013%205.115%20L%205.989%205.428%205.785%205.500%20C%205.214%205.699%2C4.638%206.083%2C4.172%206.573%20C%203.666%207.106%2C3.294%207.766%2C3.120%208.440%20C%202.938%209.149%2C2.970%2010.091%2C3.201%2010.800%20L%203.312%2011.140%203.065%2011.400%20C%202.590%2011.898%2C2.284%2012.434%2C2.114%2013.060%20C%201.997%2013.491%2C1.986%2014.447%2C2.094%2014.840%20C%202.254%2015.428%2C2.465%2015.871%2C2.779%2016.279%20C%202.969%2016.526%2C3.384%2016.926%2C3.607%2017.077%20L%203.750%2017.175%203.772%2017.697%20C%203.797%2018.308%2C3.890%2018.726%2C4.121%2019.268%20C%204.726%2020.683%2C5.988%2021.668%2C7.545%2021.940%20C%208.711%2022.143%2C10.030%2021.807%2C11.000%2021.059%20C%2011.224%2020.886%2C11.692%2020.414%2C11.890%2020.160%20L%2012.000%2020.020%2012.110%2020.160%20C%2012.308%2020.414%2C12.776%2020.886%2C13.000%2021.059%20C%2013.970%2021.807%2C15.289%2022.143%2C16.455%2021.940%20C%2018.023%2021.666%2C19.272%2020.685%2C19.891%2019.240%20C%2020.110%2018.729%2C20.204%2018.299%2C20.228%2017.697%20L%2020.250%2017.175%2020.393%2017.077%20C%2020.616%2016.926%2C21.031%2016.526%2C21.221%2016.279%20C%2021.535%2015.871%2C21.746%2015.428%2C21.906%2014.840%20C%2022.014%2014.447%2C22.003%2013.491%2C21.886%2013.060%20C%2021.716%2012.433%2C21.409%2011.897%2C20.935%2011.400%20L%2020.687%2011.140%2020.786%2010.844%20C%2021.070%2010.000%2C21.070%208.970%2C20.787%208.140%20C%2020.377%206.940%2C19.371%205.907%2C18.215%205.500%20L%2018.011%205.428%2017.987%205.115%20C%2017.824%202.998%2C15.736%201.553%2C13.695%202.142%20C%2013.113%202.310%2C12.447%202.720%2C12.117%203.113%20L%2011.994%203.260%2011.893%203.131%20C%2011.733%202.928%2C11.289%202.583%2C10.960%202.406%20C%2010.320%202.062%2C9.453%201.927%2C8.741%202.062%20M9.969%203.603%20C%2010.591%203.812%2C11.063%204.335%2C11.198%204.960%20C%2011.233%205.125%2C11.242%206.785%2C11.232%2011.640%20L%2011.220%2018.100%2011.111%2018.420%20C%2010.949%2018.895%2C10.743%2019.217%2C10.340%2019.622%20C%209.733%2020.231%2C9.114%2020.486%2C8.240%2020.486%20C%207.862%2020.486%2C7.716%2020.467%2C7.420%2020.381%20C%206.630%2020.150%2C6.001%2019.634%2C5.585%2018.877%20C%205.437%2018.608%2C5.280%2018.086%2C5.280%2017.864%20L%205.280%2017.740%205.770%2017.737%20C%206.323%2017.733%2C6.785%2017.640%2C7.209%2017.448%20C%207.630%2017.257%2C7.820%2016.931%2C7.724%2016.564%20C%207.587%2016.045%2C7.141%2015.873%2C6.535%2016.105%20C%206.206%2016.231%2C5.626%2016.276%2C5.275%2016.203%20C%204.503%2016.043%2C3.820%2015.396%2C3.584%2014.603%20C%203.501%2014.323%2C3.501%2013.746%2C3.583%2013.426%20C%203.770%2012.700%2C4.340%2012.107%2C5.087%2011.858%20C%205.441%2011.740%2C5.642%2011.558%2C5.725%2011.279%20C%205.822%2010.956%2C5.654%2010.592%2C5.336%2010.438%20C%205.187%2010.366%2C5.107%2010.353%2C4.904%2010.370%20L%204.654%2010.390%204.602%2010.205%20C%204.517%209.900%2C4.504%209.261%2C4.576%208.921%20C%204.747%208.117%2C5.287%207.424%2C6.036%207.050%20C%206.325%206.906%2C6.332%206.904%2C6.387%206.981%20C%206.830%207.610%2C6.918%207.692%2C7.202%207.740%20C%207.706%207.826%2C8.169%207.320%2C8.037%206.830%20C%208.013%206.738%2C7.939%206.586%2C7.873%206.490%20C%207.808%206.395%2C7.706%206.215%2C7.647%206.089%20C%207.549%205.879%2C7.540%205.819%2C7.540%205.360%20C%207.540%204.872%2C7.543%204.853%2C7.677%204.580%20C%207.909%204.104%2C8.426%203.669%2C8.891%203.559%20C%209.164%203.494%2C9.712%203.517%2C9.969%203.603%20M15.420%203.679%20C%2015.794%203.858%2C16.142%204.206%2C16.320%204.580%20C%2016.437%204.826%2C16.456%204.910%2C16.472%205.263%20C%2016.493%205.741%2C16.436%205.982%2C16.216%206.340%20C%2015.978%206.727%2C15.945%206.809%2C15.945%207.000%20C%2015.946%207.495%2C16.405%207.847%2C16.885%207.719%20C%2017.088%207.666%2C17.368%207.395%2C17.523%207.103%20C%2017.576%207.002%2C17.640%206.920%2C17.665%206.920%20C%2017.759%206.920%2C18.270%207.206%2C18.488%207.380%20C%2018.929%207.734%2C19.303%208.349%2C19.424%208.921%20C%2019.496%209.261%2C19.483%209.900%2C19.398%2010.205%20L%2019.346%2010.390%2019.096%2010.370%20C%2018.667%2010.335%2C18.381%2010.530%2C18.274%2010.931%20C%2018.210%2011.168%2C18.273%2011.388%2C18.465%2011.600%20C%2018.573%2011.719%2C18.676%2011.779%2C18.913%2011.858%20C%2019.660%2012.107%2C20.230%2012.700%2C20.417%2013.426%20C%2020.496%2013.735%2C20.498%2014.273%2C20.420%2014.572%20C%2020.215%2015.361%2C19.509%2016.040%2C18.725%2016.203%20C%2018.374%2016.276%2C17.794%2016.231%2C17.465%2016.105%20C%2016.859%2015.873%2C16.413%2016.045%2C16.276%2016.564%20C%2016.180%2016.931%2C16.370%2017.257%2C16.791%2017.448%20C%2017.215%2017.640%2C17.677%2017.733%2C18.230%2017.737%20L%2018.720%2017.740%2018.720%2017.864%20C%2018.720%2018.086%2C18.563%2018.608%2C18.415%2018.877%20C%2017.999%2019.634%2C17.370%2020.150%2C16.580%2020.381%20C%2016.284%2020.467%2C16.138%2020.486%2C15.760%2020.486%20C%2014.886%2020.486%2C14.267%2020.231%2C13.660%2019.622%20C%2013.257%2019.217%2C13.051%2018.895%2C12.889%2018.420%20L%2012.780%2018.100%2012.780%2011.500%20L%2012.780%204.900%2012.925%204.600%20C%2013.169%204.095%2C13.513%203.782%2C14.022%203.602%20C%2014.222%203.531%2C14.331%203.520%2C14.700%203.532%20C%2015.102%203.544%2C15.164%203.557%2C15.420%203.679%20%22%20stroke%3D%22none%22%20fill-rule%3D%22evenodd%22%20fill%3D%22currentColor%22%3E%3C%2Fpath%3E%3C%2Fsvg%3E") center / contain no-repeat;
+	}
+	:is(.chat-core-tool-card-grep, .chat-core-tool-card-glob) .chat-core-tool-card-icon::before {
+		content: "";
+		width: 16px;
+		height: 16px;
+		background: currentColor;
+		mask: url("data:image/svg+xml,%3Csvg%20aria-hidden%3D%22true%22%20width%3D%2216px%22%20height%3D%2216px%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20d%3D%22M10.207%203.043%20C%208.656%203.193%2C7.096%203.846%2C5.900%204.847%20C%204.985%205.612%2C4.307%206.477%2C3.800%207.529%20C%202.453%2010.317%2C2.837%2013.625%2C4.789%2016.040%20C%205.075%2016.394%2C5.761%2017.067%2C6.100%2017.326%20C%207.743%2018.581%2C9.834%2019.176%2C11.832%2018.958%20C%2013.289%2018.798%2C14.736%2018.220%2C15.883%2017.337%20L%2016.106%2017.166%2017.943%2019.007%20C%2019.169%2020.236%2C19.833%2020.873%2C19.940%2020.923%20C%2020.243%2021.065%2C20.552%2021.004%2C20.788%2020.755%20C%2021.013%2020.516%2C21.060%2020.233%2C20.923%2019.940%20C%2020.873%2019.833%2C20.236%2019.169%2C19.007%2017.943%20L%2017.166%2016.106%2017.337%2015.883%20C%2018.220%2014.736%2C18.798%2013.289%2C18.958%2011.832%20C%2019.176%209.834%2C18.579%207.737%2C17.325%206.100%20C%2017.055%205.747%2C16.510%205.190%2C16.100%204.847%20C%2014.483%203.494%2C12.337%202.837%2C10.207%203.043%20M11.940%204.577%20C%2014.094%204.908%2C15.858%206.196%2C16.838%208.153%20C%2017.493%209.462%2C17.661%2011.157%2C17.283%2012.629%20C%2016.641%2015.130%2C14.538%2017.031%2C11.980%2017.423%20C%2011.467%2017.502%2C10.533%2017.502%2C10.020%2017.423%20C%207.461%2017.031%2C5.360%2015.132%2C4.717%2012.629%20C%204.451%2011.596%2C4.451%2010.404%2C4.717%209.371%20C%205.361%206.863%2C7.431%204.993%2C10.020%204.580%20C%2010.456%204.511%2C11.498%204.509%2C11.940%204.577%20%22%20stroke%3D%22none%22%20fill-rule%3D%22evenodd%22%20fill%3D%22currentColor%22%3E%3C%2Fpath%3E%3C%2Fsvg%3E") center / contain no-repeat;
+	}
+
+	.chat-terminal-card-header > .codicon-terminal::before {
+		content: '';
+		display: block;
+		width: 14px;
+		height: 14px;
+		background: currentColor;
+		mask: url("data:image/svg+xml,%3Csvg%20class%3D%22codeium-text-medium%20m-px%22%20aria-hidden%3D%22true%22%20width%3D%2214px%22%20height%3D%2214px%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20d%3D%22M5.270%203.041%20C%204.702%203.138%2C4.154%203.442%2C3.728%203.898%20C%203.440%204.206%2C3.241%204.550%2C3.113%204.960%20L%203.020%205.260%203.020%2012.000%20L%203.020%2018.740%203.113%2019.040%20C%203.256%2019.498%2C3.455%2019.822%2C3.816%2020.184%20C%204.178%2020.545%2C4.502%2020.744%2C4.960%2020.887%20L%205.260%2020.980%2012.000%2020.980%20L%2018.740%2020.980%2019.040%2020.887%20C%2019.498%2020.744%2C19.822%2020.545%2C20.184%2020.184%20C%2020.545%2019.822%2C20.744%2019.498%2C20.887%2019.040%20L%2020.980%2018.740%2020.980%2012.000%20L%2020.980%205.260%2020.887%204.960%20C%2020.625%204.118%2C19.939%203.413%2C19.109%203.131%20L%2018.780%203.020%2012.120%203.014%20C%208.457%203.011%2C5.375%203.023%2C5.270%203.041%20M18.760%204.623%20C%2019.052%204.758%2C19.225%204.929%2C19.365%205.220%20L%2019.480%205.460%2019.480%2012.000%20L%2019.480%2018.540%2019.366%2018.782%20C%2019.226%2019.076%2C18.954%2019.327%2C18.667%2019.428%20C%2018.471%2019.496%2C18.123%2019.500%2C12.000%2019.500%20C%205.877%2019.500%2C5.529%2019.496%2C5.333%2019.428%20C%205.046%2019.327%2C4.774%2019.076%2C4.634%2018.782%20L%204.520%2018.540%204.520%2012.000%20L%204.521%205.460%204.623%205.240%20C%204.758%204.948%2C4.929%204.775%2C5.220%204.635%20L%205.460%204.520%2012.000%204.520%20L%2018.540%204.521%2018.760%204.623%20M6.940%207.073%20C%206.718%207.179%2C6.598%207.323%2C6.538%207.554%20C%206.485%207.759%2C6.504%207.940%2C6.600%208.121%20C%206.629%208.175%2C6.937%208.509%2C7.285%208.862%20L%207.918%209.503%207.338%2010.082%20C%206.702%2010.715%2C6.569%2010.881%2C6.520%2011.101%20C%206.475%2011.302%2C6.561%2011.615%2C6.702%2011.762%20C%206.951%2012.022%2C7.381%2012.067%2C7.672%2011.865%20C%207.755%2011.808%2C8.222%2011.359%2C8.710%2010.868%20C%2010.097%209.472%2C10.096%209.528%2C8.749%208.169%20C%208.282%207.699%2C7.815%207.251%2C7.711%207.174%20C%207.469%206.995%2C7.182%206.958%2C6.940%207.073%20%22%20stroke%3D%22none%22%20fill-rule%3D%22evenodd%22%20fill%3D%22currentColor%22%3E%3C%2Fpath%3E%3C%2Fsvg%3E") center / contain no-repeat;
+	}
+
+	.chat-core-tool-card-location {
+		display: inline;
+		margin-left: 4px;
+		opacity: 0.7;
+	}
+
+	.chat-core-tool-card-read.chat-core-tool-card-complete :is(.chat-core-tool-card-count, .chat-core-tool-card-subtitle:not(.chat-core-tool-card-subtitle-error)) {
+		display: none;
+	}
+
+	.chat-core-tool-card-status-complete {
+		display: none;
+	}
+
+	.chat-core-tool-card-count {
+		padding: 0;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		font-size: 11px;
+		font-weight: 400;
+	}
+
+	.chat-core-tool-card-details {
+		box-sizing: border-box;
+		width: calc(100% - 24px);
+		margin-top: 6px;
+		margin-left: 24px;
+		padding: 8px 10px;
+		border: 1px solid var(--bb-devin-card-border);
+		border-radius: 8px;
+		background: var(--bb-devin-card-surface);
+	}
+
+	.chat-core-tool-card-read .chat-core-tool-card-section-label {
+		display: none;
+	}
+
+	.chat-core-tool-card-details .chat-core-tool-card-preview pre {
+		margin: 0;
+		padding: 0;
+		background: transparent;
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.chat-thinking-tool-wrapper.chat-thinking-cursor-terminal-row {
+		margin-block: 16px;
+		border: 0;
+		border-radius: 10px;
+		background: transparent;
+	}
+
+	.chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible {
+		border: 1px solid var(--bb-devin-card-border);
+		border-radius: 10px;
+	}
+
+	.chat-thinking-cursor-terminal-row .chat-terminal-thinking-collapsible > .chat-used-context-label .monaco-button {
+		padding: 12px 12px 10px;
+		min-height: 0;
+	}
+
+	.chat-terminal-collapsed-output-preview {
+		color: var(--vscode-foreground);
+		max-height: 74px;
+		padding: 0 12px 10px;
+		line-height: 16px;
+	}
+
+	.chat-terminal-has-snapshot:not(.chat-used-context-collapsed) > :is(.chat-terminal-thinking-content, .chat-terminal-collapsed-output-preview) {
+		display: none !important;
+	}
+
+	.chat-terminal-has-snapshot:not(.chat-used-context-collapsed) > .chat-terminal-snapshot-output {
+		display: block;
+		box-sizing: border-box;
+		max-height: 256px;
+		margin: 0;
+		padding: 0 12px 10px;
+		overflow: auto;
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		color: var(--vscode-foreground);
+		font: 12px/16px var(--monaco-monospace-font);
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+		scrollbar-width: thin;
+	}
+
+	.chat-terminal-snapshot-output:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: -2px;
+	}
+
+	.chat-external-edit-card.chat-external-edit-preview {
+		margin-block: 16px;
+	}
+
+	.chat-external-edit-card.chat-external-edit-preview > .chat-codeblock-pill-widget {
+		min-height: 38px;
+		padding: 10px 12px;
+		font-size: 13px;
+		line-height: 18px;
+	}
+
+	.chat-external-edit-card.chat-external-edit-preview .chat-external-edit-diff-row {
+		font-size: 11px;
+		line-height: 18.2px;
+	}
+}
+
+/* Animate only arriving content in live responses. Restored transcript rows
+ * stay still when virtualization remounts them. Disclosures fade on opening,
+ * and hover controls use the same restrained 150ms transition. */
+@keyframes backboard-panel-content-in {
+	from { opacity: 0; transform: translateY(3px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.monaco-workbench:not(.monaco-reduce-motion) :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript {
+		.chat-response-loading :is(.chat-core-tool-card, .chat-thinking-cursor-terminal-row, .chat-external-edit-card, .chat-thinking-cursor-reasoning-label) {
+			animation: backboard-panel-content-in 180ms cubic-bezier(0.2, 0, 0, 1) both;
+		}
+
+		:is(.chat-core-tool-card-details:not([hidden]), .chat-terminal-thinking-content:not(.collapsed), .chat-terminal-snapshot-output, .chat-thinking-cursor-reasoning-preview:not([hidden])) {
+			animation: backboard-panel-content-in 150ms ease-out;
+		}
+
+		:is(.chat-core-tool-card-header, .chat-terminal-card-header, .chat-thinking-cursor-reasoning-label, .chat-external-edit-copy) {
+			transition: opacity 150ms ease, color 150ms ease, background-color 150ms ease;
+		}
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .chat-terminal-card-chevron {
+		transition: none;
+	}
+}
+
+.monaco-workbench.monaco-reduce-motion :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .chat-terminal-card-chevron {
+	transition: none;
+}
+
+/* MCP and Playwright activity rows are informational; there is no hidden input/output disclosure. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-tool-io-static-activity {
+	.chat-confirmation-widget-title.monaco-button {
+		cursor: default;
+		text-decoration: none !important;
+		background: transparent !important;
+	}
+	.chat-confirmation-widget-title > .chat-io-activity-icon {
+		opacity: 1 !important;
+	}
+}
+
+/* Tool approvals use the same prompt/choice surface as editor-panel questions.
+ * Keep native approval buttons, scope menus, and code editors intact. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-composer .interactive-session {
+
+	.chat-tool-confirmation-carousel-container {
+		width: 100%;
+		min-width: 0;
+		margin: 0;
+	}
+
+	:is(.chat-tool-confirmation-carousel, .chat-question-approval:not(.chat-tool-confirmation-carousel *)) {
+		border: 0;
+		border-radius: 14px;
+		padding: 6px;
+		margin-bottom: 8px;
+		max-width: 100%;
+		box-sizing: border-box;
+		min-width: 0;
+		background: var(--bb-devin-card-surface, var(--vscode-editor-background));
+
+		.chat-tool-carousel-overlay {
+			align-items: flex-start;
+			min-height: 32px;
+			box-sizing: border-box;
+			padding: 8px 8px 10px 10px;
+			gap: 8px;
+			border: 0;
+			background: transparent;
+		}
+
+		.chat-tool-carousel-collapsed-title {
+			font-size: 13px;
+			font-weight: 400;
+			line-height: 18px;
+			white-space: normal;
+		}
+
+		.chat-tool-carousel-title-group {
+			min-width: 0;
+			flex: 1;
+		}
+
+		/* Retry confirmations use the same choices without hiding their warning. */
+		.chat-notification-widget {
+			padding: 8px 10px;
+			margin: 0;
+			border: 0;
+			background: transparent;
+			font-size: 13px;
+			line-height: 18px;
+			overflow-wrap: anywhere;
+		}
+
+		.chat-notification-widget .rendered-markdown > :first-child { margin-top: 0; }
+		.chat-notification-widget .rendered-markdown > :last-child { margin-bottom: 0; }
+
+		.chat-tool-carousel-overlay-actions { gap: 2px; }
+
+		.chat-tool-carousel-content,
+		.chat-confirmation-widget,
+		.chat-confirmation-widget2,
+		.chat-confirmation-widget-message-container {
+			border: 0;
+			background: transparent;
+			box-shadow: none;
+		}
+
+		.chat-confirmation-widget-message-scrollable {
+			margin: 0;
+		}
+
+		.chat-confirmation-widget-message {
+			padding: 0 10px 8px;
+			background: transparent !important;
+			border: 0 !important;
+			font-size: 13px;
+			line-height: 18px;
+		}
+
+		.chat-confirmation-widget-title,
+		.chat-confirmation-widget-title p,
+		.chat-confirmation-widget-message .rendered-markdown {
+			font-size: 13px;
+			line-height: 18px;
+			font-weight: 400;
+			overflow-wrap: anywhere;
+		}
+
+		.chat-confirmation-widget-message .rendered-markdown > :first-child { margin-top: 0; }
+		.chat-confirmation-widget-message .rendered-markdown > :last-child { margin-bottom: 0; }
+		.chat-confirmation-widget-message > :first-child { margin-top: 0; }
+		.chat-confirmation-widget-message > :last-child { margin-bottom: 0; }
+
+		.chat-confirmation-widget-title {
+			padding: 6px 10px;
+			border: 0;
+			background: transparent;
+		}
+
+		/* Title and tool description share one line: the description is a
+		 * muted, ellipsized tail (no upstream en-dash, no second wrapped line). */
+		.chat-confirmation-widget-title .chat-query-title-part {
+			display: flex;
+			align-items: baseline;
+			gap: 6px;
+			min-width: 0;
+			overflow: hidden;
+		}
+
+		.chat-confirmation-widget-title .chat-query-title-part > .rendered-markdown {
+			flex: 0 0 auto;
+			white-space: nowrap;
+		}
+
+		.chat-confirmation-widget-title small {
+			min-width: 0;
+			overflow: hidden;
+			color: var(--vscode-descriptionForeground);
+			opacity: 1;
+			font-size: 12px;
+			white-space: nowrap;
+			text-overflow: ellipsis;
+
+			&::before { content: none; }
+
+			.rendered-markdown,
+			.rendered-markdown p {
+				display: inline;
+				margin: 0;
+				white-space: nowrap;
+			}
+		}
+
+		/* A single inset code surface; no second dark message frame. */
+		.chat-confirmation-widget-message .interactive-result-code-block {
+			margin: 0;
+			border: 1px solid var(--bb-devin-card-border) !important;
+			border-radius: 8px;
+			overflow: hidden;
+		}
+
+		.chat-confirmation-widget-message :is(.interactive-result-code-block, .interactive-result-editor, .monaco-editor, .monaco-editor-background, .margin) {
+			background-color: var(--bb-devin-card-surface, var(--vscode-editor-background)) !important;
+		}
+
+		.chat-confirmation-widget-message :is(.disclaimer, .chat-confirmation-message-terminal-disclaimer) {
+			margin: 6px 0 0 !important;
+			font-size: 11px;
+			line-height: 16px;
+			font-style: normal;
+			color: var(--vscode-descriptionForeground);
+			opacity: 1 !important;
+		}
+
+		.chat-confirmation-widget-message :is(.disclaimer, .chat-confirmation-message-terminal-disclaimer) p {
+			margin: 0 !important;
+			font: inherit;
+		}
+
+		.chat-tool-carousel-overlay-actions .monaco-button:not(.chat-tool-carousel-approve-all-button) {
+			width: 20px;
+			min-width: 20px;
+			height: 20px;
+			border-radius: 6px;
+		}
+
+		.chat-confirmation-widget-buttons,
+		.chat-buttons-container {
+			margin: 0;
+			padding: 2px 0 4px;
+			border: 0;
+			background: transparent;
+		}
+
+		.chat-buttons {
+			display: flex;
+			flex-direction: column;
+			width: 100%;
+			gap: 0;
+			counter-reset: approval-choice;
+		}
+
+		.chat-buttons > :is(.monaco-button, .monaco-button-dropdown) {
+			counter-increment: approval-choice;
+			width: 100%;
+			min-width: 0;
+			box-sizing: border-box;
+			border-radius: 6px;
+		}
+
+		.chat-buttons .monaco-button {
+			justify-content: flex-start;
+			min-height: 32px;
+			padding: 4px 8px;
+			gap: 8px;
+			border: 0 !important;
+			border-radius: 6px;
+			background: transparent !important;
+			color: var(--vscode-foreground) !important;
+			font-size: 13px;
+			font-weight: 400;
+			line-height: 18px;
+			text-align: left;
+			white-space: normal;
+		}
+
+		.chat-buttons > .monaco-button::before,
+		.chat-buttons > .monaco-button-dropdown > .monaco-button:not(.monaco-dropdown-button)::before {
+			content: counter(approval-choice, upper-alpha);
+			flex: 0 0 auto;
+			align-self: baseline;
+			width: 12px;
+			margin-left: 2px;
+			color: var(--vscode-descriptionForeground);
+			font-size: 12px;
+			line-height: 18px;
+		}
+
+		/* Letter hint and label share a baseline; the scope chevron hugs the label. */
+		.chat-buttons .monaco-button {
+			align-items: baseline;
+		}
+
+		.chat-buttons > .monaco-button-dropdown {
+			display: flex;
+			align-items: center;
+			justify-content: flex-start;
+
+			> .monaco-button:not(.monaco-dropdown-button) {
+				flex: 0 1 auto;
+				width: auto;
+			}
+		}
+
+		.chat-buttons .monaco-button:hover:not(.disabled) {
+			background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent) !important;
+		}
+
+		.chat-buttons .monaco-button:focus-visible {
+			outline: 1px solid var(--vscode-focusBorder) !important;
+			outline-offset: -1px;
+		}
+
+		.chat-buttons .monaco-dropdown-button {
+			flex: 0 0 28px;
+			width: 28px;
+			min-width: 28px;
+			padding: 0;
+			justify-content: center;
+		}
+
+		.monaco-button-dropdown-separator { display: none; }
+	}
+}
+
+/* Position the spinner without a transform: Codicon's rotation owns transform. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-tool-io .chat-confirmation-widget-title > :is(.chat-collapsible-hover-chevron, .chat-io-activity-icon) {
+	top: calc(50% - 8px);
+	transform: none;
+	transform-origin: 8px 8px;
+	width: 16px;
+	height: 16px;
+	line-height: 16px;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview > :is(.chat-external-edit-expand, .chat-external-edit-copy) {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	position: absolute;
+	top: 7px;
+	width: 16px;
+	height: 16px;
+	font-size: 14px;
+	line-height: 16px;
+	padding: 0;
+	margin: 0;
+	box-sizing: border-box;
+}
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview > .chat-external-edit-expand { left: 11px; }
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview > .chat-external-edit-copy { right: 8px; }
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .agent-sessions-workbench .part.sessionspart) .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-external-edit-card.chat-external-edit-preview > .chat-external-edit-copy + .chat-external-edit-copy { right: 30px; }
+
+/* Pending tools keep the same compact rhythm and icon column as finished tools. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-tool-progress-row {
+	margin: 2px 0;
+	padding: 0;
+	min-height: 24px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-tool-progress-row:is(.progress-container),
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-tool-progress-row .progress-container {
+	margin: 0;
+	padding: 2px 0;
+	min-height: 24px;
+	box-sizing: border-box;
+	gap: 6px;
+	align-items: center;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-tool-progress-row .progress-step {
+	margin: 0;
+	padding: 0;
+	line-height: 20px;
+	min-width: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-tool-progress-row .progress-step > p {
+	margin: 0;
+	line-height: 20px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-tool-progress-row .codicon,
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-tool-progress-row > .codicon {
+	flex: 0 0 16px;
+	width: 16px;
+	height: 16px;
+	line-height: 16px;
+	margin: 0;
+	transform-origin: center;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-tool-progress-row .codicon-check {
+	display: inline-block;
+	visibility: hidden;
+}
+
+/* One icon column for every live activity row. Finished core-tool cards put a
+ * 16px icon at x=0 and the label at x=24; streaming tools (a bare "Read" or
+ * "Execute" while input or approval is pending), pending MCP rows, and the
+ * "Planning next moves" status must match, or their throbbers drift sideways.
+ * Upstream's thinking wrapper indents progress rows 6px and hides every
+ * loading codicon with !important, which left streaming rows as orphan text;
+ * these selectors outrank both. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value :is(.chat-cursor-progress-row, .chat-tool-progress-row, .chat-cursor-working-row).progress-container {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 24px;
+	margin: 0;
+	padding: 2px 0;
+	box-sizing: border-box;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value :is(.chat-cursor-progress-row, .chat-tool-progress-row, .chat-cursor-working-row).progress-container > .codicon {
+	flex: 0 0 16px;
+	width: 16px;
+	height: 16px;
+	margin: 0;
+	font-size: 14px;
+	line-height: 16px;
+	text-align: center;
+	transform-origin: 50% 50%;
+	color: var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground));
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value .chat-thinking-tool-wrapper .progress-container.chat-cursor-progress-row > .codicon.codicon-loading,
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value .chat-thinking-tool-wrapper .progress-container.chat-tool-progress-row > .codicon.codicon-loading {
+	display: inline-block !important;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value :is(.chat-cursor-progress-row, .chat-tool-progress-row, .chat-cursor-working-row).progress-container > .progress-step {
+	margin: 0;
+	min-width: 0;
+	line-height: 20px;
+}
+
+/* Finished generic tools (MCP calls without an I/O card) would otherwise leave
+ * an empty icon column next to their siblings; show the same tools glyph the
+ * MCP I/O rows use instead of the hidden success check. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value .chat-tool-progress-row.progress-container > .codicon.codicon-check {
+	display: inline-block !important;
+	visibility: visible;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value .chat-tool-progress-row.progress-container > .codicon.codicon-check::before {
+	content: '\eb6d';
+}
+
+/* A streaming tool is still pending: keep its label muted like other live rows. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value .chat-cursor-progress-row.progress-container > .progress-step {
+	color: var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground));
+	font-size: 13px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-item-container.interactive-response .value .chat-cursor-progress-row.progress-container > .progress-step > p {
+	margin: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-terminal-snapshot-output {
+	overscroll-behavior: contain;
+}
+
+/* Icon-only access control leaves the trailing space for the full model name. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane, .part.sessionspart) .interactive-session .chat-input-toolbars {
+	height: auto !important;
+
+	.backboard-access-mode-trigger .agent-host-chat-input-picker-label {
+		display: none;
+	}
+
+	.backboard-access-mode-trigger {
+		gap: 0 !important;
+		padding-inline: 5px !important;
+		min-width: 26px;
+		justify-content: center;
+	}
+
+	> .chat-input-toolbar {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+
+	> .chat-input-toolbar .monaco-action-bar,
+	> .chat-input-toolbar .actions-container {
+		width: 100%;
+	}
+
+	.combined-model-provider-picker-item {
+		flex: 0 1 auto;
+		margin-left: auto !important;
+		min-width: 0;
+		max-width: none !important;
+		overflow: hidden;
+	}
+
+	.combined-model-provider-trigger {
+		display: flex;
+		align-items: center;
+		flex-wrap: nowrap;
+		gap: 5px;
+		max-width: 100% !important;
+		min-width: 0;
+		height: 28px !important;
+		padding: 0 6px !important;
+		box-sizing: border-box;
+		overflow: hidden;
+	}
+
+	/* The name gives way first (ellipsis); logo, level and chevron never squeeze. */
+	.combined-model-provider-trigger-label {
+		flex: 0 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis !important;
+		white-space: nowrap !important;
+	}
+
+	.combined-model-provider-trigger > :is(.combined-model-logo, .combined-model-provider-trigger-thinking, .combined-model-provider-trigger-chevron) {
+		flex-shrink: 0;
+		white-space: nowrap;
+	}
+}
+
+/* One bounded loading ring for tool and response activity in both modes. */
+.monaco-workbench .backboard-clean-chat .interactive-session .codicon.codicon-loading.codicon-modifier-spin {
+	flex: 0 0 16px;
+	width: 16px !important;
+	height: 16px !important;
+	font-size: 16px !important;
+	line-height: 16px !important;
+	transform-origin: center;
+	animation: backboard-chat-loading-ring 1s linear infinite !important;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-session .codicon.codicon-loading.codicon-modifier-spin::before {
+	font-size: 16px !important;
+	line-height: 16px !important;
+}
+
+@keyframes backboard-chat-loading-ring {
+	to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench .backboard-clean-chat .interactive-session .codicon.codicon-loading.codicon-modifier-spin {
+		animation: none !important;
+	}
+}
+
+/* One corner radius for every Backboard composer (Simple and the editor panel). */
+.monaco-workbench {
+	--bb-composer-radius: 18px;
+}
+
+/* Floating composer card: breathing room around a single input box. */
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part {
+	background: transparent !important;
+	margin-top: 12px !important;
+	margin-bottom: 8px !important;
+	border-radius: 18px !important;
+	padding: 0 !important;
+	gap: 0 !important;
+
+	.interactive-input-and-side-toolbar { margin: 0 !important; }
+
+	.chat-input-container,
+	.chat-input-container:focus-within {
+		min-height: 86px !important;
+		padding: 8px !important;
+		border-radius: var(--bb-composer-radius, 18px) !important;
+		border: 1px solid color-mix(in srgb, var(--vscode-foreground) 12%, transparent) !important;
+		--bb-composer-surface: color-mix(in srgb, var(--vscode-foreground) 6%, var(--bb-devin-card-surface, var(--vscode-editorWidget-background))) !important;
+		background: var(--bb-composer-surface) !important;
+		box-shadow: none !important;
+	}
+
+	.chat-editor-container { padding: 4px !important; }
+	.chat-input-container .chat-editor-container .interactive-input-editor .monaco-editor,
+	.chat-input-container .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background,
+	.chat-input-container .chat-editor-container .interactive-input-editor .monaco-editor .margin {
+		background-color: var(--bb-composer-surface) !important;
+	}
+	.chat-input-toolbars { min-height: 24px !important; padding: 0 !important; }
+	.chat-input-toolbars .combined-model-provider-picker-item { margin-left: auto !important; }
+	.chat-input-toolbars .combined-model-provider-trigger { font-size: 12px !important; }
+	.chat-input-toolbars > .chat-execute-toolbar .action-item > .action-label:is(.codicon-arrow-up, .codicon-newline, .codicon-stop-circle) {
+		width: 24px !important;
+		height: 24px !important;
+		min-width: 24px !important;
+		background: var(--vscode-foreground) !important;
+		color: var(--vscode-editor-background) !important;
+	}
+
+	/* Stop is the same disc as send with Codex's filled square in it; the
+	   stop-circle glyph would draw a second ring inside the disc. */
+	.chat-input-toolbars > .chat-execute-toolbar .action-item > .action-label.codicon-stop-circle::before {
+		content: '';
+		width: 8px;
+		height: 8px;
+		border-radius: 2px;
+		background: currentColor;
+	}
+}
+
+/* Let the context tip use both input lines instead of truncating at the edge. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part:not(.compact) .chat-editor-container .monaco-editor [class^="ced-chat-session-detail"] {
+	white-space: normal;
+	overflow-wrap: break-word;
+	text-overflow: clip;
+	overflow: visible;
+	vertical-align: top;
+}
+
+/* One 28px control row: every item is a flex box centred on the row, so
+ * icons, the model name and the send button share a single centre line
+ * (block items left shorter labels such as the 24px send button top-pinned). */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part {
+	.chat-input-toolbars { margin-top: 6px !important; flex-shrink: 0; align-items: center; }
+	.chat-input-toolbars .monaco-action-bar .action-item {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	.chat-input-toolbars .combined-model-provider-picker-item,
+	.chat-input-toolbars .combined-model-provider-trigger { height: 28px !important; }
+	.chat-input-toolbars .combined-model-provider-trigger-label { line-height: 18px; }
+}
+
+/* The control row is the size container for the model control's ladder below. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .chat-input-toolbars {
+	container-type: inline-size;
+	container-name: backboard-composer-controls;
+}
+
+/* One size ladder for the model control, measured on the composer's own
+ * control row so Simple, split panes and the editor panel behave alike:
+ * the name ellipsizes first, then the reasoning level and chevron drop, and
+ * only a very narrow row falls back to the provider logo alone. The level
+ * stays through the editor's default side-panel width (about 270px of row),
+ * where it is the only place the chat shows its reasoning setting. */
+@container backboard-composer-controls (max-width: 250px) {
+	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger > .combined-model-provider-trigger-thinking {
+		display: none !important;
+	}
+}
+
+@container backboard-composer-controls (max-width: 230px) {
+	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger > .combined-model-provider-trigger-chevron {
+		display: none !important;
+	}
+}
+
+@container backboard-composer-controls (max-width: 210px) {
+	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger > :not(.combined-model-logo) {
+		display: none !important;
+	}
+	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger {
+		width: 28px !important;
+		min-width: 28px !important;
+		padding: 0 !important;
+		gap: 0 !important;
+		justify-content: center;
+	}
+	.monaco-workbench :is(.backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-toolbars .combined-model-provider-trigger .combined-model-logo {
+		margin: 0 !important;
+	}
+}
+
+/* The changed-files band tucks its 18px bottom padding (chat.css) under the
+ * input box's rounded top, so it reads as a tab on the composer, not a box with
+ * an empty strip under its title. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-input-part .chat-editing-session:not(:empty) {
+	margin: 0 auto -18px !important;
+}
+
+/* No bottom border leaks through where the review card tucks under the input. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-input-part .chat-editing-session-container {
+	border-bottom: 0 !important;
+}
+
+/* Floating composer: with a conversation on screen the composer overlays the
+ * transcript instead of reserving a full-width band below it, so content is
+ * never sliced off along an invisible edge. ChatWidget sizes the list to the
+ * full height and pads its scroll end by the composer's height, keeping the
+ * last message above the composer (and the changed-files strip) at rest. */
+.monaco-workbench .backboard-composer .interactive-session.chat-composer-floating {
+	position: relative;
+}
+
+.monaco-workbench .backboard-composer .interactive-session.chat-composer-floating > .interactive-input-part {
+	position: absolute !important;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 3;
+}
+
+/* A standalone edit row that renders only its summary (a denied or failed
+ * write has no diff card) keeps the shared 16px icon column like every other
+ * activity row; the transcript otherwise hides work-row icons. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-edit-row > .chat-thinking-work-row-summary {
+	gap: 8px;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .chat-thinking-cursor-edit-row > .chat-thinking-work-row-summary > .chat-thinking-work-row-icon {
+	display: inline-flex !important;
+	flex: 0 0 16px;
+	width: 16px;
+	height: 16px;
+	align-items: center;
+	justify-content: center;
+	color: var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground));
+}
+
+@keyframes backboard-composer-popout {
+	from { opacity: 0; transform: translateY(10px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.monaco-workbench .backboard-composer .interactive-session .interactive-input-part > :is(.chat-question-carousel-widget-container, .chat-tool-confirmation-carousel-container) {
+		animation: none;
+	}
+}
+
+/* The session location view marks the machine the session runs on. */
+.backboard-composer-flow .backboard-composer-location-check {
+	margin-left: 6px;
+	font-size: 14px;
+	color: var(--vscode-foreground);
+}
+
+/* Session location sub-view of the "+" menu: title row with a back chevron,
+ * then plain option rows, matching the menu it came from. */
+.monaco-workbench .backboard-composer-flow.backboard-composer-location-flow {
+	width: 264px;
+}
+
+.monaco-workbench .backboard-composer-location-flow > .backboard-composer-flow-header {
+	justify-content: flex-start;
+	gap: 2px;
+	min-height: 30px;
+	padding: 4px 8px 0 4px;
+	font-size: 12px;
+}
+
+.monaco-workbench .backboard-composer-location-flow > .backboard-composer-flow-header > button.backboard-composer-flow-back {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border-radius: 5px !important;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench .backboard-composer-location-flow > .backboard-composer-flow-header > button.backboard-composer-flow-back:hover {
+	background: var(--vscode-list-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.monaco-workbench .backboard-composer-location-flow > .backboard-composer-flow-header > button.backboard-composer-flow-back .codicon {
+	font-size: 14px;
+}
+
+.monaco-workbench .backboard-composer-location-flow .backboard-composer-drawer-option:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+
+.monaco-workbench .backboard-composer-location-flow .backboard-composer-drawer-value {
+	max-width: 120px;
+}
+
+/* Chips above the input: active capabilities, files, skills and images share
+ * one row and one chip style, inset to line up with the input text. Every chip
+ * reads [icon][label][×] at the same 22px height, so mixed chips stay aligned. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-container > .chat-attachments-container {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	margin: 0 0 2px !important;
+	padding: 0 2px;
+	box-sizing: border-box;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-input-container > .chat-attachments-container > :is(.chat-attached-context, .backboard-capability-chips) {
+	display: contents;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container :is(.backboard-capability-chip, .chat-attached-context .chat-attached-context-attachment) {
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	width: auto;
+	max-width: min(220px, 100%);
+	min-width: 0;
+	height: 22px;
+	margin: 0;
+	padding: 0 4px 0 5px;
+	border: 1px solid color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+	border-radius: 7px;
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+	color: var(--vscode-foreground);
+	font: normal 12px/20px var(--vscode-font-family);
+	overflow: hidden;
+	cursor: default;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .backboard-capability-chip {
+	cursor: pointer;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container :is(.backboard-capability-chip, .chat-attached-context .chat-attached-context-attachment):hover {
+	border-color: color-mix(in srgb, var(--vscode-foreground) 20%, transparent);
+	background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+}
+
+/* Leading icon: one 14px slot for capability glyphs, file icons and thumbnails. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .backboard-capability-chip > .codicon:first-child,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container :is(.backboard-capability-chip-avatar, .chat-attached-context-avatar),
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .monaco-icon-label > .codicon,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .monaco-icon-label-iconpath {
+	flex: 0 0 14px;
+	width: 14px;
+	height: 14px;
+	margin: 0;
+	padding: 0;
+	font-size: 14px;
+	line-height: 14px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .chat-attached-context-pill {
+	flex: 0 0 16px;
+	width: 16px;
+	height: 16px;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .chat-attached-context-pill-image {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+/* Label: single line, ellipsized, never taller than the chip. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .backboard-capability-chip-label,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .monaco-icon-label,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .chat-attached-context-custom-text {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	min-width: 0;
+	height: 20px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 12px;
+	line-height: 20px;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .monaco-icon-label::before {
+	flex: 0 0 14px;
+	width: 14px;
+	height: 20px;
+	margin: 0;
+	padding: 0;
+	background-size: 14px;
+	background-position: center;
+}
+
+/* Trailing ×: capability chips and removable attachments end the same way. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .backboard-capability-chip-remove,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment > .monaco-button {
+	order: 99;
+	flex: 0 0 16px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	margin: 0 -2px 0 0 !important;
+	padding: 0 !important;
+	border-radius: 4px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	outline-offset: 0;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment > .monaco-button:hover,
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .backboard-capability-chip:hover .backboard-capability-chip-remove {
+	background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+	color: var(--vscode-foreground);
+}
+
+/* A codicon attachment (skills, pages) has no file-icon glyph: drop the empty
+ * pseudo slot so its label sits the same distance from its icon as others. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .monaco-icon-label:has(> .monaco-icon-label-iconpath)::before {
+	display: none;
+}
+
+/* Avatar glyphs (capabilities, referenced conversations) are images, not glyph
+ * fonts: keep them crisp and centered in the leading slot. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container :is(.backboard-capability-chip-avatar, .chat-attached-context-avatar) {
+	display: block;
+	object-fit: contain;
+}
+
+/* `$(icon) name` labels put the codicon inline in the text run; center it on the
+ * text instead of letting it sit on the baseline above the label. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment .monaco-highlighted-label > .codicon {
+	font-size: 14px;
+	line-height: 20px;
+	vertical-align: top;
+	margin-right: 1px;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* Ellipsize at the innermost label so long names end in "…" instead of clipping. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment :is(.monaco-icon-label-container, .monaco-icon-name-container, .label-name, .monaco-highlighted-label) {
+	display: block;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+/* Image chips show their thumbnail in the icon slot; the empty label adds no gap. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-session .interactive-input-part .chat-attachments-container .chat-attached-context-attachment.image-attachment > .monaco-icon-label:empty {
+	display: none;
+}

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop">
+	<id>@@NAME@@.desktop</id>
+	<metadata_license>@@LICENSE@@</metadata_license>
+	<project_license>@@LICENSE@@</project_license>
+	<name>@@NAME_LONG@@</name>
+	<url type="homepage">https://docs.backboard.io</url>
+	<summary>Backboard IDE. Code editing with Backboard.</summary>
+	<description>
+		<p>Backboard IDE combines the simplicity of a code editor with Backboard-powered development workflows.</p>
+	</description>
+	<screenshots>
+		<screenshot type="default">
+			<image>https://docs.backboard.io/assets/backboard-ide.png</image>
+			<caption>Editing TypeScript and searching for extensions</caption>
+		</screenshot>
+	</screenshots>
+</component>

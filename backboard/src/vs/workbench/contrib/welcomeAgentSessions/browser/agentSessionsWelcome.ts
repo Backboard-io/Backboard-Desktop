@@ -1,0 +1,955 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import { renderBackboardAuthSetup } from '../../chat/browser/backboardAuthSetup.js';
+import './media/agentSessionsWelcome.css';
+import { $, addDisposableListener, append, clearNode, Dimension, getWindow, scheduleAtNextAnimationFrame, setVisibility } from '../../../../base/browser/dom.js';
+import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
+import { DomScrollableElement } from '../../../../base/browser/ui/scrollbar/scrollableElement.js';
+import { Toggle } from '../../../../base/browser/ui/toggle/toggle.js';
+import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { DisposableStore, IReference, toDisposable } from '../../../../base/common/lifecycle.js';
+import { Emitter } from '../../../../base/common/event.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
+import { ScrollbarVisibility } from '../../../../base/common/scrollable.js';
+import { basename } from '../../../../base/common/resources.js';
+import { URI } from '../../../../base/common/uri.js';
+import { localize } from '../../../../nls.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { ServiceCollection } from '../../../../platform/instantiation/common/serviceCollection.js';
+import { IProductService } from '../../../../platform/product/common/productService.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
+import { editorBackground } from '../../../../platform/theme/common/colorRegistry.js';
+import { getListStyles, getToggleStyles } from '../../../../platform/theme/browser/defaultStyles.js';
+import { IThemeService } from '../../../../platform/theme/common/themeService.js';
+import { EditorPane } from '../../../browser/parts/editor/editorPane.js';
+import { IEditorOpenContext, IEditorSerializer } from '../../../common/editor.js';
+import { SIDE_BAR_FOREGROUND } from '../../../common/theme.js';
+import { IEditorGroup } from '../../../services/editor/common/editorGroupsService.js';
+import { IWorkbenchLayoutService } from '../../../services/layout/browser/layoutService.js';
+import { ChatAgentLocation, ChatConfiguration, ChatModeKind } from '../../chat/common/constants.js';
+import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
+import { ChatWidget } from '../../chat/browser/widget/chatWidget.js';
+import { IAgentSessionsService } from '../../chat/browser/agentSessions/agentSessionsService.js';
+import { AgentSessionProviders, AgentSessionTarget } from '../../chat/browser/agentSessions/agentSessions.js';
+import { IAgentSession } from '../../chat/browser/agentSessions/agentSessionsModel.js';
+import { AgentSessionsWelcomeEditorOptions, AgentSessionsWelcomeInput, AgentSessionsWelcomeWorkspaceKind } from './agentSessionsWelcomeInput.js';
+import { IChatService } from '../../chat/common/chatService/chatService.js';
+import { IChatModel } from '../../chat/common/model/chatModel.js';
+import { ChatViewId, IChatWidgetService, ISessionTypePickerDelegate, IWorkspacePickerDelegate, IWorkspacePickerItem } from '../../chat/browser/chat.js';
+import { ChatSessionPosition, getResourceForNewChatSession } from '../../chat/browser/chatSessions/chatSessions.contribution.js';
+import { IChatEntitlementService } from '../../../services/chat/common/chatEntitlementService.js';
+import { AgentSessionsControl, IAgentSessionsControlOptions } from '../../chat/browser/agentSessions/agentSessionsControl.js';
+import { AgentSessionsFilter } from '../../chat/browser/agentSessions/agentSessionsFilter.js';
+import { AgentSessionsListDelegate } from '../../chat/browser/agentSessions/agentSessionsViewer.js';
+import { HoverPosition } from '../../../../base/browser/ui/hover/hoverWidget.js';
+import { IMarkdownRendererService } from '../../../../platform/markdown/browser/markdownRenderer.js';
+import { MarkdownString } from '../../../../base/common/htmlContent.js';
+import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
+import { IWorkspacesService, IRecentFolder, IRecentWorkspace, isRecentFolder, isRecentWorkspace } from '../../../../platform/workspaces/common/workspaces.js';
+import { IHostService } from '../../../services/host/browser/host.js';
+import { IWorkspaceTrustManagementService } from '../../../../platform/workspace/common/workspaceTrust.js';
+import { IViewDescriptorService, ViewContainerLocation } from '../../../common/views.js';
+import { toErrorMessage } from '../../../../base/common/errorMessage.js';
+import { ILogService } from '../../../../platform/log/common/log.js';
+import { canShowAgentsBanner, createAgentsBanner } from '../../chat/browser/agentSessions/agentSessionsBanner.js';
+import { BackboardAuthContextKeys, BackboardAuthGateContextKeys, IBackboardAuthService } from '../../chat/common/backboardAuth.js';
+
+const configurationKey = 'workbench.startupEditor';
+const MAX_SESSIONS = 6;
+const MAX_REPO_PICKS = 10;
+const WELCOME_CHAT_INPUT_LAYOUT_HEIGHT = 150;
+const WELCOME_CHAT_INPUT_RESERVED_LIST_HEIGHT = 50;
+const WELCOME_CHAT_INPUT_RESERVED_CHROME_HEIGHT = 72;
+const SANDBOX_INPUT_PLACEHOLDER = 'Describe what you want to build';
+// Mirror ChatWidget's compact-surface sizing so the hidden list reservation and input chrome do not collapse the editor.
+const WELCOME_CHAT_INPUT_MAX_HEIGHT_OVERRIDE = WELCOME_CHAT_INPUT_LAYOUT_HEIGHT + WELCOME_CHAT_INPUT_RESERVED_LIST_HEIGHT + WELCOME_CHAT_INPUT_RESERVED_CHROME_HEIGHT;
+
+/**
+ * - visibleDurationMs: Do they close it right away or leave it open (#3)
+ * - closedBy: Track what action caused the close (viewAllSessions, chatSubmission, sessionClicked, etc.) (#5)
+ */
+type AgentSessionsWelcomeClosedClassification = {
+	visibleDurationMs: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; isMeasurement: true; comment: 'How long the welcome page was visible in milliseconds.' };
+	closedBy: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'What action caused the welcome page to close.' };
+	owner: 'osortega';
+	comment: 'Tracks when the agent sessions welcome page is closed to understand engagement.';
+};
+
+type AgentSessionsWelcomeClosedEvent = {
+	visibleDurationMs: number;
+	closedBy: string;
+};
+
+/**
+ * - mode/provider/workspaceKind: Track agent type, session provider, and workspace state (#4)
+ * - selectedRecentWorkspace: Do users select a recent workspace before submitting chat (#8)
+ */
+type AgentSessionsWelcomeChatSubmittedClassification = {
+	mode: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The chat mode used (ask, agent, edit).' };
+	provider: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The session provider (local, cloud).' };
+	workspaceKind: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The type of workspace - empty, folder, or workspace.' };
+	selectedRecentWorkspace: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'Whether a recent workspace was selected before submitting.' };
+	owner: 'osortega';
+	comment: 'Tracks chat submissions from the welcome page to understand session creation patterns.';
+};
+
+type AgentSessionsWelcomeChatSubmittedEvent = {
+	mode: string;
+	provider: string;
+	workspaceKind: AgentSessionsWelcomeWorkspaceKind;
+	selectedRecentWorkspace: boolean;
+};
+
+export class AgentSessionsWelcomePage extends EditorPane {
+
+	static readonly ID = 'agentSessionsWelcomePage';
+	static readonly COMMAND_ID = 'workbench.action.openAgentSessionsWelcome';
+
+	private container!: HTMLElement;
+	private contentContainer!: HTMLElement;
+	private scrollableElement: DomScrollableElement | undefined;
+	private chatWidget: ChatWidget | undefined;
+	private chatWidgetContainer: HTMLElement | undefined;
+	private chatModelRef: IReference<IChatModel> | undefined;
+	private sessionsControl: AgentSessionsControl | undefined;
+	private sessionsControlContainer: HTMLElement | undefined;
+	private readonly sessionsControlDisposables = this._register(new DisposableStore());
+	private readonly contentDisposables = this._register(new DisposableStore());
+	private contextService: IContextKeyService;
+	private _selectedSessionProvider: AgentSessionTarget = AgentSessionProviders.Local;
+	private _selectedWorkspace: IWorkspacePickerItem | undefined;
+	private _recentTrustedWorkspaces: Array<IRecentWorkspace | IRecentFolder> = [];
+	private _isEmptyWorkspace: boolean = false;
+	private _workspaceKind: AgentSessionsWelcomeWorkspaceKind = 'empty';
+	private backboardAuthGateOverlay: HTMLElement | undefined;
+
+	// Telemetry tracking
+	private _openedAt: number = 0;
+	private _closedBy?: string;
+	private _storedInput: AgentSessionsWelcomeInput | undefined;
+
+	constructor(
+		group: IEditorGroup,
+		@ITelemetryService telemetryService: ITelemetryService,
+		@IThemeService themeService: IThemeService,
+		@IStorageService private readonly storageService: IStorageService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
+		@IContextKeyService contextKeyService: IContextKeyService,
+		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
+		@ICommandService private readonly commandService: ICommandService,
+		@IBackboardAuthService private readonly backboardAuthService: IBackboardAuthService,
+		@IAgentSessionsService private readonly agentSessionsService: IAgentSessionsService,
+		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IProductService private readonly productService: IProductService,
+		@IChatService private readonly chatService: IChatService,
+		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
+		@IMarkdownRendererService private readonly markdownRendererService: IMarkdownRendererService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
+		@IWorkspacesService private readonly workspacesService: IWorkspacesService,
+		@IHostService private readonly hostService: IHostService,
+		@IWorkspaceTrustManagementService private readonly workspaceTrustManagementService: IWorkspaceTrustManagementService,
+		@IViewDescriptorService private readonly viewDescriptorService: IViewDescriptorService,
+		@IChatWidgetService private readonly chatWidgetService: IChatWidgetService,
+		@ILogService private readonly logService: ILogService,
+	) {
+		super(AgentSessionsWelcomePage.ID, group, telemetryService, themeService, storageService);
+
+		this.container = $('.agentSessionsWelcome', {
+			role: 'document',
+			tabindex: 0,
+			'aria-label': localize('agentSessionsWelcomeAriaLabel', "Sandbox chat workspace.")
+		});
+
+		this.contextService = this._register(contextKeyService.createScoped(this.container));
+		ChatContextKeys.inAgentSessionsWelcome.bindTo(this.contextService).set(true);
+		this._register(this.contextService.onDidChangeContext(e => {
+			if (e.affectsSome(BackboardAuthGateContextKeys)) {
+				this.updateBackboardAuthGate();
+			}
+		}));
+
+		this._register(this.chatEntitlementService.onDidChangeSentiment(() => {
+			const input = this.input || this._storedInput;
+			if (this.chatEntitlementService.sentiment.hidden && input) {
+				this._closedBy = 'chatHidden';
+				this.group.closeEditor(input);
+			}
+		}));
+	}
+
+	protected createEditor(parent: HTMLElement): void {
+		parent.appendChild(this.container);
+
+		// Create scrollable content
+		this.contentContainer = $('.agentSessionsWelcome-content');
+		this.scrollableElement = this._register(new DomScrollableElement(this.contentContainer, {
+			className: 'agentSessionsWelcome-scrollable',
+			vertical: ScrollbarVisibility.Auto
+		}));
+		this.container.appendChild(this.scrollableElement.getDomNode());
+		this.createBackboardAuthGate();
+		this.updateBackboardAuthGate();
+		this.refreshBackboardAuthGateFromConfig().catch(error => {
+			this.logService.error(`[Backboard] Failed to refresh agents welcome auth gate: ${error instanceof Error ? error.message : String(error)}`);
+		});
+	}
+
+	private isBackboardAuthRequired(): boolean {
+		return this.contextService.getContextKeyValue<boolean>(BackboardAuthContextKeys.enabled.key) === true && this.contextService.getContextKeyValue<boolean>(BackboardAuthContextKeys.resolved.key) === true
+			&& this.contextService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) !== true
+			&& this.contextService.getContextKeyValue<boolean>(BackboardAuthContextKeys.alternativeConfigured.key) !== true;
+	}
+
+	private createBackboardAuthGate(): void {
+		if (this.backboardAuthGateOverlay) {
+			return;
+		}
+
+		const overlay = append(this.container, $('.backboard-auth-gate-overlay.backboard-auth-gate-agents-welcome'));
+		overlay.setAttribute('role', 'dialog');
+		overlay.setAttribute('aria-label', localize('backboard.auth.agentsWelcome.aria', "Connect Your AI"));
+
+		const card = append(overlay, $('.backboard-auth-gate-card'));
+		const logo = append(card, $('span.backboard-auth-gate-logo.codicon.codicon-backboard-logo'));
+		logo.setAttribute('aria-hidden', 'true');
+
+		const title = append(card, $('h3.backboard-auth-gate-title'));
+		title.textContent = localize('backboard.auth.agentsWelcome.title', "Connect Your AI");
+
+		const description = append(card, $('p.backboard-auth-gate-description'));
+		description.textContent = localize('backboard.auth.agentsWelcome.description', "Use Backboard, an API key, or a subscription.");
+
+		this._register(renderBackboardAuthSetup(card, this.commandService, () => this.refreshBackboardAuthGateFromConfig()));
+
+		this.backboardAuthGateOverlay = overlay;
+	}
+
+	private updateBackboardAuthGate(): void {
+		const gated = this.isBackboardAuthRequired();
+		this.container.classList.toggle('backboard-auth-gate-active', gated);
+		if (this.backboardAuthGateOverlay) {
+			setVisibility(gated, this.backboardAuthGateOverlay);
+		}
+	}
+
+	private async refreshBackboardAuthGateFromConfig(): Promise<void> {
+		await this.backboardAuthService.refresh();
+		this.updateBackboardAuthGate();
+	}
+
+	override async setInput(input: AgentSessionsWelcomeInput, options: AgentSessionsWelcomeEditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
+		this._storedInput = input;
+		this._openedAt = Date.now();
+		await super.setInput(input, options, context, token);
+		this._workspaceKind = input.workspaceKind ?? 'empty';
+		await this.buildContent();
+	}
+
+	override clearInput(): void {
+		// Send closed telemetry when the editor is closed
+		if (this._openedAt > 0) {
+			const visibleDurationMs = Date.now() - this._openedAt;
+			this.telemetryService.publicLog2<AgentSessionsWelcomeClosedEvent, AgentSessionsWelcomeClosedClassification>(
+				'agentSessionsWelcome.closed',
+				{
+					visibleDurationMs,
+					closedBy: this._closedBy ?? 'disposed'
+				}
+			);
+			this._openedAt = 0;
+			this._closedBy = undefined;
+		}
+		super.clearInput();
+	}
+
+	private async buildContent(): Promise<void> {
+		this.contentDisposables.clear();
+		this.sessionsControlDisposables.clear();
+		this.sessionsControl = undefined;
+		clearNode(this.contentContainer);
+
+		// Detect empty workspace and fetch recent workspaces
+		this._isEmptyWorkspace = this.workspaceContextService.getWorkbenchState() === WorkbenchState.EMPTY;
+		if (this._isEmptyWorkspace) {
+			const recentlyOpened = await this.getRecentlyOpenedWorkspaces(true);
+			this._recentTrustedWorkspaces = recentlyOpened.slice(0, MAX_REPO_PICKS);
+		}
+
+		const shell = append(this.contentContainer, $('.agentSessionsWelcome-shell'));
+		const leftRail = append(shell, $('.agentSessionsWelcome-leftRail'));
+		const mainRegion = append(shell, $('.agentSessionsWelcome-mainRegion'));
+		const rightPanel = append(shell, $('.agentSessionsWelcome-rightPanel'));
+
+		this.buildLeftRail(leftRail);
+
+		const topBar = append(mainRegion, $('.agentSessionsWelcome-topBar'));
+		const titleWrap = append(topBar, $('.agentSessionsWelcome-threadTitle'));
+		append(titleWrap, $('span.agentSessionsWelcome-projectGlyph'));
+		append(titleWrap, $('span', {}, localize('sandboxTitle', "Sandbox")));
+		titleWrap.appendChild(renderIcon(Codicon.chevronDown));
+		const topActions = append(topBar, $('.agentSessionsWelcome-topActions'));
+		this.buildIconButton(topActions, Codicon.more, localize('moreActionsButton', "More Actions"));
+
+		const conversation = append(mainRegion, $('.agentSessionsWelcome-conversation'));
+		const header = append(conversation, $('.agentSessionsWelcome-header'));
+		append(header, $('h1.product-name', {}, localize('simpleModePromptTitle', "What do you want to build?")));
+		append(header, $('p.agentSessionsWelcome-subtitle', {}, localize('agentSessionsWelcome.subtitle', "Describe a page, feature, or change. Backboard will generate the output.")));
+		const suggestions = append(header, $('.agentSessionsWelcome-suggestedPrompts'));
+		this.buildSuggestedPrompt(suggestions, localize('landingPagePrompt', "Make a landing page"));
+		this.buildSuggestedPrompt(suggestions, localize('pricingSectionPrompt', "Create a pricing section"));
+		this.buildSuggestedPrompt(suggestions, localize('settingsScreenPrompt', "Build a settings screen"));
+
+		const chatSection = append(mainRegion, $('.agentSessionsWelcome-chatSection'));
+		this.buildChatWidget(chatSection);
+
+		const recentsHeader = append(leftRail, $('.agentSessionsWelcome-sessionsHeader'));
+		append(recentsHeader, $('span', {}, localize('recents', "Recents")));
+		append(recentsHeader, $('span.agentSessionsWelcome-recentsIndicator'));
+
+		const sessionsSection = append(leftRail, $('.agentSessionsWelcome-sessionsSection'));
+		this.buildSessionsOrPrompts(sessionsSection);
+
+		this.buildEnvironmentPanel(rightPanel);
+
+		const footer = append(leftRail, $('.agentSessionsWelcome-footer'));
+		this.buildFooter(footer);
+
+		// Listen for session changes - store reference to avoid querySelector
+		let originalSessions = this.agentSessionsService.model.sessions.length > 0;
+		this.contentDisposables.add(this.agentSessionsService.model.onDidChangeSessions(() => {
+			const hasSessions = this.agentSessionsService.model.sessions.length > 0;
+			// Only rebuild if the amount of sessions changed, other updates should be managed by the control
+			if (hasSessions !== originalSessions) {
+				originalSessions = hasSessions;
+				clearNode(sessionsSection);
+				this.buildSessionsOrPrompts(sessionsSection);
+			}
+			this.layoutSessionsControl();
+		}));
+
+		this.scrollableElement?.scanDomNode();
+	}
+
+	private buildLeftRail(container: HTMLElement): void {
+		const header = append(container, $('.agentSessionsWelcome-railHeader'));
+		append(header, $('span.agentSessionsWelcome-railTitle', {}, localize('sandbox', "Sandbox")));
+		this.buildIconButton(header, Codicon.layoutSidebarLeft, localize('toggleSidebar', "Toggle Sidebar"));
+
+		const nav = append(container, $('.agentSessionsWelcome-railNav'));
+		this.buildRailButton(nav, Codicon.edit, localize('newChat', "New chat"), () => this.chatWidget?.focusInput());
+		this.buildRailButton(nav, Codicon.search, localize('searchChats', "Search chats"), () => this.commandService.executeCommand('workbench.action.quickOpen'));
+	}
+
+	private buildRailButton(container: HTMLElement, icon: ThemeIcon, label: string, run?: () => void): void {
+		const button = append(container, $('button.agentSessionsWelcome-railButton')) as HTMLButtonElement;
+		button.type = 'button';
+		button.appendChild(renderIcon(icon));
+		button.appendChild($('span', {}, label));
+		if (run) {
+			button.onclick = () => run();
+		}
+	}
+
+	private buildIconButton(container: HTMLElement, icon: ThemeIcon, title: string): void {
+		const button = append(container, $('button.agentSessionsWelcome-iconButton')) as HTMLButtonElement;
+		button.type = 'button';
+		button.title = title;
+		button.setAttribute('aria-label', title);
+		button.appendChild(renderIcon(icon));
+	}
+
+	private buildSuggestedPrompt(container: HTMLElement, prompt: string): void {
+		const button = append(container, $('button.agentSessionsWelcome-suggestedPrompt', {}, prompt)) as HTMLButtonElement;
+		button.type = 'button';
+		button.onclick = () => {
+			this.chatWidget?.setInput(prompt);
+			this.chatWidget?.focusInput();
+		};
+	}
+
+	private buildEnvironmentPanel(container: HTMLElement): void {
+		const header = append(container, $('.agentSessionsWelcome-artifactHeader'));
+		append(header, $('span.agentSessionsWelcome-artifactTitle', {}, localize('artifactTitle', "Landing Page")));
+		const actions = append(header, $('.agentSessionsWelcome-artifactActions'));
+		const toggle = append(actions, $('.agentSessionsWelcome-artifactToggle'));
+		this.buildArtifactToggleButton(toggle, Codicon.tools, localize('designView', "Design"), true);
+		this.buildArtifactToggleButton(toggle, Codicon.code, localize('codeView', "Code"), false);
+		this.buildIconButton(actions, Codicon.deviceDesktop, localize('viewportButton', "Viewport"));
+		this.buildIconButton(actions, Codicon.refresh, localize('refreshArtifact', "Refresh"));
+		this.buildIconButton(actions, Codicon.more, localize('artifactMoreActions', "More Actions"));
+
+		const canvas = append(container, $('.agentSessionsWelcome-artifactCanvas'));
+		const empty = append(canvas, $('.agentSessionsWelcome-artifactEmptyState'));
+		const illustration = append(empty, $('.agentSessionsWelcome-artifactIllustration'));
+		append(illustration, $('.agentSessionsWelcome-artifactIllustrationShadow'));
+		const sheet = append(illustration, $('.agentSessionsWelcome-artifactIllustrationSheet'));
+		append(sheet, $('.agentSessionsWelcome-artifactIllustrationLine.lineOne'));
+		append(sheet, $('.agentSessionsWelcome-artifactIllustrationLine.lineTwo'));
+		append(sheet, $('.agentSessionsWelcome-artifactIllustrationLine.lineThree'));
+		append(empty, $('h2', {}, localize('noArtifactYet', "No artifact yet")));
+		append(empty, $('p', {}, localize('noArtifactDescription', "Ask Backboard to build something and the output will appear here.")));
+		const emptyActions = append(empty, $('.agentSessionsWelcome-artifactEmptyActions'));
+		const generateButton = append(emptyActions, $('button.agentSessionsWelcome-artifactPrimaryButton', {}, localize('generateArtifact', "Generate artifact"))) as HTMLButtonElement;
+		generateButton.type = 'button';
+		generateButton.onclick = () => {
+			const prompt = localize('generateArtifactPrompt', "Generate a landing page");
+			this.chatWidget?.setInput(prompt);
+			this.chatWidget?.focusInput();
+		};
+		const tryPromptButton = append(emptyActions, $('button.agentSessionsWelcome-artifactSecondaryButton', {}, localize('tryPrompt', "Try a prompt"))) as HTMLButtonElement;
+		tryPromptButton.type = 'button';
+		tryPromptButton.onclick = () => {
+			const prompt = localize('tryPromptValue', "Make a landing page");
+			this.chatWidget?.setInput(prompt);
+			this.chatWidget?.focusInput();
+		};
+	}
+
+	private buildArtifactToggleButton(container: HTMLElement, icon: ThemeIcon, label: string, active: boolean): void {
+		const button = append(container, $('button.agentSessionsWelcome-artifactToggleButton')) as HTMLButtonElement;
+		button.type = 'button';
+		button.classList.toggle('active', active);
+		button.appendChild(renderIcon(icon));
+		append(button, $('span', {}, label));
+	}
+
+	private buildChatWidget(container: HTMLElement): void {
+		const chatWidgetContainer = append(container, $('.agentSessionsWelcome-chatWidget'));
+		this.chatWidgetContainer = chatWidgetContainer;
+
+		// Create editor overflow widgets container
+		const editorOverflowWidgetsDomNode = this.layoutService.getContainer(getWindow(chatWidgetContainer)).appendChild($('.chat-editor-overflow.monaco-editor'));
+		this.contentDisposables.add(toDisposable(() => editorOverflowWidgetsDomNode.remove()));
+
+		// Create ChatWidget with scoped services
+		const scopedContextKeyService = this.contentDisposables.add(this.contextService.createScoped(chatWidgetContainer));
+		const scopedInstantiationService = this.contentDisposables.add(this.instantiationService.createChild(new ServiceCollection([IContextKeyService, scopedContextKeyService])));
+
+		// Create a delegate for the session target picker with independent local state
+		const onDidChangeActiveSessionProvider = this.contentDisposables.add(new Emitter<AgentSessionTarget>());
+		const recreateSessionForProvider = async (provider: AgentSessionTarget) => {
+			if (this.chatWidget && this.chatModelRef) {
+				this.chatWidget.setModel(undefined);
+				this.chatModelRef.dispose();
+				const newResource = getResourceForNewChatSession({
+					type: provider,
+					position: ChatSessionPosition.Sidebar,
+					displayName: ''
+				});
+				const ref = await this.chatService.acquireOrLoadSession(newResource, ChatAgentLocation.Chat, CancellationToken.None);
+				this.chatModelRef = ref ?? this.chatService.startNewLocalSession(ChatAgentLocation.Chat);
+				this.contentDisposables.add(this.chatModelRef);
+				if (this.chatModelRef.object) {
+					this.chatWidget.setModel(this.chatModelRef.object);
+				}
+			}
+		};
+		const sessionTypePickerDelegate: ISessionTypePickerDelegate = {
+			getActiveSessionProvider: () => this._selectedSessionProvider,
+			setActiveSessionProvider: (provider: AgentSessionTarget) => {
+				this._selectedSessionProvider = provider;
+				onDidChangeActiveSessionProvider.fire(provider);
+				try {
+					recreateSessionForProvider(provider);
+				} catch { /* Ignore errors */ }
+			},
+			onDidChangeActiveSessionProvider: onDidChangeActiveSessionProvider.event
+		};
+
+		// Create workspace picker delegate for empty workspace scenarios
+		const onDidChangeSelectedWorkspace = this.contentDisposables.add(new Emitter<IWorkspacePickerItem | undefined>());
+		const onDidChangeWorkspaces = this.contentDisposables.add(new Emitter<void>());
+		const workspacePickerDelegate: IWorkspacePickerDelegate | undefined = this._isEmptyWorkspace ? {
+			getWorkspaces: () => this._recentTrustedWorkspaces.map(w => ({
+				uri: this.getWorkspaceUri(w),
+				label: this.getWorkspaceLabel(w),
+				isFolder: isRecentFolder(w),
+			})),
+			getSelectedWorkspace: () => this._selectedWorkspace,
+			setSelectedWorkspace: (workspace: IWorkspacePickerItem | undefined) => {
+				this._selectedWorkspace = workspace;
+				onDidChangeSelectedWorkspace.fire(workspace);
+			},
+			onDidChangeSelectedWorkspace: onDidChangeSelectedWorkspace.event,
+			onDidChangeWorkspaces: onDidChangeWorkspaces.event,
+			openFolderCommand: 'workbench.action.files.openFolder',
+		} : undefined;
+
+		this.chatWidget = this.contentDisposables.add(scopedInstantiationService.createInstance(
+			ChatWidget,
+			ChatAgentLocation.Chat,
+			// TODO: @osortega should we have a completely different ID and check that context instead in chatInputPart?
+			{}, // Empty resource view context
+			{
+				autoScroll: mode => mode !== ChatModeKind.Ask,
+				renderFollowups: false,
+				supportsFileReferences: true,
+				renderInputOnTop: true,
+				rendererOptions: {
+					renderTextEditsAsSummary: () => true,
+					referencesExpandedWhenEmptyResponse: false,
+					progressMessageAtBottomOfResponse: mode => mode !== ChatModeKind.Ask,
+				},
+				editorOverflowWidgetsDomNode,
+				enableImplicitContext: true,
+				enableWorkingSet: 'explicit',
+				supportsChangingModes: true,
+				sessionTypePickerDelegate,
+				workspacePickerDelegate,
+				submitHandler: this._isEmptyWorkspace ? (query, mode) => this.handleWorkspaceSubmission(query, mode) : undefined,
+			},
+			{
+				listForeground: SIDE_BAR_FOREGROUND,
+				listBackground: editorBackground,
+				overlayBackground: editorBackground,
+				inputEditorBackground: editorBackground,
+				resultEditorBackground: editorBackground,
+			}
+		));
+
+		this.chatWidget.render(chatWidgetContainer);
+		this.chatWidget.setVisible(true);
+
+		// Schedule initial layout at next animation frame to ensure proper input sizing
+		this.contentDisposables.add(scheduleAtNextAnimationFrame(getWindow(chatWidgetContainer), () => {
+			this.layoutChatWidget();
+		}));
+
+		// Start a chat session so the widget has a viewModel
+		// This is necessary for actions like mode switching to work properly
+		this.chatModelRef = this.chatService.startNewLocalSession(ChatAgentLocation.Chat);
+		this.contentDisposables.add(this.chatModelRef);
+		if (this.chatModelRef.object) {
+			this.chatWidget.setModel(this.chatModelRef.object);
+			this.chatWidget.setInputPlaceholder(SANDBOX_INPUT_PLACEHOLDER);
+		}
+
+		// Focus the input when clicking anywhere in the chat widget area
+		// This ensures our widget becomes lastFocusedWidget for the chatWidgetService
+		this.contentDisposables.add(addDisposableListener(chatWidgetContainer, 'mousedown', () => {
+			this.chatWidget?.focusInput();
+		}));
+
+		// Automatically open the chat view when a request is submitted from this welcome view
+		this.contentDisposables.add(this.chatService.onDidSubmitRequest(({ chatSessionResource }) => {
+			if (this.chatModelRef?.object?.sessionResource.toString() === chatSessionResource.toString()) {
+				// Send chat submitted telemetry
+				const mode = this.chatWidget?.input.currentModeObs.get().name.get() || 'unknown';
+				this.telemetryService.publicLog2<AgentSessionsWelcomeChatSubmittedEvent, AgentSessionsWelcomeChatSubmittedClassification>(
+					'agentSessionsWelcome.chatSubmitted',
+					{
+						mode,
+						provider: this._selectedSessionProvider,
+						workspaceKind: this._workspaceKind,
+						selectedRecentWorkspace: this._selectedWorkspace !== undefined
+					}
+				);
+
+				this._closedBy = 'chatSubmission';
+				this.openSessionInChat(chatSessionResource);
+			}
+		}));
+
+		// Check for prefill data from a workspace transfer
+		this.applyPrefillData();
+	}
+
+	private getWorkspaceLabel(workspace: IRecentWorkspace | IRecentFolder): string {
+		if (isRecentFolder(workspace)) {
+			return workspace.label || basename(workspace.folderUri);
+		} else if (isRecentWorkspace(workspace)) {
+			return workspace.label || basename(workspace.workspace.configPath);
+		}
+		return '';
+	}
+
+	private getWorkspaceUri(workspace: IRecentWorkspace | IRecentFolder): URI {
+		if (isRecentFolder(workspace)) {
+			return workspace.folderUri;
+		} else if (isRecentWorkspace(workspace)) {
+			return workspace.workspace.configPath;
+		}
+		throw new Error('Invalid workspace type');
+	}
+
+	private async handleWorkspaceSubmission(query: string, mode: ChatModeKind): Promise<boolean> {
+		// Only handle if a workspace is selected
+		if (!this._selectedWorkspace) {
+			return false;
+		}
+
+		if (!query.trim()) {
+			return false;
+		}
+
+		// Store the prefill data for the target workspace to read on startup
+		const prefillData = {
+			query,
+			mode,
+			timestamp: Date.now(),
+		};
+		this.storageService.store(
+			'chat.welcomeViewPrefill',
+			JSON.stringify(prefillData),
+			StorageScope.APPLICATION,
+			StorageTarget.MACHINE
+		);
+
+		// Find the workspace to determine if it's a folder or workspace file
+		const workspace = this._recentTrustedWorkspaces.find(w =>
+			this.getWorkspaceUri(w).toString() === this._selectedWorkspace?.uri.toString());
+
+		if (workspace) {
+			try {
+				if (isRecentFolder(workspace)) {
+					await this.hostService.openWindow([{ folderUri: workspace.folderUri }]);
+				} else if (isRecentWorkspace(workspace)) {
+					await this.hostService.openWindow([{ workspaceUri: workspace.workspace.configPath }]);
+				}
+				return true;
+			} catch (e) {
+				// Ignore errors
+			}
+		}
+		this.storageService.remove('chat.welcomeViewPrefill', StorageScope.APPLICATION);
+		return false;
+	}
+
+	/**
+	 * Reads and applies prefill data from storage (used when transferring chat input from another workspace).
+	 * This is called after the chat widget is created to populate it with any pending prefill data.
+	 */
+	private applyPrefillData(): void {
+		const prefillData = this.storageService.get('chat.welcomeViewPrefill', StorageScope.APPLICATION);
+		if (prefillData) {
+			// Remove immediately to prevent re-application
+			this.storageService.remove('chat.welcomeViewPrefill', StorageScope.APPLICATION);
+			try {
+				const { query, mode, timestamp } = JSON.parse(prefillData);
+				// Invalidate entries older than 1 minute
+				if (timestamp && Date.now() - timestamp > 60 * 1000) {
+					return;
+				}
+				if (query && this.chatWidget) {
+					this.chatWidget.setInput(query);
+				}
+				if (mode !== undefined && this.chatWidget) {
+					this.chatWidget.input.setChatMode(mode, false);
+				}
+				// Focus the input to make it clear we've prefilled
+				this.chatWidget?.focusInput();
+			} catch {
+				// Ignore malformed prefill data
+			}
+		}
+	}
+
+	private buildSessionsOrPrompts(container: HTMLElement): void {
+		// Clear previous sessions control
+		this.sessionsControlDisposables.clear();
+		this.sessionsControl = undefined;
+
+		const sessions = this.agentSessionsService.model.sessions.filter(s => !s.isArchived());
+
+		if (sessions.length > 0) {
+			this.buildSessionsGrid(container, sessions);
+		} else {
+			append(container, $('div.agentSessionsWelcome-noChats', {}, localize('noChats', "No chats")));
+		}
+	}
+
+
+	private buildSessionsGrid(container: HTMLElement, _sessions: IAgentSession[]): void {
+		// Show cached sessions immediately if available, otherwise show loading skeleton
+		this.sessionsControlContainer = append(container, $('.agentSessionsWelcome-sessionsGrid'));
+		const options: IAgentSessionsControlOptions = {
+			overrideStyles: getListStyles({
+				listBackground: editorBackground,
+			}),
+			filter: this.sessionsControlDisposables.add(this.instantiationService.createInstance(AgentSessionsFilter, {
+				limitResults: () => MAX_SESSIONS,
+				overrideExclude: (session) => session.isArchived() ? true : undefined,
+			})),
+			getHoverPosition: () => HoverPosition.BELOW,
+			trackActiveEditorSession: () => false,
+			source: 'welcomeView',
+			hideSectionCount: true,
+			hideSessionBadge: true,
+			useStatusOnlyIcons: true,
+			compactShowMore: true,
+			notifySessionOpened: () => {
+				const isProjectionEnabled = this.configurationService.getValue<boolean>(ChatConfiguration.AgentSessionProjectionEnabled);
+				if (!isProjectionEnabled) {
+					this._closedBy = 'sessionClicked';
+					this.revealMaximizedChat();
+				}
+			}
+		};
+
+		this.sessionsControl = this.sessionsControlDisposables.add(this.instantiationService.createInstance(
+			AgentSessionsControl,
+			this.sessionsControlContainer,
+			options
+		));
+
+		// Listen for loading state changes to toggle skeleton visibility
+		this.sessionsControlDisposables.add(this.agentSessionsService.model.onDidResolve(() => {
+			this.layoutSessionsControl();
+		}));
+
+		if (this.agentSessionsService.model.resolved) {
+			this.layoutSessionsControl();
+		}
+
+		// Schedule layout at next animation frame to ensure proper rendering
+		this.sessionsControlDisposables.add(scheduleAtNextAnimationFrame(getWindow(this.sessionsControlContainer), () => {
+			this.layoutSessionsControl();
+		}));
+
+		// "Try out the new Sandbox app" banner
+		if (canShowAgentsBanner(this.chatEntitlementService)) {
+			const agentsBanner = createAgentsBanner(
+				{
+					cssClass: 'agentSessionsWelcome-agentsBanner',
+					source: 'agentSessionsWelcome',
+					label: localize('viewAllSessions', "View Sandbox"),
+					onButtonClick: () => { this._closedBy = 'viewAllSessions'; },
+				},
+				this.commandService,
+				this.telemetryService,
+			);
+			this.sessionsControlDisposables.add(agentsBanner.disposables);
+			append(container, agentsBanner.element);
+		}
+	}
+
+	private static readonly PRIVACY_NOTICE_DISMISSED_KEY = 'agentSessionsWelcome.privacyNoticeDismissed';
+
+	private buildPrivacyNotice(container: HTMLElement): void {
+		// TOS/Privacy notice for users who are not signed in - reusing walkthrough card design
+		if (!this.chatEntitlementService.anonymous) {
+			return;
+		}
+
+		// Check if user has dismissed the notice
+		if (this.storageService.getBoolean(AgentSessionsWelcomePage.PRIVACY_NOTICE_DISMISSED_KEY, StorageScope.APPLICATION, false)) {
+			return;
+		}
+
+		const providers = this.productService.defaultChatAgent?.provider;
+		if (!providers || !providers.default || !this.productService.defaultChatAgent?.termsStatementUrl || !this.productService.defaultChatAgent?.privacyStatementUrl) {
+			return;
+		}
+
+		const tosCard = append(container, $('.agentSessionsWelcome-walkthroughCard.agentSessionsWelcome-tosCard'));
+
+		const dismissNotice = () => {
+			this.storageService.store(AgentSessionsWelcomePage.PRIVACY_NOTICE_DISMISSED_KEY, true, StorageScope.APPLICATION, StorageTarget.USER);
+			tosCard.remove();
+		};
+
+		// Dismiss the notice when a chat request is sent
+		this.contentDisposables.add(this.chatService.onDidSubmitRequest(() => dismissNotice()));
+
+		// Icon
+		const iconContainer = append(tosCard, $('.agentSessionsWelcome-walkthroughCard-icon'));
+		iconContainer.appendChild(renderIcon(Codicon.chatSparkle));
+
+		// Content
+		const content = append(tosCard, $('.agentSessionsWelcome-walkthroughCard-content'));
+		const title = append(content, $('.agentSessionsWelcome-walkthroughCard-title'));
+		title.textContent = localize('tosTitle', "Try Backboard for free, no sign-in required!");
+
+		const desc = append(content, $('.agentSessionsWelcome-walkthroughCard-description'));
+		const descriptionMarkdown = new MarkdownString(
+			localize(
+				{ key: 'tosDescription', comment: ['{Locked="]({1})"}', '{Locked="]({2})"}'] },
+				"By continuing, you agree to {0}'s [Terms]({1}) and [Privacy Statement]({2}).",
+				providers.default.name,
+				this.productService.defaultChatAgent.termsStatementUrl,
+				this.productService.defaultChatAgent.privacyStatementUrl
+			),
+			{ isTrusted: true }
+		);
+		const renderedMarkdown = this.markdownRendererService.render(descriptionMarkdown);
+		desc.appendChild(renderedMarkdown.element);
+
+		// Dismiss button
+		const dismissButton = append(tosCard, $('button.agentSessionsWelcome-tosCard-dismiss'));
+		dismissButton.appendChild(renderIcon(Codicon.close));
+		dismissButton.title = localize('dismissPrivacyNotice', "Dismiss");
+		dismissButton.onclick = (e) => {
+			e.stopPropagation();
+			dismissNotice();
+		};
+	}
+
+	private buildFooter(container: HTMLElement): void {
+		// Privacy notice
+		this.buildPrivacyNotice(container);
+
+		// Show on startup checkbox
+		const showOnStartupContainer = append(container, $('.agentSessionsWelcome-showOnStartup'));
+		const showOnStartupCheckbox = this.contentDisposables.add(new Toggle({
+			icon: Codicon.check,
+			actionClassName: 'agentSessionsWelcome-checkbox',
+			isChecked: this.configurationService.getValue(configurationKey) === 'agentSessionsWelcomePage',
+			title: localize('checkboxTitle', "When checked, this page will be shown on startup."),
+			...getToggleStyles({
+				inputActiveOptionBackground: 'var(--vscode-descriptionForeground)',
+				inputActiveOptionForeground: 'var(--vscode-editor-background)',
+				inputActiveOptionBorder: 'var(--vscode-descriptionForeground)',
+			})
+		}));
+		showOnStartupCheckbox.domNode.id = 'showOnStartup';
+		const showOnStartupLabel = $('label.caption', { for: 'showOnStartup' }, localize('showOnStartup', "Show welcome page on startup"));
+
+		const onShowOnStartupChanged = () => {
+			if (showOnStartupCheckbox.checked) {
+				this.configurationService.updateValue(configurationKey, 'agentSessionsWelcomePage');
+			} else {
+				this.configurationService.updateValue(configurationKey, 'none');
+			}
+		};
+
+		this.contentDisposables.add(showOnStartupCheckbox.onChange(() => onShowOnStartupChanged()));
+		this.contentDisposables.add(addDisposableListener(showOnStartupLabel, 'click', () => {
+			showOnStartupCheckbox.checked = !showOnStartupCheckbox.checked;
+			onShowOnStartupChanged();
+		}));
+
+		showOnStartupContainer.appendChild(showOnStartupCheckbox.domNode);
+		showOnStartupContainer.appendChild(showOnStartupLabel);
+	}
+
+	private lastDimension: Dimension | undefined;
+
+	override layout(dimension: Dimension): void {
+		this.lastDimension = dimension;
+		this.container.style.height = `${dimension.height}px`;
+		this.container.style.width = `${dimension.width}px`;
+		if (this.scrollableElement) {
+			const scrollableDomNode = this.scrollableElement.getDomNode();
+			scrollableDomNode.style.height = `${dimension.height}px`;
+			scrollableDomNode.style.width = `${dimension.width}px`;
+		}
+		this.contentContainer.style.height = `${dimension.height}px`;
+		this.contentContainer.style.width = `${dimension.width}px`;
+
+		// Layout chat widget
+		this.layoutChatWidget();
+
+		// Layout sessions control
+		this.layoutSessionsControl();
+
+		this.scrollableElement?.scanDomNode();
+	}
+
+	private layoutChatWidget(): void {
+		if (!this.chatWidget || !this.lastDimension) {
+			return;
+		}
+
+		const chatWidth = Math.max(260, this.chatWidgetContainer?.clientWidth ?? Math.min(540, this.lastDimension.width));
+		this.chatWidget.setInputPartMaxHeightOverride(WELCOME_CHAT_INPUT_MAX_HEIGHT_OVERRIDE);
+		this.chatWidget.layout(WELCOME_CHAT_INPUT_LAYOUT_HEIGHT, chatWidth);
+	}
+
+	private layoutSessionsControl(): void {
+		if (!this.sessionsControl || !this.sessionsControlContainer || !this.lastDimension) {
+			return;
+		}
+
+		const sessionsWidth = Math.max(180, this.sessionsControlContainer.clientWidth);
+		const visibleSessions = Math.min(
+			this.agentSessionsService.model.sessions.filter(s => !s.isArchived()).length,
+			MAX_SESSIONS
+		);
+		const sessionsHeight = visibleSessions * AgentSessionsListDelegate.ITEM_HEIGHT;
+		this.sessionsControl.layout(sessionsHeight, sessionsWidth);
+		this.sessionsControl.element!.style.marginBottom = '0';
+	}
+
+	override focus(): void {
+		super.focus();
+		this.chatWidget?.focusInput();
+	}
+
+	private async revealMaximizedChat(): Promise<void> {
+		try {
+			await this.closeEditorAndMaximizeAuxiliaryBar();
+		} catch (error) {
+			this.logService.error('Failed to open maximized chat: {0}', toErrorMessage(error));
+		}
+	}
+
+	private async openSessionInChat(sessionResource: URI): Promise<void> {
+		try {
+			await this.closeEditorAndMaximizeAuxiliaryBar(sessionResource);
+		} catch (error) {
+			this.logService.error('Failed to open agent session: {0}', toErrorMessage(error));
+		}
+	}
+
+	private async closeEditorAndMaximizeAuxiliaryBar(sessionResource?: URI): Promise<void> {
+		const editorToClose = this.input || this._storedInput;
+
+		if (editorToClose && this.group.contains(editorToClose)) {
+			// Wait until the active editor changed so that the chat doesn't toggle back
+			await new Promise<void>(resolve => {
+				const disposable = this.group.onDidActiveEditorChange(e => {
+					disposable.dispose();
+					resolve();
+				});
+
+				this.group.closeEditor(editorToClose);
+			});
+		}
+		// Now proceed with opening chat and maximizing
+		if (sessionResource) {
+			await this.chatWidgetService.openSession(sessionResource);
+		} else {
+			await this.commandService.executeCommand('workbench.action.chat.open');
+		}
+		const chatViewLocation = this.viewDescriptorService.getViewLocationById(ChatViewId);
+		if (chatViewLocation === ViewContainerLocation.AuxiliaryBar) {
+			this.layoutService.setAuxiliaryBarMaximized(true);
+		}
+	}
+
+	private async getRecentlyOpenedWorkspaces(onlyTrusted: boolean = false): Promise<Array<IRecentWorkspace | IRecentFolder>> {
+		const workspaces = await this.workspacesService.getRecentlyOpened();
+		const trustInfoPromises = workspaces.workspaces.map(async ws => {
+			const uri = isRecentWorkspace(ws) ? ws.workspace.configPath : ws.folderUri;
+			const trustInfo = await this.workspaceTrustManagementService.getUriTrustInfo(uri);
+			return { workspace: ws, trusted: trustInfo.trusted };
+		});
+		const trustInfoResults = await Promise.all(trustInfoPromises);
+		const filteredWorkspaces = trustInfoResults
+			.filter(result => onlyTrusted ? result.trusted : true)
+			.map(result => result.workspace);
+		return filteredWorkspaces;
+	}
+}
+
+export class AgentSessionsWelcomeInputSerializer implements IEditorSerializer {
+	canSerialize(editorInput: AgentSessionsWelcomeInput): boolean {
+		return true;
+	}
+
+	serialize(editorInput: AgentSessionsWelcomeInput): string {
+		return JSON.stringify({});
+	}
+
+	deserialize(instantiationService: IInstantiationService, serializedEditorInput: string): AgentSessionsWelcomeInput {
+		return new AgentSessionsWelcomeInput({});
+	}
+}

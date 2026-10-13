@@ -1,0 +1,1 @@
+The postrm fixture is copied unchanged from the published Backboard Studio 3.0.0 Linux x86_64 Debian package. Its SHA-256 is `0ea83cea178258a6664bb8a299b82b4968edf826263d99c996865f2f11413f32`. A minimal previous-version package uses this real script to test dpkg upgrade ordering and preservation of shared VS Code apt files.

@@ -1,0 +1,874 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.agent-sessions-viewer {
+
+	flex: 1 1 auto;
+	height: 100%;
+	min-height: 0;
+	position: relative;
+
+	&.backboard-auth-gate-active > :not(.backboard-auth-gate-overlay) {
+		filter: blur(4px);
+		pointer-events: none;
+		user-select: none;
+	}
+
+	.backboard-auth-gate-overlay {
+		position: absolute;
+		inset: 0;
+		z-index: 20;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 20px;
+		background: color-mix(in srgb, var(--vscode-editor-background) 55%, transparent);
+		backdrop-filter: blur(2px);
+	}
+
+	.backboard-auth-gate-card {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		width: min(340px, 100%);
+		padding: 16px;
+		border: 1px solid var(--vscode-panel-border);
+		border-radius: 4px;
+		background: var(--vscode-editor-background);
+		box-shadow: 0 8px 28px var(--vscode-widget-shadow, transparent);
+	}
+
+	.backboard-auth-gate-logo.codicon.codicon-backboard-logo {
+		width: 36px !important;
+		height: 36px !important;
+		color: var(--vscode-editor-foreground);
+	}
+
+	.backboard-auth-gate-title {
+		margin: 0;
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 20px;
+	}
+
+	.backboard-auth-gate-description {
+		margin: 0;
+		color: var(--vscode-descriptionForeground);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.backboard-auth-gate-button {
+		align-self: flex-start;
+		height: 28px;
+		padding: 0 12px;
+		border: 1px solid var(--vscode-button-border, transparent);
+		border-radius: 2px;
+		color: var(--vscode-button-foreground);
+		background: var(--vscode-button-background);
+		cursor: pointer;
+	}
+
+	.backboard-auth-gate-button:hover {
+		background: var(--vscode-button-hoverBackground);
+	}
+
+	.codicon.codicon-backboard-logo {
+		display: inline-block;
+		width: 14px;
+		height: 14px;
+		font-size: 0;
+		background-color: currentColor;
+		-webkit-mask: url('../../media/backboard_icon.svg') center / contain no-repeat;
+		mask: url('../../media/backboard_icon.svg') center / contain no-repeat;
+	}
+
+	.codicon.codicon-backboard-logo::before {
+		content: '';
+	}
+
+	.pane-body & .monaco-scrollable-element {
+		padding: 0 6px;
+	}
+
+	.agent-sessions-workbench .pane-body & .monaco-scrollable-element {
+		padding: 0 12px;
+	}
+
+	.agent-sessions-workbench .pane-body & .monaco-tree-sticky-container {
+		left: 12px;
+		width: calc(100% - 24px);
+	}
+
+	.monaco-list-row {
+		border-radius: 0;
+	}
+
+	.monaco-list-row .force-no-twistie {
+		display: none !important;
+	}
+
+	.monaco-list-row.selected .agent-session-details-row {
+		color: unset;
+
+		.rendered-markdown {
+			a {
+				color: unset;
+			}
+		}
+	}
+
+	.monaco-list:focus .monaco-list-row.selected .agent-session-details-row {
+		.agent-session-diff-container {
+			.agent-session-diff-added,
+			.agent-session-diff-removed {
+				color: unset;
+			}
+		}
+	}
+
+	.monaco-list-row.selected .agent-session-item,
+	.monaco-list-row.selected .agent-session-title {
+		color: unset;
+	}
+
+	.monaco-list:not(:focus) .monaco-list-row.selected .agent-session-details-row {
+		color: var(--vscode-descriptionForeground);
+	}
+
+	.monaco-list-row .agent-session-pinned-indicator {
+		display: none;
+		height: 16px;
+		align-items: center;
+		color: var(--vscode-descriptionForeground);
+		font-size: 12px;
+		pointer-events: none;
+
+		&.visible {
+			display: flex;
+		}
+	}
+
+	.monaco-list-row .agent-session-title-toolbar {
+		/* for the absolute positioning of the toolbar below */
+		position: relative;
+		height: 16px;
+		display: none;
+
+		.monaco-toolbar {
+			/* this is required because the overal height (including the padding needed for hover feedback) would push down the title otherwise */
+			position: relative;
+			right: 0;
+			top: 0;
+		}
+	}
+
+	/* On hover or keyboard focus: show toolbar, hide pinned indicator */
+	.monaco-list-row:hover,
+	.monaco-list-row.focused:not(.selected) {
+
+		.agent-session-pinned-indicator {
+			display: none;
+		}
+
+		.agent-session-title-toolbar {
+			display: block;
+		}
+
+		.agent-session-title {
+			margin-right: 8px;
+		}
+	}
+
+	.agent-session-item {
+		display: flex;
+		flex-direction: row;
+		padding: 5px 6px;
+		margin: 0;
+		border-left: 2px solid transparent;
+
+		.monaco-list-row:hover &,
+		.monaco-list-row.focused:not(.selected) & {
+			background-color: var(--vscode-list-hoverBackground);
+		}
+
+		.monaco-list-row.selected & {
+			border-left-color: var(--vscode-focusBorder);
+			background-color: var(--vscode-list-activeSelectionBackground);
+		}
+
+		&.archived {
+			color: var(--vscode-descriptionForeground);
+		}
+
+		.agent-session-main-col,
+		.agent-session-title-row,
+		.agent-session-details-row {
+			flex: 1;
+			min-width: 0;
+		}
+
+		.agent-session-icon-col {
+			display: flex;
+			align-items: flex-start;
+			line-height: 16px;
+
+			.agent-session-icon {
+				flex-shrink: 0;
+				font-size: 12px;
+				width: 18px;
+				height: 18px;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				border: none;
+				border-radius: 0;
+				background-color: transparent;
+				color: var(--vscode-descriptionForeground);
+
+				&.needs-input {
+					animation: agent-session-needs-input-pulse 2s ease-in-out infinite;
+				}
+
+				@media (prefers-reduced-motion: reduce) {
+					&.needs-input {
+						animation: none;
+					}
+				}
+			}
+		}
+
+		.agent-session-main-col {
+			padding-left: 7px;
+		}
+
+		.agent-session-title-row,
+		.agent-session-details-row {
+			display: flex;
+			align-items: center;
+		}
+
+		/* Leading status indicator: throbber while actively working, colored dot
+		 * otherwise. Hidden where the status icon column is visible (it shows the
+		 * indicator instead); shown in compact surfaces like the history modal
+		 * that hide the icon column. */
+		.agent-session-status-dot {
+			display: none;
+			flex: 0 0 auto;
+			width: 8px;
+			height: 8px;
+			margin-right: 8px;
+			border-radius: 50%;
+			font-size: 8px;
+			line-height: 8px;
+			background-color: var(--vscode-descriptionForeground);
+
+			&.completed {
+				background-color: var(--vscode-charts-green);
+			}
+
+			&.needs-input {
+				background-color: var(--vscode-charts-orange);
+			}
+
+			&.failed {
+				background-color: var(--vscode-charts-red);
+			}
+
+			&.opened {
+				background-color: var(--vscode-descriptionForeground);
+			}
+
+			/* Keep the same 8px box as the dot so the title never shifts, and match
+			 * the dot's visual size (the codicon glyph is centered on the box). */
+			&.running {
+				width: 8px;
+				height: 8px;
+				border-radius: 0;
+				background-color: transparent;
+				color: var(--vscode-textLink-foreground);
+				font-size: 10px;
+				line-height: 1;
+			}
+		}
+
+		.agent-session-title-row {
+			line-height: 16px;
+			padding-bottom: 1px;
+		}
+
+		.agent-session-details-row {
+			gap: 4px;
+			font-size: 12px;
+			line-height: 14px;
+			max-height: 14px;
+			color: var(--vscode-descriptionForeground);
+
+			.agent-session-details-icon {
+				display: none;
+				font-size: 11px;
+				line-height: 1;
+				flex-shrink: 0;
+
+				&.visible {
+					display: flex;
+					align-items: center;
+				}
+			}
+
+			.rendered-markdown {
+				p {
+					display: flex;
+					align-items: center;
+					margin: 0;
+
+					> span.codicon {
+						margin-right: 2px;
+					}
+				}
+
+				a {
+					color: var(--vscode-descriptionForeground);
+				}
+			}
+
+			.agent-session-diff-container {
+				font-variant-numeric: tabular-nums;
+				overflow: hidden;
+			}
+
+			.agent-session-diff-container {
+				display: flex;
+				gap: 4px;
+
+				&:not(.has-diff) {
+					display: none;
+				}
+
+				.agent-session-diff-added {
+					color: var(--vscode-chat-linesAddedForeground);
+				}
+
+				.agent-session-diff-removed {
+					color: var(--vscode-chat-linesRemovedForeground);
+				}
+			}
+
+			.agent-session-separator {
+				display: none;
+
+				&.has-separator {
+					display: inline;
+
+					&::before {
+						content: '\00B7';
+					}
+				}
+			}
+
+			.agent-session-badge {
+
+				p {
+					overflow: hidden;
+				}
+
+				&:not(.has-badge) {
+					display: none;
+				}
+			}
+		}
+
+		.agent-session-title,
+		.agent-session-description {
+			/* push other items to the end */
+			flex: 1;
+			overflow: hidden;
+			white-space: nowrap;
+			text-overflow: ellipsis;
+		}
+
+		.agent-session-description:empty {
+			display: none;
+		}
+
+		/* The Claude / ChatGPT subscription a chat bills to. */
+		.agent-session-subscription {
+			display: none;
+			flex: 0 0 auto;
+			align-items: center;
+			gap: 4px;
+			white-space: nowrap;
+
+			&.has-subscription {
+				display: inline-flex;
+			}
+
+			.agent-session-subscription-icon {
+				font-size: 11px;
+				opacity: 0.8;
+			}
+		}
+
+		.agent-session-description.has-separator::before {
+			content: '\00B7';
+			margin-right: 4px;
+		}
+
+		.agent-session-title {
+			font-size: 13px;
+			font-weight: 600;
+			letter-spacing: 0;
+		}
+
+		.agent-session-status {
+			display: flex;
+			align-items: center;
+			font-variant-numeric: tabular-nums;
+			white-space: nowrap;
+
+			&.has-separator::before {
+				content: '\00B7';
+				margin-right: 4px;
+			}
+
+			&.hidden {
+				display: none;
+			}
+
+		}
+		.agent-session-approval-row {
+			display: none;
+			align-items: flex-end;
+			gap: 8px;
+			margin-top: 4px;
+			padding: 4px 8px;
+			box-sizing: border-box;
+			border: 1px solid var(--vscode-contrastBorder, var(--vscode-widget-border, transparent));
+			border-radius: 4px;
+			background-color: var(--vscode-editor-background);
+			color: var(--vscode-editor-foreground);
+
+			&.visible {
+				display: flex;
+			}
+
+			.agent-session-approval-label {
+				flex: 1;
+				overflow: hidden;
+				min-width: 0;
+
+				& > .rendered-markdown,
+				& > .rendered-markdown > .code,
+				& > .rendered-markdown > .code > span {
+					display: block;
+					overflow: hidden;
+				}
+
+				.monaco-tokenized-source {
+					display: block;
+					overflow: hidden;
+					white-space: nowrap;
+					text-overflow: ellipsis;
+					font-size: 12px;
+				}
+			}
+
+			.agent-session-approval-button {
+				flex-shrink: 0;
+
+				.monaco-button {
+					padding: 2px 10px;
+					font-size: 12px;
+					white-space: nowrap;
+				}
+			}
+		}
+	}
+
+	.agent-session-show-more {
+		display: flex;
+		align-items: center;
+		font-size: 12px;
+		color: var(--vscode-foreground);
+		/* align with session item text: 6px item padding + 16px icon + 6px main-col padding */
+		padding: 0 6px 0 24px;
+		cursor: pointer;
+		text-decoration: none !important;
+	}
+
+	.agent-session-section {
+		display: flex;
+		align-items: center;
+		font-size: 11px;
+		font-weight: 500;
+		color: var(--vscode-descriptionForeground);
+		text-transform: uppercase;
+		/* align with session item padding */
+		padding: 0 6px;
+
+		.agent-session-section-label {
+			flex: 1;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.agent-session-section-count {
+			opacity: 0.7;
+			margin-right: 4px;
+		}
+
+		.agent-session-section-toolbar {
+			/* for the absolute positioning of the toolbar below */
+			position: relative;
+
+			.monaco-toolbar {
+				/* this is required because the overal height (including the padding needed for hover feedback) would push down the label otherwise */
+				position: absolute;
+				right: 0;
+				top: 0;
+				display: none;
+			}
+		}
+	}
+
+	.monaco-list-row:hover .agent-session-section .agent-session-section-count {
+		display: none;
+	}
+
+	.monaco-list-row:hover .agent-session-section .agent-session-section-toolbar,
+	.monaco-list-row.focused:not(.selected) .agent-session-section .agent-session-section-toolbar {
+		width: 22px;
+
+		.monaco-toolbar {
+			display: block;
+		}
+	}
+
+	.monaco-list:focus .monaco-list-row.focused.selected .agent-session-section-label,
+	.monaco-list:focus .monaco-list-row.selected .agent-session-section-label {
+		color: var(--vscode-list-activeSelectionForeground);
+	}
+
+	.monaco-list:not(:focus) .monaco-list-row.selected .agent-session-section-label {
+		color: var(--vscode-list-inactiveSelectionForeground);
+	}
+
+	.agent-sessions-empty-filter-message {
+		padding: 8px 12px;
+		font-size: 12px;
+		color: var(--vscode-descriptionForeground);
+
+		.reset-filter-link {
+			color: var(--vscode-textLink-foreground);
+			cursor: pointer;
+			text-decoration: none;
+
+			&:hover {
+				text-decoration: underline;
+			}
+
+			&:focus-visible {
+				text-decoration: underline;
+				outline: 1px solid var(--vscode-focusBorder);
+				outline-offset: 1px;
+			}
+		}
+	}
+}
+
+.backboard-side-chat-sessions .agent-sessions-viewer {
+
+	.pane-body & .monaco-scrollable-element,
+	.agent-sessions-workbench .pane-body & .monaco-scrollable-element {
+		padding: 0;
+	}
+
+	.monaco-list-row {
+		border-radius: 7px;
+		overflow: hidden;
+	}
+
+	.monaco-list-row:hover,
+	.monaco-list-row.focused:not(.selected) {
+		background: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 5%, transparent) !important;
+	}
+
+	.monaco-list-row.selected {
+		background: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 8%, transparent) !important;
+		outline: 1px solid color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 10%, transparent) !important;
+		outline-offset: -1px;
+	}
+
+	.agent-session-item {
+		height: 100%;
+		align-items: center;
+		padding: 0 6px 0 36px;
+		border-left: none;
+		background: transparent !important;
+	}
+
+	.agent-session-icon-col {
+		display: none;
+	}
+
+	.agent-session-main-col {
+		display: flex;
+		align-items: center;
+		min-width: 0;
+		padding-left: 0;
+	}
+
+	.agent-session-title-row {
+		flex: 1 1 auto;
+		min-width: 0;
+		gap: 8px;
+		line-height: 18px;
+		padding-bottom: 0;
+	}
+
+	.agent-session-status-dot {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.agent-session-title {
+		flex: 1 1 auto;
+		min-width: 0;
+		max-width: none;
+		color: var(--vscode-descriptionForeground);
+		font-size: 12px;
+		font-weight: var(--vscode-agents-fontWeight-regular, 400);
+		line-height: 18px;
+	}
+
+	.agent-session-title-row .agent-session-title-toolbar {
+		display: none !important;
+	}
+
+	.agent-session-details-row {
+		flex: 0 1 auto;
+		min-width: 0;
+		max-width: 44%;
+		gap: 6px;
+		color: var(--vscode-descriptionForeground);
+		font-size: 11px;
+		line-height: 16px;
+		max-height: 16px;
+		overflow: hidden;
+	}
+
+	.agent-session-description,
+	.agent-session-separator,
+	.agent-session-badge,
+	.agent-session-diff-container {
+		display: none !important;
+	}
+
+	.agent-session-status {
+		flex: 0 0 auto;
+		color: var(--vscode-descriptionForeground);
+		font-size: 11px;
+		line-height: 16px;
+	}
+
+	.agent-session-status.has-separator::before {
+		content: none;
+	}
+
+	.agent-session-section {
+		height: 100%;
+		gap: 10px;
+		padding: 0 6px 0 0;
+		color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+		font-size: 12px;
+		font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+		line-height: 18px;
+		text-transform: none;
+	}
+
+	.agent-session-section::before {
+		content: '\ea83';
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		flex: 0 0 16px;
+		color: color-mix(in srgb, var(--vscode-icon-foreground) 78%, transparent);
+		font-family: codicon;
+		font-size: 16px;
+		font-weight: normal;
+		line-height: 1;
+		text-transform: none;
+	}
+
+	.agent-session-section::after {
+		content: '\eab6';
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		flex: 0 0 16px;
+		color: var(--vscode-descriptionForeground);
+		font-family: codicon;
+		font-size: 14px;
+		font-weight: normal;
+		line-height: 1;
+	}
+
+	.agent-session-section-label {
+		flex: 1 1 auto;
+		color: inherit;
+	}
+
+	.agent-session-section-count {
+		display: none;
+	}
+
+	.agent-session-section-toolbar {
+		display: none !important;
+	}
+
+	.agent-session-show-more {
+		min-height: 24px;
+		justify-content: center;
+		padding: 0 6px;
+		color: var(--vscode-descriptionForeground);
+		font-size: 12px;
+	}
+}
+
+/* Cursor's editor drawer uses the full two-row session card. The earlier
+ * Backboard compact override collapsed the row to a one-line history entry,
+ * hiding the status icon, diff summary and file count. */
+.backboard-side-chat-sessions .agent-sessions-viewer {
+	.monaco-list-row {
+		border-radius: 6px;
+	}
+
+	.monaco-list-row:hover,
+	.monaco-list-row.focused:not(.selected) {
+		background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)) !important;
+	}
+
+	.monaco-list-row.selected,
+	.monaco-list:focus .monaco-list-row.selected,
+	.monaco-list:not(:focus) .monaco-list-row.selected {
+		background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-inactiveSelectionBackground)) !important;
+		outline: none !important;
+	}
+
+	.agent-session-item {
+		height: 100%;
+		align-items: flex-start;
+		padding: 5px 8px;
+		border-left: 0;
+		background: transparent !important;
+		box-sizing: border-box;
+	}
+
+	.agent-session-icon-col {
+		display: flex;
+		align-items: flex-start;
+		width: 18px;
+		flex: 0 0 18px;
+	}
+
+	.agent-session-icon-col .agent-session-icon {
+		display: flex;
+		width: 18px;
+		height: 18px;
+		align-items: center;
+		justify-content: center;
+		font-size: 13px;
+		color: var(--vscode-descriptionForeground);
+	}
+
+	.agent-session-main-col {
+		display: block;
+		min-width: 0;
+		padding-left: 7px;
+	}
+
+	.agent-session-title-row,
+	.agent-session-details-row {
+		display: flex;
+		align-items: center;
+		max-width: none;
+	}
+
+	.agent-session-title-row {
+		gap: 6px;
+		padding-bottom: 1px;
+		line-height: 18px;
+	}
+
+	.agent-session-title {
+		flex: 1 1 auto;
+		min-width: 0;
+		max-width: none;
+		color: var(--vscode-foreground);
+		font-size: 14px;
+		font-weight: 500;
+		line-height: 18px;
+	}
+
+	.monaco-list-row.selected .agent-session-title {
+		color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+		font-weight: 600;
+	}
+
+	.agent-session-details-row {
+		gap: 4px;
+		max-height: 15px;
+		overflow: hidden;
+		color: var(--vscode-descriptionForeground);
+		font-size: 12px;
+		line-height: 15px;
+	}
+
+	.agent-session-details-row .agent-session-badge.has-badge,
+	.agent-session-details-row .agent-session-description:not(:empty) {
+		display: block !important;
+	}
+
+	.agent-session-details-row .agent-session-separator.has-separator {
+		display: inline !important;
+	}
+
+	.agent-session-details-row .agent-session-diff-container {
+		display: none !important;
+		gap: 5px;
+	}
+
+	.agent-session-details-row .agent-session-diff-container.has-diff {
+		display: flex !important;
+	}
+
+	.agent-session-diff-added {
+		color: var(--vscode-gitDecoration-addedResourceForeground) !important;
+	}
+
+	.agent-session-diff-removed {
+		color: var(--vscode-gitDecoration-deletedResourceForeground) !important;
+	}
+
+	.agent-session-details-row:has(.agent-session-diff-container.has-diff) .agent-session-status {
+		display: none;
+	}
+}
+
+@keyframes agent-session-needs-input-pulse {
+	0%, 100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.4;
+	}
+}

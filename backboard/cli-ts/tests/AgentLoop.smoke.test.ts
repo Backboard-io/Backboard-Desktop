@@ -1,0 +1,2608 @@
+import { describe, expect, it } from "bun:test";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { Config } from "../src/config/Config.ts";
+import { AgentController } from "../src/core/agent/AgentController.ts";
+import { TURN_MAX_ATTEMPTS } from "../src/core/agent/TurnRetry.ts";
+import { EventBus } from "../src/core/bus/EventBus.ts";
+import type { AgentEvent } from "../src/core/bus/events.ts";
+import type { CheckpointRecorder } from "../src/core/checkpoints/CheckpointStore.ts";
+import { emptyRuleSet } from "../src/core/permissions/PermissionRules.ts";
+import type { PermissionContext } from "../src/core/permissions/types.ts";
+import { assistantMessage, userMessage } from "../src/core/session/Message.ts";
+import { Session } from "../src/core/session/Session.ts";
+import { SkillController } from "../src/core/skills/SkillController.ts";
+import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
+import type {
+	BackboardClient,
+	RequestOptions,
+} from "../src/providers/backboard/BackboardClient.ts";
+import { DEFAULT_STREAM_SERVER_ERROR_RETRIES } from "../src/providers/backboard/streamRetry.ts";
+import type {
+	AssistantInfo,
+	BackboardResponse,
+	ModelsListResponse,
+	ModelThinkingMetadataResponse,
+	ProviderEvent,
+	SendMessageRequest,
+	SubmitToolOutputsRequest,
+} from "../src/providers/backboard/types.ts";
+import { TestTool } from "./helpers.ts";
+
+const env = { apiKey: "k", apiUrl: "https://example.test/api" };
+
+// Bypass mode with no rules keeps the permission gate a no-op, matching the
+// pre-wiring behavior these tests were written against.
+const TEST_PERMISSIONS: PermissionContext = {
+	mode: "bypass",
+	rules: emptyRuleSet(),
+	interactive: false,
+};
+
+async function delay(ms: number, signal?: AbortSignal): Promise<void> {
+	await new Promise<void>((resolve, reject) => {
+		const timeout = setTimeout(resolve, ms);
+		signal?.addEventListener(
+			"abort",
+			() => {
+				clearTimeout(timeout);
+				reject(new Error("aborted"));
+			},
+			{ once: true },
+		);
+	});
+}
+
+class FakeClient {
+	/** Stands in for Backboard, so the assistant/thread paths stay exercised. */
+	readonly capabilities = { assistants: true, threads: true, memory: true };
+	messageRequests: SendMessageRequest[] = [];
+	messageAttachmentPaths: Array<string[] | undefined> = [];
+	toolOutputRequests: SubmitToolOutputsRequest[] = [];
+	preservedToolOutputRequests: SubmitToolOutputsRequest[] = [];
+	modelThinkingMetadataCount = 0;
+	listModelsCount = 0;
+	threadSource: "byok" | "backboard" | "subscription" = "backboard";
+	listAssistantsDelayMs = 0;
+	onRunMessage?: () => void;
+	assistantRequests: Array<{
+		name: string;
+		system_prompt: string;
+		tools: unknown[];
+	}> = [];
+	private readonly assistants: AssistantInfo[] = [];
+
+	constructor(
+		private readonly first: ProviderEvent[],
+		private readonly second: ProviderEvent[],
+	) {}
+
+	async listAssistants(options: RequestOptions = {}): Promise<AssistantInfo[]> {
+		if (this.listAssistantsDelayMs > 0) {
+			await delay(this.listAssistantsDelayMs, options.signal);
+		}
+		return this.assistants;
+	}
+
+	async createAssistant(req: {
+		name: string;
+		system_prompt: string;
+		tools: unknown[];
+	}): Promise<AssistantInfo> {
+		this.assistantRequests.push(req);
+		const assistant = {
+			assistant_id: `asst_${this.assistants.length + 1}`,
+			name: req.name,
+			system_prompt: req.system_prompt,
+			tools: req.tools,
+		};
+		this.assistants.push(assistant);
+		return assistant;
+	}
+
+	async getModelThinkingMetadata(
+		provider: string,
+		model: string,
+	): Promise<ModelThinkingMetadataResponse> {
+		this.modelThinkingMetadataCount++;
+		const allowedFields =
+			provider.toLowerCase() === "openrouter" ? ["max_tokens"] : ["effort"];
+		return {
+			provider,
+			model,
+			supports_thinking: true,
+			thinking_controls: {
+				supported: true,
+				allowed_fields: allowedFields,
+				defaults_only: false,
+			},
+		};
+	}
+
+	async listModels(): Promise<ModelsListResponse> {
+		this.listModelsCount++;
+		return {
+			models: [
+				{
+					name: "gpt-5.5",
+					provider: "openai",
+					model_type: "llm",
+					supports_thinking: true,
+					thinking_controls: {
+						supported: true,
+						allowed_fields: ["effort"],
+						defaults_only: false,
+					},
+				},
+			],
+			total: 1,
+		};
+	}
+
+	sourceForThread(): "byok" | "backboard" | "subscription" {
+		return this.threadSource;
+	}
+
+	async sendMessage(): Promise<BackboardResponse> {
+		return {
+			thread_id: "compaction_helper",
+			content:
+				"## Objective\nKeep the work moving.\n\n## Current State\nHistory compressed.",
+			status: "COMPLETED",
+			tool_calls: null,
+			model_provider: "anthropic",
+			model_name: "test",
+		};
+	}
+
+	async *runMessage(
+		req: SendMessageRequest,
+		options?: { attachmentFilePaths?: string[] },
+	): AsyncIterable<ProviderEvent> {
+		this.onRunMessage?.();
+		this.messageRequests.push(req);
+		this.messageAttachmentPaths.push(options?.attachmentFilePaths);
+		yield* this.first;
+	}
+
+	async *runToolOutputs(
+		req: SubmitToolOutputsRequest,
+	): AsyncIterable<ProviderEvent> {
+		this.toolOutputRequests.push(req);
+		yield* this.second;
+	}
+
+	async preserveFailedToolOutputs(
+		req: SubmitToolOutputsRequest,
+	): Promise<string | null> {
+		this.preservedToolOutputRequests.push(req);
+		return null;
+	}
+}
+
+/** Serves one scripted stream per message request, in order. */
+class ScriptedClient extends FakeClient {
+	constructor(private readonly runs: ProviderEvent[][]) {
+		super([], []);
+	}
+
+	override async *runMessage(
+		req: SendMessageRequest,
+	): AsyncIterable<ProviderEvent> {
+		this.messageRequests.push(req);
+		yield* this.runs.shift() ?? [];
+	}
+}
+
+class DisposableTool extends TestTool {
+	disposeCount = 0;
+
+	constructor(
+		name: string,
+		private readonly disposeError?: Error,
+	) {
+		super({ name });
+	}
+
+	override async dispose(): Promise<void> {
+		this.disposeCount++;
+		if (this.disposeError) throw this.disposeError;
+	}
+}
+
+function controllerWith(
+	client: FakeClient,
+	tool: TestTool | TestTool[],
+	argv: string[] = [],
+	options: {
+		onThreadReplaced?: (threadId: string | null) => void;
+		finalVerificationNudge?: boolean;
+		todoReconciliation?: boolean;
+		autoCompact?: boolean;
+		checkpoints?: CheckpointRecorder;
+	} = {},
+): {
+	ctrl: AgentController;
+	events: AgentEvent[];
+	session: Session;
+	config: Config;
+} {
+	const config = new Config({ env, argv });
+	const bus = new EventBus();
+	const events: AgentEvent[] = [];
+	bus.onAny((e) => events.push(e));
+	const session = new Session("sess_test");
+	const registry = new ToolRegistry(Array.isArray(tool) ? tool : [tool]);
+	const skillController = new SkillController({ cwd: config.cwd, bus });
+	const ctrl = new AgentController({
+		config,
+		bus,
+		session,
+		registry,
+		client: client as unknown as BackboardClient,
+		skillController,
+		permissions: TEST_PERMISSIONS,
+		autoCompact: options.autoCompact,
+		turnRetryBackoffMs: 0,
+		...(options.onThreadReplaced
+			? { onThreadReplaced: options.onThreadReplaced }
+			: {}),
+		...(options.finalVerificationNudge !== undefined
+			? { finalVerificationNudge: options.finalVerificationNudge }
+			: {}),
+		...(options.todoReconciliation !== undefined
+			? { todoReconciliation: options.todoReconciliation }
+			: {}),
+		...(options.checkpoints ? { checkpoints: options.checkpoints } : {}),
+	});
+	return { ctrl, events, session, config };
+}
+
+describe("AgentController loop (mocked Backboard)", () => {
+	it("checks restored history before the first provider usage measurement", async () => {
+		const client = new FakeClient(
+			[{ kind: "thread", threadId: "new" }, { kind: "completed" }],
+			[],
+		);
+		const { ctrl } = controllerWith(client, [], [], {
+			autoCompact: true,
+			finalVerificationNudge: false,
+			todoReconciliation: false,
+		});
+		ctrl.hydrateSession({
+			threadId: "old",
+			messages: [
+				userMessage("Old requirement " + "x".repeat(8000)),
+				assistantMessage("Old answer"),
+				userMessage("Recent question"),
+				assistantMessage("Recent answer"),
+			],
+		});
+		ctrl.setModelContextLimit(2000);
+		expect(ctrl.needsCompaction()).toBe(true);
+		expect(await ctrl.submit("Continue")).toBe("completed");
+		expect(client.messageRequests[0]?.content).toContain("History compressed.");
+		await ctrl.dispose();
+	});
+
+	it("does not send a queued turn cancelled while restore is preparing", async () => {
+		const client = new FakeClient([{ kind: "completed" }], []);
+		const { ctrl } = controllerWith(client, []);
+		let release!: () => void;
+		const preparing = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const run = ctrl.submit("Continue", { onStart: () => preparing });
+		ctrl.cancel();
+		release();
+		expect(await run).toBe("cancelled");
+		expect(client.messageRequests).toHaveLength(0);
+		await ctrl.dispose();
+	});
+	it("automatically compresses at the model context threshold and seeds the next turn once", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "replacement" },
+				{ kind: "assistant_delta", text: "Done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const { ctrl, session, events } = controllerWith(client, [], [], {
+			autoCompact: true,
+			finalVerificationNudge: false,
+			todoReconciliation: false,
+		});
+		session.threadId = "original";
+		for (let i = 0; i < 3; i++) {
+			session.addMessage(userMessage(`Previous request ${i}`));
+			session.addMessage(assistantMessage(`Previous response ${i}`));
+		}
+		session.addUsage({ inputTokens: 85_000, contextLimit: 100_000 });
+		expect(await ctrl.submit("Continue")).toBe("completed");
+		// The context ring hears about the emptied window as soon as
+		// compression finishes, not only when the reply's usage arrives.
+		const drop = events.find((e) => e.type === "usage");
+		expect(drop?.type === "usage" && drop.usage.contextLimit).toBe(100_000);
+		expect(
+			drop?.type === "usage" && (drop.usage.contextTokens ?? 0) < 85_000,
+		).toBe(true);
+		expect(client.messageRequests[0]?.thread_id).toBeUndefined();
+		expect(client.messageRequests[0]?.content).toContain("History compressed.");
+		expect(client.messageRequests[0]?.content).toEndWith("Continue");
+		expect(await ctrl.submit("Next")).toBe("completed");
+		expect(client.messageRequests[1]?.content).toBe("Next");
+		expect(client.messageRequests[1]?.thread_id).toBe("replacement");
+		await ctrl.dispose();
+	});
+
+	it("compresses between tool rounds instead of submitting into a full window", async () => {
+		const client = new ScriptedClient([
+			[
+				{ kind: "thread", threadId: "full" },
+				{
+					kind: "usage",
+					usage: { contextTokens: 80_000, contextLimit: 100_000 },
+				},
+				{
+					kind: "requires_action",
+					runId: "run_full",
+					calls: [
+						{ id: "c1", name: "Echo", input: { value: "x".repeat(40_000) } },
+					],
+				},
+			],
+			[
+				{ kind: "thread", threadId: "fresh" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+		]);
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+			[],
+			{ autoCompact: true, finalVerificationNudge: false },
+		);
+		expect(await ctrl.submit("Read the big file")).toBe("completed");
+		// The round's outputs were never pushed into the full thread.
+		expect(client.toolOutputRequests).toHaveLength(0);
+		expect(client.messageRequests).toHaveLength(2);
+		expect(client.messageRequests[1]?.thread_id).toBeUndefined();
+		expect(client.messageRequests[1]?.content).toContain("History compressed.");
+		expect(client.messageRequests[1]?.content).toContain(
+			"Request:\nRead the big file",
+		);
+		await ctrl.dispose();
+	});
+
+	it("compresses and continues when the provider rejects an overflowing prompt", async () => {
+		const client = new ScriptedClient([
+			[
+				{
+					kind: "failed",
+					error: "prompt is too long: 201000 tokens > 200000 maximum",
+					retryable: false,
+				},
+			],
+			[
+				{ kind: "thread", threadId: "fresh" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+		]);
+		const { ctrl, session } = controllerWith(client, [], [], {
+			autoCompact: true,
+			finalVerificationNudge: false,
+			todoReconciliation: false,
+		});
+		session.threadId = "full";
+		session.addMessage(userMessage("Earlier request"));
+		session.addMessage(assistantMessage("Earlier answer"));
+		expect(await ctrl.submit("Continue")).toBe("completed");
+		expect(client.messageRequests[0]?.thread_id).toBe("full");
+		expect(client.messageRequests[1]?.thread_id).toBeUndefined();
+		expect(client.messageRequests[1]?.content).toContain("History compressed.");
+		await ctrl.dispose();
+	});
+
+	it("compresses before the turn ends so the window never idles above the threshold", async () => {
+		const client = new ScriptedClient([
+			[
+				{ kind: "thread", threadId: "t1" },
+				{
+					kind: "usage",
+					usage: { contextTokens: 90_000, contextLimit: 100_000 },
+				},
+				{ kind: "assistant_delta", text: "long answer" },
+				{ kind: "completed" },
+			],
+			[
+				{ kind: "thread", threadId: "t2" },
+				{ kind: "assistant_delta", text: "next" },
+				{ kind: "completed" },
+			],
+		]);
+		const { ctrl, session, events } = controllerWith(client, [], [], {
+			autoCompact: true,
+			finalVerificationNudge: false,
+			todoReconciliation: false,
+		});
+		session.addMessage(userMessage("Earlier request"));
+		session.addMessage(assistantMessage("Earlier answer"));
+		expect(await ctrl.submit("Big question")).toBe("completed");
+		const types = events.map((e) => e.type);
+		const lastUsage = types.lastIndexOf("usage");
+		expect(lastUsage).toBeGreaterThan(-1);
+		expect(lastUsage).toBeLessThan(types.lastIndexOf("turn:end"));
+		const drop = events[lastUsage];
+		expect(
+			drop?.type === "usage" && (drop.usage.contextTokens ?? 0) < 85_000,
+		).toBe(true);
+		expect(await ctrl.submit("Next")).toBe("completed");
+		expect(client.messageRequests[1]?.thread_id).toBeUndefined();
+		expect(client.messageRequests[1]?.content).toContain("History compressed.");
+		expect(client.messageRequests[1]?.content).toEndWith("Next");
+		await ctrl.dispose();
+	});
+
+	it("trims instead of failing the turn when no summary can be made", async () => {
+		class FailedSummarizer extends FakeClient {
+			summaryAttempts = 0;
+			override async sendMessage(): Promise<BackboardResponse> {
+				this.summaryAttempts++;
+				throw new Error("Summary unavailable");
+			}
+		}
+		const client = new FailedSummarizer(
+			[{ kind: "thread", threadId: "trimmed" }, { kind: "completed" }],
+			[],
+		);
+		const { ctrl, session } = controllerWith(client, [], [], {
+			autoCompact: true,
+			finalVerificationNudge: false,
+			todoReconciliation: false,
+		});
+		session.threadId = "original";
+		for (let i = 0; i < 3; i++) {
+			session.addMessage(userMessage(`Request ${i}`));
+			session.addMessage(assistantMessage(`Response ${i}`));
+		}
+		session.addUsage({ inputTokens: 85_000, contextLimit: 100_000 });
+		expect(await ctrl.submit("Continue")).toBe("completed");
+		expect(client.summaryAttempts).toBe(2);
+		expect(client.messageRequests[0]?.thread_id).toBeUndefined();
+		expect(client.messageRequests[0]?.content).toContain("was trimmed");
+		expect(client.messageRequests[0]?.content).toEndWith("Continue");
+		await ctrl.dispose();
+	});
+	for (const stage of ["preparing", "generating"] as const) {
+		it(`pins the route during ${stage} and keeps a newer selection on completion`, async () => {
+			const client = new FakeClient(
+				[
+					{ kind: "thread", threadId: "byok_route" },
+					{ kind: "assistant_delta", text: "done" },
+					{ kind: "completed" },
+				],
+				[],
+			);
+			client.threadSource = "byok";
+			client.listAssistantsDelayMs = 20;
+			const { ctrl, config } = controllerWith(
+				client,
+				new TestTool({ name: "Echo", readOnly: true }),
+				[],
+				{ finalVerificationNudge: false },
+			);
+			config.setModel({ provider: "openai", model: "gpt-4.1" }, "byok");
+			if (stage === "generating") {
+				client.onRunMessage = () =>
+					config.setModel(
+						{ provider: "google", model: "gemini-2.5-flash" },
+						"byok",
+					);
+			}
+			const running = ctrl.submit("hello");
+			if (stage === "preparing")
+				config.setModel(
+					{ provider: "google", model: "gemini-2.5-flash" },
+					"byok",
+				);
+			await running;
+			expect({
+				requests: client.messageRequests.map((req) => [
+					req.llm_provider,
+					req.model_name,
+					req.source,
+				]),
+				selection: config.modelString,
+				source: config.modelSource,
+			}).toEqual({
+				requests: [["openai", "gpt-4.1", "byok"]],
+				selection: "google/gemini-2.5-flash",
+				source: "byok",
+			});
+		});
+	}
+
+	it("emits turn:start and accepted prompt before assistant setup finishes", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		client.listAssistantsDelayMs = 50;
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const promise = ctrl.submit("do it");
+		expect(events.map((e) => e.type)).toEqual([
+			"turn:start",
+			"turn:status",
+			"user:message",
+		]);
+		await promise;
+		expect(
+			events
+				.filter((event) => event.type === "turn:status")
+				.map((event) => event.phase),
+		).toEqual(["preparing", "generating"]);
+	});
+
+	it("runs a full tool round-trip to completion", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Echo", input: {} }],
+				},
+			],
+			[{ kind: "assistant_delta", text: "all done" }, { kind: "completed" }],
+		);
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("do it");
+		expect(status).toBe("completed");
+
+		const types = events.map((e) => e.type);
+		expect(types).toContain("user:message");
+		expect(types).toContain("turn:start");
+		expect(types).toContain("tool:requested");
+		expect(types).toContain("tool:start");
+		expect(types).toContain("tool:result");
+		// A read-only round needs no separate verification request or buffered final.
+		expect(types).toContain("assistant:message");
+		expect(types).not.toContain("assistant:message:discard");
+		expect(types[types.length - 1]).toBe("turn:end");
+		expect(
+			events
+				.filter((event) => event.type === "turn:status")
+				.map((event) => event.phase),
+		).toEqual(["preparing", "generating", "generating"]);
+	});
+
+	it("stamps the turn's billing route on the message and every continuation", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Echo", input: {} }],
+				},
+			],
+			[{ kind: "assistant_delta", text: "all done" }, { kind: "completed" }],
+		);
+		const { ctrl, config } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+		config.setModel({ provider: "openai", model: "gpt-5.5" }, "byok");
+
+		expect(await ctrl.submit("do it")).toBe("completed");
+
+		expect(client.messageRequests.map((req) => req.source)).toEqual(["byok"]);
+		expect(client.toolOutputRequests.map((req) => req.source)).toEqual([
+			"byok",
+		]);
+	});
+
+	it("does not resolve a completed turn before checkpoint finalization is durable", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		let releaseFlush!: () => void;
+		const flushGate = new Promise<void>((resolve) => {
+			releaseFlush = resolve;
+		});
+		let flushStarted!: () => void;
+		const started = new Promise<void>((resolve) => {
+			flushStarted = resolve;
+		});
+		const checkpoints: CheckpointRecorder = {
+			recordPreImage: async () => {},
+			recordPostImage: async () => {},
+			revertToolCall: async () => {},
+			beginShellCapture: async () => {},
+			endShellCapture: async () => {},
+			captureWarning: () => null,
+			flush: async () => {
+				flushStarted();
+				await flushGate;
+			},
+			scopedToTurn() {
+				return this;
+			},
+		};
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+			[],
+			{ checkpoints },
+		);
+
+		let resolved = false;
+		const submission = ctrl.submit("do it").then((status) => {
+			resolved = true;
+			return status;
+		});
+		await started;
+		expect(events.at(-1)?.type).toBe("turn:end");
+		expect(resolved).toBe(false);
+		releaseFlush();
+		expect(await submission).toBe("completed");
+	});
+
+	for (const failBoundary of [false, true]) {
+		it(`uses the editor turn id and waits for request capture (failure: ${failBoundary})`, async () => {
+			const client = new FakeClient(
+				[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+				[],
+			);
+			const boundaries: string[] = [];
+			let finish!: () => void;
+			const gate = new Promise<void>((resolve) => {
+				finish = resolve;
+			});
+			let started!: () => void;
+			const capturing = new Promise<void>((resolve) => {
+				started = resolve;
+			});
+			const checkpoints: CheckpointRecorder = {
+				recordPreImage: async () => {},
+				recordPostImage: async () => {},
+				revertToolCall: async () => {},
+				beginShellCapture: async () => {},
+				endShellCapture: async () => {},
+				captureWarning: () => null,
+				scopedToTurn() {
+					return this;
+				},
+				beginTurn: async (id) => {
+					boundaries.push(`begin:${id}`);
+				},
+				endTurn: async (id) => {
+					boundaries.push(`end:${id}`);
+					started();
+					await gate;
+					if (failBoundary) throw new Error("capture failed");
+				},
+			};
+			const { ctrl, events } = controllerWith(
+				client,
+				new TestTool({ name: "Echo", readOnly: true }),
+				[],
+				{ checkpoints },
+			);
+			const submission = ctrl.submit("do it", { turnId: "editor-turn" });
+			await capturing;
+			let idle = false;
+			const wait = ctrl.waitForIdle().then(() => {
+				idle = true;
+			});
+			await Promise.resolve();
+			expect(idle).toBe(false);
+			finish();
+			if (failBoundary)
+				await expect(submission).rejects.toThrow("capture failed");
+			else expect(await submission).toBe("completed");
+			await wait;
+			expect({
+				boundaries,
+				active: ctrl.hasActiveWork,
+				turnId: events.find((event) => event.type === "turn:start")?.turnId,
+			}).toEqual({
+				boundaries: ["begin:editor-turn", "end:editor-turn"],
+				active: false,
+				turnId: "editor-turn",
+			});
+		});
+	}
+
+	it("overlaps the request capture with turn setup but sends nothing before it completes", async () => {
+		const client = new FakeClient(
+			[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+			[],
+		);
+		const boundaries: string[] = [];
+		let finishCapture!: () => void;
+		const capture = new Promise<void>((resolve) => {
+			finishCapture = resolve;
+		});
+		const checkpoints: CheckpointRecorder = {
+			recordPreImage: async () => {},
+			recordPostImage: async () => {},
+			revertToolCall: async () => {},
+			beginShellCapture: async () => {},
+			endShellCapture: async () => {},
+			captureWarning: () => null,
+			scopedToTurn() {
+				return this;
+			},
+			beginTurn: async (id) => {
+				boundaries.push(`begin:${id}`);
+				await capture;
+				boundaries.push(`captured:${id}`);
+			},
+			endTurn: async (id) => {
+				boundaries.push(`end:${id}`);
+			},
+		};
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+			[],
+			{ checkpoints },
+		);
+		const submission = ctrl.submit("do it", { turnId: "editor-turn" });
+		for (let i = 0; i < 20; i++) await Promise.resolve();
+		const whileCapturing = {
+			turnStarted: events.some((event) => event.type === "turn:start"),
+			requests: client.messageRequests.length,
+		};
+		finishCapture();
+		expect(await submission).toBe("completed");
+		expect({ whileCapturing, boundaries }).toEqual({
+			whileCapturing: { turnStarted: true, requests: 0 },
+			boundaries: [
+				"begin:editor-turn",
+				"captured:editor-turn",
+				"end:editor-turn",
+			],
+		});
+	});
+
+	it("starts a safe tool mid-stream when tool_call_ready arrives early", async () => {
+		let requiresActionYielded = false;
+		let startedDuringStream = false;
+		let runs = 0;
+		class EarlyReadyClient extends FakeClient {
+			constructor() {
+				super(
+					[],
+					[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+				);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				yield { kind: "thread", threadId: "thr_1" };
+				yield { kind: "tool_started", id: "c1", name: "Echo" };
+				yield {
+					kind: "tool_ready",
+					call: { id: "c1", name: "Echo", input: { value: "v" } },
+				};
+				// The rest of the model turn is still streaming while the
+				// early-offered call should already be executing.
+				await delay(30);
+				requiresActionYielded = true;
+				yield {
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Echo", input: { value: "v" } }],
+				};
+			}
+		}
+		const client = new EarlyReadyClient();
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({
+				name: "Echo",
+				readOnly: true,
+				onStart: () => {
+					runs++;
+					startedDuringStream ||= !requiresActionYielded;
+				},
+			}),
+		);
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("completed");
+		expect(startedDuringStream).toBe(true);
+		// The early run is reused at finalize, never re-executed, and the
+		// outputs are still submitted as a single batch.
+		expect(runs).toBe(1);
+		expect(client.toolOutputRequests).toHaveLength(1);
+		expect(
+			client.toolOutputRequests[0]?.tool_outputs.map((o) => o.tool_call_id),
+		).toEqual(["c1"]);
+	});
+
+	it("includes the startup environment prompt in assistant and turn prompts", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const config = new Config({ env, argv: [] });
+		const bus = new EventBus();
+		const session = new Session("sess_test");
+		const registry = new ToolRegistry([
+			new TestTool({ name: "Echo", readOnly: true }),
+		]);
+		const skillController = new SkillController({ cwd: config.cwd, bus });
+		const startupEnvironmentPrompt = "Environment snapshot\n- OS: test";
+		const ctrl = new AgentController({
+			config,
+			bus,
+			session,
+			registry,
+			client: client as unknown as BackboardClient,
+			skillController,
+			startupEnvironmentPrompt,
+			permissions: TEST_PERMISSIONS,
+		});
+
+		await ctrl.submit("do it");
+
+		expect(client.assistantRequests[0]?.system_prompt).toContain(
+			startupEnvironmentPrompt,
+		);
+		expect(client.messageRequests[0]?.system_prompt).toContain(
+			startupEnvironmentPrompt,
+		);
+	});
+	it("sends one visible verification phase for unvalidated mutations", async () => {
+		class FinalVerificationClient extends FakeClient {
+			constructor() {
+				super(
+					[],
+					[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+				);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				if (this.messageRequests.length === 1) {
+					yield { kind: "thread", threadId: "thr_1" };
+					yield {
+						kind: "requires_action",
+						runId: "run_1",
+						// A successful mutation without validation needs a focused check.
+						calls: Array.from({ length: 1 }, (_, index) => ({
+							id: `c${index + 1}`,
+							name: "Echo",
+							input: {},
+						})),
+					};
+					return;
+				}
+				yield { kind: "assistant_delta", text: "verified" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new FinalVerificationClient();
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: false }),
+			["--final-verification"],
+		);
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("completed");
+		expect(client.messageRequests.map((request) => request.content)).toEqual([
+			"do it",
+			expect.stringContaining(
+				"changes without sufficient successful validation",
+			),
+		]);
+		expect(client.messageRequests[1]?.content).toContain(
+			"Briefly tell the user",
+		);
+		expect(client.messageRequests[1]?.content).toContain("focused check");
+		expect(client.toolOutputRequests).toHaveLength(1);
+	});
+
+	it("streams a long read-only investigation without verification or todo cleanup inference", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_read" },
+				{
+					kind: "requires_action",
+					runId: null,
+					calls: Array.from({ length: 40 }, (_, index) => ({
+						id: `read-${index}`,
+						name: "Read",
+						input: {},
+					})),
+				},
+			],
+			[
+				{
+					kind: "assistant_delta",
+					text: "Investigation complete; deployment is still pending.",
+				},
+				{ kind: "completed" },
+			],
+		);
+		const { ctrl, events, session } = controllerWith(
+			client,
+			new TestTool({ name: "Read", readOnly: true }),
+			["--final-verification"],
+			{ todoReconciliation: true },
+		);
+		const todos = [
+			{
+				id: "requested",
+				content: "Deploy after review",
+				status: "pending" as const,
+			},
+		];
+		session.setTodos(todos);
+		expect(
+			await ctrl.submit(
+				"Investigate the source; preserve the deployment plan.",
+			),
+		).toBe("completed");
+		expect(client.messageRequests).toHaveLength(1);
+		expect(client.toolOutputRequests).toHaveLength(1);
+		expect(session.todos).toEqual(todos);
+		expect(
+			events.filter((event) => event.type === "assistant:delta"),
+		).toHaveLength(1);
+		expect(
+			events.some((event) => event.type === "assistant:message:discard"),
+		).toBe(false);
+	});
+
+	it("finishes a validated narrow change without a second review request", async () => {
+		class ValidatedClient extends FakeClient {
+			override async *runToolOutputs(
+				req: SubmitToolOutputsRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.toolOutputRequests.push(req);
+				if (this.toolOutputRequests.length === 1) {
+					yield {
+						kind: "requires_action",
+						runId: null,
+						calls: [{ id: "check", name: "Check", input: {} }],
+					};
+				} else {
+					yield { kind: "assistant_delta", text: "Fixed and verified." };
+					yield { kind: "completed" };
+				}
+			}
+		}
+		const client = new ValidatedClient(
+			[
+				{ kind: "thread", threadId: "thr_edit" },
+				{
+					kind: "requires_action",
+					runId: null,
+					calls: [{ id: "edit", name: "Patch", input: {} }],
+				},
+			],
+			[],
+		);
+		const check = new (class extends TestTool {
+			override async execute(...args: Parameters<TestTool["execute"]>) {
+				return {
+					...(await super.execute(...args)),
+					execution: { validation: "passed" as const },
+				};
+			}
+		})({ name: "Check", readOnly: true });
+		const { ctrl, events } = controllerWith(
+			client,
+			[new TestTool({ name: "Patch", readOnly: false }), check],
+			["--final-verification"],
+		);
+		expect(await ctrl.submit("Fix the typo and verify it.")).toBe("completed");
+		expect(client.messageRequests).toHaveLength(1);
+		expect(client.toolOutputRequests).toHaveLength(2);
+		expect(
+			events.some((event) => event.type === "assistant:message:discard"),
+		).toBe(false);
+	});
+
+	it("lets the host disable final verification even when config enables it", async () => {
+		class NoNudgeClient extends FakeClient {
+			constructor() {
+				super(
+					[],
+					[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+				);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				yield { kind: "thread", threadId: "thr_1" };
+				yield {
+					kind: "requires_action",
+					runId: "run_1",
+					calls: Array.from({ length: 1 }, (_, index) => ({
+						id: `c${index + 1}`,
+						name: "Echo",
+						input: {},
+					})),
+				};
+			}
+		}
+		const client = new NoNudgeClient();
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: false }),
+			["--final-verification"],
+			{ finalVerificationNudge: false },
+		);
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("completed");
+		expect(client.messageRequests.map((request) => request.content)).toEqual([
+			"do it",
+		]);
+	});
+
+	it("retries retryable initial stream server failures", async () => {
+		class RetryMessageClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				if (this.messageRequests.length === 1) {
+					yield {
+						kind: "failed",
+						error: "Upstream idle timeout exceeded",
+						retryable: true,
+					};
+					return;
+				}
+				yield { kind: "thread", threadId: "thr_retry" };
+				yield { kind: "assistant_delta", text: "recovered" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new RetryMessageClient();
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("completed");
+		expect(client.messageRequests).toHaveLength(2);
+	});
+
+	it("routes unavailable models to an available GLM-5.3 model", async () => {
+		class CapacityFallbackClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async listModels(): Promise<ModelsListResponse> {
+				this.listModelsCount++;
+				return {
+					models: [
+						{
+							name: "z-ai/glm-5.3",
+							provider: "openrouter",
+							model_type: "llm",
+						},
+					],
+					total: 1,
+				};
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				if (req.model_name !== "z-ai/glm-5.3") {
+					yield {
+						kind: "failed",
+						error: "No endpoints found for z-ai/glm-4.7.",
+					};
+					return;
+				}
+				yield { kind: "thread", threadId: "thr_glm" };
+				yield { kind: "assistant_delta", text: "recovered" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new CapacityFallbackClient();
+		const { ctrl, config, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("completed");
+		expect(client.messageRequests.map((request) => request.model_name)).toEqual(
+			["gpt-5.5", "z-ai/glm-5.3"],
+		);
+		expect(client.messageRequests[1]).not.toHaveProperty("thinking");
+		expect(config.modelString).toBe("openrouter/z-ai/glm-5.3");
+		expect(
+			events.some(
+				(event) =>
+					event.type === "system:warning" &&
+					event.message.includes("retrying with openrouter/z-ai/glm-5.3"),
+			),
+		).toBeTrue();
+	});
+
+	it("never falls back to another model on a key-billed turn", async () => {
+		class KeyBilledCapacityClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async listModels(): Promise<ModelsListResponse> {
+				this.listModelsCount++;
+				return {
+					models: [
+						{
+							name: "z-ai/glm-5.3",
+							provider: "openrouter",
+							model_type: "llm",
+						},
+					],
+					total: 1,
+				};
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				yield { kind: "failed", error: "No endpoints found for gpt-5.5." };
+			}
+		}
+		const client = new KeyBilledCapacityClient();
+		const { ctrl, config, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+		config.setModel({ provider: "openai", model: "gpt-5.5" }, "byok");
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("failed");
+		// Only the key-billed model was ever asked for, only on the key's route,
+		// and no catalog was consulted for a substitute.
+		expect(
+			new Set(
+				client.messageRequests.map(
+					(request) => `${request.model_name}:${request.source}`,
+				),
+			),
+		).toEqual(new Set(["gpt-5.5:byok"]));
+		expect(client.listModelsCount).toBe(0);
+		expect(config.modelString).toBe("openai/gpt-5.5");
+		expect(
+			events.some(
+				(event) =>
+					event.type === "system:warning" &&
+					event.message.includes("retrying with"),
+			),
+		).toBeFalse();
+	}, 30_000);
+
+	it("retries with thinking off when a provider rejects thinking", async () => {
+		class ThinkingFallbackClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				if (req.thinking !== null) {
+					yield {
+						kind: "failed",
+						error: "Thinking is not supported for this model",
+					};
+					return;
+				}
+				yield { kind: "assistant_delta", text: "recovered" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new ThinkingFallbackClient();
+		const { ctrl, config } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+			["--thinking", "high"],
+		);
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("completed");
+		expect(client.messageRequests.map((request) => request.thinking)).toEqual([
+			{ effort: "high" },
+			null,
+		]);
+		expect(config.thinking).toBeNull();
+	});
+
+	it("retries retryable tool-output continuation failures without rerunning tools", async () => {
+		const toolStarts: string[] = [];
+		class RetryToolOutputClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				yield { kind: "thread", threadId: "thr_retry" };
+				yield {
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "call_1", name: "Echo", input: { value: "ok" } }],
+				};
+			}
+
+			override async *runToolOutputs(
+				req: SubmitToolOutputsRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.toolOutputRequests.push(req);
+				if (this.toolOutputRequests.length === 1) {
+					yield {
+						kind: "failed",
+						error: "Failed to continue streaming after tool outputs.",
+						retryable: true,
+					};
+					return;
+				}
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new RetryToolOutputClient();
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({
+				name: "Echo",
+				readOnly: true,
+				onStart: (name) => toolStarts.push(name),
+			}),
+		);
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("completed");
+		expect(client.toolOutputRequests).toHaveLength(2);
+		expect(toolStarts).toEqual(["Echo"]);
+	});
+
+	it("fails after the default retryable stream server retry budget", async () => {
+		class AlwaysRetryableFailureClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				yield {
+					kind: "failed",
+					error: "Upstream idle timeout exceeded",
+					retryable: true,
+				};
+			}
+		}
+		const client = new AlwaysRetryableFailureClient();
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("failed");
+		// Each silent turn attempt spends the stream's own retry budget.
+		expect(client.messageRequests).toHaveLength(
+			TURN_MAX_ATTEMPTS * (1 + DEFAULT_STREAM_SERVER_ERROR_RETRIES),
+		);
+	}, 30_000);
+
+	it("retries non-retryable stream failures only as whole turn attempts", async () => {
+		const client = new FakeClient(
+			[
+				{
+					kind: "failed",
+					error: "Backboard requested tool outputs without tool calls",
+				},
+			],
+			[],
+		);
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("failed");
+		expect(client.messageRequests).toHaveLength(TURN_MAX_ATTEMPTS);
+	});
+
+	it("recovers from a failed turn silently and keeps the original request", async () => {
+		class FailsOnceClient extends FakeClient {
+			failed = false;
+			constructor() {
+				super([], []);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				if (!this.failed) {
+					this.failed = true;
+					yield {
+						kind: "failed",
+						error: "Backboard requested tool outputs without tool calls",
+					};
+					return;
+				}
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new FailsOnceClient();
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("rename the widget");
+
+		expect(status).toBe("completed");
+		expect(client.messageRequests).toHaveLength(2);
+		expect(client.messageRequests[1]?.content).toContain(
+			"Request:\nrename the widget",
+		);
+		expect(events.some((event) => event.type === "run:error")).toBeFalse();
+		expect(
+			events.filter((event) => event.type === "turn:end").map((e) => e.status),
+		).toEqual(["completed"]);
+	});
+
+	it("does not retry a turn the account cannot pay for, and says why", async () => {
+		const blocked =
+			"We paused LLM chat — your balance is used up. Add credits on the Billing page (or turn on auto-reload) to top up and pick up right where you left off.";
+		const client = new FakeClient([{ kind: "failed", error: blocked }], []);
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("rename the widget");
+
+		expect({
+			status,
+			requests: client.messageRequests.length,
+			errors: events.filter((event) => event.type === "run:error"),
+		}).toEqual({
+			status: "failed",
+			requests: 1,
+			errors: [{ type: "run:error", error: blocked, actionable: true }],
+		});
+	});
+
+	it("starts a fresh thread when the server no longer has the session's", async () => {
+		class GoneThreadClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				if (req.thread_id === "thread_gone") {
+					throw new Error(
+						"Backboard request failed: HTTP 404: Thread not found",
+					);
+				}
+				yield { kind: "thread", threadId: "thread_new" };
+				yield { kind: "assistant_delta", text: "done" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new GoneThreadClient();
+		const { ctrl, events, session } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+		session.threadId = "thread_gone";
+
+		const status = await ctrl.submit("rename the widget");
+
+		expect({
+			status,
+			threads: client.messageRequests.map((request) => request.thread_id),
+			content: client.messageRequests[1]?.content,
+			threadId: session.threadId,
+			errors: events.filter((event) => event.type === "run:error"),
+		}).toEqual({
+			status: "completed",
+			threads: ["thread_gone", undefined],
+			content: "rename the widget",
+			threadId: "thread_new",
+			errors: [],
+		});
+	});
+
+	it("moves a turn the account cannot pay for onto a free model", async () => {
+		const blocked =
+			"You're out of credits, so we paused LLM chat. Add credits or start a subscription on the Billing page to jump right back in.";
+		class FreeFallbackClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+
+			override async listModels(): Promise<ModelsListResponse> {
+				this.listModelsCount++;
+				return {
+					models: [
+						{
+							name: "cohere/north-mini-code:free",
+							provider: "openrouter",
+							model_type: "llm",
+							input_cost_per_1m_tokens: 0,
+							output_cost_per_1m_tokens: 0,
+							supports_tools: true,
+						},
+					],
+					total: 1,
+				};
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				if (req.model_name !== "cohere/north-mini-code:free") {
+					yield { kind: "failed", error: blocked };
+					return;
+				}
+				yield { kind: "assistant_delta", text: "done for free" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new FreeFallbackClient();
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("rename the widget");
+
+		expect({
+			status,
+			models: client.messageRequests.map((request) => request.model_name),
+			errors: events.filter((event) => event.type === "run:error").length,
+			warned: events.some(
+				(event) =>
+					event.type === "system:warning" &&
+					event.message.includes("cohere/north-mini-code:free, a free model"),
+			),
+		}).toEqual({
+			status: "completed",
+			models: ["gpt-5.5", "cohere/north-mini-code:free"],
+			errors: 0,
+			warned: true,
+		});
+	});
+
+	it("queues prompts submitted while a turn is running", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const first = ctrl.submit("first");
+		const second = ctrl.submit("second");
+
+		expect(
+			events
+				.filter((event) => event.type === "user:message")
+				.map((event) => event.text),
+		).toEqual(["first"]);
+		await expect(Promise.all([first, second])).resolves.toEqual([
+			"completed",
+			"completed",
+		]);
+		expect(
+			events
+				.filter(
+					(event) =>
+						event.type === "user:message" || event.type === "assistant:message",
+				)
+				.map((event) =>
+					event.type === "user:message" ? `user:${event.text}` : "assistant",
+				),
+		).toEqual(["user:first", "assistant", "user:second", "assistant"]);
+		expect(client.messageRequests.map((request) => request.content)).toEqual([
+			"first",
+			"second",
+		]);
+		expect(client.messageRequests[1]?.thread_id).toBe("thr_1");
+	});
+
+	it("prioritizes steering prompts ahead of queued prompts", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Echo", input: {} }],
+				},
+			],
+			[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+		);
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true, delayMs: 100 }),
+		);
+
+		const first = ctrl.submit("first");
+		while (!events.some((event) => event.type === "tool:start")) {
+			await delay(1);
+		}
+		const queued = ctrl.submit("queued");
+		const steering = ctrl.steer("steer");
+
+		await expect(Promise.all([first, steering, queued])).resolves.toEqual([
+			"cancelled",
+			"completed",
+			"completed",
+		]);
+		expect(
+			client.messageRequests
+				.map((request) => request.content)
+				.filter((content) => !content.startsWith("Before finalizing")),
+		).toEqual(["first", "steer", "queued"]);
+		expect(
+			events
+				.filter((event) => event.type === "user:message")
+				.map((event) => event.text),
+		).toEqual(["first", "queued"]);
+	});
+
+	it("clears queued prompts on user cancellation", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Echo", input: {} }],
+				},
+			],
+			[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+		);
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true, delayMs: 100 }),
+		);
+
+		const first = ctrl.submit("first");
+		while (!events.some((event) => event.type === "tool:start")) {
+			await delay(1);
+		}
+		const queued = ctrl.submit("queued");
+		ctrl.cancel({ clearQueue: true });
+
+		await expect(Promise.all([first, queued])).resolves.toEqual([
+			"cancelled",
+			"cancelled",
+		]);
+		expect(client.messageRequests.map((request) => request.content)).toEqual([
+			"first",
+		]);
+		expect(
+			events
+				.filter((event) => event.type === "user:message")
+				.map((event) => event.text),
+		).toEqual(["first"]);
+	});
+
+	it("continues queued prompts after cancelling only the active turn", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Echo", input: {} }],
+				},
+			],
+			[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+		);
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true, delayMs: 100 }),
+		);
+
+		const first = ctrl.submit("first");
+		while (!events.some((event) => event.type === "tool:start")) {
+			await delay(1);
+		}
+		const queued = ctrl.submit("queued");
+		ctrl.cancel();
+
+		await expect(Promise.all([first, queued])).resolves.toEqual([
+			"cancelled",
+			"completed",
+		]);
+		expect(
+			client.messageRequests
+				.map((request) => request.content)
+				.filter((content) => !content.startsWith("Before finalizing")),
+		).toEqual(["first", "queued"]);
+		expect(
+			events
+				.filter((event) => event.type === "user:message")
+				.map((event) => event.text),
+		).toEqual(["first", "queued"]);
+	});
+
+	it("passes startup model, memory, thinking, profile, and tool filters to Backboard", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const config = new Config({
+			env,
+			argv: [
+				"--model",
+				"openai/gpt-5.5",
+				"--memory",
+				"auto",
+				"--memory-profile",
+				"coding",
+				"--thinking",
+				"high",
+				"--excluded-tools",
+				"Hidden",
+			],
+		});
+		const bus = new EventBus();
+		const session = new Session("sess_test");
+		const registry = new ToolRegistry([
+			new TestTool({ name: "Visible", readOnly: true }),
+			new TestTool({ name: "Hidden", readOnly: true }),
+		]);
+		const skillController = new SkillController({ cwd: config.cwd, bus });
+		const ctrl = new AgentController({
+			config,
+			bus,
+			session,
+			registry,
+			client: client as unknown as BackboardClient,
+			skillController,
+			permissions: TEST_PERMISSIONS,
+		});
+
+		await ctrl.submit("do it");
+
+		const req = client.messageRequests[0];
+		expect(req).toBeDefined();
+		if (!req) throw new Error("expected a message request");
+		expect(req.llm_provider).toBe("openai");
+		expect(req.model_name).toBe("gpt-5.5");
+		expect(req.memory).toBe("Auto");
+		expect(req.memory_profile).toBe("code");
+		expect(req.thinking).toEqual({ effort: "high" });
+		expect(req.system_prompt).toContain("You are Backboard");
+		expect(req.system_prompt).not.toContain("Model profile:");
+		expect(req.tools?.map((tool) => tool.function.name)).toEqual(["Visible"]);
+	});
+
+	it("resolves dynamic thinking before sending requests to Backboard", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const config = new Config({
+			env,
+			argv: ["--model", "openrouter/deepseek-r1", "--thinking", "dynamic"],
+		});
+		const bus = new EventBus();
+		const session = new Session("sess_test");
+		const registry = new ToolRegistry([
+			new TestTool({ name: "Visible", readOnly: true }),
+		]);
+		const skillController = new SkillController({ cwd: config.cwd, bus });
+		const ctrl = new AgentController({
+			config,
+			bus,
+			session,
+			registry,
+			client: client as unknown as BackboardClient,
+			skillController,
+			permissions: TEST_PERMISSIONS,
+		});
+
+		await ctrl.submit("do it");
+
+		const thinking = client.messageRequests[0]?.thinking;
+		expect(thinking).toEqual({
+			max_tokens: 4096,
+			exclude_reasoning: false,
+		});
+		expect(client.modelThinkingMetadataCount).toBe(1);
+		expect(client.listModelsCount).toBe(0);
+	});
+
+	it("sends dynamic thinking overrides on tool continuations", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Echo", input: {} }],
+				},
+			],
+			[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+		);
+		const config = new Config({
+			env,
+			argv: ["--model", "openai/gpt-5.5", "--thinking", "dynamic"],
+		});
+		const bus = new EventBus();
+		const session = new Session("sess_test");
+		const registry = new ToolRegistry([
+			new TestTool({ name: "Echo", readOnly: true }),
+		]);
+		const skillController = new SkillController({ cwd: config.cwd, bus });
+		const ctrl = new AgentController({
+			config,
+			bus,
+			session,
+			registry,
+			client: client as unknown as BackboardClient,
+			skillController,
+			permissions: TEST_PERMISSIONS,
+		});
+
+		await ctrl.submit("do it");
+
+		expect(client.messageRequests[0]?.thinking).toEqual({ effort: "medium" });
+		expect(client.toolOutputRequests[0]?.thinking).toEqual({
+			effort: "low",
+		});
+		expect(client.modelThinkingMetadataCount).toBe(1);
+		expect(client.listModelsCount).toBe(0);
+	});
+
+	it("resends visible static thinking on tool continuations", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Echo", input: {} }],
+				},
+			],
+			[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+		);
+		const config = new Config({
+			env,
+			argv: ["--model", "openrouter/deepseek", "--thinking", "high"],
+		});
+		const bus = new EventBus();
+		const session = new Session("sess_test");
+		const registry = new ToolRegistry([
+			new TestTool({ name: "Echo", readOnly: true }),
+		]);
+		const skillController = new SkillController({ cwd: config.cwd, bus });
+		const ctrl = new AgentController({
+			config,
+			bus,
+			session,
+			registry,
+			client: client as unknown as BackboardClient,
+			skillController,
+			permissions: TEST_PERMISSIONS,
+		});
+
+		await ctrl.submit("do it");
+
+		const expected = { max_tokens: 8192, exclude_reasoning: false };
+		expect(client.messageRequests[0]?.thinking).toEqual(expected);
+		expect(client.toolOutputRequests[0]?.thinking).toEqual(expected);
+	});
+
+	it("resends thinking off on tool continuations", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Echo", input: {} }],
+				},
+			],
+			[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+		);
+		const config = new Config({
+			env,
+			argv: ["--model", "openai/gpt-5.5", "--thinking", "off"],
+		});
+		const bus = new EventBus();
+		const session = new Session("sess_test");
+		const registry = new ToolRegistry([
+			new TestTool({ name: "Echo", readOnly: true }),
+		]);
+		const skillController = new SkillController({ cwd: config.cwd, bus });
+		const ctrl = new AgentController({
+			config,
+			bus,
+			session,
+			registry,
+			client: client as unknown as BackboardClient,
+			skillController,
+			permissions: TEST_PERMISSIONS,
+		});
+
+		await ctrl.submit("do it");
+
+		expect(client.messageRequests[0]?.thinking).toBeNull();
+		expect(client.toolOutputRequests[0]?.thinking).toBeNull();
+	});
+
+	it("keeps mechanical failures at low effort across repeated rounds", async () => {
+		class MultiRoundClient extends FakeClient {
+			private round = 0;
+
+			constructor() {
+				super([], []);
+			}
+
+			override async *runMessage(
+				req: SendMessageRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				yield { kind: "thread", threadId: "thr_1" };
+				yield {
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: "c1", name: "Fail", input: {} }],
+				};
+			}
+
+			override async *runToolOutputs(
+				req: SubmitToolOutputsRequest,
+			): AsyncIterable<ProviderEvent> {
+				this.toolOutputRequests.push(req);
+				this.round++;
+				const next = [
+					{ id: "c2", name: "Fail" },
+					{ id: "c3", name: "Echo" },
+					{ id: "c4", name: "Fail" },
+					{ id: "c5", name: "Fail" },
+				][this.round - 1];
+				if (!next) {
+					yield { kind: "assistant_delta", text: "done" };
+					yield { kind: "completed" };
+					return;
+				}
+				yield {
+					kind: "requires_action",
+					runId: "run_1",
+					calls: [{ id: next.id, name: next.name, input: {} }],
+				};
+			}
+		}
+
+		const client = new MultiRoundClient();
+		const config = new Config({
+			env,
+			argv: ["--model", "openai/gpt-5.5", "--thinking", "dynamic"],
+		});
+		const bus = new EventBus();
+		const session = new Session("sess_test");
+		const registry = new ToolRegistry([
+			new TestTool({ name: "Fail", readOnly: true, throws: true }),
+			new TestTool({ name: "Echo", readOnly: true }),
+		]);
+		const skillController = new SkillController({ cwd: config.cwd, bus });
+		const ctrl = new AgentController({
+			config,
+			bus,
+			session,
+			registry,
+			client: client as unknown as BackboardClient,
+			skillController,
+			permissions: TEST_PERMISSIONS,
+		});
+
+		await ctrl.submit("do it");
+
+		expect(client.toolOutputRequests.map((req) => req.thinking)).toEqual([
+			{ effort: "low" },
+			{ effort: "low" },
+			{ effort: "low" },
+			{ effort: "low" },
+			{ effort: "low" },
+		]);
+	});
+
+	it("keeps the backend thread when the assistant shape is unchanged", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		await ctrl.submit("first");
+		await ctrl.submit("second");
+
+		expect(client.assistantRequests.length).toBe(1);
+		expect(client.messageRequests[0]?.thread_id).toBeUndefined();
+		expect(client.messageRequests[1]?.thread_id).toBe("thr_1");
+		expect(client.messageRequests[1]?.assistant_id).toBe("asst_1");
+	});
+
+	it("loads skill instructions only after explicit skill loading", async () => {
+		const root = await tempDir();
+		await writeSkill(root, "docs", "doc skill", "docs body");
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const config = new Config({ env, argv: ["--cwd", root] });
+		const bus = new EventBus();
+		const session = new Session("sess_test");
+		const registry = new ToolRegistry([
+			new TestTool({ name: "Visible", readOnly: true }),
+		]);
+		const skillController = new SkillController({ cwd: config.cwd, bus });
+		const ctrl = new AgentController({
+			config,
+			bus,
+			session,
+			registry,
+			client: client as unknown as BackboardClient,
+			skillController,
+			permissions: TEST_PERMISSIONS,
+		});
+
+		await ctrl.submit("$docs use it");
+		const beforeLoad = client.messageRequests[0];
+		expect(beforeLoad).toBeDefined();
+		if (!beforeLoad) throw new Error("expected a message request");
+		expect(beforeLoad.system_prompt).not.toContain("# Skill: docs");
+		expect(beforeLoad.assistant_id).toBe("asst_1");
+
+		const tabs = await skillController.listSkillTabs();
+		const repoTab = tabs.find((tab) => tab.id === "repo");
+		const item = repoTab?.items.find((skill) => skill.name === "docs");
+		expect(item).toBeDefined();
+		if (!item) throw new Error("expected docs skill");
+		expect(item.active).toBe(false);
+		expect(item.description).toBe("doc skill");
+		expect(item.source).toBe("repo");
+		const personalTab = tabs.find((tab) => tab.id === "personal");
+		expect(personalTab?.items.some((skill) => skill.name === "docs")).toBe(
+			false,
+		);
+		const loadResult = await skillController.selectSkill(item);
+		expect(loadResult.selectedName).toBe("docs");
+		expect(loadResult.action).toBe("activated");
+		const tabsAfterLoad = await skillController.listSkillTabs();
+		expect(
+			tabsAfterLoad
+				.find((tab) => tab.id === "repo")
+				?.items.find((skill) => skill.name === "docs")?.active,
+		).toBe(true);
+
+		await ctrl.submit("$docs use it");
+
+		const req = client.messageRequests[1];
+		expect(req).toBeDefined();
+		if (!req) throw new Error("expected a message request");
+		expect(req.assistant_id).toBe("asst_1");
+		expect(req.thread_id).toBe("thr_1");
+		expect(req.content).toBe("$docs use it");
+		expect(req.system_prompt).toContain("- docs: doc skill");
+		expect(req.system_prompt).toContain("# Skill: docs");
+		expect(req.system_prompt).toContain("docs body");
+		expect(req.tools?.map((tool) => tool.function.name)).toEqual(["Visible"]);
+		expect(client.assistantRequests.length).toBe(1);
+
+		await ctrl.submit("continue");
+
+		const afterActivation = client.messageRequests[2];
+		expect(afterActivation).toBeDefined();
+		if (!afterActivation) throw new Error("expected a message request");
+		expect(afterActivation.assistant_id).toBe("asst_1");
+		expect(afterActivation.thread_id).toBe("thr_1");
+		expect(afterActivation.system_prompt).toContain("- docs: doc skill");
+		expect(afterActivation.system_prompt).not.toContain("# Skill: docs");
+		// Real skill filesystem I/O across three turns runs close to the default
+		// 5s budget under full-file load; give it headroom to avoid a flake.
+	}, 20_000);
+
+	it("transfers compaction ownership for locally stored threads, not Backboard ones", async () => {
+		const replacements: Array<string | null> = [];
+		const backboard = new FakeClient([], []);
+		const first = controllerWith(
+			backboard,
+			new TestTool({ name: "Echo" }),
+			[],
+			{ onThreadReplaced: (threadId) => replacements.push(threadId) },
+		);
+		first.session.threadId = "thread_backboard";
+		first.session.addMessage(userMessage("one"));
+		first.session.addMessage(assistantMessage("two"));
+		first.session.addMessage(userMessage("three"));
+		first.session.addMessage(assistantMessage("four"));
+		await first.ctrl.compact();
+
+		const byok = new FakeClient([], []);
+		byok.threadSource = "byok";
+		const second = controllerWith(byok, new TestTool({ name: "Echo" }), [], {
+			onThreadReplaced: (threadId) => replacements.push(threadId),
+		});
+		second.session.threadId = "byok_previous";
+		second.session.addMessage(userMessage("one"));
+		second.session.addMessage(assistantMessage("two"));
+		second.session.addMessage(userMessage("three"));
+		second.session.addMessage(assistantMessage("four"));
+		await second.ctrl.compact();
+
+		const subscription = new FakeClient([], []);
+		subscription.threadSource = "subscription";
+		const third = controllerWith(
+			subscription,
+			new TestTool({ name: "Echo" }),
+			[],
+			{ onThreadReplaced: (threadId) => replacements.push(threadId) },
+		);
+		third.session.threadId = "claude_sub_previous";
+		third.session.addMessage(userMessage("one"));
+		third.session.addMessage(assistantMessage("two"));
+		third.session.addMessage(userMessage("three"));
+		third.session.addMessage(assistantMessage("four"));
+		await third.ctrl.compact();
+
+		expect(replacements).toEqual([
+			null,
+			"byok_previous",
+			"claude_sub_previous",
+		]);
+	});
+
+	it("cancels an in-flight turn", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_2" },
+				{
+					kind: "requires_action",
+					runId: "run_2",
+					calls: [{ id: "c1", name: "Slow", input: {} }],
+				},
+			],
+			[{ kind: "completed" }],
+		);
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Slow", readOnly: false, delayMs: 100 }),
+		);
+
+		const promise = ctrl.submit("long task");
+		setTimeout(() => ctrl.cancel(), 20);
+		const status = await promise;
+
+		expect(status).toBe("cancelled");
+		expect(events.map((e) => e.type)).toContain("turn:cancelled");
+	});
+
+	it("preserves a synthetic tool result when cancellation interrupts execution", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "byok_tool_cancel" },
+				{
+					kind: "tool_ready",
+					call: { id: "call_1", name: "SlowWrite", input: {} },
+				},
+				{
+					kind: "requires_action",
+					runId: null,
+					calls: [{ id: "call_1", name: "SlowWrite", input: {} }],
+				},
+			],
+			[],
+		);
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "SlowWrite", readOnly: false, delayMs: 100 }),
+		);
+
+		const promise = ctrl.submit("run the slow write");
+		setTimeout(() => ctrl.cancel(), 20);
+
+		expect(await promise).toBe("cancelled");
+		expect(client.preservedToolOutputRequests).toHaveLength(1);
+		expect(
+			client.preservedToolOutputRequests[0]?.tool_outputs[0]?.output,
+		).toContain("interrupted");
+	});
+
+	it("keeps completed tool outputs when a later tool is interrupted", async () => {
+		const calls = [
+			{ id: "call_fast", name: "FastWrite", input: {} },
+			{ id: "call_slow", name: "SlowWrite", input: {} },
+		];
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "byok_partial_tool_cancel" },
+				{ kind: "tool_ready", call: calls[0] as (typeof calls)[number] },
+				{ kind: "tool_ready", call: calls[1] as (typeof calls)[number] },
+				{ kind: "requires_action", runId: null, calls },
+			],
+			[],
+		);
+		const { ctrl } = controllerWith(client, [
+			new TestTool({ name: "FastWrite", readOnly: false }),
+			new TestTool({ name: "SlowWrite", readOnly: false, delayMs: 100 }),
+		]);
+
+		const promise = ctrl.submit("run both writes");
+		setTimeout(() => ctrl.cancel(), 30);
+
+		expect(await promise).toBe("cancelled");
+		const outputs = client.preservedToolOutputRequests[0]?.tool_outputs ?? [];
+		expect(outputs).toHaveLength(2);
+		expect(outputs[0]?.output).not.toContain("interrupted");
+		expect(outputs[1]?.output).toContain("interrupted");
+	});
+
+	it("cancels while resolving the assistant", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		client.listAssistantsDelayMs = 100;
+		const { ctrl, events } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const promise = ctrl.submit("stop early");
+		setTimeout(() => ctrl.cancel(), 20);
+		const status = await promise;
+
+		expect(status).toBe("cancelled");
+		expect(client.messageRequests).toEqual([]);
+		expect(client.assistantRequests).toEqual([]);
+		expect(events.map((e) => e.type)).toContain("turn:cancelled");
+	});
+
+	it("keeps the Backboard thread while changing per-turn tool overrides", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const config = new Config({ env, argv: [] });
+		const bus = new EventBus();
+		const session = new Session("sess_test");
+		const registry = new ToolRegistry([
+			new TestTool({ name: "Visible" }),
+			new TestTool({ name: "Computer" }),
+		]);
+		const skillController = new SkillController({ cwd: config.cwd, bus });
+		const ctrl = new AgentController({
+			config,
+			bus,
+			session,
+			registry,
+			client: client as unknown as BackboardClient,
+			skillController,
+			permissions: TEST_PERMISSIONS,
+		});
+
+		await ctrl.submit("first");
+		config.enableComputerUse();
+		await ctrl.submit("second");
+
+		expect(client.messageRequests[0]?.thread_id).toBeUndefined();
+		expect(client.messageRequests[1]?.thread_id).toBe("thr_1");
+		expect(client.messageRequests[1]?.assistant_id).toBe("asst_1");
+		expect(client.messageRequests[1]?.content).toBe("second");
+		expect(
+			client.messageRequests[1]?.tools?.map((tool) => tool.function.name),
+		).toEqual(["Visible", "computer"]);
+		expect(client.assistantRequests.length).toBe(1);
+	});
+
+	it("syncs dynamic MCP tools before building per-turn tool overrides", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const config = new Config({ env, argv: [] });
+		const bus = new EventBus();
+		const session = new Session("sess_test");
+		const registry = new ToolRegistry([
+			new TestTool({ name: "Visible", readOnly: true }),
+		]);
+		const skillController = new SkillController({ cwd: config.cwd, bus });
+		const ctrl = new AgentController({
+			config,
+			bus,
+			session,
+			registry,
+			client: client as unknown as BackboardClient,
+			skillController,
+			syncDynamicTools: async () => {
+				if (!registry.has("mcp__dynamic__new_tool")) {
+					registry.register(
+						new TestTool({ name: "mcp__dynamic__new_tool", readOnly: true }),
+					);
+				}
+			},
+			permissions: TEST_PERMISSIONS,
+		});
+
+		await ctrl.submit("use the current tools");
+
+		expect(
+			client.messageRequests[0]?.tools?.map((tool) => tool.function.name),
+		).toEqual(["Visible", "mcp__dynamic__new_tool"]);
+		const assistantTools = client.assistantRequests[0]?.tools as
+			| Array<{ function: { name: string } }>
+			| undefined;
+		expect(assistantTools?.map((tool) => tool.function.name)).toEqual([
+			"Visible",
+		]);
+	});
+
+	it("enables Browser lazily and disposes it after a turn", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const config = new Config({ env, argv: [] });
+		const bus = new EventBus();
+		const session = new Session("sess_test");
+		const browser = new DisposableTool("Browser");
+		const registry = new ToolRegistry([browser]);
+		const skillController = new SkillController({ cwd: config.cwd, bus });
+		const ctrl = new AgentController({
+			config,
+			bus,
+			session,
+			registry,
+			client: client as unknown as BackboardClient,
+			skillController,
+			permissions: TEST_PERMISSIONS,
+		});
+
+		ctrl.enableBrowserUse();
+		expect(config.isBrowserUseEnabled).toBe(true);
+		expect(browser.disposeCount).toBe(0);
+
+		await ctrl.submit("do it");
+
+		expect(browser.disposeCount).toBe(1);
+		expect(client.assistantRequests[0]?.system_prompt).not.toContain(
+			"- Browser:",
+		);
+		expect(client.assistantRequests[0]?.tools).toEqual([]);
+		expect(client.messageRequests[0]?.system_prompt).toContain("- Browser:");
+		expect(
+			client.messageRequests[0]?.tools?.map((tool) => tool.function.name),
+		).toEqual(["browser"]);
+	});
+
+	it("reports cleanup failures without leaving the controller running", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const config = new Config({ env, argv: [] });
+		const bus = new EventBus();
+		const events: AgentEvent[] = [];
+		bus.onAny((event) => events.push(event));
+		const session = new Session("sess_test");
+		const tool = new DisposableTool("Cleanup", new Error("dispose failed"));
+		const registry = new ToolRegistry([tool]);
+		const skillController = new SkillController({ cwd: config.cwd, bus });
+		const ctrl = new AgentController({
+			config,
+			bus,
+			session,
+			registry,
+			client: client as unknown as BackboardClient,
+			skillController,
+			permissions: TEST_PERMISSIONS,
+		});
+
+		const status = await ctrl.submit("do it");
+
+		expect(status).toBe("completed");
+		expect(ctrl.isRunning).toBe(false);
+		expect(events).toContainEqual({
+			type: "run:error",
+			error: "Tool cleanup failed for Cleanup: dispose failed",
+		});
+	});
+});
+
+describe("AgentController attachment file paths", () => {
+	it("puts the staged file paths on the first run request only", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("do it", {
+			attachmentFilePaths: ["/tmp/a.png", "/tmp/b.pdf"],
+		});
+
+		expect(status).toBe("completed");
+		expect(client.messageAttachmentPaths[0]).toEqual([
+			"/tmp/a.png",
+			"/tmp/b.pdf",
+		]);
+		expect(client.messageRequests[0]).not.toHaveProperty(
+			"attachment_file_paths",
+		);
+	});
+
+	it("keeps attachments off nudge and tool-round requests", async () => {
+		class ToolThenNudgeClient extends FakeClient {
+			constructor() {
+				super(
+					[],
+					[{ kind: "assistant_delta", text: "done" }, { kind: "completed" }],
+				);
+			}
+			override async *runMessage(
+				req: SendMessageRequest,
+				options?: { attachmentFilePaths?: string[] },
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				this.messageAttachmentPaths.push(options?.attachmentFilePaths);
+				if (this.messageRequests.length === 1) {
+					yield { kind: "thread", threadId: "thr_1" };
+					yield {
+						kind: "requires_action",
+						runId: "run_1",
+						calls: Array.from({ length: 1 }, (_, index) => ({
+							id: `c${index + 1}`,
+							name: "Echo",
+							input: {},
+						})),
+					};
+					return;
+				}
+				yield { kind: "assistant_delta", text: "verified" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new ToolThenNudgeClient();
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: false }),
+			["--final-verification"],
+		);
+
+		await ctrl.submit("do it", { attachmentFilePaths: ["/tmp/a.png"] });
+
+		expect(client.messageRequests).toHaveLength(2);
+		// First request carries the files; the nudge (second) must not.
+		expect(client.messageAttachmentPaths[0]).toEqual(["/tmp/a.png"]);
+		expect(client.messageAttachmentPaths[1]).toBeUndefined();
+	});
+
+	it("resends the files on a transport retry, matching the resent content", async () => {
+		class RetryMessageClient extends FakeClient {
+			constructor() {
+				super([], []);
+			}
+			override async *runMessage(
+				req: SendMessageRequest,
+				options?: { attachmentFilePaths?: string[] },
+			): AsyncIterable<ProviderEvent> {
+				this.onRunMessage?.();
+				this.messageRequests.push(req);
+				this.messageAttachmentPaths.push(options?.attachmentFilePaths);
+				if (this.messageRequests.length === 1) {
+					yield {
+						kind: "failed",
+						error: "Upstream idle timeout exceeded",
+						retryable: true,
+					};
+					return;
+				}
+				yield { kind: "thread", threadId: "thr_retry" };
+				yield { kind: "assistant_delta", text: "recovered" };
+				yield { kind: "completed" };
+			}
+		}
+		const client = new RetryMessageClient();
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		const status = await ctrl.submit("do it", {
+			attachmentFilePaths: ["/tmp/a.png"],
+		});
+
+		expect(status).toBe("completed");
+		expect(client.messageAttachmentPaths).toEqual([
+			["/tmp/a.png"],
+			["/tmp/a.png"],
+		]);
+	});
+
+	it("treats an empty path list as no attachments", async () => {
+		const client = new FakeClient(
+			[
+				{ kind: "thread", threadId: "thr_1" },
+				{ kind: "assistant_delta", text: "done" },
+				{ kind: "completed" },
+			],
+			[],
+		);
+		const { ctrl } = controllerWith(
+			client,
+			new TestTool({ name: "Echo", readOnly: true }),
+		);
+
+		await ctrl.submit("do it", { attachmentFilePaths: [] });
+
+		expect(client.messageAttachmentPaths[0]).toBeUndefined();
+	});
+});
+
+async function tempDir(): Promise<string> {
+	return mkdtemp(path.join(os.tmpdir(), "cli-agent-"));
+}
+
+async function writeSkill(
+	root: string,
+	name: string,
+	description: string,
+	body: string,
+): Promise<void> {
+	const dir = path.join(root, ".agents", "skills", name);
+	await mkdir(dir, { recursive: true });
+	await writeFile(
+		path.join(dir, "SKILL.md"),
+		`---
+name: ${name}
+description: ${description}
+---
+${body}
+`,
+	);
+}

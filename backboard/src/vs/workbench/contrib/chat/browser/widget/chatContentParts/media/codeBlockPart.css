@@ -1,0 +1,289 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+
+.interactive-result-code-block {
+	position: relative;
+}
+
+.interactive-result-code-block .interactive-result-code-block-toolbar {
+	opacity: 0;
+	pointer-events: none;
+}
+
+.interactive-result-code-block .interactive-result-code-block-toolbar > .monaco-action-bar,
+.interactive-result-code-block .interactive-result-code-block-toolbar > .monaco-toolbar {
+	position: absolute;
+	top: -15px;
+	height: 26px;
+	line-height: 26px;
+	background-color: var(--vscode-interactive-result-editor-background-color, var(--vscode-editor-background));
+	border: 1px solid var(--vscode-chat-requestBorder);
+	border-radius: var(--vscode-cornerRadius-medium);
+	z-index: 100;
+	max-width: 70%;
+	text-overflow: ellipsis;
+	overflow: hidden;
+}
+
+.interactive-result-code-block .interactive-result-code-block-toolbar > .monaco-action-bar {
+	left: 0px
+}
+
+.interactive-result-code-block .interactive-result-code-block-toolbar > .monaco-toolbar {
+	right: 10px;
+}
+
+.interactive-result-code-block .monaco-toolbar .action-item {
+	height: 24px;
+	width: 24px;
+	margin: 1px 2px;
+}
+
+.interactive-result-code-block .monaco-toolbar .action-item .codicon {
+	margin: 1px;
+}
+
+/* Toolbars use ul/li elements, but must not inherit the surrounding Markdown
+ * list spacing: it pushes the actions below the code block's header rail. */
+.interactive-result-code-block .interactive-result-code-block-toolbar .monaco-action-bar .actions-container {
+	margin: 0 !important;
+	padding: 0 !important;
+	list-style: none;
+}
+
+.interactive-result-code-block .interactive-result-code-block-toolbar .monaco-action-bar .action-item {
+	margin: 1px 2px !important;
+	padding: 0 !important;
+}
+
+.interactive-result-code-block:hover .interactive-result-code-block-toolbar,
+.interactive-result-code-block .interactive-result-code-block-toolbar:focus-within,
+.interactive-result-code-block.focused .interactive-result-code-block-toolbar {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.interactive-result-code-block .interactive-result-code-block-toolbar.force-visibility {
+	opacity: 1 !important;
+	pointer-events: auto !important;
+}
+
+/* Backboard code blocks use a real header rail. Keeping actions in flow means
+ * the first command line remains fully readable, and constraining the editor as
+ * a flex child lets Monaco own horizontal scrolling for long, unwrapped lines. */
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare):has(> .interactive-result-code-block-toolbar) {
+	display: flex;
+	min-width: 0;
+	overflow: hidden;
+	flex-direction: column;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-editor {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-code-block-toolbar {
+	position: static !important;
+	top: auto !important;
+	right: auto !important;
+	z-index: auto !important;
+	box-sizing: border-box;
+	display: flex;
+	order: -1;
+	width: 100% !important;
+	min-height: 28px;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 4px 0 10px !important;
+	opacity: 1 !important;
+	pointer-events: auto;
+	background: var(--vscode-interactive-result-editor-background-color, var(--vscode-editor-background)) !important;
+	border-bottom: 1px solid var(--vscode-chat-requestBorder);
+	border-radius: 0 !important;
+	box-shadow: none !important;
+	transition: none !important;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-code-block-toolbar::before {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground);
+	content: attr(data-language-id);
+	font-size: 11px;
+	line-height: 18px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-code-block-toolbar > .monaco-action-bar,
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-code-block-toolbar > .monaco-toolbar {
+	position: static !important;
+	top: auto !important;
+	right: auto !important;
+	height: 26px;
+	max-width: none;
+	flex: 0 0 auto;
+	opacity: 0;
+	overflow: visible;
+	pointer-events: none;
+	background: transparent;
+	border: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare):hover > .interactive-result-code-block-toolbar > :is(.monaco-action-bar, .monaco-toolbar),
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare).focused > .interactive-result-code-block-toolbar > :is(.monaco-action-bar, .monaco-toolbar),
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-code-block-toolbar:focus-within > :is(.monaco-action-bar, .monaco-toolbar),
+.monaco-workbench .backboard-clean-chat .interactive-result-code-block:not(.compare) > .interactive-result-code-block-toolbar.force-visibility > :is(.monaco-action-bar, .monaco-toolbar) {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.interactive-item-container .value .rendered-markdown [data-code] {
+	margin: 0 0 16px 0;
+}
+
+.interactive-session .interactive-request .interactive-result-code-block {
+	border: 1px solid var(--vscode-chat-requestCodeBorder);
+}
+
+.interactive-session .interactive-response .interactive-result-code-block {
+	border: 1px solid var(--vscode-input-border, transparent);
+	background-color: var(--vscode-interactive-result-editor-background-color);
+}
+
+.interactive-result-code-block:has(.monaco-editor.focused) {
+	border-color: var(--vscode-focusBorder, transparent);
+}
+
+.interactive-result-code-block,
+.interactive-result-code-block .monaco-editor,
+.interactive-result-code-block .monaco-editor .overflow-guard {
+	border-radius: var(--vscode-cornerRadius-medium);
+}
+
+.interactive-result-code-block .interactive-result-vulns {
+	font-size: 0.9em;
+	padding: 0px 8px 2px 8px;
+}
+
+.interactive-result-code-block .interactive-result-vulns-header {
+	display: flex;
+	height: 22px;
+}
+
+.interactive-result-code-block .interactive-result-vulns-header,
+.interactive-result-code-block .interactive-result-vulns-list {
+	opacity: 0.8;
+}
+
+.interactive-result-code-block .interactive-result-vulns-list {
+	margin: 0px;
+	padding-bottom: 3px;
+	padding-left: 16px !important; /* Override markdown styles */
+}
+
+.interactive-result-code-block.chat-vulnerabilities-collapsed .interactive-result-vulns-list {
+	display: none;
+}
+
+.interactive-result-code-block .interactive-result-vulns-list .chat-vuln-title {
+	font-weight: bold;
+}
+
+.interactive-result-code-block.no-vulns .interactive-result-vulns {
+	display: none;
+}
+
+.interactive-result-code-block .interactive-result-vulns-header .monaco-button {
+	/* unset Button styles */
+	display: inline-flex;
+	width: 100%;
+	border: none;
+	padding: 0;
+	text-align: initial;
+	justify-content: initial;
+	color: var(--vscode-foreground) !important; /* This is inside .rendered-markdown */
+	user-select: none;
+}
+
+.interactive-result-code-block .interactive-result-vulns-header .monaco-text-button:focus {
+	outline: none;
+}
+
+.interactive-result-code-block .interactive-result-vulns-header .monaco-text-button:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+}
+
+/* compare code block */
+
+.interactive-result-code-block.compare.no-diff .message {
+	display: inherit;
+}
+
+.interactive-result-code-block.compare .message {
+	display: none;
+	padding: 6px;
+}
+
+
+.interactive-result-code-block.compare .message A {
+	color: var(--vscode-textLink-foreground);
+	cursor: pointer;
+}
+
+.interactive-result-code-block.compare .message A > CODE {
+	color: var(--vscode-textLink-foreground);
+}
+
+.interactive-result-code-block.compare {
+	& .interactive-result-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 0 3px;
+		box-sizing: border-box;
+		border-bottom: solid 1px var(--vscode-chat-requestBorder);
+
+		& .monaco-icon-label {
+			flex: 1;
+			min-width: 0;
+
+			& > .monaco-icon-label-container {
+				display: flex;
+				align-items: baseline;
+
+				& > .monaco-icon-name-container {
+					flex-shrink: 0;
+
+					& > .label-name {
+						white-space: nowrap;
+					}
+				}
+
+				& > .monaco-icon-description-container {
+					min-width: 0;
+					flex: 1;
+
+					& > .label-description {
+						white-space: nowrap;
+						overflow: hidden;
+						text-overflow: ellipsis;
+						display: block;
+					}
+				}
+			}
+		}
+	}
+
+	&.no-diff {
+		& .interactive-result-header,
+		& .interactive-result-editor {
+			display: none;
+		}
+	}
+}

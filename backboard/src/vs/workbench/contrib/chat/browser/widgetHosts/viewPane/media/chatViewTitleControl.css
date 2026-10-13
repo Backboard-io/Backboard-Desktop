@@ -1,0 +1,249 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.chat-viewpane {
+
+	.chat-view-title-container {
+		display: none;
+		cursor: pointer;
+		flex-shrink: 0;
+		height: 32px;
+		border-bottom: 1px solid var(--vscode-panel-border);
+		background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+
+		.chat-view-title-inner {
+			display: flex;
+			align-items: center;
+			gap: 0;
+			height: 100%;
+			width: 100%;
+			padding: 0;
+			box-sizing: border-box;
+		}
+
+		.chat-view-title-tabs {
+			display: flex;
+			align-items: center;
+			gap: 4px;
+			min-width: 0;
+			flex: 1 1 auto;
+			overflow-x: auto;
+			overflow-y: hidden;
+			height: 100%;
+			padding: 4px 8px;
+			overscroll-behavior-x: contain;
+			scroll-behavior: smooth;
+			scrollbar-width: none;
+			mask-image: linear-gradient(to right, #000 calc(100% - 96px), transparent);
+			-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 96px), transparent);
+		}
+
+		.chat-view-title-tabs::-webkit-scrollbar {
+			display: none;
+		}
+
+		.chat-view-title-tab {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			height: 24px;
+			width: 136px;
+			min-width: 112px;
+			max-width: 160px;
+			padding: 0 6px 0 10px;
+			border: none;
+			border-radius: 5px;
+			color: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground));
+			background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+			cursor: pointer;
+			font: inherit;
+			box-sizing: border-box;
+			flex: 0 0 136px;
+			position: relative;
+			transition: background-color 80ms linear, color 80ms linear, box-shadow 80ms linear;
+		}
+
+		.chat-view-title-tab + .chat-view-title-tab {
+			margin-left: 0;
+		}
+
+		.chat-view-title-tab:hover {
+			color: var(--vscode-tab-hoverForeground, var(--vscode-foreground));
+			background: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 62%, transparent);
+		}
+
+		.chat-view-title-tab-active {
+			color: var(--vscode-tab-activeForeground, var(--vscode-foreground));
+			background: var(--vscode-tab-activeBackground, var(--vscode-sideBar-background, var(--vscode-editor-background)));
+			box-shadow: inset 0 2px 0 var(--vscode-focusBorder);
+		}
+
+		.chat-view-title-tab-status {
+			display: flex;
+			align-items: center;
+			flex: 0 0 auto;
+			margin-right: 4px;
+			font-size: 12px;
+			opacity: 0.8;
+		}
+
+		.chat-view-title-tab-label {
+			overflow: hidden;
+			white-space: nowrap;
+			text-overflow: ellipsis;
+			min-width: 0;
+			font-size: 12px;
+			font-weight: 500;
+			line-height: 16px;
+			letter-spacing: 0;
+		}
+
+		.chat-view-title-tab-close {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 16px;
+			height: 16px;
+			margin-left: auto;
+			border-radius: 4px;
+			color: var(--vscode-descriptionForeground);
+			font-size: 10px;
+			flex: 0 0 auto;
+			opacity: 0.48;
+		}
+
+		.chat-view-title-tab:hover .chat-view-title-tab-close,
+		.chat-view-title-tab-active .chat-view-title-tab-close {
+			opacity: 0.78;
+		}
+
+		.chat-view-title-tab-close:hover {
+			color: var(--vscode-foreground);
+			background: var(--vscode-toolbar-hoverBackground);
+			opacity: 1;
+		}
+
+		.chat-view-title-back {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			flex: 0 0 auto;
+			width: 22px;
+			height: 24px;
+			padding: 0;
+			border: none;
+			border-radius: 5px;
+			background: transparent;
+			color: var(--vscode-descriptionForeground);
+			cursor: pointer;
+		}
+
+		.chat-view-title-back:hover {
+			background: var(--vscode-toolbar-hoverBackground);
+			color: var(--vscode-foreground);
+		}
+
+		.chat-view-title-back-icon {
+			font-size: 14px;
+		}
+
+		.chat-view-title-navigation-toolbar {
+			display: none;
+			overflow: hidden;
+
+			.chat-view-title-action-item {
+				flex: 1 1 auto;
+				min-width: 0;
+
+				.chat-view-title-label-container {
+					display: flex;
+					gap: 4px;
+				}
+			}
+		}
+
+		.chat-view-title-label {
+			text-transform: uppercase;
+			font-size: 11px;
+			font-weight: 700;
+			line-height: 16px;
+			display: block;
+			overflow: hidden;
+			white-space: nowrap;
+			text-overflow: ellipsis;
+			min-width: 0;
+		}
+
+		.chat-view-title-actions-toolbar {
+			display: none;
+			margin-left: auto;
+			padding: 0 6px 0 2px;
+			flex-shrink: 0;
+		}
+
+		.chat-view-title-actions-toolbar .monaco-toolbar {
+			height: 100%;
+		}
+
+		.chat-view-title-actions-toolbar .actions-container {
+			height: 100%;
+			align-items: center;
+		}
+
+		.chat-view-title-actions-toolbar .action-label {
+			color: var(--vscode-descriptionForeground);
+		}
+
+		.chat-view-title-actions-toolbar .action-label:hover {
+			color: var(--vscode-foreground);
+			background: var(--vscode-toolbar-hoverBackground);
+		}
+	}
+
+	.chat-view-title-container.visible {
+		display: block;
+	}
+}
+
+/*
+ * Below is a very complicated set of CSS rules that try to align the
+ * chat title to the surrounding elements depending on:
+ * - the activity bar position
+ * - the chat view container (sidebar, panel, auxiliarybar)
+ * - the container orientation (left, right)
+ * - the visibility of side by side
+ */
+.chat-viewpane {
+
+	/* Default padding for all view locations */
+	&.chat-view-location-sidebar,
+	&.chat-view-location-panel,
+	&.chat-view-location-auxiliarybar {
+		.chat-view-title-inner {
+			padding: 0;
+		}
+	}
+
+	/* Auxiliarybar with non-default activity bar position */
+	&.activity-bar-location-other.chat-view-location-auxiliarybar {
+		.chat-view-title-inner {
+			padding: 0;
+		}
+	}
+
+	/* Side-by-side sessions: left position (any activity bar) */
+	&.has-sessions-control.sessions-control-orientation-sidebyside.chat-view-position-left {
+		.chat-view-title-inner {
+			padding: 0;
+		}
+	}
+
+	/* Side-by-side sessions: right position (default activity bar only) */
+	&.activity-bar-location-default.has-sessions-control.sessions-control-orientation-sidebyside.chat-view-position-right {
+		.chat-view-title-inner {
+			padding: 0;
+		}
+	}
+}

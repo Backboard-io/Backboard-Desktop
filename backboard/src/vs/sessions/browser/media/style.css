@@ -1,0 +1,2615 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* ---- Typeface ---- */
+
+/* T3 Code's UI face (`--font-sans`), shipped so Simple mode renders with the
+ * same font rather than the system fallback. Files and declarations are taken
+ * verbatim from @fontsource-variable/dm-sans@5.2.8 — the exact package T3 pins
+ * (SIL Open Font License; font (c) Colophon Foundry, Jonny Pinhorn, Indian
+ * Type Foundry). Only the normal style ships: T3 imports just the upright
+ * variable font and lets italics synthesize. */
+
+/* dm-sans-latin-ext-wght-normal */
+@font-face {
+	font-family: 'DM Sans Variable';
+	font-style: normal;
+	font-display: swap;
+	font-weight: 100 1000;
+	src: url(./fonts/dm-sans-latin-ext-wght-normal.woff2) format('woff2-variations');
+	unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* dm-sans-latin-wght-normal */
+@font-face {
+	font-family: 'DM Sans Variable';
+	font-style: normal;
+	font-display: swap;
+	font-weight: 100 1000;
+	src: url(./fonts/dm-sans-latin-wght-normal.woff2) format('woff2-variations');
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* T3's full sans stack, applied to the Simple window. Monaco surfaces (the
+ * code editor, code blocks) keep their own configured mono face — matching
+ * T3, whose `--font-mono` starts at the macOS-native SF Mono. The Advanced
+ * windows keep the product's system font. */
+.monaco-workbench.agent-sessions-workbench {
+	font-family: 'DM Sans Variable', 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ---- Action Bar Items ---- */
+
+/* Default rounded hover/active background for all action bar items in the
+ * agents window. Components that need a different shape (e.g. circular avatars
+ * or the workspace profile icon) override this with higher-specificity rules. */
+.agent-sessions-workbench .monaco-action-bar .action-label {
+	border-radius: 0 !important;
+}
+
+.agent-sessions-workbench .monaco-dropdown-with-default {
+	border-radius: 0 !important;
+}
+
+/* ---- Sidebar & Auxiliary Bar Card Appearance ---- */
+
+.agent-sessions-workbench {
+	/* All modes use a fixed, opaque sidebar. */
+	--sessions-sidebar-region-background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	--sessions-main-region-background: var(--vscode-agents-background, var(--vscode-editor-background));
+	--sessions-codex-surface-background: var(--vscode-agentsChatInput-background, var(--vscode-editorWidget-background));
+	--sessions-codex-surface-border: color-mix(in srgb, var(--vscode-agentsChatInput-border, var(--vscode-editorWidget-border)) 72%, transparent);
+	--sessions-codex-muted-foreground: color-mix(in srgb, var(--vscode-foreground) 62%, transparent);
+	--sessions-panel-divider-color: var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 10%, transparent));
+	/* A deliberately strong divider for the boundary between the agents panel
+	 * and the right (auxiliary) panel. Foreground-based so it always contrasts
+	 * with the panel background — clearly visible in light, dark, and high
+	 * contrast themes alike. */
+	--sessions-right-panel-divider-color: var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 32%, transparent));
+}
+
+.agent-sessions-workbench .part.sidebar {
+	background: var(--sessions-sidebar-region-background);
+}
+
+/* Hide the Agent Host agent picker ("Agent" pill) from the composer toolbars in
+ * the Agents Window. The picker is only contributed here (its menu entries are
+ * gated on the sessions window), so scoping to the workbench is sufficient. */
+.agent-sessions-workbench .chat-agent-picker-item {
+	display: none;
+}
+
+/* Transparent so the shell gradient painted on the workbench root shows
+ * through behind the sidebar; the main content parts paint their own
+ * opaque backgrounds. */
+.agent-sessions-workbench > .monaco-grid-view {
+	background-color: transparent;
+}
+
+/* Held transparent for the one frame between the boot splash being torn down
+ * and the workbench's first laid-out frame, so a mode switch never shows a
+ * half-built workbench. Dropped by `revealWorkbench()` in workbench.ts. */
+.agent-sessions-workbench.workbench-booting > .monaco-grid-view,
+.agent-sessions-workbench.workbench-booting > .part {
+	opacity: 0;
+}
+
+.agent-sessions-workbench.shell-gradient-background {
+	position: relative;
+	isolation: isolate;
+	background: var(--sessions-main-region-background);
+}
+
+.agent-sessions-workbench.shell-gradient-background::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	pointer-events: none;
+	background: var(--sessions-main-region-background);
+}
+
+/* Each variant layers a second gradient lobe anchored top-left so there is
+ * real color behind the left sidebar for the glass to diffuse — the original
+ * lobe at the bottom-right corner barely reaches the sidebar region. */
+@supports (background: color-mix(in srgb, black 0%, white)) {
+	.agent-sessions-workbench.shell-gradient-background::before {
+		background: var(--vscode-agents-background);
+	}
+
+	.monaco-workbench.vs.agent-sessions-workbench.shell-gradient-background::before {
+		background: var(--vscode-agents-background);
+	}
+
+	.monaco-workbench.vs-dark.agent-sessions-workbench.shell-gradient-background::before {
+		background: var(--vscode-agents-background);
+	}
+}
+
+.monaco-workbench.hc-black.agent-sessions-workbench.shell-gradient-background::before,
+.monaco-workbench.hc-light.agent-sessions-workbench.shell-gradient-background::before {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench > .notifications-center {
+	right: 15px;
+	bottom: 15px;
+}
+
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts {
+	right: 15px;
+	bottom: 15px;
+}
+
+.monaco-workbench.agent-sessions-workbench.nostatusbar > .notifications-center {
+	bottom: 15px;
+}
+
+.monaco-workbench.agent-sessions-workbench.nostatusbar > .notifications-toasts {
+	bottom: 15px;
+}
+
+.monaco-workbench.agent-sessions-workbench > .notifications-center.bottom-left {
+	right: auto;
+	left: 15px;
+	bottom: 15px;
+}
+
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts.bottom-left {
+	right: auto;
+	left: 15px;
+	bottom: 15px;
+}
+
+.monaco-workbench.agent-sessions-workbench > .notifications-center.top-right {
+	top: 40px;
+	right: 15px;
+	bottom: auto;
+}
+
+.monaco-workbench.agent-sessions-workbench > .notifications-center,
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts,
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts .notifications-list-container,
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts .notification-toast-container > .notification-toast,
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts .notification-toast-container > .notification-toast .monaco-scrollable-element,
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts .notification-toast-container > .notification-toast .monaco-list:not(.element-focused):focus::before,
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts .notification-toast-container > .notification-toast .monaco-list-row,
+.monaco-workbench.agent-sessions-workbench .notifications-list-container .notification-list-item,
+.monaco-workbench.agent-sessions-workbench .notifications-list-container .notification-list-item .notification-list-item-buttons-container > .monaco-button,
+.monaco-workbench.agent-sessions-workbench .notifications-list-container .notification-list-item .notification-list-item-buttons-container .monaco-button,
+.monaco-workbench.agent-sessions-workbench .notifications-list-container .notification-list-item .notification-list-item-buttons-container .monaco-text-button {
+	border-radius: 0 !important;
+}
+
+.monaco-workbench.agent-sessions-workbench > .notifications-toasts .notifications-list-container,
+.monaco-workbench.agent-sessions-workbench .notifications-list-container .notification-list-item {
+	background-color: var(--vscode-notifications-background, var(--vscode-editorWidget-background)) !important;
+}
+
+.agent-sessions-workbench.shell-gradient-background > .monaco-grid-view {
+	position: relative;
+	z-index: 1;
+	background: transparent !important;
+}
+
+/**
+ * Agent sessions parts are flush against each other. The grid allocates the full
+ * space and the Part classes subtract only their borders from internal layout.
+ */
+
+.agent-sessions-workbench:not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2.vertical > .monaco-scrollable-element > .split-view-container > .split-view-view.part-host-branch-contains-sidebar > .monaco-grid-branch-node > .monaco-split-view2.horizontal > .monaco-scrollable-element > .split-view-container > .split-view-view.part-host-branch-contains-sessionspart::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 30;
+	pointer-events: none;
+	border-left: 1px solid var(--sessions-panel-divider-color);
+	border-right: 1px solid var(--sessions-panel-divider-color);
+	border-radius: 0;
+	box-sizing: border-box;
+}
+
+/* The sessions panel also owns the line on the opposite side of the sidebar.
+ * Rounded sidebars must not leave a straight divider behind their corners. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2.vertical > .monaco-scrollable-element > .split-view-container > .split-view-view.part-host-branch-contains-sidebar > .monaco-grid-branch-node > .monaco-split-view2.horizontal > .monaco-scrollable-element > .split-view-container > .split-view-view.part-host-branch-contains-sessionspart::after {
+	border-left: 0 !important;
+	border-right: 0 !important;
+}
+
+/**
+ * Sidebar/agents-panel separator, keyed directly off the sidebar part's own
+ * grid wrapper rather than a fixed branch depth: the grid nests sidebar vs.
+ * panel differently depending on whether the bottom panel spans the full
+ * window width or only the content column, so this matches regardless of
+ * that arrangement (the wrapper above only covers one of the two).
+ */
+.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 30;
+	pointer-events: none;
+	border-right: 1px solid var(--sessions-panel-divider-color);
+	border-radius: 0;
+	box-sizing: border-box;
+}
+
+/* Keep the sidebar flush with its grid allocation. The wrapper owns the
+ * Simple-mode shadow so the sidebar's clipped content cannot cut it off. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar {
+	z-index: 1;
+	overflow: visible !important;
+	background: var(--sessions-main-region-background) !important;
+	border-right: 0 !important;
+	box-shadow: none !important;
+	outline: 0 !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(.hc-black):not(.hc-light) .monaco-grid-view .split-view-view.part-host-sidebar {
+	z-index: 2;
+	box-shadow: 6px 0 18px -6px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36)) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar::after {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .part.sidebar {
+	position: relative;
+	z-index: 1;
+	overflow: hidden;
+	border-right: 0 !important;
+	border-radius: 0 !important;
+	box-shadow: none !important;
+	outline: 0 !important;
+}
+
+/* Keep the resize hit target without painting another edge over the sidebar. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-split-view2.horizontal.part-host-contains-sidebar > .sash-container > .monaco-sash.vertical {
+	background: transparent !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-split-view2.horizontal.part-host-contains-sidebar > .sash-container > .monaco-sash.vertical::before,
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-split-view2.horizontal.part-host-contains-sidebar > .sash-container > .monaco-sash.vertical::after {
+	display: none !important;
+}
+
+/* When the primary sidebar is collapsed, the remaining left rail is the
+ * Activity Bar. Its stock bordered pseudo-element and nosidebar shadow paint
+ * the same vertical divider independently of the sidebar and resize sash. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .part.activitybar {
+	border-right: 0 !important;
+	box-shadow: none !important;
+	outline: 0 !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .activitybar.left.bordered::before {
+	display: none !important;
+}
+
+/* The sessions panel's grid wrapper insets its own one-pixel divider on this
+ * same shared edge (the box-shadow form used elsewhere between parts). Drop
+ * it as well: the invisible resize sash is the only thing left on the edge. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sessionspart {
+	box-shadow: none !important;
+}
+
+.monaco-workbench.hc-black.agent-sessions-workbench:not(.phone-layout) .part.sidebar,
+.monaco-workbench.hc-light.agent-sessions-workbench:not(.phone-layout) .part.sidebar {
+	box-shadow: none;
+}
+
+/* The sidebar part itself paints the opaque sidebar surface; its inner surfaces
+ * stay transparent so the panel reads as one continuous sheet. */
+.agent-sessions-workbench.shell-gradient-background .part.titlebar,
+.agent-sessions-workbench.shell-gradient-background .part.titlebar > .content,
+.agent-sessions-workbench.shell-gradient-background .part.titlebar > .titlebar-container,
+.agent-sessions-workbench.shell-gradient-background .part.titlebar > .sessions-titlebar-container,
+.agent-sessions-workbench.shell-gradient-background .part.sidebar > .composite.title,
+.agent-sessions-workbench.shell-gradient-background .part.sidebar > .content,
+.agent-sessions-workbench.shell-gradient-background .part.sidebar > .sidebar-footer {
+	background: transparent !important;
+}
+
+.monaco-workbench.hc-black.agent-sessions-workbench .part.sidebar,
+.monaco-workbench.hc-light.agent-sessions-workbench .part.sidebar {
+	background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.agent-sessions-workbench .monaco-grid-view .split-view-view,
+.agent-sessions-workbench .part.sessionspart,
+.agent-sessions-workbench .part.sessionspart > .title,
+.agent-sessions-workbench .part.sessionspart > .content,
+.agent-sessions-workbench .part.editor,
+.agent-sessions-workbench .part.auxiliarybar,
+.agent-sessions-workbench .part.auxiliarybar > .title,
+.agent-sessions-workbench .part.auxiliarybar > .content,
+.agent-sessions-workbench .part.auxiliarybar .pane-composite-part,
+.agent-sessions-workbench .part.auxiliarybar .composite,
+.agent-sessions-workbench .part.auxiliarybar .composite.title,
+.agent-sessions-workbench .part.auxiliarybar .pane,
+.agent-sessions-workbench .part.auxiliarybar .pane-body {
+	border-radius: 0 !important;
+}
+
+.agent-sessions-workbench .part.sidebar.mobile-overlay-sidebar {
+	background: var(--vscode-agents-background) !important;
+}
+
+.agent-sessions-workbench .part.sessionspart {
+	--session-view-background: var(--sessions-main-region-background);
+	margin: 0;
+	background: var(--sessions-main-region-background) !important;
+	border: none !important;
+	border-radius: 0;
+	box-sizing: border-box;
+	position: relative;
+}
+
+/* SessionView writes its active/inactive surface inline. In Simple mode the
+ * view and header use the main panel surface before the transcript is revealed. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window) .part.sessionspart .session-view {
+	--session-view-background: var(--sessions-main-region-background) !important;
+	--part-background: var(--sessions-main-region-background) !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title {
+	-webkit-app-region: no-drag;
+}
+
+/* When the editor is the left-most visible part (maximized editor layout with
+ * the sidebar and chat hidden), keep the first editor group's tabs clear of
+ * the macOS traffic lights — no other part hosts the spacer in this state. */
+.agent-sessions-workbench.mac.nosidebar.nosessionspart:not(.fullscreen):not(.phone-layout) .monaco-grid-view .part.editor:not(.modal-editor-part) > .content .split-view-view:first-child .editor-group-container > .title {
+	padding-left: 78px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container,
+.agent-sessions-workbench .part.auxiliarybar > .title .title-actions,
+.agent-sessions-workbench .part.auxiliarybar > .title .monaco-action-bar,
+.agent-sessions-workbench .part.auxiliarybar > .title .action-item,
+.agent-sessions-workbench .part.auxiliarybar > .title .action-label,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title > .tabs-and-actions-container,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title .tabs-container,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title .tab,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title .editor-actions,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title .monaco-action-bar,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title .action-item,
+.agent-sessions-workbench .part.editor:not(.modal-editor-part) .editor-group-container > .title .action-label {
+	-webkit-app-region: no-drag;
+}
+
+.agent-sessions-workbench.nopanel .part.sessionspart {
+	margin-bottom: 0;
+}
+
+.agent-sessions-workbench.noauxiliarybar .part.sessionspart {
+	margin-right: 0;
+}
+
+.agent-sessions-workbench .monaco-grid-view .part.editor:not(.modal-editor-part) {
+	/*
+	 * Keep the main editor flush with adjacent agent-session parts. Scoped to
+	 * `.monaco-grid-view` so this styling does not leak into floating editor
+	 * windows.
+	 *
+	 * Auxiliary window editor parts are created as a direct child of the aux
+	 * container and also receive `agent-sessions-workbench` via `trackAttributes`.
+	 */
+	margin: 0;
+	background: var(--sessions-main-region-background) !important;
+	border: none;
+	border-radius: 0;
+	box-sizing: border-box;
+	overflow: hidden;
+}
+
+/*
+ * When the secondary side bar (auxiliary bar) is hidden, keep the editor as a
+ * square-edged full-width part.
+ */
+.agent-sessions-workbench.noauxiliarybar .monaco-grid-view .part.editor:not(.modal-editor-part) {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+.agent-sessions-workbench .monaco-grid-view .part.editor:not(.modal-editor-part)::after {
+	box-shadow: none;
+}
+
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-sessionspart,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-editor,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-auxiliarybar,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-branch-contains-auxiliarybar {
+	background: var(--sessions-main-region-background) !important;
+	border-radius: 0 !important;
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-sessionspart {
+	border: none !important;
+}
+
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-editor,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-auxiliarybar,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-branch-contains-auxiliarybar {
+	border: none !important;
+}
+
+.agent-sessions-workbench.noauxiliarybar .monaco-grid-view .split-view-view.part-host-editor,
+.agent-sessions-workbench.noauxiliarybar .monaco-grid-view .split-view-view.part-host-branch-contains-editor {
+	border-right: none !important;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry {
+	padding: 0 8px;
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header {
+	cursor: pointer;
+	background: transparent;
+	position: relative;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background: var(--vscode-editor-background);
+	z-index: -1;
+	pointer-events: none;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header-content {
+	border-radius: 0;
+	border: none;
+	background: var(--vscode-sideBarSectionHeader-background);
+	margin: 0;
+	align-items: center;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header:not(.collapsed) .header-content {
+	border-bottom: none;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header-content .file-path .title {
+	font-size: var(--vscode-agents-fontSize-body1);
+	line-height: 22px;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header:focus,
+.agent-sessions-workbench .part.editor .multiDiffEntry .header:focus-visible {
+	outline: none;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header:focus .header-content,
+.agent-sessions-workbench .part.editor .multiDiffEntry .header:focus-visible .header-content {
+	box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header-content .actions {
+	opacity: 0;
+	pointer-events: none;
+	padding: 0 0 0 8px;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header:hover .header-content .actions,
+.agent-sessions-workbench .part.editor .multiDiffEntry .header:focus-within .header-content .actions {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .collapse-button a {
+	border-radius: 0;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .editorParent {
+	border-bottom: none;
+}
+
+.agent-sessions-workbench .part.editor .diff-hidden-lines .center {
+	box-shadow: none;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .part.editor .editor.original .diff-hidden-lines .center {
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+}
+
+.agent-sessions-workbench .part.editor .editor.modified .diff-hidden-lines .center {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header-content .status {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	min-width: 16px;
+	font-size: var(--vscode-agents-fontSize-body2);
+	font-weight: var(--vscode-agents-fontWeight-semiBold);
+	opacity: 0.9;
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header-content .status.added {
+	color: var(--vscode-gitDecoration-addedResourceForeground);
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header-content .status.deleted {
+	color: var(--vscode-gitDecoration-deletedResourceForeground);
+}
+
+.agent-sessions-workbench .part.editor .multiDiffEntry .header-content .status.renamed {
+	color: var(--vscode-gitDecoration-modifiedResourceForeground);
+}
+
+.agent-sessions-workbench .part.editor .title.tabs {
+	min-height: 38px !important;
+	height: 38px !important;
+	background-color: var(--vscode-editor-background) !important;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	box-sizing: border-box;
+	--editor-group-tab-height: 26px !important;
+}
+
+/* Editor tabs: match chat composite bar tab style */
+.agent-sessions-workbench .part.editor .tabs-container > .tab {
+	background-color: transparent !important;
+	border-right: none !important;
+	border-radius: 0 !important;
+	font-size: var(--vscode-agents-fontSize-label1);
+	font-weight: var(--vscode-agents-fontWeight-semiBold);
+	box-shadow: none !important;
+	padding: 0 0 0 4px !important;
+	--tab-border-top-color: transparent !important;
+}
+
+/* Allow tabs to shrink when space is constrained so the close button stays
+ * reachable, while still letting them grow to fit their label when there is
+ * space. The default `sizing-fit` rule sets `width: 120px; min-width:
+ * fit-content; flex-shrink: 0;` — clearing min-width alone leaves the tab
+ * pinned at 120px and prevents it from expanding to its full content width. */
+.agent-sessions-workbench .part.editor .tabs-container > .tab.sizing-fit {
+	width: auto !important;
+	min-width: 0 !important;
+	flex: 0 1 auto !important;
+}
+
+.agent-sessions-workbench .part.editor .tabs-container > .tab.sizing-fit .monaco-icon-label,
+.agent-sessions-workbench .part.editor .tabs-container > .tab.sizing-fit .monaco-icon-label > .monaco-icon-label-container {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+}
+
+/* Keep the close button reserved within the tab so it remains accessible when
+ * the tab shrinks. Without this the action sits in an `overflow: hidden`
+ * container that only reveals on hover, which combined with the smaller tab
+ * makes the close target hard to hit. */
+.agent-sessions-workbench .part.editor .tabs-container > .tab > .tab-actions {
+	flex: 0 0 auto;
+	overflow: visible;
+}
+
+.agent-sessions-workbench .part.editor .tabs-and-actions-container {
+	--tabs-border-bottom-color: transparent !important;
+	align-items: center;
+	height: 38px !important;
+	padding: 4px 24px 4px 8px !important;
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .part.editor > .content .editor-group-container > .title .editor-actions {
+	padding-right: 0 !important;
+}
+
+.agent-sessions-workbench .part.editor .tabs-container > .tab.active {
+	background-color: color-mix(in srgb, var(--vscode-foreground) 5%, transparent) !important;
+}
+
+.agent-sessions-workbench .part.editor .tabs-container > .tab .tab-border-top-container,
+.agent-sessions-workbench .part.editor .tabs-container > .tab .tab-border-bottom-container {
+	display: none !important;
+}
+
+.agent-sessions-workbench:not(.nosidebar) .part.sessionspart {
+	margin-left: 0;
+}
+
+/* Dividers are painted with an inset box-shadow instead of a real border:
+ * split-view-view boxes are absolutely positioned by the grid using the full
+ * allocated width, so a real border (box-sizing: border-box) shrinks the
+ * content box while nested split-views are still laid out at the full size —
+ * each nesting level then drifts 1px further right, pushing the auxiliary
+ * bar past the window edge. Box-shadow paints without affecting layout. */
+.agent-sessions-workbench:not(.phone-layout):not(.nosidebar) .monaco-grid-view .split-view-view.part-host-sessionspart {
+	border-left: none !important;
+	box-shadow: inset 1px 0 0 var(--sessions-panel-divider-color);
+}
+
+.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sessionspart,
+.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar,
+.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-branch-contains-sidebar {
+	transition:
+		opacity 140ms ease-out;
+}
+
+/* The Simple/Advanced root grid has a branch for the chat + terminal column.
+ * Animate those immediate root children too so that column and the editor move
+ * with a side panel instead of snapping to their final width ahead of it. */
+.agent-sessions-workbench.parts-animating:not(.sessions-sash-dragging):not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2 > .monaco-scrollable-element > .split-view-container > .split-view-view {
+	transition:
+		width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+		height 280ms cubic-bezier(0.22, 1, 0.36, 1),
+		left 280ms cubic-bezier(0.22, 1, 0.36, 1),
+		top 280ms cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+.agent-sessions-workbench .part.sessionspart > .title {
+	min-height: 38px !important;
+	height: 38px !important;
+	padding: 0 8px;
+	background-color: var(--sessions-main-region-background) !important;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+	box-sizing: border-box;
+	transition: padding-left 180ms ease-out, background-color 180ms ease-out;
+}
+
+.agent-sessions-workbench .part.sessionspart > .title > *,
+.agent-sessions-workbench .part.editor .title.tabs > *,
+.agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar > * {
+	background-color: transparent !important;
+}
+
+.agent-sessions-workbench .part.sessionspart > .content {
+	background-color: var(--sessions-main-region-background) !important;
+	position: relative;
+}
+
+.agent-sessions-workbench:not(.phone-layout) .part.sessionspart .session-view.is-active .chat-composite-bar.session-header-bar {
+	transition: padding-left 180ms ease-out;
+}
+
+/* ---- Quiet session header ----
+ * The transcript is the content; the header only has to say which session you
+ * are in. Muted, body-weight title and dimmed actions keep it from competing
+ * with the first message. The 6% hairline below it is already set by the base
+ * header rule, so it is deliberately not restated here. */
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text {
+	font-weight: normal;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* Header actions recede until pointed at. Opacity rather than a colour swap so
+ * the icons dim uniformly whatever each one's own colour is. */
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .monaco-toolbar .action-label {
+	opacity: 0.55;
+	transition: opacity 100ms ease-out;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar:hover .monaco-toolbar .action-label,
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .monaco-toolbar .action-label:hover,
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .monaco-toolbar .action-label:focus-visible {
+	opacity: 1;
+}
+
+/* T3 thread breadcrumb: project first, slash, then the thread title. The
+ * workspace is plain breadcrumb text rather than a pill, which also prevents
+ * the duplicate-looking title treatment reported in the session header. */
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-title-row {
+	gap: 8px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-row {
+	order: 0;
+	flex: 0 1 auto;
+	gap: 6px;
+	overflow: visible;
+	color: var(--session-view-foreground);
+	font-size: 14px;
+	line-height: 20px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-row::after {
+	flex: 0 0 auto;
+	margin-left: 2px;
+	color: color-mix(in srgb, var(--session-view-foreground) 36%, transparent);
+	content: '/';
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-workspace {
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	color: var(--session-view-foreground);
+	font-size: 14px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-workspace-icon {
+	font-size: 15px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title {
+	order: 1;
+	min-height: 20px;
+	padding: 0;
+	margin: 0;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text {
+	color: var(--session-view-foreground);
+	font-weight: 600;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-title-actions {
+	order: 2;
+}
+
+/* Keep the 48px breadcrumb bar while preserving Backboard's compact,
+ * icon-only session actions. The header should never mix injected text labels
+ * into the environment, panel, done, pin, and close icon cluster. */
+.agent-sessions-workbench .part.sessionspart > .title {
+	min-height: 48px !important;
+	height: 48px !important;
+	padding-inline: 12px;
+	border-bottom: 0 !important;
+}
+
+.agent-sessions-workbench .part.sessionspart .sessions-panel-header.sessions-part-header {
+	height: 48px;
+	flex: 0 0 48px;
+	border-bottom: 0;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar,
+.agent-sessions-workbench .sessions-header-session-title-slot .chat-composite-bar.session-header-bar,
+.agent-sessions-workbench .sessions-header-session-toolbar-slot {
+	height: 48px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-title-row {
+	height: 48px;
+	gap: 7px;
+	transform: translateY(-2px);
+}
+
+/* T3 keeps change counts in the changed-files surface, not inside the project
+ * breadcrumb. This also guarantees the header always reads "project / title". */
+.agent-sessions-workbench .part.sessionspart .chat-composite-bar.session-header-bar .chat-composite-bar-meta-diff {
+	display: none;
+}
+
+.agent-sessions-workbench .sessions-header-session-toolbar-slot .monaco-toolbar .actions-container {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	transform: translateY(-2px);
+}
+
+.agent-sessions-workbench .sessions-header-session-toolbar-slot .monaco-toolbar .action-item {
+	display: flex;
+	flex: 0 0 auto;
+	margin: 0;
+}
+
+.agent-sessions-workbench .sessions-header-session-toolbar-slot .monaco-toolbar .action-label {
+	display: inline-flex;
+	box-sizing: border-box;
+	width: 28px !important;
+	min-width: 28px;
+	height: 28px !important;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 8px;
+	background: transparent;
+	color: color-mix(in srgb, var(--session-view-foreground) 76%, transparent);
+	font-size: 15px;
+	line-height: 26px;
+	opacity: 1;
+}
+
+.agent-sessions-workbench .sessions-header-session-toolbar-slot .monaco-toolbar .action-label:hover {
+	border-color: color-mix(in srgb, var(--session-view-foreground) 18%, transparent);
+	background: color-mix(in srgb, var(--session-view-foreground) 7%, transparent);
+	color: var(--session-view-foreground);
+}
+
+
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-sessionspart,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-editor,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-auxiliarybar,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-branch-contains-auxiliarybar {
+	border: none !important;
+	background: var(--sessions-main-region-background) !important;
+}
+
+.agent-sessions-workbench .part.editor .title.tabs {
+	min-height: 38px !important;
+	height: 38px !important;
+	background-color: var(--sessions-main-region-background) !important;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar {
+	min-height: 38px !important;
+	height: 38px !important;
+	background-color: var(--sessions-main-region-background) !important;
+	border-bottom: 0 !important;
+	box-sizing: border-box;
+}
+
+/* See the sessionspart divider above: box-shadow, not border, so the grid
+ * layout is not distorted. */
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-editor,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-auxiliarybar,
+.agent-sessions-workbench .monaco-grid-view .split-view-view.part-host-branch-contains-auxiliarybar {
+	border-left: none !important;
+	box-shadow: inset 1px 0 0 var(--sessions-panel-divider-color);
+}
+
+/* Clear, always-visible separator between the agents panel and the right
+ * (auxiliary) panel. A box-shadow/border on the grid wrapper gets painted over
+ * by the panel's own opaque content, so — like the sidebar separator above —
+ * paint it as an overlay pseudo-element with a high z-index on the auxiliary
+ * bar's left edge. Foreground-based color keeps it visible in every theme. */
+.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-auxiliarybar::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 30;
+	pointer-events: none;
+	border-left: 1px solid var(--sessions-right-panel-divider-color);
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .monaco-grid-view .part.editor:not(.modal-editor-part),
+.agent-sessions-workbench .monaco-grid-view .part.auxiliarybar {
+	border-left: none !important;
+}
+
+.agent-sessions-workbench .part.editor .title.tabs {
+	border-bottom: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 14%, transparent)) !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar {
+	border-bottom: 0 !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar {
+	/*
+	 * The TS `layout()` mirrors these zero margins so the inner area is sized
+	 * correctly while the auxiliary bar stays flush against adjacent parts.
+	*/
+	margin: 0;
+	padding-left: 0;
+	background: var(--sessions-main-region-background) !important;
+	border: none;
+	border-radius: 0;
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench.nomaineditorarea .part.auxiliarybar {
+	margin-left: 0;
+	padding-left: 0;
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+}
+
+.agent-sessions-workbench.nopanel .part.auxiliarybar,
+.agent-sessions-workbench.nopanel .monaco-grid-view .part.editor:not(.modal-editor-part) {
+	margin-bottom: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title,
+.agent-sessions-workbench .part.auxiliarybar > .content,
+.agent-sessions-workbench .part.auxiliarybar > .content .pane-body {
+	background-color: var(--sessions-main-region-background) !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar .pane-composite-part,
+.agent-sessions-workbench .part.auxiliarybar .composite,
+.agent-sessions-workbench .part.auxiliarybar .pane,
+.agent-sessions-workbench .part.auxiliarybar .pane-body,
+.agent-sessions-workbench .part.auxiliarybar .monaco-list,
+.agent-sessions-workbench .part.auxiliarybar .monaco-list-rows,
+.agent-sessions-workbench .part.auxiliarybar .monaco-tree,
+.agent-sessions-workbench .part.auxiliarybar .monaco-tree-rows,
+.agent-sessions-workbench .part.auxiliarybar .monaco-scrollable-element {
+	background-color: var(--sessions-main-region-background) !important;
+	border-radius: 0 !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .composite.title.has-composite-bar {
+	height: 34px;
+	min-height: 34px;
+	padding: 0 6px 0 4px;
+	box-sizing: border-box;
+	background-color: var(--sessions-main-region-background) !important;
+	border-bottom: 0 !important;
+	border-radius: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container {
+	min-width: 0;
+	flex: 1 1 auto;
+	overflow: hidden;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar {
+	line-height: 22px;
+	min-width: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .actions-container,
+.agent-sessions-workbench .part.auxiliarybar > .title > .title-actions .monaco-action-bar .actions-container {
+	gap: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item {
+	display: flex;
+	align-items: center;
+	height: 26px;
+	padding: 0 4px;
+	border-radius: 0;
+	background: transparent !important;
+	position: relative;
+	text-transform: none;
+	font-size: 13px;
+	font-weight: var(--vscode-agents-fontWeight-medium, 500);
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked {
+	background: transparent !important;
+	border-radius: 0 !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:not(.checked):hover {
+	background: transparent !important;
+	border-radius: 0 !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item .action-label {
+	display: inline-flex;
+	align-items: center;
+	height: 26px;
+	padding: 0;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	border-radius: 0;
+	background: transparent !important;
+	outline: none !important;
+	color: color-mix(in srgb, var(--vscode-foreground) 68%, transparent);
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked .action-label {
+	color: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.checked::after {
+	content: '';
+	position: absolute;
+	left: 8px;
+	right: 8px;
+	bottom: 0;
+	height: 2px;
+	background: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item:has(.action-label[aria-label^="Changes"]) {
+	display: none !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item .active-item-indicator {
+	display: none;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions {
+	flex: 0 0 auto;
+	padding-left: 2px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .global-actions {
+	flex: 0 0 auto;
+	margin-left: auto;
+	padding-left: 2px;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item {
+	width: 24px;
+	height: 26px;
+	margin-right: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .global-actions .monaco-action-bar .actions-container {
+	gap: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .global-actions .monaco-action-bar .action-item {
+	width: 24px;
+	height: 26px;
+	margin-right: 0;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item:has(.action-label.codicon-collapse-all),
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item:has(.action-label[aria-label^="Collapse Folders in Explorer"]) {
+	display: none !important;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item .action-label {
+	width: 24px;
+	height: 26px;
+	padding: 0;
+	border-radius: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.agent-sessions-workbench .part.auxiliarybar > .title.has-composite-bar > .global-actions .monaco-action-bar .action-item .action-label {
+	width: 24px;
+	height: 26px;
+	padding: 0;
+	border-radius: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-navbar {
+	min-height: 58px;
+	padding: 11px 14px;
+	box-sizing: border-box;
+	gap: 12px;
+	border-bottom: 1px solid var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 12%, transparent));
+	background: var(--vscode-editor-background);
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-actions-toolbar .action-item:has(.action-label.codicon-chevron-right),
+.agent-sessions-workbench .part.editor .browser-root .browser-actions-toolbar .action-item:has(.action-label.codicon-arrow-right) {
+	display: none !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.browser-root) .title.tabs {
+	border-bottom-color: transparent !important;
+	background: var(--vscode-editor-background) !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.browser-root) .tabs-and-actions-container {
+	justify-content: flex-start;
+	padding: 4px 10px !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.browser-root) .tabs-container > .tab {
+	height: 30px !important;
+	border-radius: var(--vscode-cornerRadius-large) !important;
+	padding: 0 6px 0 8px !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.browser-root) .tabs-container > .tab.active {
+	background-color: color-mix(in srgb, var(--vscode-foreground) 9%, transparent) !important;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-nav-toolbar .action-label,
+.agent-sessions-workbench .part.editor .browser-root .browser-actions-toolbar .action-label {
+	width: 30px !important;
+	height: 30px !important;
+	border-radius: var(--vscode-cornerRadius-large) !important;
+	color: color-mix(in srgb, var(--vscode-foreground) 76%, transparent) !important;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-nav-toolbar .action-label:hover,
+.agent-sessions-workbench .part.editor .browser-root .browser-actions-toolbar .action-label:hover {
+	background-color: color-mix(in srgb, var(--vscode-foreground) 7%, transparent) !important;
+	color: var(--vscode-foreground) !important;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-url-container {
+	min-height: 34px;
+	border: none;
+	border-radius: var(--vscode-cornerRadius-large);
+	background-color: color-mix(in srgb, var(--vscode-input-background) 72%, var(--vscode-editor-background));
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-url-container:has(.browser-url-display:focus) {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-url-bar-widgets {
+	padding: 4px 8px;
+}
+
+.agent-sessions-workbench .part.editor .browser-root .browser-container-wrapper {
+	background: var(--vscode-editor-background);
+}
+
+.agent-sessions-workbench .part.editor:has(.terminal-overflow-guard.terminal-editor) .title.tabs {
+	border-bottom-color: transparent !important;
+	background: var(--vscode-editor-background) !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.terminal-overflow-guard.terminal-editor) .tabs-and-actions-container {
+	justify-content: flex-start;
+	padding: 4px 10px !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.terminal-overflow-guard.terminal-editor) .tabs-container > .tab {
+	height: 30px !important;
+	border-radius: var(--vscode-cornerRadius-large) !important;
+	padding: 0 6px 0 8px !important;
+}
+
+.agent-sessions-workbench .part.editor:has(.terminal-overflow-guard.terminal-editor) .tabs-container > .tab.active {
+	background-color: color-mix(in srgb, var(--vscode-foreground) 9%, transparent) !important;
+}
+
+.agent-sessions-workbench .part.editor .terminal-overflow-guard.terminal-editor {
+	background: var(--vscode-editor-background);
+}
+
+.agent-sessions-workbench .part.editor .terminal-overflow-guard.terminal-editor .terminal-wrapper {
+	background-color: var(--vscode-terminal-background, var(--vscode-editor-background));
+}
+
+.agent-sessions-workbench .part.panel:has(.pane-body.integrated-terminal) {
+	/* The terminal page shares one continuous surface with its header. This
+	 * also covers the DOM behind xterm's canvas when a theme supplies a
+	 * distinct terminal.background color. */
+	--vscode-terminal-background: var(--part-background);
+}
+
+.agent-sessions-workbench .part.panel {
+	margin: 0;
+	background: var(--part-background);
+	border: 1px solid var(--part-border-color, transparent);
+	border-radius: 0;
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench:not(.nosidebar) .part.panel {
+	margin-left: 0;
+}
+
+.agent-sessions-workbench .monaco-sash:before {
+	border-radius: calc(var(--vscode-sash-hover-size) / 2);
+}
+
+.agent-sessions-workbench .monaco-sash.hover:before,
+.agent-sessions-workbench .monaco-sash.active:before {
+	background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)) !important;
+}
+
+/* Simple mode keeps layout sashes interactive without drawing their active
+ * vertical/horizontal rails. Scope this to workbench grid sashes so resizers
+ * inside editors, browsers, and other embedded widgets retain their feedback. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .monaco-grid-branch-node > .monaco-split-view2 > .sash-container > .monaco-sash::before {
+	display: none !important;
+	background: transparent !important;
+}
+
+.agent-sessions-workbench .monaco-sash:not(.disabled) > .orthogonal-drag-handle {
+	border-radius: var(--vscode-sash-size);
+}
+
+/* ---- Scrollbars ---- */
+
+/* Thinner, rounded scrollbar sliders scoped to the agents app.
+ * The scrollbar widget sets the slider's size inline to match the full
+ * track. We hide that default background and paint a narrower, rounded
+ * slider with an inset ::before pseudo-element so all four corners round
+ * consistently and the full hit area is preserved. */
+.agent-sessions-workbench .monaco-scrollable-element > .scrollbar > .slider {
+	background: transparent !important;
+}
+
+.agent-sessions-workbench .monaco-scrollable-element > .scrollbar.vertical > .slider::before,
+.agent-sessions-workbench .monaco-scrollable-element > .scrollbar.horizontal > .slider::before {
+	content: '';
+	position: absolute;
+	inset: 1px;
+	border-radius: var(--vscode-cornerRadius-circle);
+	background: var(--vscode-scrollbarSlider-background);
+}
+
+.agent-sessions-workbench .monaco-scrollable-element > .scrollbar > .slider:hover::before {
+	background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+.agent-sessions-workbench .monaco-scrollable-element > .scrollbar > .slider.active::before {
+	background: var(--vscode-scrollbarSlider-activeBackground);
+}
+
+.monaco-workbench.vs.agent-sessions-workbench .part.sessionspart,
+.monaco-workbench.vs.agent-sessions-workbench .part.auxiliarybar,
+.monaco-workbench.vs.agent-sessions-workbench .part.panel {
+	border-color: transparent !important;
+}
+
+/* ---- Chat Layout ---- */
+
+/* Remove max-width from the session container so the scrollbar extends full width */
+.agent-sessions-workbench .interactive-session {
+	max-width: none;
+}
+
+.monaco-workbench.vs.agent-sessions-workbench .part.sessionspart .interactive-list > .monaco-list > .monaco-scrollable-element > .monaco-list-rows {
+	background: transparent !important;
+}
+
+.monaco-workbench.vs.agent-sessions-workbench .part.sessionspart .interactive-list > .monaco-list > .monaco-scrollable-element > .monaco-list-rows > .monaco-list-row.request:hover,
+.monaco-workbench.vs.agent-sessions-workbench .part.sessionspart .interactive-list > .monaco-list > .monaco-scrollable-element > .monaco-list-rows > .monaco-list-row.response:hover,
+.monaco-workbench.vs.agent-sessions-workbench .part.sessionspart .interactive-list > .monaco-list > .monaco-scrollable-element > .monaco-list-rows > .monaco-list-row.focused.request,
+.monaco-workbench.vs.agent-sessions-workbench .part.sessionspart .interactive-list > .monaco-list > .monaco-scrollable-element > .monaco-list-rows > .monaco-list-row.focused.response,
+.monaco-workbench.vs.agent-sessions-workbench .part.sessionspart .interactive-list > .monaco-list > .monaco-scrollable-element > .monaco-list-rows > .monaco-list-row.selected.request,
+.monaco-workbench.vs.agent-sessions-workbench .part.sessionspart .interactive-list > .monaco-list > .monaco-scrollable-element > .monaco-list-rows > .monaco-list-row.selected.response {
+	background: transparent !important;
+}
+
+/* Let content items fill the full width of their host, with only a gutter to
+ * keep text off the edge. The base chat stylesheet centers a fixed reading
+ * column; the sessions window instead uses the whole panel.
+ * Scoped to the chat panel (`.part.sessionspart`) and the chat editor host
+ * (`.chat-editor-relative`) so the "card style" doesn't leak into other chat
+ * surfaces that reuse `.interactive-item-container` — notably the terminal
+ * and editor inline chat widgets and the agent-session hover widget. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container,
+.agent-sessions-workbench .part.sessionspart .interactive-session > .chat-suggest-next-widget,
+.agent-sessions-workbench .chat-editor-relative .interactive-session > .chat-suggest-next-widget {
+	max-width: none;
+	width: 100%;
+	margin: 0;
+	padding-left: 20px;
+	padding-right: 20px;
+	box-sizing: border-box;
+}
+
+/* The sent prompt reads as a distinct speaker turn: a rounded bubble pushed to
+ * the trailing edge, with the agent's reply running full width beneath it. The
+ * bubble is capped well short of the column so the two turns stay visually
+ * distinct even on a wide panel. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request {
+	align-items: flex-end;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value {
+	align-items: flex-end !important;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
+	width: fit-content;
+	/* Bubble geometry matches T3 Code's user row (`max-w-[80%] rounded-2xl p-3`,
+	 * MIT, (c) 2026 T3 Tools Inc). */
+	max-width: 80%;
+	margin: 0 0 8px;
+	padding: 12px;
+	border: 0;
+	border-radius: 16px;
+	/* Lifted off the page rather than a fixed grey, so the bubble reads
+	   correctly against both light and dark themes. */
+	background-color: color-mix(in srgb, var(--vscode-foreground) 8%, transparent) !important;
+	/* Body weight and size: the bubble itself marks the speaker turn, so the
+	   text doesn't also need to be heavier than the agent's prose. Matches the
+	   14px agent prose set in chatMarkdown.css. */
+	font-size: 14px;
+	font-weight: normal;
+	line-height: 1.45;
+	/* Prompts wrap inside the bubble; the trailing-edge alignment applies to the
+	   bubble, not to the text within it. */
+	text-align: left;
+	color: var(--vscode-foreground);
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown.clickable:hover {
+	background-color: color-mix(in srgb, var(--vscode-foreground) 12%, transparent) !important;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value > .rendered-markdown p,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value > .rendered-markdown p {
+	width: auto;
+}
+
+/* Let request bubbles that contain a code block grow to fit the code editor. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown:has(.interactive-result-code-block),
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown:has(.interactive-result-code-block) {
+	max-width: 100%;
+}
+
+/* ---- Simple mode: T3 Code row treatment ---- */
+
+/* T3's row rhythm, tightened: the turns sit closer together so more of the
+ * conversation is on screen at once, and the transcript runs in a narrower
+ * column than the shared 20px gutters set above — still full-panel width
+ * rather than a hard reading-column cap, just pulled further off the edges. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container,
+.agent-sessions-workbench .part.sessionspart .interactive-session > .chat-suggest-next-widget {
+	padding-left: 32px;
+	padding-right: 32px;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container {
+	padding-top: 0;
+	padding-bottom: 8px;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request {
+	padding-top: 8px;
+}
+
+/* The composer keeps the same gutters as the transcript above it. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-input-part {
+	padding-left: 32px;
+	padding-right: 32px;
+}
+
+/* ---- Simple mode: compressed transcript + composer ----
+ * Smaller type and a tighter rhythm so more of the conversation fits on
+ * screen: 13px prose on snugger lines, a slimmer prompt bubble, narrower
+ * gutters, and a shorter composer shell. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container .value .rendered-markdown {
+	font-size: 13px;
+	line-height: 1.45;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container.interactive-request .value .rendered-markdown {
+	font-size: 13px;
+	margin-bottom: 4px;
+	padding: 7px 10px;
+	border-radius: 12px;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container,
+.agent-sessions-workbench .part.sessionspart .interactive-session > .chat-suggest-next-widget {
+	padding-left: 20px;
+	padding-right: 20px;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-item-container {
+	padding-bottom: 4px;
+}
+
+.agent-sessions-workbench .part.sessionspart .chat-view-chat.backboard-clean-chat.backboard-composer .interactive-session .interactive-input-part {
+	/* Match the code editor's sent-chat composer box model exactly. The inset
+	 * belongs to the composer's width, not inner padding, so Monaco and the
+	 * footer controls receive the same content width in both hosts. */
+	width: calc(100% - (2 * var(--bb-backboard-viewport-inset)));
+	margin: 0 auto;
+	padding: 0 0 10px;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-input-part .chat-input-container {
+	padding: 2px 10px 6px;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-input-part .chat-input-toolbars {
+	margin-top: 4px;
+}
+
+/* …except the inline edit box inside a sent request, which is already inset by
+ * the row it lives in. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .chat-edit-input-container .interactive-input-part {
+	padding-left: 0;
+	padding-right: 0;
+}
+
+/* Response meta (copy button, etc.) is hover-revealed in T3
+ * (`opacity-0 … group-hover/assistant:opacity-100 focus-within:opacity-100`),
+ * not a permanent row under the reply. The response details (model name,
+ * credits) stay visible on every completed response, so only the action
+ * buttons are gated. */
+.agent-sessions-workbench .part.sessionspart .interactive-item-container.interactive-response .chat-footer-toolbar .monaco-action-bar {
+	opacity: 0;
+	transition: opacity 200ms;
+}
+
+.agent-sessions-workbench .part.sessionspart .interactive-item-container.interactive-response:hover .chat-footer-toolbar .monaco-action-bar,
+.agent-sessions-workbench .part.sessionspart .interactive-item-container.interactive-response:focus-within .chat-footer-toolbar .monaco-action-bar {
+	opacity: 1;
+}
+
+/* ---- Chat Output ---- */
+
+/* Top fade overlay: dims content scrolled near the top edge of the chat bar card.
+ * Use the Monaco scroll shadow element, which is only shown when scrollTop > 0. */
+.agent-sessions-workbench .part.sessionspart .monaco-scrollable-element > .shadow.top {
+	height: 16px;
+	background: linear-gradient(to bottom, var(--part-background), transparent);
+	box-shadow: none;
+}
+
+/* Same fade overlay for the chat renderer inside an editor (e.g. floating aux window). */
+.agent-sessions-workbench .chat-editor-relative .interactive-list .monaco-scrollable-element > .shadow.top {
+	height: 16px;
+	background: linear-gradient(to bottom, var(--vscode-editor-background), transparent);
+	box-shadow: none;
+}
+
+/* ---- Chat Input ---- */
+
+.agent-sessions-workbench .interactive-session .chat-input-container {
+	border-radius: 18px;
+	border-color: var(--sessions-codex-surface-border) !important;
+	background-color: var(--sessions-codex-surface-background);
+	color: var(--vscode-agentsChatInput-foreground);
+}
+
+.agent-sessions-workbench .interactive-session .chat-input-container.focused {
+	border-color: color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 48%, var(--vscode-agentsChatInput-border)) !important;
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent);
+}
+
+/* While the developer-joy animated border is active, keep a faint
+	persistent ring so the input still has a visible boundary throughout
+	the comet animation (improves visuals + accessibility). The spinning
+	gradient ring overlays this. When focused, the regular focus border
+	is blended/dimmed during the animation to avoid competing visually. */
+.agent-sessions-workbench .interactive-session .chat-input-container.working:not(.focused) {
+	border-color: var(--vscode-agentsChatInput-border) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench .interactive-session .chat-input-container.working,
+.monaco-workbench .agent-sessions-workbench .interactive-session .chat-input-container.working {
+	/* The disabled input overlay shown during an active run inherits the shared
+		chat input's working state. Keep it clipped to the Agents composer frame. */
+	overflow: hidden;
+}
+
+/* Dim the focus border while the comet is animating so the bright focus
+	ring doesn't visually fight with the spinning gradient. */
+.agent-sessions-workbench .interactive-session .chat-input-container.working.focused {
+	border-color: color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 40%, transparent) !important;
+}
+
+/* Make the Monaco editor inside the chat input transparent so it inherits the chatInput.background */
+.agent-sessions-workbench .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor {
+	background-color: transparent !important;
+}
+
+/* The `.monaco-editor-background` layer must use a *solid* color (not transparent):
+ * the editor reuses this class for the reverse-rounded selection corner pieces,
+ * which "carve" the rounded notches out of the selection highlight. With a
+ * transparent background those pieces stop covering the selection layer and the
+ * corners render as blocky squares. Paint it with the same color the chat input
+ * container uses so the editor still visually matches its surroundings. */
+.agent-sessions-workbench .interactive-session .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
+	background-color: var(--sessions-codex-surface-background) !important;
+}
+.agent-sessions-workbench .interactive-session .chat-edit-input-container .interactive-input-part .chat-editor-container .interactive-input-editor .monaco-editor .monaco-editor-background {
+	background-color: transparent !important;
+}
+
+/* Scoped to the chat panel (`.part.sessionspart`) and the chat editor host
+ * (`.chat-editor-relative`) to avoid leaking into other chat surfaces such as
+ * the inline chat widgets and agent-session hover widget. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .interactive-input-part,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-input-part {
+	width: 100%;
+	max-width: none;
+	margin: 0;
+	display: inherit;
+	padding: 4px 20px;
+	box-sizing: border-box;
+}
+
+/* Make sure when editing we don't give unnecessary padding. */
+.agent-sessions-workbench .part.sessionspart .interactive-session .chat-edit-input-container .interactive-input-part,
+.agent-sessions-workbench .chat-editor-relative .interactive-session .chat-edit-input-container .interactive-input-part {
+	padding: 4px 0;
+}
+
+/* ---- Simple window: T3 Code composer shell ---- */
+
+/* Geometry ported from T3 Code's composer (`ChatComposer.tsx` +
+ * `.chat-composer-glass-host` in their index.css): a 22px shell radius, a low
+ * soft drop shadow, 28px footer controls with 10px corners and a 32px circular
+ * send button. Colours stay on theme tokens, so this block holds in light
+ * themes too. Scoped to the Simple
+ * window and the Advanced window's right chat panel (`.optimus-chat-view`,
+ * via the `:is()` host lists); the rest of Advanced keeps the
+ * stock composer. */
+
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-container,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .interactive-session .chat-input-container {
+	border-radius: 22px;
+	box-shadow: none;
+	min-height: 110px;
+	padding: 10px 12px;
+	gap: 6px;
+}
+
+/* Keep the drop shadow underneath the focus ring. */
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-container.focused,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .interactive-session .chat-input-container.focused {
+	box-shadow:
+		0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent);
+}
+
+/* Lift the Simple-mode composer off image backgrounds with a soft drop shadow.
+ * Keep this out of the Advanced composer variants, which retain
+ * their existing chrome. */
+.monaco-workbench.agent-sessions-workbench .part.sessionspart .interactive-session .chat-input-container {
+	box-shadow:
+		0 14px 30px -14px color-mix(in srgb, #000 50%, transparent),
+		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench .part.sessionspart .interactive-session .chat-input-container.focused {
+	box-shadow:
+		0 0 0 2px color-mix(in srgb, var(--vscode-agentsChatInput-focusBorder, var(--vscode-focusBorder)) 20%, transparent),
+		0 14px 30px -14px color-mix(in srgb, #000 50%, transparent),
+		0 4px 10px -6px color-mix(in srgb, #000 30%, transparent);
+}
+
+/* Once a transcript exists, match the right panel's compact reply state. */
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-container,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .interactive-session:not(.chat-composer-empty) .chat-input-container {
+	min-height: var(--bb-simple-sent-composer-min-height, 58px);
+	padding: var(--bb-simple-sent-composer-padding, 5px 8px);
+	gap: var(--bb-simple-sent-composer-gap, 2px);
+	border-radius: var(--bb-simple-sent-composer-radius, 15px);
+}
+
+/* A draft uses the same compact shell as a reply. The full window contributes
+ * width, not a separate hero-card height. */
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-input-container {
+	min-height: var(--bb-simple-sent-composer-min-height, 58px);
+	padding: var(--bb-simple-sent-composer-padding, 5px 8px);
+	gap: var(--bb-simple-sent-composer-gap, 2px);
+	border-radius: var(--bb-simple-sent-composer-radius, 15px);
+	/* No shadow declaration here: Simple mode inherits the soft drop shadow
+	 * from the composer shell rules above, while the Advanced right panel
+	 * falls back to the flat shell. */
+}
+
+/* The inline edit box inside a sent request shares `.chat-input-container` but
+ * is a compact bubble, not the main shell — keep it near the stock look. */
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-edit-input-container .chat-input-container,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .interactive-session .chat-edit-input-container .chat-input-container {
+	border-radius: 12px;
+	box-shadow: none;
+	padding: 0 6px 6px;
+}
+
+/* Editing a sent request still blocks the surrounding transcript and the main
+ * composer, but it should not paint a dark spotlight over them. */
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session :is(.chat-row-disabled-overlay.disabled, .chat-input-overlay.disabled) {
+	background-color: transparent;
+	opacity: 1;
+}
+
+/* Room for the taller controls between the editor and the footer row. The
+ * container already supplies 12px of side inset, so the row itself sits flush
+ * with it and only adds vertical breathing room. */
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars {
+	height: 28px;
+	min-height: 28px;
+	margin-top: 0;
+	padding: 0;
+}
+
+/* Advanced keeps its denser sent-state footer. Simple intentionally uses the
+ * shared 28px code-editor controls above. */
+.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session:not(.chat-composer-empty) .chat-input-toolbars {
+	height: 24px;
+	min-height: 24px;
+}
+
+/* The context usage dial rides in the composer footer here (moved off the
+ * secondary toolbar in chatInputPart), so it needs its own separation from the
+ * pickers on its left and the send button on its right — `margin-left: auto`
+ * from chat.css only handles the former. */
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars .chat-context-usage-container {
+	margin-left: auto;
+	margin-right: 8px;
+}
+
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars .chat-context-usage-widget {
+	padding: 4px 6px;
+	border-radius: 10px;
+}
+
+/* Prompt text inset: T3 pads the editor `px-4` (16px) from the card edge. The
+ * container contributes 12px; the editor row supplies the rest. Safe against
+ * Monaco's layout — chatInputPart caps the editor at the container's *content*
+ * width (`dom.getContentWidth`), which excludes this padding. */
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .interactive-input-part .chat-editor-container,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .interactive-session .interactive-input-part .chat-editor-container {
+	padding: 0 4px;
+}
+
+/* Keep the prompt inset identical to the right-panel composer. */
+:is(.monaco-workbench.agent-sessions-workbench .part.sessionspart, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container,
+.monaco-workbench.agent-sessions-workbench .chat-editor-relative .new-chat-composer-stack > .interactive-session .interactive-input-part .chat-editor-container {
+	padding: 0 2px;
+}
+
+/* Footer controls: T3's ghost buttons are 28px tall with `rounded-lg` (10px)
+ * corners. The split model picker keeps its own inner-section highlight, so it
+ * is excluded here and resized below. Descendant (not child) combinators: the
+ * gear sits inside a `.monaco-dropdown` and the mode chip inside a
+ * `.sessions-chat-picker-slot`, both between the action-item and its label.
+ * `!important` counters the workbench-wide `border-radius: 0 !important`
+ * action-label flattener at the top of this file. */
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
+	height: 28px;
+	min-width: 28px;
+	box-sizing: border-box;
+	border-radius: 10px !important;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session:not(.chat-composer-empty) .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split),
+.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view .interactive-session:not(.chat-composer-empty) .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon-mic {
+	height: 24px;
+	min-width: 24px;
+}
+
+/* Rounded hover container on every footer control (T3's ghost-button hover). */
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label:not(.model-picker-split):hover,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) .action-label.codicon-mic:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-picker-item .action-label.model-picker-split .model-picker-section {
+	height: 22px;
+	padding: 0 7px;
+	box-sizing: border-box;
+	border-radius: 8px;
+}
+
+/* The model selector belongs to the same inline toolbar as Add. Remove the
+ * persistent chip surface while retaining a compact hover/focus affordance. */
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
+	border: 0;
+	background: transparent !important;
+	box-shadow: none;
+}
+
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label.model-picker-split,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label.model-picker-split .model-picker-section {
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+/* Chips with a text label get T3's chip padding (`px-2`). */
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.chat-input-picker-label),
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.combined-model-provider-trigger-label),
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label:not(.model-picker-split):has(.sessions-chat-dropdown-label) {
+	padding: 0 8px;
+}
+
+/* Row icons: T3's `size-4.5` (18px) for the icon-only controls. The labels
+ * here are the codicon glyphs themselves, and the 28px/32px flex boxes above
+ * give the larger glyph room, so nothing clips. */
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label.codicon,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon {
+	font-size: 18px;
+}
+
+/* The provider mark inside the model chip sits in a fixed 16px codicon box
+ * (actionbar.css), so free the box alongside the size bump. */
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .combined-model-provider-trigger-icon .codicon {
+	font-size: 16px;
+	width: auto;
+	height: auto;
+}
+
+/* Dropdown chevrons scale with the rest of the row. The combined picker's
+ * chevron span *is* the codicon element, so match it directly too. */
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .chat-input-picker-item .action-label .codicon-chevron-down,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .codicon.combined-model-provider-trigger-chevron,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbar .combined-model-provider-trigger-chevron .codicon {
+	font-size: 12px;
+}
+
+/* Primary action: T3's 32px `rounded-full` send button (`size-8`) with an
+ * inset top highlight, hover scale and 30% disabled opacity; the stop state is
+ * their destructive red circle. This fork's submit action uses
+ * `Codicon.newLine` (↵) — the stock filled-circle rules in chat.css only cover
+ * `codicon-arrow-up`, so the fill is applied here for both glyphs. */
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-newline,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-stop-circle {
+	box-sizing: border-box;
+	width: 32px;
+	height: 32px;
+	min-width: 32px;
+	/* Beats the workbench-wide `border-radius: 0 !important` flattener. */
+	border-radius: 999px !important;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: background-color 120ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session:not(.chat-composer-empty) .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > :is(.action-label.codicon-arrow-up, .action-label.codicon-newline, .action-label.codicon-stop-circle) {
+	width: 24px;
+	height: 24px;
+	min-width: 24px;
+}
+
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground) !important;
+	box-shadow: 0 1px 2px var(--vscode-widget-shadow, transparent);
+}
+
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:hover,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+/* The stop button sits on the composer rather than shouting from it: it takes
+ * the composer's own surface colour instead of T3's destructive red, so the
+ * only thing that reads during a run is the glyph. */
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle {
+	background: var(--sessions-codex-surface-background);
+	color: var(--vscode-foreground) !important;
+	box-shadow: none;
+}
+
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 10%, var(--sessions-codex-surface-background));
+}
+
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:hover,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:hover,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:hover {
+	transform: scale(1.05);
+}
+
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-arrow-up:active,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-newline:active,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item:not(.disabled) > .action-label.codicon-stop-circle:active {
+	transform: scale(1);
+	box-shadow: inset 0 1px 0 var(--vscode-widget-shadow, transparent);
+}
+
+/* T3 keeps the primary fill on the disabled send button, just faded. Fading
+ * via `opacity` washes the glyph out against light themes (white arrow over a
+ * 30%-alpha fill), so mix the fade into the fill instead and keep the glyph
+ * at full strength. */
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label.codicon-arrow-up,
+:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item.disabled > .action-label.codicon-newline {
+	background: color-mix(in srgb, var(--vscode-button-background) 45%, var(--vscode-agentsChatInput-background, var(--vscode-editor-background)));
+	color: var(--vscode-button-foreground) !important;
+	opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-arrow-up,
+	:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-newline,
+	:is(.monaco-workbench.agent-sessions-workbench, .monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item > .action-label.codicon-stop-circle {
+		transition: background-color 120ms ease;
+		transform: none;
+	}
+}
+
+/* ---- Composer content fit ------------------------------------------------
+ * Simple sessions and full-page chat editors host the same controls at very
+ * different widths. Keep their text, icons, context meter and primary action
+ * on one sizing scale; labels yield with an ellipsis before fixed controls can
+ * clip or escape the shell. */
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session {
+	--bb-sessions-composer-control-size: 28px;
+	--bb-sessions-composer-icon-size: 16px;
+	--bb-sessions-composer-label-size: 12.5px;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session:not(.chat-composer-empty) {
+	--bb-sessions-composer-control-size: 24px;
+	--bb-sessions-composer-icon-size: 14px;
+	--bb-sessions-composer-label-size: 12px;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbars {
+	box-sizing: border-box;
+	width: 100%;
+	height: var(--bb-sessions-composer-control-size);
+	min-height: var(--bb-sessions-composer-control-size);
+	flex: 0 0 var(--bb-sessions-composer-control-size);
+	align-items: center;
+	gap: 4px;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbars > .chat-input-toolbar {
+	width: auto;
+	min-width: 0;
+	max-width: none;
+	flex: 1 1 auto;
+	overflow: hidden;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbars > .chat-execute-toolbar {
+	min-width: 0;
+	flex: 0 0 auto;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbars .monaco-action-bar,
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbars .monaco-action-bar .actions-container {
+	min-width: 0;
+	height: var(--bb-sessions-composer-control-size);
+	align-items: center;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar > .monaco-action-bar,
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar > .monaco-action-bar > .actions-container {
+	width: 100%;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbars .monaco-action-bar .action-item {
+	box-sizing: border-box;
+	min-width: 0;
+	height: var(--bb-sessions-composer-control-size);
+}
+
+/* Add, mic and submit/stop never shrink. Their glyphs share one optical size,
+ * while the round primary action now fits inside the footer's actual height. */
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar .action-item:has(.action-label.codicon-add),
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .action-item {
+	flex: 0 0 auto;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar .monaco-action-bar .action-item .action-label.codicon,
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .monaco-action-bar .action-item .action-label.codicon {
+	font-size: var(--bb-sessions-composer-icon-size);
+	line-height: 1;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar .action-label.codicon-add,
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .action-label.codicon-mic,
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbars > .chat-execute-toolbar .action-item > :is(.action-label.codicon-arrow-up, .action-label.codicon-newline, .action-label.codicon-stop-circle) {
+	box-sizing: border-box;
+	width: var(--bb-sessions-composer-control-size);
+	height: var(--bb-sessions-composer-control-size);
+	min-width: var(--bb-sessions-composer-control-size);
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+/* Permission/mode and model controls are the only flexible footer items. Both
+ * carry a real minimum of zero all the way to their text spans, which is the
+ * missing link required for text-overflow to work inside an action bar. */
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar .action-item:has(.sessions-chat-dropdown-label),
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar .chat-model-picker-action-item {
+	min-width: 0;
+	flex: 0 1 auto;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar .action-item:has(.sessions-chat-dropdown-label) {
+	max-width: min(180px, 30cqi);
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar .chat-model-picker-action-item {
+	max-width: min(240px, 42cqi);
+	margin-left: auto;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar .combined-model-provider-trigger {
+	box-sizing: border-box;
+	width: 100%;
+	height: var(--bb-sessions-composer-control-size);
+	min-width: 0;
+	max-width: 100%;
+	padding: 0 6px !important;
+	gap: 4px;
+	border: 0;
+	border-radius: 7px !important;
+	background: transparent !important;
+	box-shadow: none;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session :is(.chat-input-picker-label, .combined-model-provider-trigger-label, .combined-model-provider-trigger-thinking, .sessions-chat-dropdown-label) {
+	min-width: 0;
+	overflow: hidden;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
+	font-size: var(--bb-sessions-composer-label-size);
+	font-weight: 400;
+	line-height: 18px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar .action-label:has(.sessions-chat-dropdown-label) {
+	box-sizing: border-box;
+	width: 100%;
+	height: var(--bb-sessions-composer-control-size);
+	min-width: 0;
+	max-width: 100%;
+	padding: 0 7px;
+	gap: 5px;
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar :is(.combined-model-provider-trigger-icon .codicon, .action-label:has(.sessions-chat-dropdown-label) > .codicon) {
+	flex: 0 0 auto;
+	font-size: calc(var(--bb-sessions-composer-icon-size) - 1px);
+}
+
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-toolbar :is(.combined-model-provider-trigger-chevron, .combined-model-provider-trigger-chevron .codicon, .codicon-chevron-down) {
+	flex: 0 0 auto;
+	font-size: 10px;
+}
+
+/* Match the overlaid context meter to the current control scale. This keeps
+ * its hit target inside the same top/right inset in both editor hosts. */
+:is(
+	.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+	.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+	.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+) .interactive-session .chat-input-container > .chat-context-usage-container .chat-context-usage-widget {
+	box-sizing: border-box;
+	min-width: var(--bb-sessions-composer-control-size);
+	height: var(--bb-sessions-composer-control-size);
+	padding: 0 6px;
+}
+
+@container chat-input-part (max-width: 420px) {
+	:is(
+		.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+		.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+		.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+	) .interactive-session .chat-input-toolbar .action-item:has(.sessions-chat-dropdown-label) {
+		max-width: 28cqi;
+	}
+
+	:is(
+		.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+		.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+		.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+	) .interactive-session .chat-input-toolbar .chat-model-picker-action-item {
+		max-width: 38cqi;
+	}
+}
+
+@container chat-input-part (max-width: 340px) {
+	:is(
+		.monaco-workbench.agent-sessions-workbench .part.sessionspart,
+		.monaco-workbench.agent-sessions-workbench .chat-editor-relative,
+		.monaco-workbench.agent-sessions-workbench.optimus-window .optimus-chat-view
+	) .interactive-session .chat-input-container {
+		--bb-sessions-composer-control-size: 24px;
+		--bb-sessions-composer-icon-size: 14px;
+		--bb-sessions-composer-label-size: 12px;
+	}
+}
+
+/* Hide shared chat-session option-group pickers in the sessions app active chat UI.
+ * The Simple window provides its own new-session configuration controls (the
+ * combined provider+model chip, backed by a session-type picker) and should not
+ * surface the shared workbench chat session pickers on top of them.
+ *
+ * Advanced (Optimus) is excluded: it has no session-type picker of its own, so
+ * these are the only control that can reach a BYOS ("bring your own server")
+ * agent provider there — hiding them made BYOS unselectable in that window.
+ * Drop the exclusion once Advanced grows its own provider picker. */
+.agent-sessions-workbench:is(:not(.optimus-window), .optimus-window.optimus-root-session-focused) .interactive-session .chat-input-toolbars .chat-sessionPicker-container {
+	display: none;
+}
+
+/* ---- Sessions Action Widget Pickers ---- */
+
+.agent-sessions-workbench .action-widget {
+	background-color: var(--vscode-agentsPanel-background);
+	border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent)));
+	box-shadow: 0 8px 24px var(--vscode-widget-shadow, transparent);
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .action-widget .action-widget-action-bar,
+.agent-sessions-workbench .action-widget .action-list-filter {
+	background-color: var(--vscode-agentsPanel-background);
+}
+
+.agent-sessions-workbench .action-widget .action-list-filter-row {
+	padding-right: 0;
+}
+
+.agent-sessions-workbench .action-widget .monaco-scrollable-element > .monaco-list-rows {
+	background-color: var(--vscode-agentsPanel-background) !important;
+}
+
+/* ---- Sessions Quick Picks ---- */
+
+.agent-sessions-workbench .quick-input-widget,
+.agent-sessions-workbench .quick-input-titlebar {
+	background-color: var(--vscode-agentsPanel-background) !important;
+}
+
+.agent-sessions-workbench .quick-input-widget {
+	border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent))) !important;
+	box-sizing: border-box;
+}
+
+.agent-sessions-workbench .quick-input-header,
+.agent-sessions-workbench .quick-input-html-widget,
+.agent-sessions-workbench .quick-input-list .monaco-scrollable-element > .monaco-list-rows,
+.agent-sessions-workbench .quick-input-tree .monaco-scrollable-element > .monaco-list-rows {
+	background-color: var(--vscode-agentsPanel-background) !important;
+}
+
+.agent-sessions-workbench .quick-input-header {
+	border-radius: var(--vscode-cornerRadius-xLarge);
+}
+
+/* ---- Sessions Context Menus ---- */
+
+.agent-sessions-workbench .context-view.monaco-menu-container,
+.agent-sessions-workbench .context-view.monaco-menu-container .monaco-menu,
+.agent-sessions-workbench .context-view.monaco-menu-container .monaco-scrollable-element {
+	background-color: var(--vscode-agentsPanel-background) !important;
+}
+
+.agent-sessions-workbench .context-view.monaco-menu-container {
+	border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, color-mix(in srgb, var(--vscode-foreground) 18%, transparent))) !important;
+	box-shadow: 0 8px 24px var(--vscode-widget-shadow, transparent);
+	box-sizing: border-box;
+}
+
+/* Keep code block backgrounds stable across themes; add separation in older light themes via border only */
+.agent-sessions-workbench .interactive-session .interactive-response .interactive-result-code-block {
+	border-color: var(--vscode-editorWidget-border, var(--vscode-widget-border));
+	border-radius: var(--vscode-cornerRadius-large);
+	background-color: color-mix(in srgb, var(--vscode-editorWidget-background) 86%, var(--vscode-editor-background));
+}
+
+/* ---- Modal Editor Block ---- */
+
+.agent-sessions-workbench .monaco-modal-editor-block {
+	background: color-mix(in srgb, var(--vscode-editor-background) 50%, transparent);
+}
+
+.agent-sessions-workbench .monaco-modal-editor-block .modal-editor-sidebar .monaco-tl-twistie.force-no-twistie {
+	width: 0 !important;
+	padding-left: 0 !important;
+	padding-right: 0 !important;
+}
+
+
+/* ---- Customization Empty State ---- */
+
+/* Icon + title side by side in a row, description underneath */
+.agent-sessions-workbench .ai-customization-list-widget .list-empty-state .empty-state-header {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 6px;
+}
+
+.agent-sessions-workbench .ai-customization-list-widget .list-empty-state .empty-state-header > .empty-state-icon {
+	font-size: 16px;
+	margin-bottom: 0;
+	flex-shrink: 0;
+}
+
+/* MCP / Plugin empty state: icon + title side by side */
+.agent-sessions-workbench .mcp-empty-state .empty-state-header {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 6px;
+}
+
+.agent-sessions-workbench .mcp-empty-state .empty-state-header > .empty-icon {
+	font-size: 16px;
+	margin-bottom: 0;
+	flex-shrink: 0;
+}
+
+/* ---- Part Appear Transitions ---- */
+
+/*
+ * Subtle appear animation when parts transition from display:none → visible
+ * (via split-view-view .visible class).
+ *
+ * Auxiliary bar, panel, and chat bar animate their container via opacity,
+ * margin, border-color, and background. The sidebar reveal animation applies
+ * only to `.part.sidebar > .content`, using opacity + transform so the
+ * sidebar container, header, and footer stay visually fixed.
+ *
+ * Opacity transiently creates a stacking context while it animates from 0 to 1
+ * over 250ms — once settled at opacity: 1, no additional stacking context is
+ * introduced by this animation. Margin and transform shifts are purely visual
+ * within the grid-allocated space.
+ */
+
+.agent-sessions-workbench .part.auxiliarybar,
+.agent-sessions-workbench .part.panel,
+.agent-sessions-workbench .part.sessionspart {
+	transition:
+		opacity 250ms ease-out,
+		margin-top 250ms ease-out,
+		margin-right 250ms ease-out,
+		margin-bottom 250ms ease-out;
+}
+
+.agent-sessions-workbench .part.sidebar > .content {
+	transition:
+		opacity 250ms ease-out,
+		transform 250ms ease-out;
+}
+
+/* Mode switches already hold the outgoing frame until this workbench's first
+ * paint. Do not spend another 250ms animating freshly-created parts underneath
+ * it; regular in-workbench part toggles keep their transitions. */
+.agent-sessions-workbench.workbench-booting .part.auxiliarybar,
+.agent-sessions-workbench.workbench-booting .part.panel,
+.agent-sessions-workbench.workbench-booting .part.sessionspart,
+.agent-sessions-workbench.workbench-booting .part.sidebar > .content {
+	transition: none;
+}
+
+@starting-style {
+
+	/* Shared starting values */
+	.agent-sessions-workbench .part.auxiliarybar,
+	.agent-sessions-workbench .part.panel,
+	.agent-sessions-workbench .part.sessionspart {
+		opacity: 0;
+		border-color: transparent;
+	}
+
+	/* Card parts: blend from surrounding background */
+	.agent-sessions-workbench .part.auxiliarybar,
+	.agent-sessions-workbench .part.panel,
+	.agent-sessions-workbench .part.sessionspart {
+		background: color-mix(in srgb, var(--part-background) 60%, var(--vscode-sideBar-background));
+	}
+
+	.agent-sessions-workbench .part.sidebar > .content {
+		opacity: 0;
+		transform: translateX(-6px);
+	}
+
+	/* Panel (bottom): fade in without introducing temporary gutters */
+	.agent-sessions-workbench .part.panel {
+		margin: 0;
+	}
+
+	/* Auxiliary bar (right): fade in without introducing temporary gutters */
+	.agent-sessions-workbench .part.auxiliarybar {
+		margin: 0;
+	}
+
+	/* Chat bar (center-bottom): fade in without introducing temporary gutters */
+	.agent-sessions-workbench .part.sessionspart {
+		margin: 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+	.agent-sessions-workbench .part.auxiliarybar,
+	.agent-sessions-workbench .part.panel,
+	.agent-sessions-workbench .part.sessionspart {
+		transition: none;
+	}
+
+	.agent-sessions-workbench .part.sidebar > .content {
+		transition: none;
+	}
+
+	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sessionspart,
+	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-sidebar,
+	.agent-sessions-workbench:not(.phone-layout) .monaco-grid-view .split-view-view.part-host-branch-contains-sidebar,
+	.agent-sessions-workbench.parts-animating:not(.sessions-sash-dragging):not(.phone-layout) > .monaco-grid-view > .monaco-grid-branch-node > .monaco-split-view2 > .monaco-scrollable-element > .split-view-container > .split-view-view {
+		transition: none !important;
+	}
+}
+
+/* ---- Widget Customizations ---- */
+
+/* Action Widget */
+.agent-sessions-workbench .action-widget .monaco-list .monaco-list-row {
+	padding-right: 0;
+}
+
+/* Badge */
+.agent-sessions-workbench .badge > .badge-content {
+	border-radius: var(--vscode-cornerRadius-small) !important;
+}
+
+/* Phone-layout rules for parts, sashes, max-width constraints, and grid
+	background live in mobileChatShell.css — do not duplicate them here. */
+
+/*
+ * Phone layout (< 640px) styles. Currently the only mobile form factor
+ * supported by the sessions workbench; tablet/larger viewports fall back
+ * to the desktop layout.
+ */
+
+/* ---- Phone Layout: Overscroll Containment ---- */
+
+/* Prevent body rubber-band on iOS and Chrome pull-to-refresh on Android */
+.agent-sessions-workbench.phone-layout .monaco-scrollable-element > .scrollable-element {
+	overscroll-behavior: contain;
+}
+
+.agent-sessions-workbench.phone-layout .interactive-session {
+	overscroll-behavior: contain;
+}
+
+.agent-sessions-workbench.phone-layout .monaco-list {
+	overscroll-behavior: contain;
+}
+
+/* ---- Phone Layout: Touch Target Sizing ---- */
+
+/* Ensure interactive elements meet 44px minimum touch target.
+	Excludes:
+	- Quick pick toolbars: 44x44 icons crowd the small popup header.
+	- Chat input toolbars: a dense row of picker buttons (Local, Auto,
+	agent, model, tools, send...). Enforcing 44px makes items 50px tall
+	and shows a huge hover/active background next to smaller adjacent
+	labels, making the bar feel unbalanced. */
+.agent-sessions-workbench.phone-layout .action-item > .action-label {
+	min-height: 44px;
+	min-width: 44px;
+}
+
+.agent-sessions-workbench.phone-layout .quick-input-widget .action-item > .action-label,
+.agent-sessions-workbench.phone-layout .chat-input-toolbars .action-item > .action-label {
+	min-height: 0;
+	min-width: 0;
+}
+
+/* Touch action for tap responsiveness */
+.agent-sessions-workbench.phone-layout .action-item,
+.agent-sessions-workbench.phone-layout button {
+	touch-action: manipulation;
+}
+
+/* Disable text selection callout on interactive elements */
+.agent-sessions-workbench.phone-layout .action-item,
+.agent-sessions-workbench.phone-layout .monaco-toolbar,
+.agent-sessions-workbench.phone-layout .sidebar-footer {
+	-webkit-touch-callout: none;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+/* Titlebar safe-area inset lives in mobileChatShell.css */
+
+/* ---- Phone Layout: Mobile Quick Picks ---- */
+
+/* On phone, expand quick picks to use the viewport with safe-area gutters
+	rather than the desktop-default narrow popup near the trigger. Position
+	is left untouched so the picker stays anchored where the user invoked
+	it (avoids feeling modal/jumpy). */
+.agent-sessions-workbench.phone-layout .quick-input-widget {
+	left: 8px !important;
+	right: 8px !important;
+	width: auto !important;
+	max-width: none !important;
+}
+
+.agent-sessions-workbench.phone-layout .quick-input-widget .quick-input-list,
+.agent-sessions-workbench.phone-layout .quick-input-widget .quick-input-tree {
+	max-height: 50vh;
+}
+
+.agent-sessions-workbench.phone-layout .quick-input-widget .quick-input-list .monaco-list-row,
+.agent-sessions-workbench.phone-layout .quick-input-widget .quick-input-tree .monaco-list-row {
+	min-height: 44px;
+}
+
+/* ---- Phone Layout: Mobile Dialogs ---- */
+
+/* Make dialogs near-full-width with larger buttons on phone */
+.agent-sessions-workbench.phone-layout .monaco-dialog-box {
+	width: calc(100% - 32px);
+	max-width: calc(100% - 32px);
+}
+
+.agent-sessions-workbench.phone-layout .monaco-dialog-box .dialog-buttons-row .monaco-button {
+	min-height: 44px;
+	font-size: 16px;
+}
+
+/* ---- Phone Layout: Mobile Notifications ---- */
+
+/* Full-width notification toasts at top of screen */
+.agent-sessions-workbench.phone-layout .notifications-toasts {
+	left: 8px !important;
+	right: 8px !important;
+	bottom: auto !important;
+	top: calc(env(safe-area-inset-top) + 48px) !important;
+	width: auto !important;
+}
+
+.agent-sessions-workbench.phone-layout .notifications-toasts .notification-toast {
+	width: 100%;
+	max-width: 100%;
+}
+
+.agent-sessions-workbench.phone-layout .notifications-toasts .notification-toast .notification-toast-container {
+	border-radius: var(--vscode-cornerRadius-xLarge);
+}
+
+/* ---- Phone Layout: Hover Cards ---- */
+
+/* Disable delayed hover cards on touch devices — they never trigger */
+.agent-sessions-workbench.phone-layout .monaco-hover {
+	display: none;
+}
+
+/* Exception: keep hovers that are explicitly triggered (e.g., info buttons) */
+.agent-sessions-workbench.phone-layout .monaco-hover.visible-on-mobile {
+	display: block;
+}
+
+/* ---- Phone Layout: Mobile Editor Modal ---- */
+
+/* Full-screen editor modal on phone — no margins, covers entire viewport */
+.agent-sessions-workbench.phone-layout .monaco-modal-editor-part {
+	top: 0 !important;
+	left: 0 !important;
+	right: 0 !important;
+	bottom: 0 !important;
+	width: 100% !important;
+	height: 100% !important;
+	border-radius: 0 !important;
+	margin: 0 !important;
+	animation: editor-slide-up 250ms ease-out;
+}
+
+@keyframes editor-slide-up {
+	from {
+		transform: translateY(30%);
+		opacity: 0.5;
+	}
+
+	to {
+		transform: translateY(0);
+		opacity: 1;
+	}
+}
+
+/* Make the modal backdrop fully cover the screen on phone */
+.agent-sessions-workbench.phone-layout .monaco-modal-editor-block {
+	background: color-mix(in srgb, var(--vscode-editor-background) 70%, transparent);
+}
+
+/* Safe area padding for editor titlebar on phone */
+.agent-sessions-workbench.phone-layout .monaco-modal-editor-part .title {
+	padding-top: env(safe-area-inset-top);
+}
+
+/* ---- Phone Layout: Input Auto-Zoom Prevention ---- */
+
+/* iOS Safari zooms in on input focus when font-size < 16px.
+	Force minimum 16px on all input elements on phone. */
+.agent-sessions-workbench.phone-layout input,
+.agent-sessions-workbench.phone-layout textarea,
+.agent-sessions-workbench.phone-layout .monaco-inputbox input,
+.agent-sessions-workbench.phone-layout .chat-input-container textarea {
+	font-size: 16px;
+}
+
+/* ---- Phone Layout: Native Scroll Preservation ---- */
+
+/* Ensure chat content uses momentum scrolling on phone.
+	The -webkit-overflow-scrolling property is needed for older iOS. */
+.agent-sessions-workbench.phone-layout .interactive-session .monaco-scrollable-element {
+	-webkit-overflow-scrolling: touch;
+}
+
+/* ---- Phone Layout: Bottom Sheet Panel ---- */
+
+/* Panel slides up from bottom as a sheet on phone */
+.agent-sessions-workbench.phone-layout .split-view-view.part-host-panel {
+	position: absolute !important;
+	bottom: 0 !important;
+	left: 0 !important;
+	right: 0 !important;
+	height: 60vh !important;
+	z-index: 200;
+	animation: panel-slide-up 250ms ease-out;
+	border-radius: 16px 16px 0 0;
+	overflow: hidden;
+}
+
+@keyframes panel-slide-up {
+	from {
+		transform: translateY(100%);
+		opacity: 0.5;
+	}
+
+	to {
+		transform: translateY(0);
+		opacity: 1;
+	}
+}
+
+/* Panel drag handle visual indicator */
+.agent-sessions-workbench.phone-layout .part.panel::before {
+	content: '';
+	display: block;
+	width: 36px;
+	height: 5px;
+	background: var(--vscode-foreground);
+	opacity: 0.3;
+	border-radius: var(--vscode-cornerRadius-small);
+	margin: 8px auto 4px auto;
+}
+
+/* ---- Phone Layout: Auxiliary Bar Overlay ---- */
+
+/* Auxiliary bar slides in from the right as a full-height overlay on phone */
+.agent-sessions-workbench.phone-layout .split-view-view.part-host-auxiliarybar {
+	position: absolute !important;
+	top: 0 !important;
+	right: 0 !important;
+	bottom: 0 !important;
+	width: 85vw !important;
+	max-width: 400px;
+	z-index: 200;
+	animation: auxbar-slide-in 250ms ease-out;
+}
+
+@keyframes auxbar-slide-in {
+	from {
+		transform: translateX(100%);
+		opacity: 0;
+	}
+
+	to {
+		transform: translateX(0);
+		opacity: 1;
+	}
+}
+
+/* Keep the changed-files summary close to the density of its file rows. */
+.agent-sessions-workbench .backboard-clean-chat .checkpoint-file-changes-summary {
+	margin-top: 6px;
+	padding: 3px 5px;
+	border-radius: 9px;
+	box-shadow: none;
+}
+.agent-sessions-workbench .backboard-clean-chat .checkpoint-file-changes-summary .checkpoint-file-changes-summary-header {
+	min-height: 22px;
+	padding: 0;
+}
+.agent-sessions-workbench .backboard-clean-chat .checkpoint-file-changes-summary .chat-file-changes-label .monaco-button {
+	min-height: 20px;
+	padding: 1px 3px;
+}
+
+/* Direct manipulation must track the sash, without toggle animations or
+ * repeatedly sampling the browser-sized glass surface during each frame. */
+.monaco-workbench.agent-sessions-workbench.sessions-sash-dragging .monaco-grid-view .split-view-view {
+	transition: none !important;
+}
+.monaco-workbench.agent-sessions-workbench.sessions-sash-dragging .part.auxiliarybar {
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+}
+

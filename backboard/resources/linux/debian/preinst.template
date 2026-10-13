@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+set -e
+
+# Backboard 3.0.0's postrm removes shared VS Code apt files even on upgrade.
+# dpkg runs the new preinst before that old postrm, then the new postinst.
+if [ "@@NAME@@" = "backboard-studio" ] && { [ "$1" = "upgrade" ] || [ "$1" = "install" ]; }; then
+	eval "$(apt-config shell APT_SOURCE_PARTS Dir::Etc::sourceparts/d)"
+	BACKUP_DIR=/var/lib/@@NAME@@/apt-upgrade-backup
+	for source in "${APT_SOURCE_PARTS}vscode.sources" /usr/share/keyrings/microsoft.gpg; do
+		if [ -e "$source" ] || [ -L "$source" ]; then
+			install -d -m 0700 "$BACKUP_DIR"
+			backup="$BACKUP_DIR/$(basename "$source")"
+			# Keep the original copy if dpkg resumes an interrupted upgrade.
+			if [ ! -e "$backup" ] && [ ! -L "$backup" ]; then
+				cp -a "$source" "$backup"
+			fi
+		fi
+	done
+fi

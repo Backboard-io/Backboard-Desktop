@@ -1,0 +1,186 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.backboard-api-keys-editor {
+	height: 100%;
+	overflow: auto;
+	padding: 40px 24px 24px;
+	box-sizing: border-box;
+}
+
+.backboard-api-keys {
+	max-width: 620px;
+	margin: 0 auto;
+}
+
+.backboard-api-keys-header {
+	padding: 0 2px;
+	margin-bottom: 16px;
+}
+
+.backboard-api-keys-title {
+	margin: 0 0 4px;
+	font-size: 16px;
+	font-weight: 600;
+	line-height: 22px;
+}
+
+.backboard-api-keys-description {
+	margin: 0;
+	font-size: 12.5px;
+	line-height: 18px;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* One grouped list with hairline dividers instead of a stack of bordered cards. */
+.backboard-api-keys-rows {
+	border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+	border-radius: 10px;
+	overflow: hidden;
+}
+
+.backboard-api-keys-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-height: 56px;
+	padding: 10px 12px;
+	box-sizing: border-box;
+}
+
+.backboard-api-keys-row + .backboard-api-keys-row {
+	border-top: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+}
+
+.backboard-api-keys-icon-tile {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	border-radius: 8px;
+	background-color: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
+}
+
+.backboard-api-keys-icon {
+	width: 16px;
+	height: 16px;
+	background-color: var(--vscode-foreground);
+}
+
+.backboard-api-keys-icon.provider-openai {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_open_ai.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_open_ai.svg') center / contain no-repeat;
+}
+
+.backboard-api-keys-icon.provider-anthropic {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_anthropic.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_anthropic.svg') center / contain no-repeat;
+}
+
+.backboard-api-keys-icon.provider-google {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_google.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_google.svg') center / contain no-repeat;
+}
+
+.backboard-api-keys-icon.provider-openrouter {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_open_router.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_open_router.svg') center / contain no-repeat;
+}
+
+.backboard-api-keys-icon.provider-xai {
+	-webkit-mask: url('../../widget/media/model-provider-icons/ai_x_ai.svg') center / contain no-repeat;
+	mask: url('../../widget/media/model-provider-icons/ai_x_ai.svg') center / contain no-repeat;
+}
+
+.backboard-api-keys-main {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.backboard-api-keys-name {
+	font-size: 13px;
+	font-weight: 500;
+	line-height: 18px;
+}
+
+.backboard-api-keys-status {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	min-width: 0;
+	font-size: 12px;
+	line-height: 16px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.backboard-api-keys-status-text {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.backboard-api-keys-status.error {
+	color: var(--vscode-errorForeground);
+}
+
+.backboard-api-keys-dot {
+	flex: 0 0 auto;
+	width: 6px;
+	height: 6px;
+	margin-top: 5px;
+	border-radius: 50%;
+	background-color: var(--vscode-descriptionForeground);
+}
+
+.backboard-api-keys-dot.connected {
+	background-color: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.backboard-api-keys-dot.pending {
+	background-color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.backboard-api-keys-dot.error {
+	background-color: var(--vscode-errorForeground);
+}
+
+.backboard-api-keys-console {
+	flex: 0 0 auto;
+	color: var(--vscode-textLink-foreground);
+	text-decoration: none;
+	cursor: pointer;
+}
+
+.backboard-api-keys-console::before {
+	content: '\00b7';
+	display: inline-block;
+	margin-right: 6px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.backboard-api-keys-console:hover {
+	text-decoration: underline;
+}
+
+.backboard-api-keys-actions {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.backboard-api-keys-actions .monaco-button {
+	width: auto;
+	height: 26px;
+	padding: 0 10px;
+	border-radius: 6px;
+	font-size: 12px;
+	line-height: 24px;
+	white-space: nowrap;
+}

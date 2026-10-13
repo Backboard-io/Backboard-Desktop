@@ -1,0 +1,347 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import './media/auxiliaryBarPart.css';
+import { localize } from '../../../../nls.js';
+import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
+import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { IStorageService } from '../../../../platform/storage/common/storage.js';
+import { contrastBorder } from '../../../../platform/theme/common/colorRegistry.js';
+import { IThemeService } from '../../../../platform/theme/common/themeService.js';
+import { ActiveAuxiliaryContext, AuxiliaryBarFocusContext } from '../../../common/contextkeys.js';
+import { ACTIVITY_BAR_BADGE_BACKGROUND, ACTIVITY_BAR_BADGE_FOREGROUND, ACTIVITY_BAR_TOP_ACTIVE_BORDER, ACTIVITY_BAR_TOP_DRAG_AND_DROP_BORDER, ACTIVITY_BAR_TOP_FOREGROUND, ACTIVITY_BAR_TOP_INACTIVE_FOREGROUND, PANEL_ACTIVE_TITLE_BORDER, PANEL_ACTIVE_TITLE_FOREGROUND, PANEL_DRAG_AND_DROP_BORDER, PANEL_INACTIVE_TITLE_FOREGROUND, SIDE_BAR_BACKGROUND, SIDE_BAR_BORDER, SIDE_BAR_TITLE_BORDER, SIDE_BAR_FOREGROUND } from '../../../common/theme.js';
+import { IViewDescriptorService, ViewContainerLocation } from '../../../common/views.js';
+import { IExtensionService } from '../../../services/extensions/common/extensions.js';
+import { ActivityBarPosition, IWorkbenchLayoutService, LayoutSettings, Parts, Position } from '../../../services/layout/browser/layoutService.js';
+import { HoverPosition } from '../../../../base/browser/ui/hover/hoverWidget.js';
+import { IAction, Separator, SubmenuAction, toAction } from '../../../../base/common/actions.js';
+import { ToggleAuxiliaryBarAction } from './auxiliaryBarActions.js';
+import { assertReturnsDefined } from '../../../../base/common/types.js';
+import { LayoutPriority } from '../../../../base/browser/ui/splitview/splitview.js';
+import { ToggleSidebarPositionAction } from '../../actions/layoutActions.js';
+import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { AbstractPaneCompositePart, CompositeBarPosition } from '../paneCompositePart.js';
+import { ActionsOrientation } from '../../../../base/browser/ui/actionbar/actionbar.js';
+import { IPaneCompositeBarOptions } from '../paneCompositeBar.js';
+import { IMenuService, MenuId } from '../../../../platform/actions/common/actions.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { getContextMenuActions } from '../../../../platform/actions/browser/menuEntryActionViewItem.js';
+import { IHoverService } from '../../../../platform/hover/browser/hover.js';
+import { VisibleViewContainersTracker } from '../visibleViewContainersTracker.js';
+import { Extensions } from '../../panecomposite.js';
+
+interface IAuxiliaryBarPartConfiguration {
+	position: ActivityBarPosition;
+
+	canShowLabels: boolean;
+	showLabels: boolean;
+}
+
+export class AuxiliaryBarPart extends AbstractPaneCompositePart {
+
+	static readonly activeViewSettingsKey = 'workbench.auxiliarybar.activepanelid';
+	static readonly pinnedViewsKey = 'workbench.auxiliarybar.pinnedPanels';
+	static readonly placeholdeViewContainersKey = 'workbench.auxiliarybar.placeholderPanels';
+	static readonly viewContainersWorkspaceStateKey = 'workbench.auxiliarybar.viewContainersWorkspaceState';
+
+	// The agent transcript is responsive down to its own 320px minimum. Keep
+	// the auxiliary bar sash aligned with that contract so the 380/480/600px
+	// Codex layouts are all reachable.
+	override readonly minimumWidth: number = 320;
+	override readonly maximumWidth: number = Number.POSITIVE_INFINITY;
+	override readonly minimumHeight: number = 0;
+	override readonly maximumHeight: number = Number.POSITIVE_INFINITY;
+
+	get preferredHeight(): number | undefined {
+		// Don't worry about titlebar or statusbar visibility
+		// The difference is minimal and keeps this function clean
+		return this.layoutService.mainContainerDimension.height * 0.4;
+	}
+
+	get preferredWidth(): number | undefined {
+		const activeComposite = this.getActivePaneComposite();
+
+		if (!activeComposite) {
+			return undefined;
+		}
+
+		const width = activeComposite.getOptimalWidth();
+		if (typeof width !== 'number') {
+			return undefined;
+		}
+
+		return Math.max(width, 320);
+	}
+
+	readonly priority = LayoutPriority.Low;
+
+	private configuration: IAuxiliaryBarPartConfiguration;
+	private lastLayoutHadTitle: boolean | undefined;
+	private readonly visibleViewContainersTracker: VisibleViewContainersTracker;
+
+	constructor(
+		@INotificationService notificationService: INotificationService,
+		@IStorageService storageService: IStorageService,
+		@IContextMenuService contextMenuService: IContextMenuService,
+		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
+		@IKeybindingService keybindingService: IKeybindingService,
+		@IHoverService hoverService: IHoverService,
+		@IInstantiationService instantiationService: IInstantiationService,
+		@IThemeService themeService: IThemeService,
+		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
+		@IContextKeyService contextKeyService: IContextKeyService,
+		@IExtensionService extensionService: IExtensionService,
+		@ICommandService private commandService: ICommandService,
+		@IMenuService menuService: IMenuService,
+		@IConfigurationService private readonly configurationService: IConfigurationService
+	) {
+		let currentPart: AuxiliaryBarPart | undefined;
+		super(
+			Parts.AUXILIARYBAR_PART,
+			{
+				get hasTitle() {
+					return currentPart?.hasCompositeTitle() ?? true;
+				},
+				trailingSeparator: true,
+				borderWidth: () => (this.getColor(SIDE_BAR_BORDER) || this.getColor(contrastBorder)) ? 1 : 0,
+			},
+			AuxiliaryBarPart.activeViewSettingsKey,
+			ActiveAuxiliaryContext.bindTo(contextKeyService),
+			AuxiliaryBarFocusContext.bindTo(contextKeyService),
+			'auxiliarybar',
+			'auxiliarybar',
+			undefined,
+			SIDE_BAR_TITLE_BORDER,
+			ViewContainerLocation.AuxiliaryBar,
+			Extensions.Auxiliary,
+			MenuId.AuxiliaryBarTitle,
+			notificationService,
+			storageService,
+			contextMenuService,
+			layoutService,
+			keybindingService,
+			hoverService,
+			instantiationService,
+			themeService,
+			viewDescriptorService,
+			contextKeyService,
+			extensionService,
+			menuService,
+		);
+
+		currentPart = this;
+		this._register(this.onDidCompositeOpen.event(() => this.relayoutForTitleVisibility()));
+		// GridView skips child layout when the outer bounds have not changed.
+		// Sending the first message restores the title without resizing the grid,
+		// so the content must give that space back even on a same-size layout.
+		this._register(layoutService.onDidLayoutMainContainer(() => this.relayoutForTitleVisibility()));
+
+		// Track visible view containers for auto-hide and for the agent panel switcher
+		this.visibleViewContainersTracker = this._register(instantiationService.createInstance(VisibleViewContainersTracker, ViewContainerLocation.AuxiliaryBar));
+		this._register(this.visibleViewContainersTracker.onDidChange((e) => this.onDidChangeVisibleViewContainers(e)));
+
+		this.configuration = this.resolveConfiguration();
+
+		this._register(configurationService.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration(LayoutSettings.ACTIVITY_BAR_LOCATION)) {
+				this.configuration = this.resolveConfiguration();
+				this.onDidChangeActivityBarLocation();
+			} else if (e.affectsConfiguration('workbench.secondarySideBar.showLabels')) {
+				this.configuration = this.resolveConfiguration();
+				this.updateCompositeBar(true);
+			} else if (e.affectsConfiguration(LayoutSettings.ACTIVITY_BAR_AUTO_HIDE)) {
+				this.onDidChangeActivityBarLocation();
+			}
+		}));
+	}
+
+	private onDidChangeVisibleViewContainers(e: { before: number; after: number }): void {
+		const visibleBefore = e.before > 1;
+		const visibleAfter = e.after > 1;
+		if (visibleBefore === visibleAfter) {
+			return;
+		}
+
+		// With the activity bar hidden, the composite bar is the only switcher the
+		// right bar has, so it appears as soon as there is a second panel to reach.
+		if (this.configuration.position === ActivityBarPosition.HIDDEN) {
+			this.onDidChangeActivityBarLocation();
+			return;
+		}
+
+		// Otherwise only update if auto-hide is enabled and composite bar would show
+		const autoHide = this.configurationService.getValue<boolean>(LayoutSettings.ACTIVITY_BAR_AUTO_HIDE);
+		if (autoHide && (this.configuration.position === ActivityBarPosition.TOP || this.configuration.position === ActivityBarPosition.BOTTOM)) {
+			this.onDidChangeActivityBarLocation();
+		}
+	}
+
+	private hasCompositeTitle(): boolean {
+		// Session tabs remain visible for empty drafts too. Reserve their height
+		// so the chat composer cannot extend underneath the status bar.
+		if (this.element?.querySelector('.composite.title.has-chat-tabs')) {
+			return true;
+		}
+		return !(this.getActivePaneComposite()?.getId() === 'workbench.panel.chat'
+			&& this.element?.querySelector('.backboard-composer .chat-composer-empty'));
+	}
+
+	private relayoutForTitleVisibility(): void {
+		if (this.lastLayoutHadTitle !== this.hasCompositeTitle() && this.dimension && this.contentPosition) {
+			this.layout(this.dimension.width, this.dimension.height, this.contentPosition.top, this.contentPosition.left);
+		}
+	}
+
+	override layout(width: number, height: number, top: number, left: number): void {
+		if (!this.layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
+			return;
+		}
+		this.lastLayoutHadTitle = this.hasCompositeTitle();
+		super.layout(width, height, top, left);
+	}
+
+	private resolveConfiguration(): IAuxiliaryBarPartConfiguration {
+		const position = this.configurationService.getValue<ActivityBarPosition>(LayoutSettings.ACTIVITY_BAR_LOCATION);
+
+		const canShowLabels = position !== ActivityBarPosition.TOP && position !== ActivityBarPosition.BOTTOM; // use same style as activity bar in this case
+		const showLabels = canShowLabels && this.configurationService.getValue('workbench.secondarySideBar.showLabels') !== false;
+
+		return { position, canShowLabels, showLabels };
+	}
+
+	private onDidChangeActivityBarLocation(): void {
+		this.updateCompositeBar();
+
+		const id = this.getActiveComposite()?.getId();
+		if (id) {
+			this.onTitleAreaUpdate(id);
+		}
+	}
+
+	override updateStyles(): void {
+		super.updateStyles();
+
+		const container = assertReturnsDefined(this.getContainer());
+		container.style.backgroundColor = this.getColor(SIDE_BAR_BACKGROUND) || '';
+		const borderColor = this.getColor(SIDE_BAR_BORDER) || this.getColor(contrastBorder);
+		const isPositionLeft = this.layoutService.getSideBarPosition() === Position.RIGHT;
+
+		container.style.color = this.getColor(SIDE_BAR_FOREGROUND) || '';
+
+		container.style.borderLeftColor = borderColor ?? '';
+		container.style.borderRightColor = borderColor ?? '';
+
+		container.style.borderLeftStyle = borderColor && !isPositionLeft ? 'solid' : 'none';
+		container.style.borderRightStyle = borderColor && isPositionLeft ? 'solid' : 'none';
+
+		container.style.borderLeftWidth = borderColor && !isPositionLeft ? '1px' : '0px';
+		container.style.borderRightWidth = borderColor && isPositionLeft ? '1px' : '0px';
+	}
+
+	protected getCompositeBarOptions(): IPaneCompositeBarOptions {
+		const $this = this;
+		return {
+			partContainerClass: 'auxiliarybar',
+			pinnedViewContainersKey: AuxiliaryBarPart.pinnedViewsKey,
+			placeholderViewContainersKey: AuxiliaryBarPart.placeholdeViewContainersKey,
+			viewContainersWorkspaceStateKey: AuxiliaryBarPart.viewContainersWorkspaceStateKey,
+			icon: !this.configuration.showLabels,
+			// The right bar's tabs name an agent — Backboard, Claude Code, Codex — so
+			// they carry the product mark alongside the label rather than instead of it.
+			showIconWithLabel: true,
+			orientation: ActionsOrientation.HORIZONTAL,
+			recomputeSizes: true,
+			activityHoverOptions: {
+				position: () => this.getCompositeBarPosition() === CompositeBarPosition.BOTTOM ? HoverPosition.ABOVE : HoverPosition.BELOW,
+			},
+			fillExtraContextMenuActions: actions => this.fillExtraContextMenuActions(actions),
+			compositeSize: 0,
+			iconSize: 16,
+			// Add 10px spacing if the overflow action is visible to no confuse the user with ... between the toolbars
+			get overflowActionSize() { return $this.getCompositeBarPosition() === CompositeBarPosition.TITLE ? 40 : 30; },
+			colors: theme => ({
+				activeBackgroundColor: theme.getColor(SIDE_BAR_BACKGROUND),
+				inactiveBackgroundColor: theme.getColor(SIDE_BAR_BACKGROUND),
+				get activeBorderBottomColor() { return $this.getCompositeBarPosition() === CompositeBarPosition.TITLE ? theme.getColor(PANEL_ACTIVE_TITLE_BORDER) : theme.getColor(ACTIVITY_BAR_TOP_ACTIVE_BORDER); },
+				get activeForegroundColor() { return $this.getCompositeBarPosition() === CompositeBarPosition.TITLE ? theme.getColor(PANEL_ACTIVE_TITLE_FOREGROUND) : theme.getColor(ACTIVITY_BAR_TOP_FOREGROUND); },
+				get inactiveForegroundColor() { return $this.getCompositeBarPosition() === CompositeBarPosition.TITLE ? theme.getColor(PANEL_INACTIVE_TITLE_FOREGROUND) : theme.getColor(ACTIVITY_BAR_TOP_INACTIVE_FOREGROUND); },
+				badgeBackground: theme.getColor(ACTIVITY_BAR_BADGE_BACKGROUND),
+				badgeForeground: theme.getColor(ACTIVITY_BAR_BADGE_FOREGROUND),
+				get dragAndDropBorder() { return $this.getCompositeBarPosition() === CompositeBarPosition.TITLE ? theme.getColor(PANEL_DRAG_AND_DROP_BORDER) : theme.getColor(ACTIVITY_BAR_TOP_DRAG_AND_DROP_BORDER); }
+			}),
+			compact: true
+		};
+	}
+
+	private fillExtraContextMenuActions(actions: IAction[]): void {
+		const currentPositionRight = this.layoutService.getSideBarPosition() === Position.LEFT;
+
+		if (this.getCompositeBarPosition() === CompositeBarPosition.TITLE) {
+			const viewsSubmenuAction = this.getViewsSubmenuAction();
+			if (viewsSubmenuAction) {
+				actions.push(new Separator());
+				actions.push(viewsSubmenuAction);
+			}
+		}
+
+		const activityBarPositionMenu = this.menuService.getMenuActions(MenuId.ActivityBarPositionMenu, this.contextKeyService, { shouldForwardArgs: true, renderShortTitle: true });
+		const positionActions = getContextMenuActions(activityBarPositionMenu).secondary;
+
+		const toggleShowLabelsAction = toAction({
+			id: 'workbench.action.auxiliarybar.toggleShowLabels',
+			label: this.configuration.showLabels ? localize('showIcons', "Show Icons") : localize('showLabels', "Show Labels"),
+			enabled: this.configuration.canShowLabels,
+			run: () => this.configurationService.updateValue('workbench.secondarySideBar.showLabels', !this.configuration.showLabels)
+		});
+
+		actions.push(...[
+			new Separator(),
+			new SubmenuAction('workbench.action.panel.position', localize('activity bar position', "Activity Bar Position"), positionActions),
+			toAction({ id: ToggleSidebarPositionAction.ID, label: currentPositionRight ? localize('move second side bar left', "Move Secondary Side Bar Left") : localize('move second side bar right', "Move Secondary Side Bar Right"), run: () => this.commandService.executeCommand(ToggleSidebarPositionAction.ID) }),
+			toggleShowLabelsAction,
+			toAction({ id: ToggleAuxiliaryBarAction.ID, label: localize('hide second side bar', "Hide Secondary Side Bar"), run: () => this.commandService.executeCommand(ToggleAuxiliaryBarAction.ID) })
+		]);
+	}
+
+	protected shouldShowCompositeBar(): boolean {
+		if (this.configuration.position === ActivityBarPosition.HIDDEN) {
+			// The right bar is Backboard's home and is shared with any agent panel
+			// installed from the marketplace (Claude Code, Codex). Hiding the activity
+			// bar must not leave those unreachable, so the composite bar stays as the
+			// switcher between them — it is still absent while chat is alone there.
+			return this.visibleViewContainersTracker.visibleCount > 1;
+		}
+
+		// Check if auto-hide is enabled and there's only one visible view container
+		// while the activity bar is configured to be top or bottom.
+		if (this.configuration.position === ActivityBarPosition.TOP || this.configuration.position === ActivityBarPosition.BOTTOM) {
+			const autoHide = this.configurationService.getValue<boolean>(LayoutSettings.ACTIVITY_BAR_AUTO_HIDE);
+			if (autoHide) {
+				// Use visible composite count from the composite bar if available (considers pinned state),
+				// otherwise fall back to the tracker's count (based on active view descriptors).
+				// Note: We access paneCompositeBar directly to avoid circular calls with getVisiblePaneCompositeIds()
+				const visibleCount = this.visibleViewContainersTracker.visibleCount;
+				if (visibleCount <= 1) {
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	protected getCompositeBarPosition(): CompositeBarPosition {
+		return CompositeBarPosition.TITLE;
+	}
+
+	override toJSON(): object {
+		return {
+			type: Parts.AUXILIARYBAR_PART
+		};
+	}
+}

@@ -1,0 +1,101 @@
+{
+	"name": "theme-defaults",
+	"displayName": "%displayName%",
+	"description": "%description%",
+	"categories": [
+		"Themes"
+	],
+	"version": "10.0.0",
+	"publisher": "vscode",
+	"license": "MIT",
+	"engines": {
+		"vscode": "*"
+	},
+	"contributes": {
+		"themes": [
+			{
+				"id": "Backboard Obsidian",
+				"label": "%backboardObsidianThemeLabel%",
+				"uiTheme": "vs-dark",
+				"path": "./themes/backboard-obsidian.json"
+			},
+			{
+				"id": "Backboard Porcelain",
+				"label": "%backboardPorcelainThemeLabel%",
+				"uiTheme": "vs",
+				"path": "./themes/backboard-porcelain.json"
+			},
+			{
+				"id": "Backboard Linen",
+				"label": "%backboardLinenThemeLabel%",
+				"uiTheme": "vs",
+				"path": "./themes/backboard-linen.json"
+			},
+			{
+				"id": "Backboard Sage",
+				"label": "%backboardSageThemeLabel%",
+				"uiTheme": "vs",
+				"path": "./themes/backboard-sage.json"
+			},
+			{
+				"id": "Backboard Mist",
+				"label": "%backboardMistThemeLabel%",
+				"uiTheme": "vs",
+				"path": "./themes/backboard-mist.json"
+			},
+			{
+				"id": "Backboard Midnight",
+				"label": "%backboardMidnightThemeLabel%",
+				"uiTheme": "vs-dark",
+				"path": "./themes/backboard-midnight.json"
+			},
+			{
+				"id": "Backboard Forest",
+				"label": "%backboardForestThemeLabel%",
+				"uiTheme": "vs-dark",
+				"path": "./themes/backboard-forest.json"
+			},
+			{
+				"id": "Backboard Ember",
+				"label": "%backboardEmberThemeLabel%",
+				"uiTheme": "vs-dark",
+				"path": "./themes/backboard-ember.json"
+			},
+			{
+				"id": "Backboard Bloom",
+				"label": "%backboardBloomThemeLabel%",
+				"uiTheme": "vs",
+				"path": "./themes/backboard-bloom.json"
+			},
+			{
+				"id": "Backboard Parchment",
+				"label": "%backboardParchmentThemeLabel%",
+				"uiTheme": "vs",
+				"path": "./themes/backboard-parchment.json"
+			},
+			{
+				"id": "Backboard Neon",
+				"label": "%backboardNeonThemeLabel%",
+				"uiTheme": "vs-dark",
+				"path": "./themes/backboard-neon.json"
+			},
+			{
+				"id": "Backboard Aubergine",
+				"label": "%backboardAubergineThemeLabel%",
+				"uiTheme": "vs-dark",
+				"path": "./themes/backboard-aubergine.json"
+			}
+		],
+		"iconThemes": [
+			{
+				"id": "vs-minimal",
+				"label": "%minimalIconThemeLabel%",
+				"path": "./fileicons/vs_minimal-icon-theme.json"
+			}
+		]
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/microsoft/vscode.git"
+	}
+}

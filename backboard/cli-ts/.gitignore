@@ -1,0 +1,11 @@
+node_modules/
+.env
+.backboard/
+/backboard
+*.log
+.DS_Store
+/skills-lock.json
+/skills/
+/prompt-dumps/
+/benchmark-cache/
+/benchmark-results/

@@ -1,0 +1,1410 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*
+ * Simple window shell, following the Codex desktop app's 2026-09 layout:
+ *
+ *   ┌──────────────────── 38px window chrome (traffic lights, header) ───────────────────┐
+ *   │ rail │╭ navigation panel ──╮┊ chat card ──────────────────────────────────────────╮│
+ *   │ 52px ││ Backboard  ⌕  ≡   │┊                                                     ││
+ *   │      ││ New chat           │┊                                                     ││
+ *   │      │╰────────────────────╯┊─────────────────────────────────────────────────────╯│
+ *   └─────────────────────────────── 4px chrome below and to the right ───────────────────┘
+ *
+ * The panel lives in the sidebar part (sessionsView.ts); the rail is docked
+ * to the window edge above it, so it stays when the sidebar is hidden and the
+ * card then starts beside it. The card inset is subtracted in
+ * SessionsPart.layout (CARD_INSET, RAIL_WIDTH) and mirrored here as margins. Earlier layers style these surfaces with `!important` and
+ * long `:is()` chains, so every rule here is scoped by `--shell` (two ids),
+ * which outranks any class-only selector.
+ */
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) {
+	/* Light and custom themes derive the layers from the theme. */
+	--sessions-shell-chrome: color-mix(in srgb, var(--codex-text-primary) 7%, var(--codex-canvas));
+	--sessions-shell-panel: color-mix(in srgb, var(--codex-text-primary) 2.5%, var(--codex-canvas));
+	--sessions-shell-hairline: color-mix(in srgb, var(--codex-text-primary) 8%, transparent);
+	--sessions-shell-raised: color-mix(in srgb, var(--codex-text-primary) 12%, var(--codex-canvas));
+	--sessions-shell-tile: color-mix(in srgb, var(--codex-text-primary) 3%, var(--codex-canvas));
+	--sessions-shell-chip: color-mix(in srgb, var(--codex-text-primary) 6.5%, transparent);
+	--sessions-shell-radius: 12px;
+	--sessions-shell-inset: 4px;
+	--sessions-shell-header: 38px;
+	--sessions-shell-rail: 52px;
+	background-color: var(--sessions-shell-chrome) !important;
+}
+
+/* Every theme, light or dark, derives the layers above from its own
+ * canvas and text colours; no palette is imposed. */
+
+/* The sidebar's own base layer carries the theme's tinted colour. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sidebar::before {
+	background: var(--sessions-shell-chrome) !important;
+}
+
+/* The mode switch keeps the Editor window's look (part.css), so switching
+ * modes does not restyle it. */
+
+/* ---- Window chrome ------------------------------------------------------ */
+
+/* The shell's full-window base layer carries the chrome colour. */
+.monaco-workbench.agent-sessions-workbench.shell-gradient-background:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b)::before {
+	background: var(--sessions-shell-chrome) !important;
+}
+
+/* The grid wrappers are transparent so the chrome reaches every gap. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .monaco-grid-view .split-view-view:is(.part-host-sidebar, .part-host-branch-contains-sidebar, .part-host-sessionspart, .part-host-auxiliarybar) {
+	background: transparent !important;
+	box-shadow: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sidebar {
+	background: var(--sessions-shell-chrome) !important;
+	box-shadow: none !important;
+	border: 0 !important;
+}
+
+/* Every header strip (sidebar, chat, right panel tabs, Canvas) is one height
+ * whose midline is the macOS traffic lights' centre (19px: the native buttons
+ * are placed for the 35px default control height). Content is centred in the
+ * strip itself, with no per-section nudges. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .sessions-panel-header:is(.sidebar-part-header, .sessions-part-header) {
+	height: var(--sessions-shell-header) !important;
+	min-height: var(--sessions-shell-header) !important;
+	flex-basis: var(--sessions-shell-header) !important;
+	align-items: center !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	border-bottom: 0 !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .sessions-panel-header:is(.sidebar-part-header, .sessions-part-header, .sessions-window-controls) > :is(.sessions-panel-header-left, .sessions-panel-header-center, .sessions-panel-header-right) {
+	height: 100% !important;
+	align-items: center !important;
+	transform: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .sessions-panel-header:is(.sidebar-part-header, .sessions-part-header, .sessions-window-controls) :is(.monaco-toolbar, .monaco-action-bar, .actions-container, .panel-header-toolbar-container, .mac-window-controls-spacer) {
+	height: 100% !important;
+	align-items: center !important;
+	transform: none !important;
+}
+
+/* Without a wallpaper the chat part paints the chrome itself; the card is its
+ * content. With one, the part stays transparent so the clipped underlay shows
+ * through the card and the workbench chrome shows around it. */
+.monaco-workbench.agent-sessions-workbench:not(.sessions-chat-custom-background):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart {
+	background: var(--sessions-shell-chrome) !important;
+}
+
+/* ---- Card: chat, then the right panel ----------------------------------- */
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart > .content {
+	margin: 0 var(--sessions-shell-inset) var(--sessions-shell-inset) 0;
+	border-radius: 0 var(--sessions-shell-radius) var(--sessions-shell-radius) 0 !important;
+	overflow: hidden;
+}
+
+.monaco-workbench.agent-sessions-workbench.nosidebar:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart > .content {
+	margin-left: var(--sessions-shell-rail);
+	border-radius: var(--sessions-shell-radius) !important;
+}
+
+/* An open right panel continues the card to the window edge. */
+.monaco-workbench.agent-sessions-workbench:not(.noauxiliarybar):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart > .content {
+	margin-right: 0;
+	border-top-right-radius: 0 !important;
+	border-bottom-right-radius: 0 !important;
+}
+
+/* Hairline where the card meets the navigation panel (Codex: 0.5px). */
+.monaco-workbench.agent-sessions-workbench:not(.nosidebar):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart > .content::after {
+	content: '';
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: 0;
+	border-left: 0.5px solid var(--sessions-shell-hairline);
+	pointer-events: none;
+	z-index: 30;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar {
+	background: transparent !important;
+	border: 0 !important;
+	border-radius: 0 !important;
+	box-shadow: none !important;
+}
+
+/* The panel spans the window height: its tab strip sits in the chrome, like
+ * Codex's tabs, and the card surface starts below it level with the chat.
+ * Earlier layers stretch the content over the whole part (its title row is
+ * hidden), so the card gaps are restated here. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar > .content {
+	position: relative;
+	isolation: isolate;
+	margin: 0 var(--sessions-shell-inset) var(--sessions-shell-inset) 0;
+	width: calc(100% - var(--sessions-shell-inset)) !important;
+	height: calc(100% - var(--sessions-shell-inset)) !important;
+	border-radius: 0 !important;
+	background: transparent !important;
+	overflow: hidden;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar :is(.pane, .pane-body, .sessions-right-workbench-shell) {
+	background: transparent !important;
+}
+
+/* The body (everything below the strip) is the card surface. It is painted
+ * here rather than on a pseudo-layer so embedded tools that sample their
+ * nearest opaque ancestor (the terminal) blend with it. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-body {
+	border-bottom-right-radius: var(--sessions-shell-radius);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(.sessions-chat-custom-background):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-body {
+	background: var(--codex-canvas) !important;
+}
+
+/* With a wallpaper the panel shows it, like the chat; its tiles and pills
+ * become dark glass so they stay legible on any image. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-body {
+	background: transparent !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar :is(.sessions-right-workbench-launcher-row, .sessions-right-workbench-launcher-site-icon, .sessions-right-workbench-browser-address) {
+	background: color-mix(in srgb, var(--sessions-shell-panel) 62%, transparent) !important;
+	-webkit-backdrop-filter: blur(12px);
+	backdrop-filter: blur(12px);
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar :is(.sessions-right-workbench-launcher-row, .sessions-right-workbench-launcher-site):is(:hover, :focus-visible) {
+	background: color-mix(in srgb, var(--sessions-shell-raised) 72%, transparent) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-title {
+	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-header {
+	height: var(--sessions-shell-header) !important;
+	min-height: var(--sessions-shell-header) !important;
+	flex-basis: var(--sessions-shell-header) !important;
+	box-sizing: border-box;
+	background: transparent !important;
+	border-bottom: 0 !important;
+	box-shadow: none !important;
+}
+
+/* Hairline between the chat and the panel. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar > .content::after {
+	content: '';
+	position: absolute;
+	inset: var(--sessions-shell-header) auto 0 0;
+	width: 0;
+	border-left: 0.5px solid var(--sessions-shell-hairline);
+	pointer-events: none;
+	z-index: 30;
+}
+
+/* The wallpaper underlay spans the window; show it only inside the card.
+ * SessionsPart publishes the card's origin. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b)::after {
+	clip-path: inset(var(--sessions-card-top, 38px) var(--sessions-shell-inset) var(--sessions-shell-inset) var(--sessions-card-left, 0px) round 0 var(--sessions-shell-radius) var(--sessions-shell-radius) 0) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.nosidebar:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b)::after {
+	clip-path: inset(var(--sessions-card-top, 38px) var(--sessions-shell-inset) var(--sessions-shell-inset) var(--sessions-card-left, var(--sessions-shell-rail)) round var(--sessions-shell-radius)) !important;
+}
+
+/* ---- Sidebar: rail + navigation panel ----------------------------------- */
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-viewpane .agent-sessions-container.has-rail {
+	display: flex;
+	flex-direction: row;
+	padding: 0 !important;
+	gap: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail > .agent-sessions-section {
+	flex: 1 1 auto;
+	min-width: 0;
+	margin-bottom: var(--sessions-shell-inset, 4px);
+	padding: 8px 8px 10px;
+	box-sizing: border-box;
+	border-radius: var(--sessions-shell-radius, 12px) 0 0 var(--sessions-shell-radius, 12px);
+	background: var(--sessions-shell-panel, transparent);
+	overflow: hidden;
+}
+
+/* The rail is docked to the window edge, under the header strip, above the
+ * grid and Canvas (2530) and below modal editors (2540). It stays when the
+ * sidebar is hidden; with the sidebar shown it covers the panel's empty
+ * placeholder column. The maximized editor fills the window on its own. */
+.agent-sessions-rail-dock {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(.nosessionspart):not(#sessions-shell-a):not(#sessions-shell-b) > .agent-sessions-rail-dock {
+	position: absolute;
+	top: var(--sessions-shell-header);
+	bottom: 0;
+	left: 0;
+	z-index: 2535;
+	display: flex;
+	width: var(--sessions-shell-rail);
+	background: var(--sessions-shell-chrome) !important;
+	-webkit-app-region: no-drag;
+}
+
+/* The mode switch and sidebar toggle are docked the same way, over the header
+ * row at the window's top-left (SessionsPart), so they keep one position while
+ * the sidebar opens and closes; the header row passes under them. */
+.sessions-window-controls-dock {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(.nosessionspart):not(#sessions-shell-a):not(#sessions-shell-b) > .sessions-window-controls-dock {
+	position: absolute;
+	top: 0;
+	left: 0;
+	z-index: 2535;
+	display: flex;
+	height: var(--sessions-shell-header);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) > .sessions-window-controls-dock > .sessions-panel-header {
+	width: auto;
+	height: 100%;
+	flex: 0 0 auto;
+	padding-top: 0;
+	background: transparent;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) > .sessions-window-controls-dock > .sessions-panel-header > :is(.sessions-panel-header-center, .sessions-panel-header-right) {
+	display: none;
+}
+
+/* The chat header's room for the dock (sized in SessionsPart). It grows and
+ * shrinks with the sidebar animation, so the header's own controls glide with
+ * the card instead of jumping. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .sessions-window-controls-reserve {
+	flex: 0 0 auto;
+	height: 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.monaco-workbench.agent-sessions-workbench.parts-animating:not(.sessions-sash-dragging):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .sessions-window-controls-reserve {
+		transition: width 280ms cubic-bezier(0.22, 1, 0.36, 1);
+	}
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail > .agent-sessions-rail-placeholder {
+	flex: 0 0 var(--sessions-shell-rail);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) > .sessions-panel-edge-preview.left {
+	left: var(--sessions-shell-rail);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail {
+	flex: 0 0 52px;
+	width: 52px;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	align-items: center;
+	padding: 4px 8px 4px;
+	box-sizing: border-box;
+	min-height: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail :is(.agent-sessions-rail-group, .agent-sessions-footer-navigation) {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	width: auto;
+}
+
+/* Rail buttons: 36px squircles with 20px icons, dim until hovered or active. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-sidebar-action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 36px;
+	width: 36px;
+	height: 36px;
+	min-width: 36px;
+	padding: 0;
+	margin: 0;
+	gap: 0;
+	border-radius: 12.5px;
+	background: transparent;
+	color: color-mix(in srgb, var(--codex-text-primary) 50%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-sidebar-action:hover {
+	background: var(--codex-hover);
+	color: var(--codex-text-primary);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-sidebar-action.active {
+	background: color-mix(in srgb, var(--codex-text-primary) 10%, transparent);
+	color: var(--codex-text-primary);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-sidebar-action-label {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-sidebar-action-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	margin: 0;
+	color: inherit;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-sidebar-action-icon :is(.codicon, svg) {
+	font-size: 20px !important;
+	width: 20px;
+	height: 20px;
+	color: inherit;
+}
+
+/* The account sits at the foot of the rail as a 26px avatar. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-user {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 36px;
+	min-width: 36px;
+	padding: 0;
+	margin: 0;
+	border: 0;
+	border-radius: 12.5px;
+	background: transparent;
+	gap: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-user:hover {
+	background: var(--codex-hover);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-user-text {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-user-avatar {
+	width: 26px;
+	height: 26px;
+	min-width: 26px;
+	margin: 0;
+	font-size: 10px;
+}
+
+/* ---- Navigation panel heading ------------------------------------------- */
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-search-row {
+	height: 30px;
+	margin: 0 0 2px;
+	padding: 0;
+	gap: 2px;
+}
+
+/* New chat leads the panel (where Codex puts its title), with Search and the
+ * folder/thread-card toggle as icons at the end of the same row. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-search-row .agent-sessions-new-chat-button {
+	flex: 1 1 auto;
+	min-width: 0;
+	justify-content: flex-start;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-search-row .agent-sessions-search-button {
+	flex: 0 0 28px;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	justify-content: center;
+	border-radius: 9.375px;
+	color: color-mix(in srgb, var(--codex-text-primary) 50%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-search-row .agent-sessions-search-button .agent-sessions-sidebar-action-label {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-search-row .agent-sessions-search-button .agent-sessions-sidebar-action-icon {
+	margin: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-search-row .agent-sessions-simple-icon-button {
+	flex: 0 0 28px;
+	width: 28px;
+	height: 28px;
+	border-radius: 9.375px;
+	color: color-mix(in srgb, var(--codex-text-primary) 50%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-search-row :is(.agent-sessions-search-button, .agent-sessions-simple-icon-button):hover {
+	background: var(--codex-hover);
+	color: var(--codex-text-primary);
+}
+
+/* The find input takes the heading row while it is open. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-search-row.find-open {
+	padding-left: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-search-row.find-open .agent-sessions-new-chat-button {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-search-row .agent-sessions-find-widget-container {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+/* ---- Projects header ---------------------------------------------------- */
+
+/* Codex introduces the folders with a quiet section label rather than a
+ * divider; the folder filter keeps its menu, only its chrome is lighter. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-project-row {
+	margin-top: 14px;
+	padding-top: 0;
+	border-top: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-project-row .agent-sessions-project-filter-button {
+	flex: 0 1 auto;
+	height: 25px;
+	padding: 0 6px 0 8px;
+	gap: 4px;
+	font-size: 13px;
+	font-weight: 400;
+	color: var(--codex-text-secondary);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-project-row .agent-sessions-project-filter-button > .agent-sessions-sidebar-action-icon {
+	display: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-project-row .agent-sessions-project-filter-label {
+	flex: 0 1 auto;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-simple-project-row .agent-sessions-simple-icon-button {
+	width: 24px;
+	height: 24px;
+	flex: 0 0 24px;
+	margin-left: auto;
+	border-radius: 8px;
+	color: var(--codex-text-secondary);
+}
+
+/* ---- Rail update button -------------------------------------------------- */
+
+/* Sized and rounded like the rail's other icon buttons, in the same blue as
+ * the Editor's Update pill; present only while an update is available (or
+ * installing, when it becomes Stop). */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update {
+	display: none;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 26px;
+	height: 26px;
+	margin: 4px auto 8px;
+	padding: 0;
+	border: 0;
+	border-radius: 8px;
+	background: #1769d2;
+	color: #fff;
+	cursor: pointer;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update.has-update {
+	display: flex;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update:hover {
+	background: #125bb8;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update .codicon {
+	font-size: 14px;
+	color: #fff;
+}
+
+/* ---- Rail bottom: one icon family, centred ------------------------------ */
+
+/* Grid, Background and Settings share the sidebar's thin outline icons
+ * (codexTheme.css draws Settings that way; Grid and Background were font
+ * glyphs at a heavier weight). Each is an 18px mask centred in its 36px
+ * button: the codexTheme mask sat at the top-left of a 20px box, which put
+ * Settings a little off-centre. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-sidebar-action-icon .codicon {
+	display: flex !important;
+	align-items: center;
+	justify-content: center;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .codicon-table {
+	--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223.5%22%20y%3D%223.5%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221.75%22%2F%3E%3Crect%20x%3D%2213.5%22%20y%3D%223.5%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221.75%22%2F%3E%3Crect%20x%3D%223.5%22%20y%3D%2213.5%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221.75%22%2F%3E%3Crect%20x%3D%2213.5%22%20y%3D%2213.5%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221.75%22%2F%3E%3C%2Fsvg%3E");
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .codicon-symbol-color {
+	--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M12%203a9%209%200%200%200%200%2018c1.2%200%201.8-1%201.4-2l-.4-1a1.7%201.7%200%200%201%201.6-2.3H17a4%204%200%200%200%204-4C21%206.9%2017%203%2012%203z%22%2F%3E%3Ccircle%20cx%3D%227.5%22%20cy%3D%2211%22%20r%3D%22.9%22%2F%3E%3Ccircle%20cx%3D%2210%22%20cy%3D%227%22%20r%3D%22.9%22%2F%3E%3Ccircle%20cx%3D%2214.5%22%20cy%3D%227%22%20r%3D%22.9%22%2F%3E%3Ccircle%20cx%3D%2217%22%20cy%3D%2211%22%20r%3D%22.9%22%2F%3E%3C%2Fsvg%3E");
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-sidebar-action-icon :is(.codicon-table, .codicon-symbol-color, .codicon-settings-gear)::before {
+	content: '';
+	display: block;
+	width: 18px;
+	height: 18px;
+	margin: 0;
+	background-color: currentColor;
+	mask: var(--sidebar-icon) center / contain no-repeat;
+}
+
+/* Update: a quiet blue tile instead of a solid block; solid on hover. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update {
+	width: 28px;
+	height: 28px;
+	margin: 0;
+	border-radius: 9px;
+	background: color-mix(in srgb, #1769d2 22%, transparent);
+	color: #4d9bff;
+	transition: background .12s ease, color .12s ease;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update:hover {
+	background: #1769d2;
+	color: #fff;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update .codicon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: inherit;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update :is(.codicon-arrow-up, .codicon-debug-stop) {
+	--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M12%2019V5M6%2011l6-6%206%206%22%2F%3E%3C%2Fsvg%3E");
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update .codicon-debug-stop {
+	--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%226.5%22%20y%3D%226.5%22%20width%3D%2211%22%20height%3D%2211%22%20rx%3D%222%22%2F%3E%3C%2Fsvg%3E");
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-rail-update :is(.codicon-arrow-up, .codicon-debug-stop)::before {
+	content: '';
+	display: block;
+	width: 15px;
+	height: 15px;
+	background-color: currentColor;
+	mask: var(--sidebar-icon) center / contain no-repeat;
+}
+
+/* The account button is a 36px rail button like the rest, around its 28px avatar. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .backboard-account-button.compact {
+	width: 36px;
+	height: 36px;
+	min-width: 36px;
+	padding: 0;
+	margin: 0 auto 2px;
+	border-radius: 12.5px;
+}
+
+/* ---- Panel footer ------------------------------------------------------- */
+
+/* Only the update control is left in the panel footer; hide the row when it
+ * has nothing to show. */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-container.has-rail .agent-sessions-footer:not(.has-update):not(:has(> .agent-sessions-app-menu-icon)) {
+	display: none;
+}
+
+/* ---- Right panel tab strip ---------------------------------------------- */
+
+/* Codex's tab strip: 32px pills (r10) on the chrome, the active one raised,
+ * 28px icon buttons (r12.5) at 50% until hovered, no separators. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 0 8px 0 7px !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tabs {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	width: auto !important;
+	flex: 0 1 auto !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tab-separator {
+	display: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tab {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: 32px !important;
+	min-width: 0;
+	max-width: 240px;
+	padding: 4px 7px 4px 10px !important;
+	box-sizing: border-box;
+	border: 0 !important;
+	border-radius: 10px !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	color: var(--codex-text-secondary) !important;
+	font-size: 13px;
+	font-weight: 430;
+	cursor: pointer;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tab:hover {
+	background: var(--sessions-shell-chip) !important;
+	color: var(--codex-text-primary) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tab.active {
+	background: var(--sessions-shell-raised) !important;
+	color: var(--codex-text-primary) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tab > .codicon {
+	flex: none;
+	font-size: 16px !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tab {
+	flex: 0 1 238px !important;
+	width: 238px;
+	min-width: 96px !important;
+	max-width: 238px !important;
+	justify-content: flex-start !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tab-close {
+	margin-left: auto !important;
+}
+
+/* Codex's strip ends with a single full-view control; the compact toggle is
+ * not part of it. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-frame-controls .sessions-right-workbench-icon-button:has(> .codicon-layout-panel) {
+	display: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tab-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tab-close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	width: 20px;
+	height: 20px;
+	margin-left: 8px;
+	padding: 2px;
+	border: 0;
+	border-radius: 10px;
+	background: transparent;
+	color: var(--codex-text-secondary);
+	visibility: hidden;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tab:is(.active, :hover) .sessions-right-workbench-tab-close {
+	visibility: visible;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tab-close:hover {
+	background: var(--sessions-shell-chip);
+	color: var(--codex-text-primary);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar :is(.sessions-right-workbench-tab-add, .sessions-right-workbench-icon-button) {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	width: 28px !important;
+	height: 28px !important;
+	padding: 0 !important;
+	border: 0 !important;
+	border-radius: 12.5px !important;
+	background: transparent !important;
+	color: var(--codex-text-secondary) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar :is(.sessions-right-workbench-tab-add, .sessions-right-workbench-icon-button):hover {
+	background: var(--sessions-shell-chip) !important;
+	color: var(--codex-text-primary) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-tab-add {
+	margin-left: 0 !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-frame-controls {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	margin-left: auto !important;
+}
+
+/* ---- Right panel launcher ---------------------------------------------- */
+
+/* Codex's new tab: a "Tools" heading over a two-column grid of 40px tiles
+ * (#181818, r10) with 12px shortcut chips. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-center {
+	justify-content: flex-start !important;
+	align-items: stretch !important;
+	padding: 24px 20px 40px !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-title {
+	display: block !important;
+	margin: 0 0 16px !important;
+	font-size: 13px !important;
+	font-weight: 500 !important;
+	line-height: 19px !important;
+	text-align: left !important;
+	color: var(--codex-text-primary) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-rows {
+	display: grid !important;
+	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+	gap: 4px 16px !important;
+	width: 100% !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-row {
+	display: grid !important;
+	grid-template-columns: 16px minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 18px !important;
+	height: 40px !important;
+	min-height: 40px !important;
+	padding: 8px 10px !important;
+	border: 0 !important;
+	border-radius: 10px !important;
+	background: var(--sessions-shell-tile) !important;
+	box-shadow: none !important;
+	color: var(--codex-text-primary) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-row:is(:hover, :focus-visible) {
+	background: var(--sessions-shell-chip) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-row > .codicon {
+	font-size: 16px !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-label {
+	font-size: 13px !important;
+	font-weight: 400 !important;
+	line-height: 19px !important;
+	text-align: left;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-shortcut {
+	position: static !important;
+	min-width: 0 !important;
+	height: 16px !important;
+	padding: 2px 6px !important;
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	border: 0 !important;
+	border-radius: 10px !important;
+	background: var(--sessions-shell-chip) !important;
+	color: color-mix(in srgb, var(--codex-text-primary) 65%, transparent) !important;
+	font-size: 12px !important;
+	line-height: 12px !important;
+}
+
+/* ---- Canvas ------------------------------------------------------------- */
+
+/* Canvas covers everything right of the sidebar. In the shell its title strip
+ * is plain chrome (draggable, hiding the chat header beneath) and its body sits
+ * exactly on the card, so the playground keeps the card's gaps and corners and
+ * its glass lines up with the clipped wallpaper. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .sessions-canvas-overlay {
+	background: transparent !important;
+	-webkit-backdrop-filter: none !important;
+	backdrop-filter: none !important;
+	border-left: 0 !important;
+	-webkit-app-region: drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .sessions-canvas-overlay::before {
+	content: '';
+	position: absolute;
+	inset: 0 0 auto 0;
+	height: var(--sessions-shell-header);
+	background: var(--sessions-shell-chrome);
+	pointer-events: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .sessions-canvas-overlay > .sessions-canvas-overlay-body {
+	margin: var(--sessions-shell-header) var(--sessions-shell-inset) var(--sessions-shell-inset) 0;
+	padding-top: 0;
+	border-radius: 0 var(--sessions-shell-radius) var(--sessions-shell-radius) 0;
+	overflow: hidden;
+	background: var(--codex-canvas);
+	-webkit-app-region: no-drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .sessions-canvas-overlay:not(.beside-sidebar) > .sessions-canvas-overlay-body {
+	margin-left: var(--sessions-shell-rail);
+	border-radius: var(--sessions-shell-radius);
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .sessions-canvas-overlay > .sessions-canvas-overlay-body {
+	background: color-mix(in srgb, var(--codex-canvas) 90%, transparent);
+	-webkit-backdrop-filter: blur(24px);
+	backdrop-filter: blur(24px);
+}
+
+/* ---- Rail icons --------------------------------------------------------- */
+
+/* Every rail icon is a 20px glyph from the same 24-unit, 1.75-stroke outline
+ * family, centred in its 36px button. Grid and Background had no outline (the
+ * table glyph drew larger, Background repeated Canvas's picture). */
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .codicon-table {
+	--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223.5%22%20y%3D%223.5%22%20width%3D%2217%22%20height%3D%2217%22%20rx%3D%223%22%2F%3E%3Cpath%20d%3D%22M3.5%209.17h17M3.5%2014.83h17M9.17%203.5v17M14.83%203.5v17%22%2F%3E%3C%2Fsvg%3E");
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .codicon-symbol-color {
+	--sidebar-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.75%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M12%203.5a8.5%208.5%200%201%200%200%2017c1.05%200%201.6-.75%201.6-1.55%200-.85-.65-1.3-.65-2.1%200-.9.72-1.5%201.62-1.5h1.88a4.05%204.05%200%200%200%204.05-4.05C20.5%207.1%2016.7%203.5%2012%203.5Z%22%2F%3E%3Ccircle%20cx%3D%227.6%22%20cy%3D%2211.2%22%20r%3D%22.9%22%2F%3E%3Ccircle%20cx%3D%229.9%22%20cy%3D%227.6%22%20r%3D%22.9%22%2F%3E%3Ccircle%20cx%3D%2214.4%22%20cy%3D%227.6%22%20r%3D%22.9%22%2F%3E%3C%2Fsvg%3E");
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-sidebar-action-icon .codicon {
+	display: inline-flex !important;
+	align-items: center;
+	justify-content: center;
+	width: 20px !important;
+	height: 20px !important;
+	font-size: 20px !important;
+	line-height: 20px !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .agent-sessions-rail .agent-sessions-sidebar-action-icon .codicon::before {
+	content: '' !important;
+	display: block !important;
+	width: 20px !important;
+	height: 20px !important;
+	background-color: currentColor !important;
+	mask: var(--sidebar-icon) center / contain no-repeat !important;
+	-webkit-mask: var(--sidebar-icon) center / contain no-repeat !important;
+}
+
+/* ---- Full-window pages: Usage, Settings, Connectors --------------------- */
+
+/* Like Canvas, these pages keep the shell: a plain chrome strip over the
+ * header (hiding the chat header beneath) and the page itself on the card. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .monaco-modal-editor-block.full-window {
+	top: var(--sessions-shell-header) !important;
+	right: var(--sessions-shell-inset) !important;
+	bottom: var(--sessions-shell-inset) !important;
+	height: auto !important;
+	background: transparent !important;
+	overflow: visible !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.nosidebar:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .monaco-modal-editor-block.full-window {
+	left: var(--sessions-shell-rail) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .monaco-modal-editor-block.full-window::before {
+	content: '';
+	position: absolute;
+	top: calc(-1 * var(--sessions-shell-header));
+	left: 0;
+	right: calc(-1 * var(--sessions-shell-inset));
+	height: var(--sessions-shell-header);
+	background: var(--sessions-shell-chrome);
+	-webkit-app-region: drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .monaco-modal-editor-block.full-window .modal-editor-resizable {
+	border-radius: 0 var(--sessions-shell-radius) var(--sessions-shell-radius) 0;
+	overflow: hidden;
+}
+
+.monaco-workbench.agent-sessions-workbench.nosidebar:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .monaco-modal-editor-block.full-window .modal-editor-resizable {
+	border-radius: var(--sessions-shell-radius);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .monaco-modal-editor-block.full-window :is(.modal-editor-part, .modal-editor-part > .content) {
+	background: var(--codex-canvas) !important;
+}
+
+/* Connectors lives inside the chat part. Its page tabs, back arrow and Add
+ * button move into the chrome strip (centred on it, like Codex's tabs); the
+ * library below is the card. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .simple-mcp-page {
+	background: transparent !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .simple-mcp-page::before {
+	content: '';
+	position: absolute;
+	inset: 0 0 auto 0;
+	height: var(--sessions-shell-header);
+	background: var(--sessions-shell-chrome);
+	-webkit-app-region: drag;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .simple-mcp-page .skills-library-modal-embedded {
+	position: relative;
+	/* Fill the page between the margins (the stock 100% width overflows by them). */
+	width: auto;
+	margin: var(--sessions-shell-header) var(--sessions-shell-inset) 0 0;
+	height: calc(100% - var(--sessions-shell-header) - var(--sessions-shell-inset)) !important;
+	border-radius: 0 var(--sessions-shell-radius) var(--sessions-shell-radius) 0;
+	overflow: hidden auto;
+	background: var(--codex-canvas) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.noauxiliarybar):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .simple-mcp-page .skills-library-modal-embedded {
+	margin-right: 0;
+	border-radius: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench.nosidebar:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .simple-mcp-page .skills-library-modal-embedded {
+	margin-left: var(--sessions-shell-rail);
+	border-top-left-radius: var(--sessions-shell-radius);
+	border-bottom-left-radius: var(--sessions-shell-radius);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .simple-mcp-page :is(.skills-library-header, .skills-library-body, .skills-library-content) {
+	background: var(--codex-canvas) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .simple-mcp-page :is(.skills-library-page-tabs, .simple-mcp-toolbar) {
+	top: 12px !important;
+	z-index: 1;
+}
+
+/* The back arrow belongs to the page, not the library, so it follows the
+ * card's top edge explicitly to stay on the tabs' row. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .simple-mcp-page .simple-mcp-page-back {
+	top: calc(var(--sessions-shell-header) + 12px) !important;
+	z-index: 2;
+}
+
+/* ---- New tab: browser bar and suggested pages ----------------------------- */
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-browser {
+	flex: none;
+	padding: 10px 10px 0;
+}
+
+/* The launcher fills what the browser row leaves; it scrolls on its own. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-mode-launcher .sessions-right-workbench-body {
+	display: flex !important;
+	flex-direction: column !important;
+	overflow: hidden !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-mode-launcher .sessions-right-workbench-launcher-center {
+	flex: 1 1 auto !important;
+	height: auto !important;
+	min-height: 0 !important;
+	overflow-y: auto !important;
+}
+
+/* Codex's browser row (New tab and Browser tabs): round 28px buttons and a
+ * borderless full-radius address pill with centred text, no divider below. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-browser-chrome {
+	border-bottom: 0 !important;
+	background: transparent !important;
+	box-shadow: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-browser-nav {
+	gap: 4px !important;
+	padding: 0 4px !important;
+	align-items: center !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-browser-nav > .sessions-right-workbench-icon-button {
+	border-radius: 9999px !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-browser-address {
+	position: relative;
+	flex: 1 1 auto !important;
+	min-width: 0 !important;
+	height: 28px !important;
+	margin: 0 6px !important;
+	border: 0 !important;
+	border-radius: 9999px !important;
+	background: var(--sessions-shell-raised) !important;
+	overflow: visible;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-browser-address:focus-within {
+	background: #3e3e3e !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-browser-url {
+	width: 100% !important;
+	min-width: 0 !important;
+	height: 28px !important;
+	box-sizing: border-box;
+	padding: 0 32px !important;
+	border: 0 !important;
+	border-radius: 9999px !important;
+	background: transparent !important;
+	color: var(--codex-text-primary) !important;
+	font-size: 13px !important;
+	text-align: center;
+	outline: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-browser-url::placeholder {
+	color: var(--codex-text-secondary);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-browser-address > .sessions-right-workbench-icon-button {
+	position: absolute !important;
+	right: 0;
+	top: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-browser .sessions-right-workbench-icon-button:disabled {
+	opacity: 0.4;
+	pointer-events: none;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-center > .sessions-right-workbench-launcher-title:not(:first-child) {
+	margin-top: 40px !important;
+}
+
+/* Codex's suggested sites: a row of 40px icons over one-line titles. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-suggested {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+	gap: 8px;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-site {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+	padding: 14px 8px 12px;
+	border: 0;
+	border-radius: 12px;
+	background: transparent;
+	color: var(--codex-text-primary);
+	cursor: pointer;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-site:is(:hover, :focus-visible) {
+	background: var(--sessions-shell-chip);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-site-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 40px;
+	border-radius: 10px;
+	overflow: hidden;
+	background: var(--sessions-shell-tile);
+	color: var(--codex-text-secondary);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-site-icon img {
+	width: 40px;
+	height: 40px;
+	object-fit: contain;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-site-icon .codicon {
+	font-size: 20px !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.auxiliarybar .sessions-right-workbench-launcher-site-title {
+	max-width: 100%;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 13px;
+	font-weight: 500;
+}
+
+/* ---- Terminal under the composer ---------------------------------------- */
+
+/* An open terminal panel continues the chat card downwards: the chat drops
+ * its bottom gap and corners, the terminal keeps the card's gaps. */
+.monaco-workbench.agent-sessions-workbench:not(.nopanel):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart > .content {
+	margin-bottom: 0;
+	border-bottom-left-radius: 0 !important;
+	border-bottom-right-radius: 0 !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.panel {
+	background: transparent !important;
+	border: 0 !important;
+	box-shadow: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.panel > :is(.title, .content) {
+	margin-right: var(--sessions-shell-inset);
+	/* The terminal paints its theme colour on a canvas; match it so the panel
+	 * reads as one surface. */
+	background: var(--vscode-terminal-background, var(--vscode-panel-background, var(--codex-canvas))) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.panel > .title {
+	border-top: 0.5px solid var(--sessions-shell-hairline) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.panel > .content {
+	margin-bottom: var(--sessions-shell-inset);
+	border-radius: 0 0 var(--sessions-shell-radius) 0;
+	overflow: hidden;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.noauxiliarybar):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.panel > :is(.title, .content) {
+	margin-right: 0;
+	border-bottom-right-radius: 0;
+}
+
+.monaco-workbench.agent-sessions-workbench.nosidebar:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.panel > :is(.title, .content) {
+	margin-left: var(--sessions-shell-rail);
+}
+
+.monaco-workbench.agent-sessions-workbench.nosidebar:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.panel > .content {
+	border-bottom-left-radius: var(--sessions-shell-radius);
+}
+
+/* ---- Split grid inside the card ----------------------------------------- */
+
+/* The top cells' headers stand in for the hidden header row, so they sit on
+ * the chrome above the card (SessionsPart keeps --sessions-card-top one
+ * header down while split); the card's rounding comes from that clip. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart.sessions-grid-split > .content {
+	border-radius: 0 0 var(--sessions-shell-radius) 0 !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart.sessions-grid-split .session-view.is-grid-top > .sessions-panel-header.session-view-split-header {
+	background: var(--sessions-shell-chrome) !important;
+}
+
+/* Cell titles read in the chrome's own text colour; inactive cells recede
+ * only slightly instead of fading to grey over the wallpaper. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart.sessions-grid-split .session-view .chat-composite-bar.session-header-bar .chat-composite-bar-session-title-text {
+	color: var(--vscode-foreground) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart.sessions-grid-split .session-view:not(.is-active) .chat-composite-bar.session-header-bar {
+	opacity: 0.8;
+}
+
+/* ---- Text colour by surface, in every theme ----------------------------- */
+
+/* Three surfaces, one rule each:
+ *  - Window frame (header strips, rail, tab strip): the theme's own colours.
+ *    The wallpaper rules in codexTheme/rightWorkbenchSimple predate the frame
+ *    and paint these white, which vanished on light themes' frames.
+ *  - Text drawn straight onto the wallpaper: white with a soft shadow, since
+ *    the wallpaper scrim is dark in every theme.
+ *  - Glass or solid surfaces (composer, tiles, address pill, pages): that
+ *    surface's theme pairing. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) {
+	/* Lighter than the 3px default: the scrim and text shadows carry legibility. */
+	--sessions-background-filter: blur(1px);
+}
+
+/* The theme's text colours, resolved here at the root: surfaces over the
+ * wallpaper redefine --vscode-foreground to white for their own content, so
+ * frame and glass surfaces below them read these instead. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) {
+	--sessions-shell-text: var(--vscode-foreground);
+	--sessions-shell-text-muted: var(--vscode-descriptionForeground);
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart > .sessions-panel-header {
+	--codex-text-primary: var(--sessions-shell-text);
+	--codex-text-secondary: var(--sessions-shell-text-muted);
+	--session-view-foreground: var(--sessions-shell-text);
+	--vscode-icon-foreground: var(--sessions-shell-text);
+	color: var(--sessions-shell-text) !important;
+	text-shadow: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart > .sessions-panel-header :is(
+	.action-label, .codicon, .chat-composite-bar-session-title-text,
+	.chat-composite-bar-meta-workspace, .chat-composite-bar-meta-workspace-label,
+	.new-chat-header-breadcrumb-label) {
+	color: var(--sessions-shell-text) !important;
+	text-shadow: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart > .sessions-panel-header :is(.new-chat-header-breadcrumb-draft, .new-chat-header-breadcrumb-separator, .action-item.disabled .action-label) {
+	color: var(--sessions-shell-text-muted) !important;
+	text-shadow: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-header {
+	--rwb-foreground: var(--sessions-shell-text);
+	--rwb-muted: var(--sessions-shell-text-muted);
+	--rwb-hover: var(--sessions-shell-chip);
+	--codex-text-primary: var(--sessions-shell-text);
+	--codex-text-secondary: var(--sessions-shell-text-muted);
+	color: var(--sessions-shell-text) !important;
+	text-shadow: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-header :is(.codicon, .sessions-right-workbench-tab-label) {
+	color: inherit !important;
+	text-shadow: none !important;
+}
+
+/* Right panel content drawn straight onto the wallpaper. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) :is(.part.auxiliarybar, .session-split-right-panel) :is(
+	.sessions-right-workbench-launcher-title,
+	.sessions-right-workbench-launcher-site-title,
+	.sessions-right-workbench-launcher-browser .sessions-right-workbench-browser-nav > .sessions-right-workbench-icon-button,
+	.sessions-right-workbench-launcher-browser .sessions-right-workbench-browser-nav > .sessions-right-workbench-icon-button .codicon) {
+	color: #ffffff !important;
+	text-shadow: 0 1px 3px #00000080 !important;
+}
+
+/* The address pill is glass in the theme's panel colour: theme text. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-browser-address :is(input, .codicon, .sessions-right-workbench-icon-button) {
+	color: var(--sessions-shell-text) !important;
+	-webkit-text-fill-color: var(--sessions-shell-text) !important;
+	text-shadow: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-browser-address input::placeholder {
+	color: var(--sessions-shell-text-muted) !important;
+	-webkit-text-fill-color: var(--sessions-shell-text-muted) !important;
+}
+
+/* Tiles are theme-coloured glass: theme text on them. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) :is(.part.auxiliarybar, .session-split-right-panel) .sessions-right-workbench-launcher-row :is(.codicon, .sessions-right-workbench-launcher-label, .sessions-right-workbench-launcher-shortcut) {
+	color: var(--sessions-shell-text) !important;
+	text-shadow: none !important;
+}
+
+/* ---- Transcript over the wallpaper -------------------------------------- */
+
+/* The transcript renders Codex's markup, which colours text from its own
+ * --app-color-text-* inputs (set per theme on every .cx-pf node), so the
+ * wallpaper's white never reached tool rows, "Thought", "Finished Working"
+ * or file links. Over the dark scrim they take the same white as the prose.
+ * Tool output and code keep their own surfaces and colours. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart :is(.interactive-response, .interactive-request) :is(.cx-pf, [data-theme]) {
+	--app-color-text-foreground: #ffffff;
+	--app-color-text-secondary: rgba(255, 255, 255, 0.72);
+	--color-token-foreground: #ffffff;
+	--color-token-description-foreground: rgba(255, 255, 255, 0.72);
+	--color-text-user-message: #ffffff;
+	--color-background-user-message: rgba(18, 20, 24, 0.36);
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart .interactive-response :is(.chat-backboard-turn-fold, [class*="group/activity-header"], .cx-reasoning) {
+	text-shadow: 0 1px 3px #00000080;
+}
+
+/* Sent messages: dark glass with white text, in every theme. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart .interactive-request > .value > .rendered-markdown {
+	--vscode-foreground: #ffffff;
+	color: #ffffff !important;
+	background: rgba(18, 20, 24, 0.36) !important;
+	text-shadow: 0 1px 2px #00000066;
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart .interactive-request > .value > .rendered-markdown :is(p, span, li, strong, em, a) {
+	color: #ffffff !important;
+}
+
+/* Codex's faint labels ("Thought" at 30%, tool results at 40%) disappear on
+ * a photo; over the wallpaper the quietest level is 62% white. */
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart .interactive-response .cx-pf :is(.text-text\/30, .text-text\/40) {
+	color: rgba(255, 255, 255, 0.62) !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) .part.sessionspart .interactive-response .cx-pf .text-text\/60 {
+	color: rgba(255, 255, 255, 0.78) !important;
+}
+
+/* ---- Diffs and file previews over the wallpaper ------------------------- */
+
+/* The right panel's wallpaper treatment makes editors transparent, so light
+ * themes drew dark code on the dark image. Code is a surface: diffs and file
+ * previews keep the theme's editor background (resolved at the root, before
+ * the panel clears it) and the theme's text, like code blocks in the chat. */
+.monaco-workbench.agent-sessions-workbench:not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) {
+	--sessions-shell-editor-bg: var(--vscode-editor-background);
+	/* Frosted, not solid: an editor fills the panel's full height even for a
+	 * three-line diff, and a solid slab over the wallpaper read as a black box.
+	 * 80% of the theme's editor colour still carries the theme's code colours. */
+	--sessions-shell-editor-glass: color-mix(in srgb, var(--vscode-editor-background) 80%, transparent);
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) :is(.part.auxiliarybar, .session-split-right-panel) :is(.sessions-right-workbench-review-main, .sessions-right-workbench-file-editor) {
+	--vscode-editor-background: transparent;
+	--vscode-editorGutter-background: transparent;
+	--vscode-editorPane-background: transparent;
+	--vscode-multiDiffEditor-background: transparent;
+	--vscode-foreground: var(--sessions-shell-text);
+	--vscode-descriptionForeground: var(--sessions-shell-text-muted);
+	--rwb-foreground: var(--sessions-shell-text);
+	--rwb-muted: var(--sessions-shell-text-muted);
+	margin: 6px 8px 8px;
+	border-radius: 10px;
+	overflow: hidden;
+	background: var(--sessions-shell-editor-glass) !important;
+	-webkit-backdrop-filter: blur(18px);
+	backdrop-filter: blur(18px);
+	color: var(--sessions-shell-text) !important;
+	text-shadow: none !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) :is(.part.auxiliarybar, .session-split-right-panel) :is(.sessions-right-workbench-review-main, .sessions-right-workbench-file-editor) :is(.monaco-editor, .monaco-editor-background, .margin, .monaco-diff-editor, .sessions-right-workbench-review-file-header, .sessions-right-workbench-review-editor, .sessions-right-workbench-file-editor-body) {
+	background-color: transparent !important;
+}
+
+.monaco-workbench.agent-sessions-workbench.sessions-chat-custom-background:not(.hc-black):not(.hc-light):not(.optimus-window):not(.phone-layout):not(#sessions-shell-a):not(#sessions-shell-b) :is(.part.auxiliarybar, .session-split-right-panel) :is(.sessions-right-workbench-review-main, .sessions-right-workbench-file-editor) :is(.sessions-right-workbench-review-file-header, .sessions-right-workbench-review-file-title, .sessions-right-workbench-file-path, .sessions-right-workbench-file-name, .codicon, .label-name, .label-description) {
+	color: var(--sessions-shell-text) !important;
+	text-shadow: none !important;
+}

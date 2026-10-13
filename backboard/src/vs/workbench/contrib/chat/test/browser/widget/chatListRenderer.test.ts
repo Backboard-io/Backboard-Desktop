@@ -1,0 +1,421 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import assert from 'assert';
+import * as sinon from 'sinon';
+import { mainWindow } from '../../../../../../base/browser/window.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
+import { URI } from '../../../../../../base/common/uri.js';
+import { IChatToolInvocationSerialized } from '../../../common/chatService/chatService.js';
+import {
+	formatBackboardWorkTimer,
+	getBackboardTurnElapsedMs,
+	IBackboardTurnTicker,
+	isBackboardWorkerWait,
+	getBackboardTurnChronologicalWorkNodes,
+	getBackboardTurnFinalContentIndexes,
+	getBackboardSubagentSummary,
+	hasBackboardTurnWorkContent,
+	isBackboardMutationBatchEdit,
+	isBackboardPersistentSubagentContent,
+	reconcileBackboardTurnNodeOrder,
+	resolveBackboardTurnExpandedState,
+	syncBackboardSubagentStrip,
+	syncBackboardTurnTicker,
+	shouldRenderBackboardEditStandalone,
+	shouldScheduleInitialHeightChange,
+	shouldSplitBackboardThinkingBeforeEdit,
+} from '../../../browser/widget/chatListRenderer.js';
+
+suite('ChatListRenderer', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('work timer formats live and completed durations', () => {
+		assert.deepStrictEqual([
+			formatBackboardWorkTimer(0, false),
+			formatBackboardWorkTimer(608000, false),
+			formatBackboardWorkTimer(608000, true),
+			formatBackboardWorkTimer(-100, true),
+		], ['Working for 0s', 'Working for 10m 8s', 'Finished Working', 'Finished Working']);
+	});
+
+	test('work timer counts wall-clock time through approval waits and never reads less once the turn ends', () => {
+		// The request started at 0s; an approval (answered late, or stale and never
+		// answered) was pending from 10s to 40s, which shifts the model's
+		// confirmation-adjusted start to 30s once the wait ends.
+		const live = { startedAt: 0, completedAt: undefined, elapsedMs: undefined, confirmationAdjustedStartedAt: 0, watchedLive: true };
+		const finished = { ...live, completedAt: 50_000, elapsedMs: 20_000, confirmationAdjustedStartedAt: 30_000 };
+		assert.deepStrictEqual({
+			duringWait: getBackboardTurnElapsedMs(live, false, 35_000),
+			afterWait: getBackboardTurnElapsedMs({ ...live, confirmationAdjustedStartedAt: 30_000 }, false, 41_000),
+			lastLive: getBackboardTurnElapsedMs(finished, false, 49_900),
+			worked: getBackboardTurnElapsedMs(finished, true, 60_000),
+			history: getBackboardTurnElapsedMs({ ...finished, watchedLive: false }, true, 60_000),
+			historyWithoutElapsed: getBackboardTurnElapsedMs({ ...finished, watchedLive: false, elapsedMs: undefined }, true, 60_000),
+		}, {
+			duringWait: 35_000,
+			afterWait: 41_000,
+			lastLive: 49_900,
+			worked: 50_000,
+			history: 20_000,
+			historyWithoutElapsed: 20_000,
+		});
+	});
+
+	test('the fold ticker is rebound by a re-render that rebuilds nothing and stops once the turn ends', () => {
+		const clock = sinon.useFakeTimers({ now: 0 });
+		const tickers = new Map<string, IBackboardTurnTicker>();
+		try {
+			let complete = false;
+			const render = (target: HTMLElement) => {
+				target.textContent = formatBackboardWorkTimer(Date.now(), complete);
+				return complete;
+			};
+			const label = mainWindow.document.createElement('span');
+			syncBackboardTurnTicker(tickers, 'response', label, render);
+			clock.tick(3_000);
+			const ticking = label.textContent;
+			// Every model change disposes the row (disposeElement stops the ticker) ...
+			tickers.get('response')?.dispose();
+			tickers.delete('response');
+			clock.tick(2_000);
+			const withoutRebind = label.textContent;
+			// ... and the render that follows rebinds it even when no part changed;
+			// binding the same label again keeps the one ticker.
+			syncBackboardTurnTicker(tickers, 'response', label, render);
+			syncBackboardTurnTicker(tickers, 'response', label, render);
+			clock.tick(4_000);
+			const resumed = label.textContent;
+			// A rebuilt fold moves the ticker to its new label.
+			const rebuilt = mainWindow.document.createElement('span');
+			syncBackboardTurnTicker(tickers, 'response', rebuilt, render);
+			clock.tick(1_000);
+			complete = true;
+			clock.tick(1_000);
+			const settled = rebuilt.textContent;
+			clock.tick(5_000);
+			assert.deepStrictEqual({ ticking, withoutRebind, resumed, oldLabel: label.textContent, settled, later: rebuilt.textContent, running: tickers.size }, {
+				ticking: 'Working for 3s',
+				withoutRebind: 'Working for 3s',
+				resumed: 'Working for 9s',
+				oldLabel: 'Working for 9s',
+				settled: 'Finished Working',
+				later: 'Finished Working',
+				running: 0,
+			});
+		} finally {
+			for (const ticker of tickers.values()) {
+				ticker.dispose();
+			}
+			clock.restore();
+		}
+	});
+
+	test('worker wait chrome is suppressed without suppressing other tools', () => {
+		assert.deepStrictEqual(['AgentWait', 'backboard_agent_wait', 'WaitForWorkers', 'AgentSpawn', 'Fetch'].map(toolId =>
+			isBackboardWorkerWait({ kind: 'toolInvocationSerialized', toolId } as IChatToolInvocationSerialized)
+		), [true, true, true, false, false]);
+	});
+
+	suite('shouldScheduleInitialHeightChange', () => {
+		test('only schedules first measurement updates when needed to avoid clipping', () => {
+			assert.deepStrictEqual([
+				shouldScheduleInitialHeightChange(120, undefined),
+				shouldScheduleInitialHeightChange(120, 120),
+				shouldScheduleInitialHeightChange(120, 120.1),
+				shouldScheduleInitialHeightChange(121, 120),
+				shouldScheduleInitialHeightChange(121, 120.1),
+			], [
+				true,
+				false,
+				false,
+				true,
+				true,
+			]);
+		});
+	});
+
+	suite('Backboard cursor transcript turn folding', () => {
+		test('keeps parallel worker pills visible without a disclosure', () => {
+			const container = mainWindow.document.createElement('div');
+			mainWindow.document.body.appendChild(container);
+			const items = Array.from({ length: 12 }, (_, index) => ({
+				node: mainWindow.document.createElement('div'),
+				active: index < 2,
+				status: index < 2 ? 'running' : 'complete',
+			}));
+
+			syncBackboardSubagentStrip(container, items);
+			const strip = container.querySelector<HTMLElement>(':scope > .chat-subagent-strip');
+			const summary = strip?.querySelector<HTMLButtonElement>(':scope > .chat-subagent-summary');
+			const details = strip?.querySelector<HTMLElement>(':scope > .chat-subagent-items');
+			assert.ok(strip);
+			assert.strictEqual(summary, null);
+			assert.ok(details);
+			assert.strictEqual(details.hidden, false);
+
+			items[1].node.tabIndex = 0;
+			items[1].node.focus();
+			const observer = new mainWindow.MutationObserver(() => { });
+			observer.observe(strip, { childList: true });
+			syncBackboardSubagentStrip(container, items);
+			const stableSyncMutations = observer.takeRecords();
+			observer.disconnect();
+			assert.strictEqual(container.querySelector(':scope > .chat-subagent-strip'), strip, 'Streaming updates should reuse the strip DOM');
+			assert.strictEqual(details.hidden, false, 'A rerender should preserve the expanded choice');
+			assert.strictEqual(stableSyncMutations.length, 0, 'An unchanged streaming update must not reparent worker rows');
+			assert.strictEqual(mainWindow.document.activeElement, items[1].node, 'Stable reconciliation must preserve focus inside the active worker row');
+			container.remove();
+		});
+
+		test('renders workers as the Codex inline sentence with openable names', () => {
+			const container = mainWindow.document.createElement('div');
+			mainWindow.document.body.appendChild(container);
+			const opened: string[] = [];
+			const worker = (label: string, status: string) => ({ node: mainWindow.document.createElement('div'), active: status === 'running', status, label, id: `call-${label}`, open: () => opened.push(label) });
+			try {
+				const items = [worker('Alpha', 'running'), worker('Beta', 'running'), worker('Gamma', 'queued'), worker('Delta', 'running')];
+				syncBackboardSubagentStrip(container, items, true);
+				const strip = container.querySelector<HTMLElement>(':scope > .chat-subagent-strip')!;
+				const sentence = () => strip.querySelector<HTMLElement>('[aria-live]')!.textContent;
+				const live = {
+					sentence: sentence(),
+					avatars: strip.querySelectorAll('img[data-agent-id]').length,
+					entering: strip.querySelectorAll('img[data-animate-entrance]').length,
+					rowsHidden: strip.querySelector<HTMLElement>(':scope > .chat-subagent-items')!.hidden,
+				};
+				strip.querySelector<HTMLElement>('[role="button"]')!.click();
+
+				syncBackboardSubagentStrip(container, items.map(item => ({ ...item, active: false, status: 'completed' })), true);
+				assert.deepStrictEqual({
+					live,
+					opened,
+					done: sentence(),
+					entering: strip.querySelectorAll('img[data-animate-entrance]').length,
+					two: (syncBackboardSubagentStrip(container, [worker('Alpha', 'failed'), worker('Beta', 'completed')], true), sentence()),
+				}, {
+					live: { sentence: 'Alpha, Beta and 2 more started working', avatars: 4, entering: 4, rowsHidden: true },
+					opened: ['Alpha'],
+					done: 'Alpha, Beta and 2 more finished',
+					entering: 0,
+					two: 'Alpha and Beta finished with errors',
+				});
+			} finally {
+				container.remove();
+			}
+		});
+
+		test('summarizes running, completed, and failed workers without internal details', () => {
+			assert.deepStrictEqual(getBackboardSubagentSummary([
+				{ active: true, status: 'running' },
+				{ active: false, status: 'integrated' },
+				{ active: false, status: 'conflict' },
+			]), {
+				label: '3 workers · 1 running · 1 complete · 1 needs attention',
+				status: 'attention',
+				detail: '3 workers · 1 running · 1 complete · 1 needs attention',
+			});
+		});
+
+		test('names one or several completed agents and preserves honest lifecycle detail', () => {
+			assert.deepStrictEqual(getBackboardSubagentSummary([{ label: 'Prompt completion', active: false, status: 'integrated' }]), {
+				label: 'Prompt completion updated', status: 'complete', detail: '1 worker · 1 complete',
+			});
+			assert.strictEqual(getBackboardSubagentSummary([
+				{ label: 'Prompt completion', active: false, status: 'integrated' },
+				{ label: 'Search', active: false, status: 'completed' },
+				{ label: 'Tool identity', active: false, status: 'completed' },
+			]).label, 'Prompt completion, Search and Tool identity updated');
+			const running = getBackboardSubagentSummary([
+				{ label: 'Alpha', active: true, status: 'integrated' },
+				{ label: 'Beta', active: false, status: 'running' },
+			]);
+			assert.deepStrictEqual(running, { label: 'Alpha and Beta working', status: 'running', detail: '2 workers · 1 running · 1 complete' });
+			assert.deepStrictEqual(getBackboardSubagentSummary([{ label: 'Search', active: true, status: 'failed' }]), {
+				label: 'Search needs attention', status: 'attention', detail: '1 worker · 1 needs attention',
+			});
+		});
+
+		test('worker pills remain visible outside the collapsed work log', () => {
+			const turn = mainWindow.document.createElement('div');
+			const body = mainWindow.document.createElement('div');
+			body.hidden = true;
+			turn.appendChild(body);
+			const node = mainWindow.document.createElement('div');
+			body.appendChild(node);
+			syncBackboardSubagentStrip(turn, [{ node, active: false, status: 'integrated' }]);
+			assert.strictEqual(node.closest('[hidden]'), null);
+			assert.strictEqual(turn.querySelector('.chat-subagent-summary'), null);
+			assert.strictEqual(body.hidden, true);
+		});
+
+		test('collapsed work keeps the parent and shared child row references but not ordinary tools', () => {
+			const invocation = { kind: 'toolInvocationSerialized', toolCallId: 'worker-id', toolSpecificData: { kind: 'subagent' } } as IChatToolInvocationSerialized;
+			assert.strictEqual(isBackboardPersistentSubagentContent(invocation), true);
+			assert.strictEqual(isBackboardPersistentSubagentContent({ ...invocation, toolSpecificData: undefined, subAgentInvocationId: 'worker-id' }), true);
+			assert.strictEqual(isBackboardPersistentSubagentContent({ ...invocation, toolSpecificData: undefined }), false);
+			assert.strictEqual(isBackboardPersistentSubagentContent(undefined), false);
+		});
+
+
+		test('stable timeline performs no moves and a late diff needs one insertion', () => {
+			const reconcile = (current: string[], desired: string[]) => {
+				let mutations = 0;
+				const moves = reconcileBackboardTurnNodeOrder(
+					desired,
+					() => current[0],
+					node => current[current.indexOf(node) + 1],
+					(node, before) => {
+						mutations++;
+						current.splice(current.indexOf(node), 1);
+						const targetIndex = before === undefined ? current.length : current.indexOf(before);
+						current.splice(targetIndex, 0, node);
+					},
+				);
+				return { current, moves, mutations };
+			};
+
+			assert.deepStrictEqual(
+				reconcile(['tool-before', 'diff', 'tool-after'], ['tool-before', 'diff', 'tool-after']),
+				{ current: ['tool-before', 'diff', 'tool-after'], moves: 0, mutations: 0 },
+				'A streaming token update must not reparent an already-stable timeline',
+			);
+			assert.deepStrictEqual(
+				reconcile(['tool-before', 'tool-after', 'diff'], ['tool-before', 'diff', 'tool-after']),
+				{ current: ['tool-before', 'diff', 'tool-after'], moves: 1, mutations: 1 },
+				'A lazily restored late diff should move once into its response-index position',
+			);
+		});
+
+		test('restores tool -> diff -> later-tool order and de-duplicates each Thought wrapper', () => {
+			const thoughtBefore = { id: 'thought-before' };
+			const toolBefore = { id: 'tool-before' };
+			const terminal = { id: 'terminal' };
+			const diff = { id: 'diff' };
+			const thoughtAfter = { id: 'thought-after' };
+			const toolAfter = { id: 'tool-after' };
+			const final = { id: 'final' };
+			const parents = new Map([
+				[thoughtBefore, thoughtBefore],
+				[toolBefore, thoughtBefore],
+				[terminal, terminal],
+				[diff, diff],
+				[thoughtAfter, thoughtAfter],
+				[toolAfter, thoughtAfter],
+				[final, final],
+			]);
+
+			assert.deepStrictEqual(
+				getBackboardTurnChronologicalWorkNodes(
+					[thoughtBefore, toolBefore, diff, thoughtAfter, toolAfter, terminal, final],
+					new Set([6]),
+					node => parents.get(node),
+				).map(node => node.id),
+				['thought-before', 'diff', 'thought-after', 'terminal'],
+				'A restored diff must remain between distinct pre/post edit Thought roots while each shared ancestor moves once',
+			);
+			assert.deepStrictEqual([
+				shouldSplitBackboardThinkingBeforeEdit('textEditGroup', true, false),
+				shouldSplitBackboardThinkingBeforeEdit('externalEdit', true, false),
+				shouldSplitBackboardThinkingBeforeEdit('externalEdit', true, true),
+				shouldSplitBackboardThinkingBeforeEdit('externalEdit', false, false),
+				shouldSplitBackboardThinkingBeforeEdit('externalEdit', true, false, true),
+			], [false, false, false, false, false], 'Codex groups edits with the surrounding work, so no edit splits the active activity unit');
+		});
+
+		test('keeps final assistant text outside while folding trailing work and support', () => {
+			const roles = [
+				'none',
+				'work',
+				'terminal', // intermediate commentary
+				'work',
+				'terminal',
+				'terminal',
+				'terminalSupport',
+				'terminal',
+				'work', // late file edit emitted after the final response
+			] as const;
+
+			assert.deepStrictEqual(getBackboardTurnFinalContentIndexes(roles, true), [4, 5, 7]);
+			assert.deepStrictEqual(getBackboardTurnFinalContentIndexes(roles, false), []);
+		});
+
+		test('keeps the final response visible when a trailing edit arrives afterward', () => {
+			assert.deepStrictEqual(getBackboardTurnFinalContentIndexes([
+				'work',
+				'terminal',
+				'work',
+			], true), [1]);
+		});
+
+		test('does not release support or invisible nodes without a terminal anchor', () => {
+			assert.deepStrictEqual(getBackboardTurnFinalContentIndexes([
+				'work',
+				'terminalSupport',
+				'none',
+			], true), []);
+		});
+
+		test('keeps a fold for every meaningful non-final work artifact', () => {
+			assert.deepStrictEqual([
+				hasBackboardTurnWorkContent(['none', 'terminal'], true),
+				hasBackboardTurnWorkContent(['none', 'work', 'terminal'], true),
+				hasBackboardTurnWorkContent(['none', 'terminal', 'terminalSupport'], true),
+				hasBackboardTurnWorkContent(['none', 'terminal'], false),
+				hasBackboardTurnWorkContent(['none', 'work', 'terminal'], false),
+			], [false, true, true, false, true]);
+		});
+
+		test('restores explicit outer-fold state and otherwise folds completed activity like Codex', () => {
+			assert.deepStrictEqual([
+				resolveBackboardTurnExpandedState(true, true),
+				resolveBackboardTurnExpandedState(true, false),
+				resolveBackboardTurnExpandedState(true, undefined),
+				resolveBackboardTurnExpandedState(true, undefined),
+				resolveBackboardTurnExpandedState(false, false),
+				resolveBackboardTurnExpandedState(false, undefined),
+			], [true, false, false, false, false, true]);
+		});
+
+		test('keeps the current transcript stable when its live run completes', () => {
+			assert.deepStrictEqual([
+				resolveBackboardTurnExpandedState(true, undefined),
+				resolveBackboardTurnExpandedState(true, undefined),
+				resolveBackboardTurnExpandedState(true, undefined),
+			], [false, false, false]);
+		});
+
+		test('folds finished history by default while respecting an explicit choice', () => {
+			assert.deepStrictEqual([
+				resolveBackboardTurnExpandedState(true, undefined),
+				resolveBackboardTurnExpandedState(true, false),
+				resolveBackboardTurnExpandedState(true, true),
+			], [false, false, true]);
+		});
+
+		test('lists Backboard edits as rows inside the activity group, like Codex', () => {
+			assert.deepStrictEqual([
+				shouldRenderBackboardEditStandalone('textEditGroup', true),
+				shouldRenderBackboardEditStandalone('externalEdit', true),
+				shouldRenderBackboardEditStandalone('toolInvocation', true),
+				shouldRenderBackboardEditStandalone('textEditGroup', false),
+			], [false, false, false, false]);
+		});
+
+		test('recognizes only explicitly batched Backboard external edits for mutation grouping', () => {
+			const batched = {
+				kind: 'externalEdit' as const,
+				uri: URI.file('/workspace/a.ts'),
+				editKind: 'edit' as const,
+				mutationBatchId: 'turn-1:mutation:write-a',
+			};
+			assert.deepStrictEqual([
+				isBackboardMutationBatchEdit(batched, true),
+				isBackboardMutationBatchEdit({ ...batched, mutationBatchId: undefined }, true),
+				isBackboardMutationBatchEdit(batched, false),
+			], [true, false, false]);
+		});
+	});
+});

@@ -1,0 +1,58 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+#monaco-workbench-session-drop-overlay {
+	position: absolute;
+	z-index: 10000;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+}
+
+#monaco-workbench-session-drop-overlay > .session-drop-overlay-indicator {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	border: 2px solid var(--vscode-focusBorder);
+	border-radius: 10px;
+	background-color: color-mix(in srgb, var(--vscode-focusBorder) 16%, transparent);
+	box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+	pointer-events: none; /* important: do not steal events from the parent */
+	opacity: 0; /* hidden initially */
+}
+
+#monaco-workbench-session-drop-overlay > .session-drop-overlay-indicator > .session-drop-overlay-label {
+	padding: 4px 10px;
+	border-radius: 999px;
+	background-color: var(--vscode-focusBorder);
+	color: var(--vscode-button-foreground, #fff);
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 18px;
+	white-space: nowrap;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.monaco-workbench.monaco-enable-motion #monaco-workbench-session-drop-overlay > .session-drop-overlay-indicator {
+	transition: opacity 80ms ease-out;
+}
+
+.monaco-workbench.monaco-enable-motion #monaco-workbench-session-drop-overlay > .session-drop-overlay-indicator.overlay-move-transition {
+	transition: top 90ms ease-out, left 90ms ease-out, width 90ms ease-out, height 90ms ease-out, opacity 80ms ease-out;
+}
+
+/* While a session is dragged, window-drag regions (the pane headers) would
+ * swallow the drag; make them plain drop targets for the duration. */
+.session-drag-in-progress,
+.session-drag-in-progress * {
+	-webkit-app-region: no-drag !important;
+}

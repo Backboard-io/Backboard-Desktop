@@ -1,0 +1,627 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import * as dom from '../../../../base/browser/dom.js';
+import { Gesture, EventType as TouchEventType } from '../../../../base/browser/touch.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
+import { renderIcon } from '../../../../base/browser/ui/iconLabel/iconLabels.js';
+import { localize } from '../../../../nls.js';
+import { IActionWidgetService } from '../../../../platform/actionWidget/browser/actionWidget.js';
+import { ActionListItemKind, IActionListDelegate, IActionListItem } from '../../../../platform/actionWidget/browser/actionList.js';
+import { IProviderSessionType, ISessionsManagementService } from '../../../services/sessions/common/sessionsManagement.js';
+import { ISessionsProvidersService } from '../../../services/sessions/browser/sessionsProvidersService.js';
+import { autorun, IObservable } from '../../../../base/common/observable.js';
+import { ISession } from '../../../services/sessions/common/session.js';
+import { Emitter } from '../../../../base/common/event.js';
+import { isWeb } from '../../../../base/common/platform.js';
+import { URI } from '../../../../base/common/uri.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
+import { IChatSessionsService } from '../../../../workbench/contrib/chat/common/chatSessionsService.js';
+import { ILanguageModelsService } from '../../../../workbench/contrib/chat/common/languageModels.js';
+import { getSessionTypeAvailability, getSessionTypeUnavailableDescription, getSessionTypeUnavailableHover, SessionTypeAvailability } from '../../../../workbench/contrib/chat/browser/agentSessions/sessionTypeAvailability.js';
+import { IChatEntitlementService } from '../../../../workbench/services/chat/common/chatEntitlementService.js';
+import { reportNewChatPickerClosed } from './newChatPickerTelemetry.js';
+import { IAgentCliSetupService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentCliSetup.js';
+
+const STORAGE_KEY_LAST_SESSION_TYPE = 'sessions.userSelectedSessionType';
+
+/**
+ * Branding for the well-known agent-host types, used while the folder's
+ * advertised session types are still resolving (the trigger would otherwise
+ * flash the raw stored id with a generic glyph).
+ */
+function knownAgentPresentation(sessionTypeId: string): { readonly label: string; readonly icon: ThemeIcon } | undefined {
+	switch (sessionTypeId) {
+		case 'backboard':
+			return { label: 'Backboard', icon: ThemeIcon.fromId('backboard-logo') };
+		case 'claude':
+			return { label: 'Claude', icon: Codicon.claude };
+		case 'codex':
+			return { label: 'Codex', icon: Codicon.openai };
+		default:
+			return undefined;
+	}
+}
+
+/**
+ * Marker providerId for the one-click setup rows: agents whose CLI is not
+ * installed yet. Selecting one starts the guided install instead of picking
+ * a session type.
+ */
+const AGENT_SETUP_PROVIDER_ID = '__agentSetup__';
+
+/**
+ * A picked session type, paired with the provider that serves it. Two
+ * providers can advertise the same session type id (e.g. both expose
+ * 'copilot-cli'), so callers need both to route session creation to the
+ * right provider.
+ */
+export interface IPickedSessionType {
+	readonly providerId: string;
+	readonly sessionTypeId: string;
+}
+
+/**
+ * A stored or in-memory preference. When the providerId is unknown (legacy
+ * storage that only persisted the session type id, or a pick made before
+ * any folder was known) the picker resolves a provider lazily once the
+ * active folder is established.
+ */
+export interface IPreferredSessionType {
+	readonly providerId?: string;
+	readonly sessionTypeId: string;
+}
+
+interface IStoredSessionTypePick {
+	readonly providerId?: string;
+	readonly sessionTypeId: string;
+	/**
+	 * The type's chat-session id (e.g. `agent-host-claude`), captured at pick
+	 * time. Allowlist checks (which speak chat-session ids) use this instead
+	 * of re-resolving through `_folderSessionTypes`, which can be momentarily
+	 * empty while providers re-advertise their session types.
+	 */
+	readonly chatSessionType?: string;
+}
+
+/**
+ * Row item rendered inside the session type picker — carries both the
+ * provider id and the session type so we can dispatch creation through
+ * the correct provider when the same type is offered by multiple providers.
+ */
+interface ISessionTypePickerItem {
+	readonly providerId: string;
+	readonly sessionTypeId: string;
+	readonly label: string;
+	readonly checked?: boolean;
+	/**
+	 * Provider display label, set when the picker shows section headers so the
+	 * accessibility label can disambiguate same-named types (e.g. "Claude")
+	 * across providers — headers are skipped by list navigation and aren't
+	 * announced on their own.
+	 */
+	readonly groupLabel?: string;
+}
+
+export class SessionTypePicker extends Disposable {
+
+	/**
+	 * The currently displayed pick. May be missing `providerId` when restored
+	 * from legacy storage that only persisted the session type id — it will
+	 * be resolved to a concrete provider lazily when consumers create a
+	 * session.
+	 */
+	protected _picked: IPreferredSessionType | undefined;
+	protected readonly _onDidSelectSessionType = this._register(new Emitter<IPickedSessionType | undefined>());
+	readonly onDidSelectSessionType = this._onDidSelectSessionType.event;
+
+	/** Session types the active session's folder can be served by, across all providers. */
+	protected _folderSessionTypes: IProviderSessionType[] = [];
+	private _allowedSessionTypeIds: readonly string[] | undefined;
+
+	private readonly _renderDisposables = this._register(new DisposableStore());
+	protected _triggerElement: HTMLElement | undefined;
+
+	constructor(
+		private readonly _session: IObservable<ISession | undefined>,
+		private readonly _fallbackFolder: (() => URI | undefined) | undefined,
+		@IActionWidgetService private readonly actionWidgetService: IActionWidgetService,
+		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
+		@ISessionsProvidersService private readonly sessionsProvidersService: ISessionsProvidersService,
+		@IStorageService protected readonly storageService: IStorageService,
+		@ITelemetryService private readonly telemetryService: ITelemetryService,
+		@IChatSessionsService protected readonly chatSessionsService: IChatSessionsService,
+		@IChatEntitlementService protected readonly chatEntitlementService: IChatEntitlementService,
+		@ILanguageModelsService protected readonly languageModelsService: ILanguageModelsService,
+		@IAgentCliSetupService private readonly agentCliSetupService: IAgentCliSetupService,
+	) {
+		super();
+
+		// Restore the previously selected session type from storage
+		this._picked = this._readStoredPick();
+
+		const refresh = (session: ISession | undefined, workspace = session?.workspace.get()) => {
+			// Sessionless surfaces (the Simple window's new chat creates its
+			// session lazily on first send) fall back to the host-provided
+			// folder so the picker stays functional without a session.
+			const folderUri = workspace?.folders[0]?.root ?? this._fallbackFolder?.();
+			this._folderSessionTypes = this._filterAllowedSessionTypes(folderUri ? this.sessionsManagementService.getSessionTypesForFolder(folderUri) : []);
+			if (session) {
+				// Reflect the active session's type in the trigger label, but do
+				// not persist it: the stored preference must only change when the
+				// user explicitly picks a type via the picker.
+				this._picked = { providerId: session.providerId, sessionTypeId: session.sessionType };
+			} else {
+				// Preserve the stored pick when no active session exists (so it
+				// seeds the next new session); keep the previous in-memory pick
+				// when nothing is stored rather than blanking the trigger.
+				this._picked = this._readStoredPick() ?? this._picked;
+			}
+			this._updateTriggerLabel();
+		};
+
+		this._register(autorun(reader => {
+			const session = this._session.read(reader);
+			// Track the workspace observable too: a fresh draft session's
+			// workspace resolves shortly after the session appears, and the
+			// folder's session types can only be computed once it has. An
+			// untracked read here left the trigger permanently empty when the
+			// New Chat flow re-rendered before the workspace landed.
+			const workspace = session?.workspace.read(reader);
+			refresh(session, workspace);
+		}));
+		// Re-read when a provider advertises/removes session types at runtime
+		// (e.g. a remote agent host discovers a new agent).
+		this._register(this.sessionsManagementService.onDidChangeSessionTypes(() => {
+			refresh(this._session.get());
+		}));
+	}
+
+	setAllowedSessionTypeIds(ids: readonly string[] | undefined): void {
+		this._allowedSessionTypeIds = ids;
+		this._folderSessionTypes = this._filterAllowedSessionTypes(this._folderSessionTypes);
+		this._updateTriggerLabel();
+	}
+
+	private _filterAllowedSessionTypes(types: readonly IProviderSessionType[]): IProviderSessionType[] {
+		if (!this._allowedSessionTypeIds) {
+			return [...types];
+		}
+		return types.filter(type => this._allowedSessionTypeIds!.includes(type.sessionType.id) || (type.sessionType.chatSessionType && this._allowedSessionTypeIds!.includes(type.sessionType.chatSessionType)));
+	}
+
+	get selectedPick(): IPreferredSessionType | undefined {
+		return this._picked;
+	}
+
+	/**
+	 * The session type the user explicitly picked, read from the stored
+	 * preference. Unlike {@link selectedPick}, this is independent of any
+	 * active session's type. Returns `undefined` when the user has never
+	 * picked a type (or changed away from the default), in which case
+	 * consumers should fall back to {@link getPreferredSessionType}.
+	 */
+	getUserPickedSessionType(): IPreferredSessionType | undefined {
+		const stored = this._readStoredPickRaw();
+		const pick = this._toPreferredSessionType(stored);
+		if (!pick || !this._allowedSessionTypeIds) {
+			return pick;
+		}
+		if (this._allowedSessionTypeIds.includes(pick.sessionTypeId)) {
+			return pick;
+		}
+		// The allowlist may be expressed in chat-session ids (e.g.
+		// `agent-host-claude`) while the stored pick carries the
+		// provider-scoped session type id (e.g. bare `claude`). Prefer the
+		// chat-session id persisted at pick time — `_folderSessionTypes` can
+		// be momentarily empty while providers re-advertise, and dropping the
+		// pick then would silently revert the draft to the preferred type.
+		if (stored?.chatSessionType && this._allowedSessionTypeIds.includes(stored.chatSessionType)) {
+			return pick;
+		}
+		// Legacy stored picks have no chat-session id — map through the
+		// advertised types as a fallback.
+		const match = this._folderSessionTypes.find(t => t.sessionType.id === pick.sessionTypeId);
+		return match?.sessionType.chatSessionType && this._allowedSessionTypeIds.includes(match.sessionType.chatSessionType)
+			? pick
+			: undefined;
+	}
+
+	/**
+	 * The preferred session type for {@link folderUri}: the first entry in
+	 * the folder's session-type list. Recomputed against the live list, so
+	 * it follows provider changes (e.g. a late-registering agent host that
+	 * prepends a new type). Used as the default when the user has made no
+	 * explicit pick.
+	 */
+	getPreferredSessionType(folderUri: URI): IPreferredSessionType | undefined {
+		const first = this._filterAllowedSessionTypes(this.sessionsManagementService.getSessionTypesForFolder(folderUri))[0];
+		return first ? { providerId: first.providerId, sessionTypeId: first.sessionType.id } : undefined;
+	}
+
+	/**
+	 * The chat-session type id (e.g. `agent-host-claude`) of the current
+	 * pick, resolved against the folder's advertised session types. The
+	 * composer's session-target chip speaks chat-session ids rather than the
+	 * provider-scoped session type ids (e.g. bare `claude`), so this maps the
+	 * pick through {@link ISessionType.chatSessionType} when present.
+	 */
+	getPickedChatSessionType(folderUri: URI | undefined): string | undefined {
+		const userPick = this.getUserPickedSessionType();
+		const pick = userPick ?? (folderUri ? this.getPreferredSessionType(folderUri) : undefined);
+		if (!pick) {
+			return undefined;
+		}
+		const types = folderUri
+			? this._filterAllowedSessionTypes(this.sessionsManagementService.getSessionTypesForFolder(folderUri))
+			: this._folderSessionTypes;
+		const match = types.find(t => t.sessionType.id === pick.sessionTypeId)
+			?? this._folderSessionTypes.find(t => t.sessionType.id === pick.sessionTypeId);
+		// Preserve an explicitly selected provider while it is temporarily
+		// unavailable. This keeps the combined picker on (for example) Codex so
+		// its Install action is shown instead of silently presenting Backboard.
+		const storedChatSessionType = userPick ? this._readStoredPickRaw()?.chatSessionType : undefined;
+		return match?.sessionType.chatSessionType ?? storedChatSessionType ?? pick.sessionTypeId;
+	}
+
+	/**
+	 * Programmatically pick a session type (e.g. from the composer's
+	 * session-target chip). Accepts either the provider-scoped session type
+	 * id or its chat-session id and routes through the same selection
+	 * handler as the picker UI so persistence, telemetry, and the
+	 * {@link onDidSelectSessionType} notification stay consistent. Ignored
+	 * when the id is not currently offered.
+	 */
+	selectSessionTypeById(sessionTypeId: string, folderUri?: URI): void {
+		const session = this._session.get();
+		const resolvedFolderUri = folderUri ?? session?.workspace.get()?.folders[0]?.root;
+		const types = resolvedFolderUri
+			? this._filterAllowedSessionTypes(this.sessionsManagementService.getSessionTypesForFolder(resolvedFolderUri))
+			: this._folderSessionTypes;
+		this._folderSessionTypes = types;
+		const match = types.find(t => t.sessionType.id === sessionTypeId || t.sessionType.chatSessionType === sessionTypeId);
+		if (match) {
+			this._handleSelectedSessionType({ providerId: match.providerId, sessionTypeId: match.sessionType.id });
+		}
+	}
+
+	render(container: HTMLElement, options?: { className?: string }): void {
+		this._renderDisposables.clear();
+
+		const slot = dom.append(container, dom.$('.sessions-chat-picker-slot'));
+		if (options?.className) {
+			const classNames = options.className.split(/\s+/).filter(className => className.length > 0);
+			if (classNames.length > 0) {
+				slot.classList.add(...classNames);
+			}
+		}
+		this._renderDisposables.add({ dispose: () => slot.remove() });
+
+		const trigger = dom.append(slot, dom.$('a.action-label'));
+		trigger.tabIndex = 0;
+		trigger.role = 'button';
+		this._triggerElement = trigger;
+		this._updateTriggerLabel();
+
+		this._renderDisposables.add(Gesture.addTarget(trigger));
+		for (const eventType of [dom.EventType.CLICK, TouchEventType.Tap]) {
+			this._renderDisposables.add(dom.addDisposableListener(trigger, eventType, (e) => {
+				dom.EventHelper.stop(e, true);
+				this._showPicker();
+			}));
+		}
+
+		this._renderDisposables.add(dom.addDisposableListener(trigger, dom.EventType.KEY_DOWN, (e) => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				dom.EventHelper.stop(e, true);
+				this._showPicker();
+			}
+		}));
+	}
+
+	/**
+	 * Override hook for mobile subclasses. Receives the trigger element so
+	 * the override can decide where to anchor (or that it doesn't need
+	 * anchoring at all, e.g. for a bottom sheet).
+	 */
+	protected _showPicker(): void {
+		if (!this._triggerElement || this.actionWidgetService.isVisible) {
+			return;
+		}
+
+		const session = this._session.get();
+
+		// Recompute types fresh at open time so a late-registering provider
+		// (e.g. Local Agent Host whose session types are populated only after
+		// agent discovery) shows up without waiting for the refresh event to
+		// land before the user clicks. Sessionless new-chat surfaces resolve
+		// through the fallback folder instead.
+		const folderUri = session?.workspace.get()?.folders[0]?.root ?? this._fallbackFolder?.();
+		const folderTypes = folderUri
+			? this._filterAllowedSessionTypes(this.sessionsManagementService.getSessionTypesForFolder(folderUri))
+			: this._folderSessionTypes;
+		this._folderSessionTypes = folderTypes;
+
+		// Agents whose CLI isn't installed become one-click setup rows; any
+		// id with a real, registered session type is excluded so the setup
+		// row disappears the moment the real provider lands.
+		const setupTypes = this.agentCliSetupService.getSetupCandidates(new Set(folderTypes.map(t => t.sessionType.id)));
+
+		if (folderTypes.length + setupTypes.length <= 1) {
+			return;
+		}
+
+		// Group session types by their provider's display label, preserving
+		// first-seen order. Providers can be interleaved in the folder list and
+		// distinct providers can share a label, so collecting by label avoids
+		// rendering the same section header more than once.
+		const groups = new Map<string, IProviderSessionType[]>();
+		for (const folderType of folderTypes) {
+			const provider = this.sessionsProvidersService.getProvider(folderType.providerId);
+			const groupTitle = provider?.label ?? folderType.providerId;
+			const existing = groups.get(groupTitle);
+			if (existing) {
+				existing.push(folderType);
+			} else {
+				groups.set(groupTitle, [folderType]);
+			}
+		}
+		// Setup rows get their own section header whenever there's anything
+		// else in the list to distinguish them from, so they read as an
+		// install action rather than a real, pickable provider.
+		const showSectionHeaders = groups.size > 1 || (groups.size > 0 && setupTypes.length > 0);
+
+		const groupedItems: IActionListItem<ISessionTypePickerItem>[] = [];
+		for (const [groupTitle, types] of groups) {
+			if (showSectionHeaders) {
+				if (groupedItems.length > 0) {
+					groupedItems.push({ kind: ActionListItemKind.Separator, label: '' });
+				}
+				groupedItems.push({
+					kind: ActionListItemKind.Header,
+					group: { title: groupTitle },
+					label: groupTitle,
+				});
+			}
+			for (const { providerId, sessionType } of types) {
+				const isCurrent = this._picked?.providerId === providerId && this._picked?.sessionTypeId === sessionType.id;
+				const availability = getSessionTypeAvailability(this.chatSessionsService, this.chatEntitlementService, this.languageModelsService, sessionType.chatSessionType ?? sessionType.id);
+				const unavailable = availability !== SessionTypeAvailability.Available;
+				const item: ISessionTypePickerItem = {
+					providerId,
+					sessionTypeId: sessionType.id,
+					label: sessionType.label,
+					...(isCurrent ? { checked: true } : {}),
+					...(showSectionHeaders ? { groupLabel: groupTitle } : {}),
+				};
+				groupedItems.push({
+					kind: ActionListItemKind.Action,
+					label: sessionType.label,
+					disabled: unavailable,
+					...(unavailable ? {
+						description: getSessionTypeUnavailableDescription(availability),
+						hover: { content: getSessionTypeUnavailableHover(availability) },
+					} : {}),
+					group: {
+						title: '',
+						icon: sessionType.icon,
+					},
+					item,
+				});
+			}
+		}
+
+		if (setupTypes.length > 0) {
+			if (showSectionHeaders) {
+				if (groupedItems.length > 0) {
+					groupedItems.push({ kind: ActionListItemKind.Separator, label: '' });
+				}
+				groupedItems.push({
+					kind: ActionListItemKind.Header,
+					group: { title: localize('sessionTypePicker.addAgents', "Add Agents") },
+					label: localize('sessionTypePicker.addAgents', "Add Agents"),
+				});
+			}
+			for (const candidate of setupTypes) {
+				const item: ISessionTypePickerItem = {
+					providerId: AGENT_SETUP_PROVIDER_ID,
+					sessionTypeId: candidate.id,
+					label: candidate.label,
+				};
+				groupedItems.push({
+					kind: ActionListItemKind.Action,
+					label: candidate.label,
+					description: candidate.description,
+					group: {
+						title: '',
+						icon: candidate.icon,
+					},
+					item,
+				});
+			}
+		}
+
+		const triggerElement = this._triggerElement;
+		const delegate: IActionListDelegate<ISessionTypePickerItem> = {
+			onSelect: (item) => {
+				this.actionWidgetService.hide();
+				if (item.providerId === AGENT_SETUP_PROVIDER_ID) {
+					void this.agentCliSetupService.beginSetup(item.sessionTypeId);
+					return;
+				}
+				this._handleSelectedSessionType(item);
+			},
+			onHide: () => { triggerElement.focus(); },
+		};
+
+		this.actionWidgetService.show<ISessionTypePickerItem>(
+			'sessionTypePicker',
+			false,
+			groupedItems,
+			delegate,
+			this._triggerElement,
+			undefined,
+			[],
+			{
+				getAriaLabel: (element) => element.item?.groupLabel ? localize('sessionTypePicker.itemAriaLabel', "{0}, {1}", element.label ?? '', element.item.groupLabel) : (element.label ?? ''),
+				getWidgetAriaLabel: () => localize('sessionTypePicker.ariaLabel', "Session Type"),
+			},
+			{ minWidth: 200 },
+		);
+	}
+
+	/**
+	 * Handles the user picking a session type. Emits `newChatPickerClosed`
+	 * telemetry (with the previously selected type read from storage, or the
+	 * in-memory field when nothing is stored). The explicit selection is always
+	 * persisted — picking the preferred (first) type clears the stored
+	 * preference, any other pick stores it — while {@link onDidSelectSessionType}
+	 * fires only when the visible pick actually changed.
+	 *
+	 * Shared between desktop (action-widget popup) and mobile (bottom
+	 * sheet) presentations so both surfaces report identical telemetry.
+	 */
+	protected _handleSelectedSessionType(pick: IPickedSessionType): void {
+		const stored = this._readStoredPick();
+		const beforeId = stored?.sessionTypeId ?? this._picked?.sessionTypeId;
+		const beforeLabel = this._folderSessionTypes.find(t => t.sessionType.id === beforeId)?.sessionType.label;
+		const afterLabel = this._folderSessionTypes.find(t => t.providerId === pick.providerId && t.sessionType.id === pick.sessionTypeId)?.sessionType.label;
+
+		reportNewChatPickerClosed(this.telemetryService, {
+			id: 'NewChatSessionTypePicker',
+			name: 'NewChatSessionTypePicker',
+			optionIdBefore: beforeId,
+			optionIdAfter: pick.sessionTypeId,
+			optionLabelBefore: beforeLabel,
+			optionLabelAfter: afterLabel,
+			isPII: false,
+		});
+
+		// Persist the explicit selection regardless of whether the visible
+		// pick changed (the visible pick may reflect the active session rather
+		// than the stored preference): picking the preferred (first) type means
+		// "no explicit preference" and clears the stored pick so the session
+		// keeps tracking the preferred type as the folder's list changes; any
+		// other explicit pick is stored.
+		const preferred = this._folderSessionTypes[0];
+		const isDefault = !!preferred && preferred.providerId === pick.providerId && preferred.sessionType.id === pick.sessionTypeId;
+		const visiblePickChanged = pick.providerId !== this._picked?.providerId || pick.sessionTypeId !== this._picked?.sessionTypeId;
+		if (isDefault) {
+			this._clearStoredPick(pick);
+		} else {
+			this._writeStoredPick(pick);
+		}
+		// Only notify (and trigger draft recreation) when the visible pick
+		// actually changed, to avoid unnecessary work.
+		if (visiblePickChanged) {
+			this._onDidSelectSessionType.fire(pick);
+		}
+	}
+
+	private _readStoredPick(): IPreferredSessionType | undefined {
+		return this._toPreferredSessionType(this._readStoredPickRaw());
+	}
+
+	private _toPreferredSessionType(stored: IStoredSessionTypePick | undefined): IPreferredSessionType | undefined {
+		if (!stored) {
+			return undefined;
+		}
+		return typeof stored.providerId === 'string'
+			? { providerId: stored.providerId, sessionTypeId: stored.sessionTypeId }
+			: { sessionTypeId: stored.sessionTypeId };
+	}
+
+	private _readStoredPickRaw(): IStoredSessionTypePick | undefined {
+		const raw = this.storageService.get(STORAGE_KEY_LAST_SESSION_TYPE, StorageScope.PROFILE);
+		if (!raw) {
+			return undefined;
+		}
+		// Try parsing as the new JSON shape first; fall back to the legacy
+		// shape where only the sessionTypeId string was stored.
+		try {
+			const parsed = JSON.parse(raw) as IStoredSessionTypePick;
+			if (parsed && typeof parsed.sessionTypeId === 'string') {
+				return parsed;
+			}
+		} catch {
+			// Not JSON — fall through to legacy raw-string handling.
+		}
+		// Legacy raw string was just the session type id. Resolution to a
+		// provider happens lazily once the active folder is known.
+		return { sessionTypeId: raw };
+	}
+
+	private _writeStoredPick(pick: IPickedSessionType): void {
+		this._picked = pick;
+		const chatSessionType = this._folderSessionTypes.find(t =>
+			t.providerId === pick.providerId && t.sessionType.id === pick.sessionTypeId)?.sessionType.chatSessionType;
+		const stored: IStoredSessionTypePick = {
+			providerId: pick.providerId,
+			sessionTypeId: pick.sessionTypeId,
+			...(chatSessionType ? { chatSessionType } : {}),
+		};
+		this.storageService.store(STORAGE_KEY_LAST_SESSION_TYPE, JSON.stringify(stored), StorageScope.PROFILE, StorageTarget.MACHINE);
+	}
+
+	/**
+	 * Forget any explicit preference (e.g. the user re-selected the default
+	 * type). The display still reflects the in-memory pick, but consumers
+	 * reading {@link getUserPickedSessionType} fall back to the preferred type.
+	 */
+	private _clearStoredPick(pick: IPickedSessionType): void {
+		this._picked = pick;
+		this.storageService.remove(STORAGE_KEY_LAST_SESSION_TYPE, StorageScope.PROFILE);
+	}
+
+	private _updateTriggerLabel(): void {
+		if (!this._triggerElement) {
+			return;
+		}
+
+		dom.clearNode(this._triggerElement);
+
+		// In web (vscode.dev/agents) the host filter already scopes the
+		// workbench to a single agent host, so when that host advertises only
+		// one harness there is nothing to pick — hide the trigger entirely.
+		// Note: the existing CSS rule on `.new-chat-header-type-picker`
+		// uses `:has(.sessions-chat-session-type-picker .action-label.hidden)`
+		// to also hide the header-row picker container when the trigger is hidden.
+		const hideForSingleHarness = isWeb && this._folderSessionTypes.length <= 1;
+		// Only hide when there is genuinely nothing to show. The folder list
+		// is transiently empty while providers (re-)advertise their session
+		// types and while a draft session's workspace resolves — wiping the
+		// trigger then would strand the user with no way to switch agents
+		// (the dropdown itself re-resolves the list when opened).
+		if (hideForSingleHarness || (this._folderSessionTypes.length === 0 && !this._picked)) {
+			this._triggerElement.classList.add('hidden');
+			return;
+		}
+
+		this._triggerElement.classList.remove('hidden');
+		const currentType = this._folderSessionTypes.find(t =>
+			t.providerId === this._picked?.providerId && t.sessionType.id === this._picked?.sessionTypeId)?.sessionType
+			?? this._folderSessionTypes.find(t => t.sessionType.id === this._picked?.sessionTypeId)?.sessionType
+			?? (this._picked ? undefined : this._folderSessionTypes[0]?.sessionType);
+		// While the folder's session types are still resolving, render the
+		// stored pick with its well-known branding instead of the raw id +
+		// generic terminal glyph — the advertised type replaces this on the
+		// next refresh.
+		const fallback = this._picked ? knownAgentPresentation(this._picked.sessionTypeId) : undefined;
+		const modeIcon = currentType?.icon ?? fallback?.icon ?? Codicon.terminal;
+		const modeLabel = currentType?.label ?? fallback?.label ?? this._picked?.sessionTypeId ?? '';
+
+		dom.append(this._triggerElement, renderIcon(modeIcon));
+		const labelSpan = dom.append(this._triggerElement, dom.$('span.sessions-chat-dropdown-label'));
+		labelSpan.textContent = modeLabel;
+
+		const chevron = dom.append(this._triggerElement, renderIcon(Codicon.chevronDownCompact));
+		chevron.classList.add('sessions-chat-dropdown-chevron');
+
+		this._triggerElement.ariaLabel = localize('sessionTypePicker.triggerAriaLabel', "Pick Session Type, {0}", modeLabel);
+	}
+}

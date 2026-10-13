@@ -1,0 +1,344 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Session header, tabs, and chat content are all hosted in this centered
+ * inner container so alignment is controlled in one place. */
+.session-view .session-view-centered-content {
+	height: 100%;
+	margin: 0 auto;
+	box-sizing: border-box;
+}
+
+.session-view {
+	position: relative;
+}
+
+.session-view .session-view-chat-navigation {
+	display: flex;
+	height: 44px;
+	align-items: center;
+	box-sizing: border-box;
+	gap: 8px;
+	padding: 4px 10px;
+	border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border) 70%, transparent);
+}
+
+.session-view .session-view-chat-navigation[hidden] {
+	display: none;
+}
+
+.session-view .session-view-chat-back {
+	appearance: none;
+	display: inline-flex;
+	max-width: 132px;
+	height: 28px;
+	min-width: 0;
+	align-items: center;
+	gap: 6px;
+	box-sizing: border-box;
+	padding: 0 8px 0 6px;
+	border: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: inherit;
+	font-size: var(--vscode-agents-fontSize-label1);
+	line-height: 20px;
+	cursor: pointer;
+}
+
+.session-view .session-view-chat-navigation-separator {
+	flex: 0 0 auto;
+	color: var(--vscode-descriptionForeground);
+	opacity: 0.6;
+}
+
+.session-view .session-view-chat-navigation-identity {
+	display: flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	flex-direction: column;
+	justify-content: center;
+	line-height: 16px;
+}
+
+.session-view .session-view-chat-navigation-title {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--session-view-foreground);
+	font-size: var(--vscode-agents-fontSize-label1);
+	font-weight: var(--vscode-agents-fontWeight-semiBold);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.session-view .session-view-chat-navigation-meta {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-agents-fontSize-label2);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+
+
+.session-view .session-view-chat-back:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--session-view-foreground);
+}
+
+.session-view .session-view-chat-back:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.session-view .session-view-chat-back > .codicon {
+	flex: 0 0 auto;
+	font-size: 12px;
+}
+
+.session-view .session-view-chat-back-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.session-view.backboard-auth-gate-active > :not(.backboard-auth-gate-overlay) {
+	filter: blur(4px);
+	opacity: 0.48;
+	pointer-events: none;
+	user-select: none;
+}
+
+.session-view .backboard-auth-gate-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 50;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 22px;
+	box-sizing: border-box;
+	background: color-mix(in srgb, var(--session-view-background) 38%, transparent);
+}
+
+.session-view .backboard-auth-gate-card {
+	width: min(340px, 100%);
+	display: grid;
+	justify-items: center;
+	gap: 12px;
+	padding: 22px 18px;
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--session-view-background) 94%, var(--vscode-editor-background));
+	box-shadow: 0 8px 24px color-mix(in srgb, var(--vscode-widget-shadow) 50%, transparent);
+	text-align: center;
+}
+
+.session-view .backboard-auth-gate-logo.codicon.codicon-backboard-logo {
+	width: 52px;
+	height: 52px;
+	color: color-mix(in srgb, var(--session-view-foreground) 62%, var(--vscode-button-background));
+	font-size: 52px;
+}
+
+.session-view .backboard-auth-gate-title {
+	margin: 0;
+	color: var(--session-view-foreground);
+	font-size: 15px;
+	font-weight: 650;
+	line-height: 20px;
+}
+
+.session-view .backboard-auth-gate-description {
+	max-width: 240px;
+	margin: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	line-height: 17px;
+}
+
+.session-view .backboard-auth-gate-button {
+	min-height: 30px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 12px;
+	border: 0;
+	border-radius: 5px;
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.session-view .backboard-auth-gate-button:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+/* Transitions apply to both active and inactive states so the header fades
+ * smoothly in either direction. Only declared when the user has not requested
+ * reduced motion so we never need to unset them. */
+@media (prefers-reduced-motion: no-preference) {
+	.session-view .chat-composite-bar.session-header-bar {
+		transition: opacity 0.15s ease;
+	}
+}
+
+/* Recede the header (title, meta, toolbar) of inactive sessions so the active
+ * session's header stands out. Everything else stays fully visible: every
+ * pane's composer keeps its model/mode pickers, attach and send controls, so
+ * side-by-side chats can be read and driven without clicking into each. */
+.session-view:not(.is-active) .chat-composite-bar.session-header-bar {
+	opacity: 0.6;
+}
+
+/* Desaturate the in-flight chat-input border beam in inactive sessions so the
+ * active session's beam is the one that draws the eye. Relative color syntax
+ * zeroes the saturation channel while preserving hue and lightness. */
+.session-view:not(.is-active) .interactive-session .chat-input-container.working {
+	--chat-input-working-border-color1: hsl(from var(--vscode-chat-inputWorkingBorderColor1) h 0% l);
+}
+
+/* ------------------------------------------------------------------------- *
+ * Split grid
+ *
+ * With more than one session visible, the window's shared header row is
+ * hidden and every column shows its own row (same classes, so it inherits the
+ * shared row's look and window-drag behavior). The left-most column borrows
+ * the window chrome, the placeholder column the new-chat breadcrumb/toolbar.
+ * ------------------------------------------------------------------------- */
+
+.session-view > .sessions-panel-header.session-view-split-header :is(
+	.session-view-split-header-chrome,
+	.session-view-split-header-leading,
+	.session-view-split-header-trailing) {
+	display: flex;
+	align-items: center;
+	height: 100%;
+	min-width: 0;
+}
+
+.session-view > .sessions-panel-header.session-view-split-header :is(
+	.session-view-split-header-chrome,
+	.session-view-split-header-leading,
+	.session-view-split-header-trailing):empty {
+	display: none;
+}
+
+/* The window header's left section, relocated into the left-most column. */
+.session-view > .sessions-panel-header.session-view-split-header .session-view-split-header-chrome > .sessions-panel-header-left {
+	display: flex;
+	align-items: center;
+	height: 100%;
+	min-width: 0;
+}
+
+/* Each column's own right panel, sized by SessionView (sash on its left edge). */
+.session-view > .session-view-side-panel {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 2;
+	overflow: hidden;
+}
+
+.session-view > .session-view-side-panel > .session-split-right-panel {
+	position: relative;
+	height: 100%;
+}
+
+.session-view > .session-view-side-panel::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	z-index: 20;
+	width: 1px;
+	background: var(--vscode-agentsPanel-border, var(--vscode-panel-border));
+	pointer-events: none;
+}
+
+/* Wallpaper: like the auxiliary bar, a column's panel wrappers reveal the
+ * shared window image (codexTheme.css); open tool surfaces keep their own
+ * backgrounds via rightWorkbenchSimple.css. */
+.monaco-workbench.agent-sessions-workbench:is(.sessions-chat-custom-background, .sessions-new-chat-custom-background):not(.optimus-window):not(.hc-black):not(.hc-light) .session-view > .session-view-side-panel :is(
+	.session-split-right-panel,
+	.session-split-right-panel > .content,
+	.session-split-right-panel .pane,
+	.session-split-right-panel .pane-body) {
+	background: transparent !important;
+	background-color: transparent !important;
+}
+
+/* Every cell has its own Back/Forward (SessionViewNavigationToolbar); the
+ * window-level pair that moved along with the chrome is hidden while split. */
+.part.sessionspart.sessions-grid-split .sessions-header-navigation:not(.session-view-pane-navigation) {
+	display: none;
+}
+
+.session-view > .sessions-panel-header.session-view-split-header .session-view-split-header-navigation {
+	display: flex;
+	align-items: center;
+	height: 100%;
+}
+
+/* Only cells along the window's top edge stand in for the title bar; headers
+ * of stacked cells lower down must not move the window. */
+.agent-sessions-workbench .session-view:not(.is-grid-top) > .sessions-panel-header.session-view-split-header,
+.agent-sessions-workbench .session-view:not(.is-grid-top) > .sessions-panel-header.session-view-split-header :is(
+	.titlebar-drag-region,
+	.sessions-panel-header-left,
+	.sessions-panel-header-center,
+	.sessions-panel-header-right,
+	.panel-header-toolbar-container,
+	.monaco-toolbar,
+	.monaco-action-bar,
+	.actions-container) {
+	-webkit-app-region: no-drag;
+}
+
+.agent-sessions-workbench .session-view:not(.is-grid-top) > .session-view-side-panel .sessions-right-workbench-header {
+	-webkit-app-region: no-drag;
+}
+
+/* Split panes are narrow: keep the composer tip on one line (ellipsized). The
+ * part also carries `chat-input-single-line-placeholder`, which tells
+ * ChatInputPart to size the input for that single line instead of the
+ * wrapped tip, so every pane's composer stays compact. */
+.monaco-workbench.agent-sessions-workbench .part.sessionspart.sessions-grid-split .session-view .interactive-session .interactive-input-part:not(.compact) .chat-editor-container .monaco-editor [class^="ced-chat-session-detail"] {
+	display: inline-block;
+	max-width: 100%;
+	/* Leave room for the context-usage ring in the input's top-right corner. */
+	max-width: calc(100cqi - 36px);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	vertical-align: bottom;
+}
+
+/* Split panes use the composer's shared model-control size ladder
+ * (chatDevinPresentation.css): the name ellipsizes before anything hides. */
+
+/* Narrow panes: keep the title readable by dropping the header's secondary
+ * actions (environment, terminal, maximize); the right panel toggle and
+ * Close stay. Environment and terminal remain reachable from the composer
+ * and the command palette. */
+.session-view > .sessions-panel-header.session-view-split-header {
+	container: session-view-header / inline-size;
+}
+
+@container session-view-header (max-width: 440px) {
+	.session-view > .sessions-panel-header.session-view-split-header .sessions-header-session-toolbar-slot :is(
+		.sessions-environment-titlebar-widget,
+		.action-item:has(> .action-label:is(.codicon-terminal, .codicon-screen-full, .codicon-screen-normal))) {
+		display: none !important;
+	}
+}

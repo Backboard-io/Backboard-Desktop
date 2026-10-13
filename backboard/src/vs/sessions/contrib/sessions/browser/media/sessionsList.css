@@ -1,0 +1,820 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.sessions-list-control {
+	flex: 1 1 auto;
+	height: 100%;
+	min-height: 0;
+	/* Pills derive from the row text base so they track the light-theme reset
+	 * below; 8%/12% rather than 6%/9% so they stay visible on the darker glass. */
+	/* Low-alpha white overlays: the rows sit on translucent glass, so anything
+	 * much brighter reads as an opaque light-grey block instead of a soft
+	 * highlight (user-rejected). Keep hover/selected subtle. */
+	--sessions-row-hover-bg: color-mix(in srgb, var(--sessions-row-fg) 4%, transparent);
+	--sessions-row-selected-bg: color-mix(in srgb, var(--sessions-row-fg) 7%, transparent);
+	/* Soft pill only — no outline ring on the selected row (HC re-adds one). */
+	--sessions-row-selected-border: transparent;
+		/* Strong (near-white) text base for glass rows — the theme's mid-grey
+		 * sideBar.foreground dims into the glass; muted/icon tiers derive from
+		 * it via alpha so text pops while keeping hierarchy. Light themes reset
+		 * this below. */
+	--sessions-row-fg: var(--vscode-strongForeground, var(--vscode-sideBar-foreground, var(--vscode-foreground)));
+	--sessions-row-title-fg: var(--sessions-row-fg);
+	--sessions-row-attention-fg: var(--sessions-row-fg);
+	--sessions-row-muted-fg: color-mix(in srgb, var(--sessions-row-fg) 56%, transparent);
+	--sessions-row-icon-fg: color-mix(in srgb, var(--sessions-row-fg) 70%, transparent);
+	/* Muted, desaturated blue — a quiet unread marker, not a glowing beacon.
+	 * Heavily mixed toward the muted foreground so it reads as a soft blue-grey
+	 * dot rather than a saturated accent. */
+	--sessions-status-done-fg: color-mix(in srgb, var(--vscode-charts-blue, var(--vscode-textLink-foreground)) 42%, var(--sessions-row-muted-fg));
+	/* Sessions blocked on the user. Unlike the unread dot this one is meant to
+	 * be noticed, so the accent stays saturated rather than being mixed toward
+	 * the muted foreground; the row tint behind it carries the same hue at low
+	 * alpha so the pill reads as highlighted without going opaque on glass. */
+	--sessions-row-waiting-fg: var(--vscode-charts-orange, var(--vscode-editorWarning-foreground, #d18616));
+	--sessions-row-waiting-bg: color-mix(in srgb, var(--sessions-row-waiting-fg) 12%, transparent);
+
+	/* A sticky header is not useful here — and its opaque background + shadow
+	 * paint a solid box over the translucent glass.
+	 * Sticky scroll is disabled programmatically in SessionsListControl; this
+	 * guard keeps the box from ever painting if the global
+	 * `workbench.tree.enableStickyScroll` setting re-enables it. */
+	.monaco-tree-sticky-container {
+		display: none !important;
+	}
+
+	.monaco-list-row:has(.session-item) {
+		border-radius: var(--vscode-cornerRadius-large);
+		margin: 0;
+		width: 100%;
+		overflow: hidden;
+	}
+
+	.monaco-list-row:has(.session-section),
+	.monaco-list-row:has(.session-show-more-folders) {
+		border-radius: var(--vscode-cornerRadius-large);
+		margin: 0;
+		width: 100%;
+		overflow: hidden;
+	}
+
+	.monaco-list-row:has(.session-item):hover,
+	.monaco-list-row.focused:not(.selected):has(.session-item) {
+		background: var(--sessions-row-hover-bg) !important;
+	}
+
+	.monaco-list-row.selected:has(.session-item),
+	.monaco-list:focus .monaco-list-row.selected:has(.session-item) {
+		background: var(--sessions-row-selected-bg) !important;
+		outline: 1px solid var(--sessions-row-selected-border) !important;
+		outline-offset: -1px;
+		box-shadow: none;
+	}
+
+	/* Folder header rows carry their highlight on the inner compact
+	 * `.session-section` band only (see the `.session-section` pill rules
+	 * below). Suppress the base list widget's full-row focus/selection
+	 * background and outline for these rows — otherwise the row paints a
+	 * second, taller pill nested around the band. */
+	.monaco-list-row:has(.session-section):hover,
+	.monaco-list-row.focused:has(.session-section),
+	.monaco-list-row.selected:has(.session-section),
+	.monaco-list:focus .monaco-list-row.selected:has(.session-section) {
+		background: transparent !important;
+		outline: none !important;
+		box-shadow: none !important;
+	}
+
+	.monaco-list-row .force-no-twistie {
+		display: none !important;
+	}
+
+	.monaco-list-row.selected .session-details-row {
+		color: var(--sessions-row-muted-fg);
+	}
+
+	.monaco-list:focus .monaco-list-row.selected .session-details-row {
+		.session-diff {
+
+			.session-diff-added,
+			.session-diff-removed {
+				color: unset;
+			}
+		}
+	}
+
+	.monaco-list-row.selected .session-title {
+		color: var(--sessions-row-title-fg);
+	}
+
+	.monaco-list:focus .monaco-list-row.selected .session-icon > .codicon,
+	.monaco-list:focus .monaco-list-row.selected .session-icon > .monaco-pixel-spinner {
+		color: var(--sessions-row-icon-fg) !important;
+	}
+
+	.monaco-list:focus .monaco-list-row.selected .session-icon.session-icon-completed:not(.session-icon-read) > .codicon {
+		color: var(--sessions-status-done-fg) !important;
+	}
+
+	.monaco-list:not(:focus) .monaco-list-row.selected .session-details-row {
+		color: var(--sessions-row-muted-fg);
+	}
+
+	.monaco-list-row .session-title-toolbar {
+		position: relative;
+		height: 18px;
+		flex: 0 0 auto;
+		display: none;
+
+		.monaco-toolbar {
+			position: relative;
+			right: 0;
+			top: 0;
+		}
+
+		.monaco-action-bar .action-label {
+			border-radius: var(--vscode-cornerRadius-medium);
+			color: var(--sessions-row-icon-fg);
+		}
+
+		.monaco-action-bar .action-label:hover {
+			color: var(--vscode-icon-foreground);
+			background: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 8%, transparent);
+		}
+	}
+
+	.monaco-list-row:hover,
+	.monaco-list-row.focused:not(.selected) {
+		.session-title-toolbar {
+			display: block;
+		}
+
+		.session-title {
+			margin-right: 8px;
+		}
+	}
+
+	/* Pinned but not hovered/focused: show only the unpin action */
+	.monaco-list-row:not(:hover):not(.focused):has(.session-item.pinned) {
+		.session-title-toolbar {
+			display: block;
+
+			.action-item:not(:last-child) {
+				display: none;
+			}
+		}
+
+		.session-title {
+			margin-right: 8px;
+		}
+	}
+}
+
+/* Session Item */
+
+.session-item {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	position: relative;
+	height: 100%;
+	box-sizing: border-box;
+	/* Text indents to 32px so it aligns on the shared 42px text column (10px
+	 * list inset + 32px), under the folder-header label (folder icon 16px +
+	 * 8px gap + 8px inset); the status dot sits in the gutter at left:8px, in
+	 * line with the folder icon. */
+	padding: 0 6px 0 32px;
+	border-radius: inherit;
+
+	&.archived {
+		color: var(--sessions-row-muted-fg);
+	}
+
+	&.sticky {
+		border-left: 2px solid var(--vscode-focusBorder);
+		padding-left: 30px;
+	}
+
+	.session-main,
+	.session-title-row,
+	.session-details-row {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.session-icon {
+		position: absolute;
+		left: 8px;
+		top: 50%;
+		transform: translateY(-50%);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		line-height: 16px;
+		color: var(--sessions-row-icon-fg);
+		/* Anchor for outgoing icons during a cross-fade swap (see swapIconWithCrossfade). */
+
+		> .codicon {
+			flex-shrink: 0;
+			font-size: 13px;
+			height: 16px;
+			width: 16px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			opacity: 1;
+		}
+
+		> .monaco-pixel-spinner {
+			flex-shrink: 0;
+			width: 16px;
+			height: 16px;
+		}
+
+		&.session-icon-pulse > .codicon {
+			animation: session-needs-input-pulse 2s ease-in-out infinite;
+		}
+
+		&.session-icon-in-progress > .codicon {
+			color: var(--sessions-row-icon-fg) !important;
+			filter: drop-shadow(0 0 5px color-mix(in srgb, var(--sessions-row-icon-fg) 46%, transparent));
+		}
+
+		/* Small, flat unread dot: no glow, reduced glyph size so it reads as a
+		 * subtle marker rather than a saturated beacon. */
+		&.session-icon-completed:not(.session-icon-read) > .codicon {
+			color: var(--sessions-status-done-fg) !important;
+			font-size: 9px;
+		}
+
+		/* Once the session has been opened the dot no longer carries any
+		 * information — remove it entirely so settled rows read as clean
+		 * text lines (Codex-style). */
+		&.session-icon-completed.session-icon-read {
+			display: none;
+		}
+
+		@media (prefers-reduced-motion: reduce) {
+			&.session-icon-pulse > .codicon {
+				animation: none;
+			}
+		}
+	}
+
+	.session-main {
+		padding-left: 0;
+		max-width: 100%;
+		display: flex;
+		align-items: center;
+	}
+
+	.session-title-row,
+	.session-details-row {
+		display: flex;
+		align-items: center;
+	}
+
+	.session-title-row {
+		line-height: 18px;
+		padding-bottom: 0;
+		gap: 6px;
+		width: 100%;
+	}
+
+	/* Agent logo (Backboard / Claude / Codex) before the title. */
+	.session-provider-icon {
+		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
+		font-size: 13px;
+		color: var(--sessions-row-icon-fg);
+		opacity: 0.85;
+	}
+
+	.session-provider-icon.no-icon {
+		display: none;
+	}
+
+	.session-details-row {
+		/* Never shrink below content: the title ellipsizes instead, so the
+		 * timestamp/diff stats are not clipped mid-word on long titles. */
+		flex: 0 0 auto;
+		max-width: 46%;
+		gap: 4px;
+		font-size: 11px;
+		line-height: 16px;
+		max-height: 16px;
+		overflow: hidden;
+		color: var(--sessions-row-muted-fg);
+
+		.session-details-icon {
+			display: flex;
+			align-items: center;
+			color: var(--sessions-row-icon-fg);
+
+			> .codicon {
+				font-size: var(--vscode-codiconFontSize-compact, 12px);
+			}
+		}
+
+		.session-diff {
+			font-variant-numeric: tabular-nums;
+			overflow: hidden;
+			display: flex;
+			gap: 2px;
+
+			.session-diff-added {
+				color: var(--vscode-chat-linesAddedForeground);
+			}
+
+			.session-diff-removed {
+				color: var(--vscode-chat-linesRemovedForeground);
+			}
+		}
+
+		.session-badge {
+			overflow: hidden;
+			white-space: nowrap;
+			text-overflow: ellipsis;
+		}
+
+		.session-separator {
+			display: none;
+
+			&.has-separator {
+				display: inline;
+
+				&::before {
+					content: '\00B7';
+				}
+			}
+		}
+	}
+
+	.session-title,
+	.session-description {
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+
+	.session-description p {
+		margin: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.session-description:empty {
+		display: none;
+	}
+
+	.session-title {
+		flex: 1 1 auto;
+		min-width: 0;
+		max-width: none;
+		font-size: 13px;
+		font-weight: var(--vscode-agents-fontWeight-regular, 400);
+		letter-spacing: 0;
+	}
+
+	.session-title {
+		color: var(--sessions-row-title-fg);
+	}
+
+	/* Strong foreground is reserved for sessions that need attention: */
+	/* unread, input required, or selected. All others use foreground. */
+	&.unread .session-title,
+	&.needs-input .session-title {
+		color: var(--sessions-row-attention-fg);
+		font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+	}
+
+	.session-time {
+		display: flex;
+		align-items: center;
+		flex: 0 0 auto;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+
+	/* Waiting on the user — either the session reported `NeedsInput` or a tool
+	 * approval is pending. Both mean the same thing to someone scanning the
+	 * sidebar ("this one is stuck on you"), so both get the warm accent. The
+	 * prompt itself is answered in the chat; the row only has to point at it. */
+	&.needs-input,
+	&.awaiting-approval {
+		.session-title,
+		.session-description,
+		.session-icon {
+			color: var(--sessions-row-waiting-fg);
+		}
+
+		.session-icon > .codicon {
+			color: var(--sessions-row-waiting-fg) !important;
+		}
+	}
+}
+
+/* Row tint for the waiting state. Applied on the list row (rather than the
+ * item) so it fills the full pill, and without `!important` so the hover and
+ * selected backgrounds above still win when the user interacts with it. */
+.sessions-list-control .monaco-list-row:has(.session-item.needs-input),
+.sessions-list-control .monaco-list-row:has(.session-item.awaiting-approval) {
+	background: var(--sessions-row-waiting-bg);
+}
+
+/* Show More */
+
+/* Quiet, left-aligned "show more" row (Codex-style) — plain muted text at the
+ * session-title indent, no divider lines. */
+.session-show-more {
+	display: flex;
+	justify-content: flex-start;
+	align-items: center;
+	padding: 0 6px 0 36px;
+	font-size: 11px;
+	color: var(--sessions-row-muted-fg);
+	min-height: 22px;
+	cursor: pointer;
+
+	.session-show-more-label {
+		padding: 0;
+		flex-shrink: 0;
+		white-space: nowrap;
+	}
+}
+
+.monaco-list-row:hover .session-show-more:hover {
+	color: var(--sessions-row-title-fg);
+}
+
+/* Folders show-more/show-less: aligned like the other show-more rows, just
+ * slightly heavier since it sits at the section level. */
+.session-show-more.session-show-more-folders {
+	font-weight: var(--vscode-agents-fontWeight-medium, 500);
+}
+
+/* Section Header */
+
+.session-section {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	/* Compact interactive band (26px) pinned to the bottom of the taller 36px
+	 * row via margin-top: the empty space above becomes the gap that separates
+	 * this project group from the previous one, while the hover/selection pill
+	 * (painted on this element, not the full row) stays compact. */
+	height: 26px;
+	margin-top: 10px;
+	box-sizing: border-box;
+	border-radius: var(--vscode-cornerRadius-large);
+	font-size: 13px;
+	font-weight: var(--vscode-agents-fontWeight-medium, 500);
+	color: var(--sessions-row-title-fg);
+	padding: 0 6px 0 8px;
+	letter-spacing: 0;
+
+	.session-section-folder-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		flex: 0 0 16px;
+		color: color-mix(in srgb, var(--sessions-row-fg, var(--vscode-icon-foreground)) 72%, transparent);
+	}
+
+	.session-section-label {
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.session-section-count {
+		flex-shrink: 0;
+		opacity: 0.55;
+		margin-left: 4px;
+		margin-right: 4px;
+	}
+
+	.session-section-toolbar {
+		flex-shrink: 0;
+		margin-left: 4px;
+		display: none;
+	}
+
+	.session-section-toolbar .monaco-action-bar .action-label {
+		border-radius: var(--vscode-cornerRadius-small);
+	}
+
+	.session-section-chevron {
+		flex-shrink: 0;
+		display: none;
+		color: var(--sessions-row-icon-fg);
+		font-size: var(--vscode-codiconFontSize-compact, 12px);
+		width: 22px;
+		height: 22px;
+		border-radius: var(--vscode-cornerRadius-small);
+		justify-content: center;
+	}
+}
+
+.monaco-list-row:hover .session-section .session-section-toolbar,
+.monaco-list-row.focused .session-section .session-section-toolbar {
+	display: block;
+}
+
+.monaco-list-row:hover .session-section .session-section-chevron.collapsible,
+.monaco-list-row.focused .session-section .session-section-chevron.collapsible {
+	display: flex;
+	align-items: center;
+}
+
+.monaco-list-row .session-section .session-section-chevron.collapsible:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.sessions-list-control {
+
+	/* Folder headers carry the pill on the compact `.session-section` band, not
+	 * the full (taller) row, so the highlight doesn't include the group-gap
+	 * space above the label. */
+	.monaco-list-row:has(.session-section):hover .session-section,
+	.monaco-list-row.focused:has(.session-section) .session-section,
+	.monaco-list-row.selected:has(.session-section) .session-section {
+		background: var(--sessions-row-hover-bg);
+	}
+
+	/* Folder-level "show more" is a compact row, so it keeps a full-row pill. */
+	.monaco-list-row:has(.session-show-more-folders):hover,
+	.monaco-list-row.focused:has(.session-show-more-folders),
+	.monaco-list-row.selected:has(.session-show-more-folders) {
+		background: var(--sessions-row-hover-bg) !important;
+	}
+
+.monaco-list-row:hover .session-section .session-section-label,
+.monaco-list-row.focused .session-section .session-section-label,
+.monaco-list-row:hover .session-show-more-folders .session-show-more-label,
+.monaco-list-row.focused .session-show-more-folders .session-show-more-label {
+		color: var(--sessions-row-title-fg);
+	}
+
+	&.session-section-focus-from-pointer {
+		.monaco-list-row.focused:has(.session-section),
+		.monaco-list-row.selected:has(.session-section) {
+			outline: none !important;
+		}
+	}
+}
+
+/* Light themes: the pure-white row text base is designed for the dark glass;
+ * fall back to the theme foreground so rows stay readable. */
+.vs .sessions-list-control {
+	--sessions-row-fg: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+}
+
+/* High-contrast themes: row titles, timestamps and section counts are dimmed
+ * via color-mix against transparent, and hover/selection are faint tinted
+ * surfaces with no border. HC requires maximum-contrast text and a visible
+ * boundary for the active/selected row, so restore full opacity and add a
+ * contrast outline. */
+.hc-black .sessions-list-control,
+.hc-light .sessions-list-control {
+	--sessions-row-title-fg: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+	--sessions-row-attention-fg: var(--vscode-strongForeground, var(--vscode-foreground));
+	--sessions-row-muted-fg: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+	--sessions-row-selected-border: var(--vscode-contrastBorder);
+}
+
+.hc-black .sessions-list-control .session-details-row,
+.hc-light .sessions-list-control .session-details-row {
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+}
+
+.hc-black .sessions-list-control .session-section-count,
+.hc-light .sessions-list-control .session-section-count {
+	opacity: 1;
+}
+
+.hc-black .sessions-list-control .session-icon > .codicon,
+.hc-light .sessions-list-control .session-icon > .codicon {
+	opacity: 1;
+}
+
+.hc-black .sessions-list-control .session-details-icon,
+.hc-black .sessions-list-control .session-section-folder-icon,
+.hc-light .sessions-list-control .session-details-icon,
+.hc-light .sessions-list-control .session-section-folder-icon {
+	color: var(--vscode-icon-foreground);
+}
+
+.hc-black .sessions-list-control .monaco-list-row:hover,
+.hc-black .sessions-list-control .monaco-list-row.focused,
+.hc-light .sessions-list-control .monaco-list-row:hover,
+.hc-light .sessions-list-control .monaco-list-row.focused {
+	outline: 1px dashed var(--vscode-contrastActiveBorder, var(--vscode-contrastBorder));
+	outline-offset: -1px;
+}
+
+@keyframes session-needs-input-pulse {
+
+	0%,
+	100% {
+		opacity: 1;
+	}
+
+	50% {
+		opacity: 0.4;
+	}
+}
+
+/* Shimmer effect for in-progress session titles when not selected. */
+/* Gated behind @supports because some environments apply */
+/* `-webkit-text-fill-color: transparent` without honoring */
+/* `background-clip: text`, which renders gradient-filled blocks */
+/* instead of clipped text. Also disabled under reduced motion. */
+
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+	@media not (prefers-reduced-motion: reduce) {
+		.monaco-list-row:not(.selected) .session-item.in-progress .session-title {
+			background: linear-gradient(
+				90deg,
+				var(--vscode-strongForeground) 0%,
+				var(--vscode-strongForeground) 30%,
+				var(--vscode-chat-thinkingShimmer) 50%,
+				var(--vscode-strongForeground) 70%,
+				var(--vscode-strongForeground) 100%
+			);
+			background-size: 400% 100%;
+			background-clip: text;
+			-webkit-background-clip: text;
+			-webkit-text-fill-color: transparent;
+			animation: session-title-shimmer 3s linear infinite;
+		}
+
+		.vs-dark .monaco-list-row:not(.selected) .session-item.in-progress .session-title,
+		.hc-black .monaco-list-row:not(.selected) .session-item.in-progress .session-title {
+			background-image: linear-gradient(
+				90deg,
+				var(--vscode-strongForeground) 0%,
+				var(--vscode-strongForeground) 30%,
+				var(--vscode-descriptionForeground) 50%,
+				var(--vscode-strongForeground) 70%,
+				var(--vscode-strongForeground) 100%
+			);
+		}
+	}
+}
+
+@keyframes session-title-shimmer {
+	0% {
+		background-position: 120% 0;
+	}
+
+	100% {
+		background-position: -120% 0;
+	}
+}
+
+.sessions-list-control .monaco-list-row:not(.selected) .session-item.in-progress .session-title,
+.sessions-list-control .session-item.in-progress .session-title,
+.sessions-list-control .session-item.completed .session-title {
+	background: none;
+	-webkit-text-fill-color: currentColor;
+	animation: none;
+	color: var(--sessions-row-title-fg);
+}
+
+/* ---- Mobile Layout: Touch Adaptations ---- */
+
+/* Always show inline toolbar on mobile (no hover dependency) */
+.agent-sessions-workbench.phone-layout .sessions-list .monaco-list-row .actions {
+	display: flex !important;
+	visibility: visible !important;
+	opacity: 1 !important;
+}
+
+/* Touch feedback on session list items */
+.agent-sessions-workbench.phone-layout .sessions-list .monaco-list-row:active {
+	background-color: var(--vscode-list-hoverBackground) !important;
+}
+
+/* Disable webkit touch callout on list items */
+.agent-sessions-workbench.phone-layout .sessions-list .monaco-list-row {
+	-webkit-touch-callout: none;
+	touch-action: manipulation;
+}
+
+/*
+ * Phone layout: roomier rows with a centered, always-visible action
+ * toolbar that meets the 44px minimum touch target. The taller row
+ * height is reserved by `SessionsTreeDelegate.ITEM_HEIGHT_PHONE` —
+ * keep these rules in sync if paddings/font sizes change here.
+ */
+.agent-sessions-workbench.phone-layout .sessions-list-control {
+	min-width: 0;
+
+	.monaco-list-row:has(.session-item) {
+		/* Horizontal-only margin: virtual list rows are absolutely
+		 * positioned with JS-set `top`/`height`, so vertical margins
+		 * here would not produce reliable inter-row spacing. Any gap
+		 * lives inside the row via padding. */
+		margin: 0 8px;
+		width: calc(100% - 16px);
+		border-radius: var(--vscode-cornerRadius-xLarge);
+	}
+
+	.session-item {
+		padding: 10px 10px;
+		/* Vertically center the icon + main column inside the fixed phone row height. */
+		align-items: center;
+		/* Anchor for the absolutely positioned title toolbar (kept out
+		 * of the title-row flow so a 44px tap target doesn't inflate
+		 * the title line-height or shift the details row down). */
+		position: relative;
+	}
+
+	.session-item .session-icon {
+		line-height: 20px;
+
+		> .codicon {
+			font-size: 14px;
+			height: 20px;
+		}
+
+		> .monaco-pixel-spinner {
+			width: 20px;
+			height: 20px;
+		}
+	}
+
+	.session-item .session-main {
+		padding-left: 10px;
+		/* Reserve space for the right-aligned toolbar so long titles
+		 * don't overlap the action icons. Sized to fit two 44px actions
+		 * (88px) plus a small gap. */
+		padding-right: min(96px, 32%);
+		min-width: 0;
+	}
+
+	.session-item .session-title-row {
+		line-height: 20px;
+		padding-bottom: 0;
+	}
+
+	.session-item .session-title {
+		font-size: 15px;
+		line-height: 20px;
+		max-width: 52%;
+	}
+
+	.session-item .session-details-row {
+		font-size: 12.5px;
+		line-height: 16px;
+		max-height: 16px;
+	}
+
+	/*
+	 * Reveal the per-row action toolbar at rest. The default workbench
+	 * rule shows it on `:hover`/`:focus`, neither of which fire reliably
+	 * on touch. Pull the toolbar out of the title row flow and vertically
+	 * center it against the full row so 44px tap targets don't push the
+	 * details row down.
+	 */
+	.monaco-list-row .session-title-toolbar {
+		display: block;
+		position: absolute;
+		right: 6px;
+		top: 50%;
+		transform: translateY(-50%);
+		height: auto;
+	}
+
+	/* Center the codicon inside the 44x44 tap target. The base
+	 * `.action-label` is a flex container that defaults to start
+	 * alignment, so the icon sticks to the top-left of the square. */
+	.monaco-list-row .session-title-toolbar .action-item.menu-entry > .action-label {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+}
+
+@media (max-width: 360px) {
+	.agent-sessions-workbench.phone-layout .sessions-list-control {
+		.session-item .session-main {
+			padding-right: 40px;
+		}
+
+		.monaco-list-row .session-title-toolbar .action-item:not(:last-child) {
+			display: none;
+		}
+	}
+}

@@ -1,0 +1,16 @@
+Package: @@NAME@@
+Version: @@VERSION@@
+Section: devel
+Depends: @@DEPENDS@@
+Recommends: @@RECOMMENDS@@
+Priority: optional
+Architecture: @@ARCHITECTURE@@
+Maintainer: Backboard
+Homepage: https://docs.backboard.io/
+Installed-Size: @@INSTALLEDSIZE@@
+Provides: backboard-@@NAME@@
+Conflicts: backboard-@@NAME@@
+Replaces: backboard-@@NAME@@
+Description: Backboard IDE.
+ Backboard IDE combines the simplicity of a code editor with Backboard-powered
+ development workflows.

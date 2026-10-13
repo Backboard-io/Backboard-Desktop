@@ -1,0 +1,1428 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.agentSessionsWelcome {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	background-color: var(--vscode-welcomePage-background);
+	overflow: hidden;
+	position: relative;
+}
+
+.agentSessionsWelcome.backboard-auth-gate-active > :not(.backboard-auth-gate-overlay) {
+	filter: blur(4px);
+	pointer-events: none;
+	user-select: none;
+}
+
+.agentSessionsWelcome .backboard-auth-gate-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	background: color-mix(in srgb, var(--vscode-editor-background) 55%, transparent);
+	backdrop-filter: blur(2px);
+}
+
+.agentSessionsWelcome .backboard-auth-gate-card {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	width: min(340px, 100%);
+	padding: 18px;
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 4px;
+	color: var(--vscode-editor-foreground);
+	background: var(--vscode-editor-background);
+	box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.agentSessionsWelcome .backboard-auth-gate-logo.codicon.codicon-backboard-logo {
+	width: 36px;
+	height: 36px;
+	color: var(--vscode-editor-foreground);
+}
+
+.agentSessionsWelcome .backboard-auth-gate-title {
+	margin: 0;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 20px;
+}
+
+.agentSessionsWelcome .backboard-auth-gate-description {
+	margin: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	line-height: 18px;
+}
+
+.agentSessionsWelcome .backboard-auth-gate-button {
+	align-self: flex-start;
+	height: 28px;
+	padding: 0 12px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 2px;
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+	cursor: pointer;
+}
+
+.agentSessionsWelcome .backboard-auth-gate-button:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+.agentSessionsWelcome-scrollable {
+	height: 100%;
+	display: flex !important;
+	align-items: center;
+	justify-content: center;
+}
+
+.agentSessionsWelcome-content {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	padding: 40px;
+	max-width: 900px;
+	width: 100%;
+	box-sizing: border-box;
+}
+
+/* Header */
+.agentSessionsWelcome-header {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	width: 100%;
+	max-width: 800px;
+}
+
+.agentSessionsWelcome-header h1.product-name {
+	font-size: 32px;
+	font-weight: 400;
+	line-height: 1;
+	margin: 0 0 12px 0;
+	color: var(--vscode-foreground);
+}
+
+.agentSessionsWelcome-startEntries {
+	display: flex;
+	gap: 16px;
+	flex-wrap: wrap;
+	justify-content: flex-start;
+}
+
+.agentSessionsWelcome-startEntry {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px;
+	padding-left: 0;
+	border: none;
+	border-radius: 4px;
+	background-color: transparent;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.agentSessionsWelcome-startEntry:hover {
+	color: var(--vscode-textLink-foreground);
+}
+
+.agentSessionsWelcome-startEntry .codicon {
+	color: var(--vscode-descriptionForeground) !important;
+}
+
+/* Chat widget section */
+.agentSessionsWelcome-chatSection {
+	width: 100%;
+	max-width: 800px;
+	margin-top: 24px;
+}
+
+/* Hide the chat tree/list - we only want the input */
+.agentSessionsWelcome-chatWidget .interactive-list {
+	display: none !important;
+}
+
+/* Hide the welcome message containers */
+.agentSessionsWelcome-chatWidget .chat-welcome-view,
+.agentSessionsWelcome-chatWidget .chat-welcome-view-container {
+	display: none !important;
+}
+
+/* Constrain the chat container height - let it size to content */
+.agentSessionsWelcome-chatWidget .interactive-session {
+	height: auto !important;
+}
+
+/* Input part styling - match chat panel */
+.agentSessionsWelcome-chatWidget .interactive-input-part {
+	margin: 0;
+	padding: 16px 0;
+}
+
+/* Suggested prompts */
+.agentSessionsWelcome-sessionsSection {
+	width: 100%;
+	max-width: 800px;
+	margin-top: 24px;
+}
+
+.agentSessionsWelcome-suggestedPrompts {
+	display: flex;
+	gap: 12px;
+	justify-content: center;
+	flex-wrap: wrap;
+}
+
+.agentSessionsWelcome-suggestedPrompt {
+	padding: 8px 16px;
+	border: 1px solid var(--vscode-button-border, var(--vscode-contrastBorder, transparent));
+	border-radius: 20px;
+	background-color: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	font-size: 13px;
+	cursor: pointer;
+	transition: background-color 0.1s;
+}
+
+.agentSessionsWelcome-suggestedPrompt:hover {
+	background-color: var(--vscode-button-secondaryHoverBackground);
+}
+
+/* Sessions grid */
+.agentSessionsWelcome-sessionsGrid {
+	width: 100%;
+	overflow: hidden;
+}
+
+/* Style the agent sessions control within welcome page - 2 column layout */
+.agentSessionsWelcome-sessionsGrid .agent-sessions-viewer {
+	height: auto;
+	min-height: 0;
+}
+
+.agentSessionsWelcome-sessionsGrid .agent-sessions-viewer .monaco-list {
+	background: transparent !important;
+}
+
+.agentSessionsWelcome-sessionsGrid .agent-sessions-viewer .monaco-list-rows {
+	background: transparent !important;
+}
+
+/* Hide scrollbars in welcome page sessions list */
+.agentSessionsWelcome-sessionsGrid .agent-sessions-viewer .monaco-scrollable-element > .scrollbar {
+	display: none !important;
+}
+
+/* 2-column grid layout using CSS transforms on virtualized list */
+.agentSessionsWelcome-sessionsGrid .monaco-list-row {
+	width: 50% !important;
+}
+
+/*
+ * Transform items into 2-column layout:
+ * - Odd items (1, 3, 5, ...) stay in left column
+ * - Even items (2, 4, 6, ...) move to right column
+ * Each pair forms a visual row.
+ * Left column items need to move up by floor((index-1)/2) rows
+ * Right column items need to move right and up by (index/2) rows
+ * Row height is 54px (must match AgentSessionsListDelegate.ITEM_HEIGHT).
+ */
+
+/* Left column items (odd positions): move up to form 2-column layout */
+/* Item 3: move up 1 row */
+.agentSessionsWelcome-sessionsGrid .monaco-list-row:nth-child(3) {
+	transform: translateY(-54px);
+}
+/* Item 5: move up 2 rows */
+.agentSessionsWelcome-sessionsGrid .monaco-list-row:nth-child(5) {
+	transform: translateY(-108px);
+}
+
+/* Right column items (even positions): move right and up */
+/* Item 2: move right, up 1 row */
+.agentSessionsWelcome-sessionsGrid .monaco-list-row:nth-child(2) {
+	transform: translateX(100%) translateY(-54px);
+}
+/* Item 4: move right, up 2 rows */
+.agentSessionsWelcome-sessionsGrid .monaco-list-row:nth-child(4) {
+	transform: translateX(100%) translateY(-108px);
+}
+/* Item 6: move right, up 3 rows */
+.agentSessionsWelcome-sessionsGrid .monaco-list-row:nth-child(6) {
+	transform: translateX(100%) translateY(-162px);
+}
+
+/* Style individual session items in the welcome page */
+.agentSessionsWelcome-sessionsGrid .agent-session-item {
+	border-radius: 4px;
+}
+
+.agentSessionsWelcome-sessionsGrid .agent-session-item:hover {
+	background-color: var(--vscode-list-hoverBackground);
+}
+
+/* Hide toolbar on items in welcome page for cleaner look */
+.agentSessionsWelcome-sessionsGrid .agent-session-title-toolbar {
+	display: none !important;
+}
+
+.agentSessionsWelcome-agentsBanner {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	width: 100%;
+	margin-top: 12px;
+	font-size: 13px;
+}
+
+.agentSessionsWelcome-agentsBanner .agents-banner-button {
+	display: flex;
+	align-items: center;
+	padding: 6px 10px;
+	border: none;
+	border-radius: 6px;
+	background-color: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+	font-size: 13px;
+	cursor: pointer;
+	font-family: inherit;
+	border-radius: 50px;
+	width: 100%;
+	justify-content: center;
+}
+
+.agentSessionsWelcome-agentsBanner .codicon {
+	color: var(--vscode-textLink-foreground) !important;
+}
+
+.agentSessionsWelcome-agentsBanner .agents-banner-button:hover {
+	background-color: var(--vscode-toolbar-activeBackground);
+}
+
+.agentSessionsWelcome-agentsBanner .icon-widget {
+	font-size: 20px;
+	padding-right: 8px;
+}
+
+.agentSessionsWelcome-agentsBanner .category-title {
+	font-size: 13px;
+	font-weight: normal;
+	margin: 0;
+}
+
+/* Walkthroughs section */
+.agentSessionsWelcome-sessionsSection .agentSessionsWelcome-walkthroughCard {
+	width: 100%;
+	box-sizing: border-box;
+}
+
+.agentSessionsWelcome-walkthroughCard {
+	display: flex;
+	align-items: center;
+	padding: 15px;
+	border: 1px solid var(--vscode-welcomePage-tileBorder, var(--vscode-contrastBorder, transparent));
+	border-radius: 8px;
+	background-color: transparent;
+	cursor: pointer;
+	transition: background-color 0.1s;
+	gap: 12px;
+}
+
+.agentSessionsWelcome-walkthroughCard:hover {
+	background-color: var(--vscode-list-hoverBackground);
+}
+
+.agentSessionsWelcome-walkthroughCard-icon {
+	flex-shrink: 0;
+	width: 20px;
+	height: 20px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.agentSessionsWelcome-walkthroughCard-icon .codicon {
+	font-size: 20px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agentSessionsWelcome-walkthroughCard-content {
+	flex: 1;
+	min-width: 0;
+}
+
+.agentSessionsWelcome-walkthroughCard-title {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--vscode-foreground);
+	margin: 0;
+	line-height: 1.4;
+}
+
+.agentSessionsWelcome-walkthroughCard-description {
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+	margin: 0;
+	line-height: 1.4;
+}
+
+.agentSessionsWelcome-walkthroughCard-nav {
+	display: flex;
+	gap: 4px;
+}
+
+.agentSessionsWelcome-walkthroughCard-nav .nav-button {
+	width: 24px;
+	height: 24px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: none;
+	border-radius: 4px;
+	background-color: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+}
+
+.agentSessionsWelcome-walkthroughCard-nav .nav-button:hover:not(:disabled) {
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.agentSessionsWelcome-walkthroughCard-nav .nav-button:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+/* Footer */
+.agentSessionsWelcome-footer {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	max-width: 800px;
+	margin-top: 24px;
+}
+
+.agentSessionsWelcome-footerLink {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 16px;
+	border: none;
+	border-radius: 4px;
+	background-color: transparent;
+	color: var(--vscode-foreground);
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.agentSessionsWelcome-footerLink:hover {
+	color: var(--vscode-textLink-foreground);
+}
+
+.agentSessionsWelcome-footerLink .codicon {
+	color: var(--vscode-descriptionForeground);
+}
+
+.agentSessionsWelcome-showOnStartup {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agentSessionsWelcome-showOnStartup label {
+	cursor: pointer;
+}
+
+.agentSessionsWelcome-checkbox {
+	width: 18px;
+	height: 18px;
+	float: none;
+	margin-left: 0;
+	border: 1px solid var(--vscode-checkbox-border) !important;
+	border-radius: 3px;
+	padding: 0;
+	background-color: var(--vscode-checkbox-background) !important;
+	color: var(--vscode-checkbox-foreground) !important;
+}
+
+.agentSessionsWelcome-checkbox.checked {
+	background-color: var(--vscode-descriptionForeground) !important;
+	border-color: var(--vscode-descriptionForeground) !important;
+	color: var(--vscode-editor-background) !important;
+}
+
+.agentSessionsWelcome-checkbox.codicon:not(.checked)::before {
+	opacity: 0;
+}
+
+/* TOS/Privacy card - simple inline notice */
+.agentSessionsWelcome-tosCard {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	max-width: 800px;
+	padding: 15px;
+	box-sizing: border-box;
+	cursor: default;
+	border: 1px solid var(--vscode-welcomePage-tileBorder, var(--vscode-contrastBorder, transparent));
+	border-radius: 8px;
+	background-color: transparent;
+}
+
+.agentSessionsWelcome-tosCard:hover {
+	background-color: var(--vscode-list-hoverBackground);
+}
+
+.agentSessionsWelcome-tosCard .agentSessionsWelcome-walkthroughCard-icon {
+	width: 20px;
+	height: 20px;
+	flex-shrink: 0;
+}
+
+.agentSessionsWelcome-tosCard .agentSessionsWelcome-walkthroughCard-icon .codicon {
+	font-size: 20px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agentSessionsWelcome-tosCard .agentSessionsWelcome-walkthroughCard-content {
+	flex: 1;
+}
+
+.agentSessionsWelcome-tosCard .agentSessionsWelcome-walkthroughCard-title {
+	font-size: 13px;
+	font-weight: 600;
+	margin: 0;
+	line-height: 1.4;
+}
+
+.agentSessionsWelcome-tosCard .agentSessionsWelcome-walkthroughCard-description {
+	font-size: 13px;
+	margin: 0;
+	line-height: 1.4;
+}
+
+.agentSessionsWelcome-tosCard .agentSessionsWelcome-walkthroughCard-description p {
+	margin: 0;
+}
+
+.agentSessionsWelcome-tosCard .agentSessionsWelcome-walkthroughCard-description a {
+	color: var(--vscode-textLink-foreground);
+}
+
+.agentSessionsWelcome-tosCard-dismiss {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	border: none;
+	border-radius: 4px;
+	background-color: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	flex-shrink: 0;
+	opacity: 0;
+	transition: opacity 0.1s;
+}
+
+.agentSessionsWelcome-tosCard:hover .agentSessionsWelcome-tosCard-dismiss {
+	opacity: 1;
+}
+
+.agentSessionsWelcome-tosCard-dismiss:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.agentSessionsWelcome-tosLink {
+	color: var(--vscode-textLink-foreground);
+	text-decoration: none;
+}
+
+.agentSessionsWelcome-tosLink:hover {
+	text-decoration: underline;
+}
+
+/* Loading skeleton */
+.agentSessionsWelcome-sessionsLoading {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 0;
+	width: 100%;
+}
+
+.agentSessionsWelcome-sessionSkeleton {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 8px 12px 8px 8px;
+	border-radius: 4px;
+	height: 44px;
+	box-sizing: border-box;
+}
+
+.agentSessionsWelcome-sessionSkeleton-icon {
+	width: 20px;
+	height: 20px;
+	border-radius: 4px;
+	background: var(--vscode-welcomePage-tileBorder, var(--vscode-contrastBorder, rgba(128, 128, 128, 0.2)));
+	animation: agentSessionsWelcome-shimmer 1.5s ease-in-out infinite;
+}
+
+.agentSessionsWelcome-sessionSkeleton-content {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.agentSessionsWelcome-sessionSkeleton-title {
+	height: 12px;
+	border-radius: 2px;
+	background: var(--vscode-welcomePage-tileBorder, var(--vscode-contrastBorder, rgba(128, 128, 128, 0.2)));
+	animation: agentSessionsWelcome-shimmer 1.5s ease-in-out infinite;
+	animation-delay: 0.1s;
+}
+
+.agentSessionsWelcome-sessionSkeleton-description {
+	height: 10px;
+	width: 60%;
+	border-radius: 2px;
+	background: var(--vscode-welcomePage-tileBorder, var(--vscode-contrastBorder, rgba(128, 128, 128, 0.2)));
+	animation: agentSessionsWelcome-shimmer 1.5s ease-in-out infinite;
+	animation-delay: 0.2s;
+}
+
+@keyframes agentSessionsWelcome-shimmer {
+	0%, 100% {
+		opacity: 0.3;
+	}
+	50% {
+		opacity: 0.6;
+	}
+}
+
+/* Backboard simple-mode shell */
+.agentSessionsWelcome {
+	background:
+		linear-gradient(142deg, color-mix(in srgb, var(--vscode-focusBorder) 10%, transparent), transparent 58%),
+		linear-gradient(104deg, color-mix(in srgb, var(--vscode-sideBar-background) 72%, var(--vscode-editor-background)), var(--vscode-editor-background));
+}
+
+.agentSessionsWelcome-scrollable {
+	align-items: stretch;
+	justify-content: center;
+}
+
+.agentSessionsWelcome-content {
+	justify-content: center;
+	min-height: 100%;
+	max-width: 880px;
+	padding: 48px 32px 40px;
+}
+
+.agentSessionsWelcome-header {
+	align-items: center;
+	max-width: 560px;
+	text-align: center;
+}
+
+.agentSessionsWelcome-header h1.product-name {
+	margin: 0;
+	font-size: 36px;
+	font-weight: 650;
+	line-height: 1.08;
+	letter-spacing: 0;
+	color: var(--vscode-foreground);
+}
+
+.agentSessionsWelcome-subtitle {
+	max-width: 420px;
+	margin: 10px 0 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	line-height: 1.45;
+}
+
+.agentSessionsWelcome-startEntries {
+	justify-content: center;
+	margin-top: 20px;
+	gap: 8px;
+}
+
+.agentSessionsWelcome-startEntry {
+	height: 30px;
+	padding: 0 10px;
+	border-radius: 6px;
+	background-color: color-mix(in srgb, var(--vscode-toolbar-hoverBackground) 72%, transparent);
+	color: var(--vscode-descriptionForeground);
+}
+
+.agentSessionsWelcome-startEntry:hover {
+	background-color: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.agentSessionsWelcome-chatSection {
+	max-width: 720px;
+	margin-top: 28px;
+}
+
+.agentSessionsWelcome-chatWidget {
+	border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 72%, transparent);
+	border-radius: 22px;
+	background-color: color-mix(in srgb, var(--vscode-editor-background) 88%, var(--vscode-sideBar-background));
+	box-shadow: 0 18px 44px color-mix(in srgb, var(--vscode-widget-shadow) 22%, transparent);
+	overflow: hidden;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-input-part {
+	padding: 10px 12px;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-input-part,
+.agentSessionsWelcome-chatWidget .interactive-input-part .monaco-editor,
+.agentSessionsWelcome-chatWidget .interactive-input-part .monaco-editor-background {
+	background-color: transparent !important;
+}
+
+.agentSessionsWelcome-sessionsSection {
+	max-width: 720px;
+	margin-top: 22px;
+}
+
+.agentSessionsWelcome-sessionsGrid {
+	border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 62%, transparent);
+	border-radius: 14px;
+	background-color: color-mix(in srgb, var(--vscode-sideBar-background) 66%, transparent);
+	padding: 8px;
+}
+
+.agentSessionsWelcome-sessionsGrid .monaco-list-row {
+	border-radius: 8px;
+}
+
+.agentSessionsWelcome-sessionsGrid .agent-session-item {
+	padding: 8px 10px;
+	border-radius: 8px;
+}
+
+.agentSessionsWelcome-sessionsGrid .agent-session-title {
+	font-size: 13px;
+	font-weight: 500;
+}
+
+.agentSessionsWelcome-sessionsGrid .agent-session-details-row {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agentSessionsWelcome-walkthroughCard,
+.agentSessionsWelcome-tosCard {
+	border-color: color-mix(in srgb, var(--vscode-panel-border) 62%, transparent);
+	background-color: color-mix(in srgb, var(--vscode-sideBar-background) 46%, transparent);
+}
+
+.agentSessionsWelcome-footer {
+	max-width: 720px;
+	margin-top: 18px;
+}
+
+.agentSessionsWelcome-footerLink {
+	color: var(--vscode-descriptionForeground);
+}
+
+@media (max-width: 700px) {
+	.agentSessionsWelcome-content {
+		padding: 28px 18px 24px;
+	}
+
+	.agentSessionsWelcome-header h1.product-name {
+		font-size: 30px;
+	}
+
+	.agentSessionsWelcome-startEntries {
+		align-items: stretch;
+		flex-direction: column;
+		width: 100%;
+	}
+
+	.agentSessionsWelcome-startEntry {
+		justify-content: center;
+	}
+
+	.agentSessionsWelcome-sessionsGrid .monaco-list-row {
+		width: 100% !important;
+		transform: none !important;
+	}
+}
+
+/* Full-screen Sandbox shell matching the chat-first Figma layout. */
+.agentSessionsWelcome {
+	--simple-mode-rail-width: 260px;
+	--simple-mode-chat-width: 540px;
+	--simple-mode-border: var(--vscode-panel-border, color-mix(in srgb, var(--vscode-foreground) 10%, transparent));
+	--simple-mode-muted: var(--vscode-descriptionForeground);
+	--simple-mode-soft-background: color-mix(in srgb, var(--vscode-editor-background) 96%, var(--vscode-sideBar-background));
+	--simple-mode-hover-background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--vscode-foreground) 6%, transparent));
+	--simple-mode-accent: var(--vscode-button-background);
+	--simple-mode-accent-foreground: var(--vscode-button-foreground);
+	--simple-mode-composer-background: var(--vscode-agentsChatInput-background, #0E0E0E);
+	--simple-mode-composer-border: var(--vscode-agentsChatInput-border, #4A4A4A);
+	--simple-mode-composer-focus-border: var(--vscode-agentsChatInput-focusBorder, #7A7A7A);
+	--simple-mode-composer-foreground: var(--vscode-agentsChatInput-foreground, var(--vscode-foreground));
+	--simple-mode-composer-muted: var(--vscode-agentsChatInput-placeholderForeground, var(--vscode-descriptionForeground));
+	--simple-mode-chip-background: var(--vscode-button-secondaryBackground, #121212);
+	--simple-mode-chip-hover-background: var(--vscode-button-secondaryHoverBackground, #242424);
+	--simple-mode-chip-border: var(--vscode-button-secondaryBorder, #3A3A3A);
+	--simple-mode-chip-foreground: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+	--simple-mode-chip-icon: var(--vscode-icon-foreground, var(--simple-mode-chip-foreground));
+	position: relative;
+	background: var(--vscode-editor-background);
+	color: var(--vscode-foreground);
+	font-family: var(--vscode-font-family, "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
+	overflow: hidden;
+}
+
+.agentSessionsWelcome > .monaco-scrollable-element.agentSessionsWelcome-scrollable {
+	position: absolute !important;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	align-items: stretch;
+	justify-content: stretch;
+}
+
+.agentSessionsWelcome > .monaco-scrollable-element.agentSessionsWelcome-scrollable > .agentSessionsWelcome-content {
+	width: 100%;
+	height: 100%;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.agentSessionsWelcome-content {
+	display: block;
+	width: 100%;
+	height: 100%;
+	min-height: 0;
+	max-width: none;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+.agentSessionsWelcome-shell {
+	display: grid;
+	grid-template-columns: var(--simple-mode-rail-width) var(--simple-mode-chat-width) minmax(360px, 1fr);
+	width: 100%;
+	height: 100%;
+	max-height: 100%;
+	min-height: 0;
+	overflow: hidden;
+	background: var(--vscode-editor-background);
+}
+
+.agentSessionsWelcome-leftRail {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	padding: 0;
+	box-sizing: border-box;
+	border-right: 1px solid var(--simple-mode-border);
+	background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+.agentSessionsWelcome-railHeader {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 44px;
+	padding: 0 8px 0 12px;
+	box-sizing: border-box;
+}
+
+.agentSessionsWelcome-railTitle {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+}
+
+.agentSessionsWelcome-railNav {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	flex-shrink: 0;
+	padding: 4px 8px;
+}
+
+.agentSessionsWelcome-railButton,
+.agentSessionsWelcome-iconButton,
+.agentSessionsWelcome-suggestedPrompt,
+.agentSessionsWelcome-artifactToggleButton,
+.agentSessionsWelcome-artifactPrimaryButton,
+.agentSessionsWelcome-artifactSecondaryButton {
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	letter-spacing: 0;
+	cursor: pointer;
+}
+
+.agentSessionsWelcome-railButton {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	height: 36px;
+	padding: 0 12px;
+	border-radius: 8px;
+	font-size: 12px;
+	color: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+	text-align: left;
+}
+
+.agentSessionsWelcome-railButton:hover {
+	background: var(--simple-mode-hover-background);
+}
+
+.agentSessionsWelcome-railButton .codicon {
+	width: 16px;
+	font-size: 16px;
+	color: var(--vscode-icon-foreground);
+}
+
+.agentSessionsWelcome-sessionsHeader {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 28px;
+	padding: 8px 12px 0;
+	box-sizing: border-box;
+	color: var(--simple-mode-muted);
+	font-size: 11px;
+}
+
+.agentSessionsWelcome-sessionsHeader span:first-child {
+	flex: 1;
+	min-width: 0;
+}
+
+.agentSessionsWelcome-recentsIndicator {
+	width: 10px;
+	height: 10px;
+	border-radius: 2px;
+	background: var(--simple-mode-muted);
+	opacity: 0.8;
+}
+
+.agentSessionsWelcome-leftRail .agentSessionsWelcome-sessionsSection {
+	flex: 1;
+	min-height: 0;
+	width: 100%;
+	max-width: none;
+	margin: 4px 0 0;
+	padding: 0 8px;
+	overflow: hidden;
+	box-sizing: border-box;
+}
+
+.agentSessionsWelcome-leftRail .agentSessionsWelcome-walkthroughCard {
+	display: none;
+}
+
+.agentSessionsWelcome-noChats {
+	padding: 8px 4px;
+	color: var(--simple-mode-muted);
+	font-size: 12px;
+}
+
+.agentSessionsWelcome-leftRail .agentSessionsWelcome-sessionsGrid {
+	height: 100%;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	padding: 0;
+}
+
+.agentSessionsWelcome-leftRail .agentSessionsWelcome-sessionsGrid .monaco-list-row {
+	width: 100% !important;
+	transform: none !important;
+}
+
+.agentSessionsWelcome-leftRail .agent-session-item {
+	min-height: 36px;
+	border-radius: 8px;
+}
+
+.agentSessionsWelcome-sessionsGrid .monaco-list-row:nth-child(2),
+.agentSessionsWelcome-sessionsGrid .monaco-list-row:nth-child(3),
+.agentSessionsWelcome-sessionsGrid .monaco-list-row:nth-child(4),
+.agentSessionsWelcome-sessionsGrid .monaco-list-row:nth-child(5),
+.agentSessionsWelcome-sessionsGrid .monaco-list-row:nth-child(6) {
+	transform: none !important;
+}
+
+.agentSessionsWelcome-footer {
+	display: none;
+}
+
+.agentSessionsWelcome-mainRegion {
+	display: grid;
+	grid-template-rows: 40px minmax(0, 1fr) auto;
+	min-width: 0;
+	min-height: 0;
+	border-right: 1px solid var(--simple-mode-border);
+	background: var(--vscode-editor-background);
+}
+
+.agentSessionsWelcome-topBar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	min-width: 0;
+	padding: 0 8px 0 12px;
+	border-bottom: 1px solid var(--simple-mode-border);
+	background: var(--vscode-editor-background);
+	box-sizing: border-box;
+}
+
+.agentSessionsWelcome-threadTitle {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	overflow: hidden;
+	color: var(--vscode-foreground);
+	font-size: 13px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.agentSessionsWelcome-threadTitle .codicon {
+	color: var(--simple-mode-muted);
+	font-size: 12px;
+}
+
+.agentSessionsWelcome-projectGlyph {
+	width: 16px;
+	height: 16px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--simple-mode-muted) 24%, transparent);
+}
+
+.agentSessionsWelcome-topActions,
+.agentSessionsWelcome-artifactActions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.agentSessionsWelcome-iconButton {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 6px;
+	color: var(--vscode-icon-foreground);
+}
+
+.agentSessionsWelcome-iconButton:hover {
+	background: var(--simple-mode-hover-background);
+	color: var(--vscode-foreground);
+}
+
+.agentSessionsWelcome-conversation {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 0;
+	min-height: 0;
+	overflow: auto;
+	padding: 32px 16px;
+	box-sizing: border-box;
+}
+
+.agentSessionsWelcome-conversation .agentSessionsWelcome-header {
+	align-items: center;
+	width: 100%;
+	max-width: 330px;
+	margin: 0 auto;
+	text-align: center;
+}
+
+.agentSessionsWelcome-conversation .agentSessionsWelcome-header h1.product-name {
+	margin: 0 0 16px;
+	color: var(--vscode-foreground);
+	font-size: 18px;
+	font-weight: 600;
+	line-height: 1.25;
+}
+
+.agentSessionsWelcome-conversation .agentSessionsWelcome-subtitle {
+	max-width: 300px;
+	margin: 0 0 16px;
+	color: var(--simple-mode-muted);
+	font-size: 14px;
+	line-height: 22px;
+}
+
+.agentSessionsWelcome-conversation .agentSessionsWelcome-suggestedPrompts {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	margin: 0;
+}
+
+.agentSessionsWelcome-suggestedPrompt {
+	min-height: 32px;
+	padding: 0 12px;
+	border-radius: 8px;
+	background: var(--simple-mode-soft-background);
+	color: var(--vscode-foreground);
+	font-size: 13px;
+}
+
+.agentSessionsWelcome-suggestedPrompt:hover {
+	background: var(--simple-mode-hover-background);
+}
+
+.agentSessionsWelcome-chatSection {
+	width: 100%;
+	max-width: none;
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+.agentSessionsWelcome-chatWidget {
+	overflow: hidden;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-input-part {
+	padding: 8px 12px 0;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-container {
+	border: 1px solid var(--simple-mode-composer-border) !important;
+	border-radius: 28px !important;
+	background: var(--simple-mode-composer-background) !important;
+	color: var(--simple-mode-composer-foreground);
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--vscode-foreground) 4%, transparent),
+		0 18px 36px rgba(0, 0, 0, 0.28) !important;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-container.focused,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-container:focus-within {
+	border-color: var(--simple-mode-composer-focus-border) !important;
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--vscode-foreground) 9%, transparent),
+		0 18px 36px rgba(0, 0, 0, 0.32) !important;
+}
+
+.agentSessionsWelcome-chatWidget .chat-editor-container .monaco-editor .mtk1 {
+	color: var(--simple-mode-composer-foreground);
+}
+
+.agentSessionsWelcome-chatWidget .interactive-input-part:not(.compact) .chat-editor-container .monaco-editor [class^="ced-chat-session-detail"] {
+	color: var(--simple-mode-composer-muted);
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .action-label,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-execute-toolbar .action-label,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .action-label .codicon,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-execute-toolbar .action-label .codicon {
+	color: var(--simple-mode-composer-foreground) !important;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .action-label:hover,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-execute-toolbar .action-label:hover,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .action-label[aria-expanded="true"],
+.agentSessionsWelcome-chatWidget .interactive-session .chat-execute-toolbar .action-label[aria-expanded="true"] {
+	background: var(--simple-mode-chip-hover-background) !important;
+	color: var(--vscode-foreground) !important;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .monaco-action-bar .actions-container > .action-item + .action-item::before,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-input-toolbar .monaco-action-bar .actions-container > .action-item + .action-item::before {
+	background-color: var(--simple-mode-chip-border);
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar {
+	justify-content: center;
+	padding: 10px 4px 0;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-sessionPicker-item .action-label {
+	height: 30px;
+	padding: 0 14px;
+	border: 1px solid var(--simple-mode-chip-border);
+	border-radius: 999px;
+	background: var(--simple-mode-chip-background);
+	color: var(--simple-mode-chip-foreground);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-foreground) 3%, transparent);
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label .codicon,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label .codicon,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-sessionPicker-item .action-label .codicon {
+	color: var(--simple-mode-chip-icon) !important;
+}
+
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label:hover,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label:hover,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-sessionPicker-item .action-label:hover,
+.agentSessionsWelcome-chatWidget .interactive-session .chat-input-toolbar .chat-sessionPicker-item .action-label[aria-expanded="true"],
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-input-picker-item .action-label[aria-expanded="true"],
+.agentSessionsWelcome-chatWidget .interactive-session .chat-secondary-toolbar .chat-sessionPicker-item .action-label[aria-expanded="true"] {
+	border-color: color-mix(in srgb, var(--simple-mode-chip-border) 70%, var(--vscode-foreground) 30%);
+	background: var(--simple-mode-chip-hover-background) !important;
+	color: var(--vscode-foreground) !important;
+}
+
+.agentSessionsWelcome-rightPanel {
+	display: flex;
+	flex-direction: column;
+	align-self: stretch;
+	width: auto;
+	max-width: none;
+	min-width: 0;
+	min-height: 0;
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+	border: 0;
+	border-radius: 0;
+	background: var(--vscode-editor-background);
+	box-shadow: none;
+}
+
+.agentSessionsWelcome-artifactHeader {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	height: 48px;
+	padding: 0 10px 0 14px;
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--simple-mode-border);
+	background: var(--vscode-editor-background);
+}
+
+.agentSessionsWelcome-artifactTitle {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--simple-mode-muted);
+	font-size: 12px;
+}
+
+.agentSessionsWelcome-artifactToggle {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 2px;
+	border: 1px solid var(--vscode-button-secondaryBackground, var(--simple-mode-border));
+	border-radius: 6px;
+	background: var(--vscode-button-secondaryBackground, var(--simple-mode-soft-background));
+}
+
+.agentSessionsWelcome-artifactToggleButton {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	height: 26px;
+	padding: 0 10px;
+	border-radius: 4px;
+	color: var(--simple-mode-muted);
+	font-size: 12px;
+}
+
+.agentSessionsWelcome-artifactToggleButton.active {
+	border: 1px solid var(--simple-mode-border);
+	background: var(--vscode-editor-background);
+	color: var(--vscode-foreground);
+}
+
+.agentSessionsWelcome-artifactCanvas {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.agentSessionsWelcome-artifactEmptyState {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 12px;
+	width: 260px;
+	text-align: center;
+}
+
+.agentSessionsWelcome-artifactIllustration {
+	position: relative;
+	width: 64px;
+	height: 50px;
+	overflow: hidden;
+	border-radius: 8px;
+}
+
+.agentSessionsWelcome-artifactIllustrationShadow {
+	position: absolute;
+	left: 10px;
+	top: 12px;
+	width: 52px;
+	height: 38px;
+	border-radius: 6px;
+	background: var(--vscode-sideBar-background);
+}
+
+.agentSessionsWelcome-artifactIllustrationSheet {
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 52px;
+	height: 38px;
+	border-radius: 4px;
+	background: var(--simple-mode-soft-background);
+}
+
+.agentSessionsWelcome-artifactIllustrationLine {
+	position: absolute;
+	left: 9px;
+	height: 3px;
+	border-radius: 2px;
+	background: var(--simple-mode-border);
+}
+
+.agentSessionsWelcome-artifactIllustrationLine.lineOne {
+	top: 11px;
+	width: 34px;
+}
+
+.agentSessionsWelcome-artifactIllustrationLine.lineTwo {
+	top: 19px;
+	width: 26px;
+	opacity: 0.85;
+}
+
+.agentSessionsWelcome-artifactIllustrationLine.lineThree {
+	top: 27px;
+	width: 18px;
+	opacity: 0.7;
+}
+
+.agentSessionsWelcome-artifactEmptyState h2 {
+	margin: 0;
+	color: var(--vscode-foreground);
+	font-size: 15px;
+	font-weight: 600;
+	line-height: 1.3;
+}
+
+.agentSessionsWelcome-artifactEmptyState p {
+	width: 240px;
+	margin: 0;
+	color: var(--simple-mode-muted);
+	font-size: 13px;
+	line-height: 20px;
+}
+
+.agentSessionsWelcome-artifactEmptyActions {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+}
+
+.agentSessionsWelcome-artifactPrimaryButton {
+	min-width: 56px;
+	padding: 8px 10px;
+	border-radius: 4px;
+	background: var(--simple-mode-accent);
+	color: var(--simple-mode-accent-foreground);
+	font-size: 12px;
+}
+
+.agentSessionsWelcome-artifactSecondaryButton {
+	min-width: 56px;
+	height: 24px;
+	padding: 0 10px;
+	border-radius: 4px;
+	color: var(--vscode-textLink-foreground);
+	font-size: 12px;
+}
+
+.agentSessionsWelcome-artifactPrimaryButton:hover,
+.agentSessionsWelcome-artifactSecondaryButton:hover {
+	background: var(--simple-mode-hover-background);
+}
+
+@media (max-width: 1280px) {
+	.agentSessionsWelcome {
+		--simple-mode-rail-width: 240px;
+		--simple-mode-chat-width: 480px;
+	}
+}
+
+@media (max-width: 980px) {
+	.agentSessionsWelcome-shell {
+		grid-template-columns: var(--simple-mode-rail-width) minmax(360px, 1fr);
+	}
+
+	.agentSessionsWelcome-rightPanel {
+		display: none;
+	}
+}
+
+@media (max-width: 700px) {
+	.agentSessionsWelcome-shell {
+		grid-template-columns: 1fr;
+	}
+
+	.agentSessionsWelcome-leftRail {
+		display: none;
+	}
+
+	.agentSessionsWelcome-mainRegion {
+		border-right: 0;
+	}
+}

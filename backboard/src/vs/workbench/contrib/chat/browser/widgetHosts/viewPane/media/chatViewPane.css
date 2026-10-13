@@ -1,0 +1,568 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Voice Agent Bar — wraps the shared AgentsVoiceWidget */
+.voice-agent-bar {
+	display: flex;
+	flex-direction: column;
+	flex-shrink: 0;
+	border-top: 1px solid var(--vscode-panel-border);
+	position: relative;
+	overflow: hidden;
+}
+
+/* Overall styles */
+.chat-viewpane {
+	display: flex;
+	flex-direction: column;
+
+	/* wrapper that holds sessions + chat controls, voice bar sits below this */
+	> .voice-agent-controls-wrapper {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		min-height: 0;
+		min-width: 0;
+		overflow: hidden;
+	}
+
+	.chat-controls-container {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		height: 100%;
+		min-height: 0;
+		min-width: 0;
+		position: relative;
+
+		.interactive-session {
+			flex: 1;
+			/* needed so that the chat input does not overflow and input grows over content above */
+			width: 100%;
+			min-height: 0;
+			min-width: 0;
+		}
+
+		&.backboard-auth-gate-active > :not(.backboard-auth-gate-overlay) {
+			filter: blur(4px);
+			pointer-events: none;
+			user-select: none;
+		}
+	}
+
+	.chat-controls-container.backboard-chat-controls {
+		background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+
+		.interactive-session,
+		.chat-welcome-view-container,
+		.monaco-list.chat-list {
+			background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+		}
+	}
+
+	.backboard-auth-gate-overlay {
+		position: absolute;
+		inset: 0;
+		z-index: 20;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 20px;
+		background: color-mix(in srgb, var(--vscode-editor-background) 55%, transparent);
+		backdrop-filter: blur(2px);
+	}
+
+	.backboard-auth-gate-card {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		width: min(340px, 100%);
+		padding: 16px;
+		border: 1px solid var(--vscode-panel-border);
+		border-radius: 4px;
+		background: var(--vscode-editor-background);
+		box-shadow: 0 8px 28px var(--vscode-widget-shadow, transparent);
+	}
+
+	.backboard-auth-gate-logo.codicon.codicon-backboard-logo {
+		display: inline-block;
+		width: 36px;
+		height: 36px;
+		font-size: 0;
+		color: var(--vscode-editor-foreground);
+	}
+
+	.backboard-auth-gate-title {
+		margin: 0;
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 20px;
+	}
+
+	.backboard-auth-gate-description {
+		margin: 0;
+		color: var(--vscode-descriptionForeground);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.backboard-auth-gate-button {
+		align-self: flex-start;
+		height: 28px;
+		padding: 0 12px;
+		border: 1px solid var(--vscode-button-border, transparent);
+		border-radius: 2px;
+		color: var(--vscode-button-foreground);
+		background: var(--vscode-button-background);
+		cursor: pointer;
+	}
+
+	.backboard-auth-gate-button:hover {
+		background: var(--vscode-button-hoverBackground);
+	}
+}
+
+/* Bottom area: tab bar + voice panel, pinned to bottom of viewpane */
+.chat-viewpane > .voice-bottom-area {
+	display: flex;
+	flex-direction: column;
+	flex-shrink: 0;
+	flex-grow: 0;
+	overflow: hidden;
+}
+
+/* Sessions control: either sidebar or stacked */
+.chat-viewpane.has-sessions-control .agent-sessions-container {
+	display: flex;
+	flex-direction: column;
+
+	.agent-sessions-title-container {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		font-size: 11px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+
+		.agent-sessions-title {
+			cursor: pointer;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+	}
+
+	.agent-sessions-toolbar {
+
+		.action-item {
+			/* align with the title actions*/
+			margin-right: 4px;
+		}
+
+		&.filtered .action-label.codicon.codicon-filter {
+			/* indicate when sessions filter is enabled */
+			border-color: var(--vscode-inputOption-activeBorder);
+			color: var(--vscode-inputOption-activeForeground);
+			background-color: var(--vscode-inputOption-activeBackground);
+		}
+	}
+}
+
+
+.chat-viewpane.has-sessions-control .agent-sessions-container.backboard-side-chat-sessions {
+	/* Derive every drawer surface from the active workbench theme. These map
+	   to the same semantic roles as VS Code's side bar, inputs and lists, so
+	   custom light, dark and high-contrast themes remain internally coherent. */
+	--backboard-side-chat-bg: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	--backboard-side-chat-raised: var(--vscode-input-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+	--backboard-side-chat-active: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground));
+	--backboard-side-chat-border: var(--vscode-sideBar-border, var(--vscode-panel-border, var(--vscode-contrastBorder, transparent)));
+	--backboard-side-chat-primary: var(--vscode-foreground);
+	--backboard-side-chat-secondary: var(--vscode-descriptionForeground, var(--vscode-foreground));
+	--backboard-side-chat-muted: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+	--backboard-vscode-ui-font: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
+	gap: 8px;
+	padding: 12px 8px 8px;
+	box-sizing: border-box;
+	background: var(--backboard-side-chat-bg);
+	color: var(--backboard-side-chat-primary);
+	font-family: var(--backboard-vscode-ui-font);
+	font-size: 13px;
+
+	button,
+	input,
+	.agent-sessions-viewer,
+	.agent-sessions-viewer .monaco-list,
+	.agent-sessions-viewer .monaco-list-row {
+		font-family: var(--backboard-vscode-ui-font) !important;
+	}
+
+	.agent-sessions-title-container {
+		display: none;
+		height: 0;
+		flex: 0 0 0;
+		padding: 0;
+		font-size: 13px;
+		font-weight: var(--vscode-agents-fontWeight-semiBold, 600);
+		line-height: 20px;
+		letter-spacing: 0;
+		text-transform: none;
+		color: var(--backboard-side-chat-primary);
+	}
+
+	.agent-sessions-title {
+		flex: 1 1 auto;
+		min-width: 0;
+		cursor: pointer;
+	}
+
+	.agent-sessions-collapse-button {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		flex: 0 0 32px;
+		padding: 0;
+		border: 1px solid transparent;
+		border-radius: 8px;
+		background: transparent;
+		color: var(--backboard-side-chat-secondary);
+		cursor: pointer;
+	}
+
+	.agent-sessions-collapse-button:hover,
+	.agent-sessions-collapse-button:focus-visible {
+		background: var(--backboard-side-chat-active);
+		color: var(--backboard-side-chat-primary);
+	}
+
+	.agent-sessions-collapse-button:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: -1px;
+	}
+
+	.agent-sessions-collapse-icon {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		font-size: 16px;
+	}
+
+	.agent-sessions-search-button {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		width: 100%;
+		height: 30px;
+		padding: 0 10px;
+		box-sizing: border-box;
+		border: 1px solid var(--backboard-side-chat-border);
+		border-radius: 7px;
+		background: var(--backboard-side-chat-raised);
+		color: var(--backboard-side-chat-muted);
+		font-family: inherit;
+		font-size: 13px;
+		line-height: 18px;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.agent-sessions-search-button:hover,
+	.agent-sessions-search-button:focus-visible {
+		border-color: color-mix(in srgb, var(--vscode-focusBorder) 55%, transparent);
+		color: var(--backboard-side-chat-secondary);
+	}
+
+	.agent-sessions-search-button:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: 2px;
+	}
+
+	.agent-sessions-search-icon,
+	.agent-sessions-action-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 16px;
+		height: 16px;
+		flex: 0 0 16px;
+		color: color-mix(in srgb, var(--vscode-icon-foreground) 74%, transparent);
+	}
+
+	.agent-sessions-search-label,
+	.agent-sessions-action-label {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.agent-sessions-action-shortcut {
+		margin-left: auto;
+		color: var(--backboard-side-chat-muted);
+		font-size: 11px;
+	}
+
+	.agent-sessions-primary-actions {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.agent-sessions-action-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		width: 100%;
+		height: 30px;
+		padding: 0 6px 0 0;
+		box-sizing: border-box;
+		border: none;
+		border-radius: 0;
+		background: transparent;
+		color: var(--backboard-side-chat-secondary);
+		font-family: inherit;
+		font-size: 13px;
+		line-height: 18px;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.agent-sessions-action-row:hover,
+	.agent-sessions-action-row:focus-visible {
+		background: var(--backboard-side-chat-active);
+		color: var(--backboard-side-chat-primary);
+	}
+
+	.agent-sessions-action-row:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: -1px;
+	}
+
+	.agent-sessions-workspaces-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		height: 32px;
+		flex: 0 0 32px;
+	}
+
+	.agent-sessions-workspaces-title {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--backboard-side-chat-primary);
+		font-size: 13px;
+		font-weight: var(--vscode-agents-fontWeight-regular, 400);
+		line-height: 20px;
+	}
+
+	.agent-sessions-toolbar {
+		flex: 0 0 auto;
+		margin: 0;
+	}
+
+	.agent-sessions-toolbar .monaco-action-bar .actions-container {
+		display: flex;
+		align-items: center;
+	}
+
+	.agent-sessions-toolbar .action-item {
+		display: none;
+		margin: 0;
+	}
+
+	.agent-sessions-toolbar .action-item:has(.codicon-filter) {
+		display: flex;
+	}
+
+	.agent-sessions-toolbar .action-label.codicon.codicon-filter {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		margin: 0;
+		padding: 0;
+		border-radius: 8px;
+		color: var(--backboard-side-chat-secondary);
+		background: transparent;
+	}
+
+	.agent-sessions-toolbar.filtered .action-label.codicon.codicon-filter,
+	.agent-sessions-toolbar .action-label.codicon.codicon-filter:hover {
+		color: var(--backboard-side-chat-primary);
+		background: var(--backboard-side-chat-active);
+	}
+
+	.agent-sessions-new-button-container {
+		display: none;
+	}
+
+	.agent-sessions-control-container {
+		flex: 1;
+		min-height: 0;
+		margin-top: -4px;
+	}
+
+	/* Let the history use the drawer surface instead of introducing a second
+	   list background. Interaction states remain visible on individual rows. */
+	.agent-sessions-control-container,
+	.agent-sessions-viewer,
+	.agent-sessions-viewer .monaco-list,
+	.agent-sessions-viewer .monaco-list-rows,
+	.agent-sessions-viewer .monaco-scrollable-element {
+		background-color: transparent !important;
+	}
+}
+
+/* Sessions control: stacked */
+.chat-viewpane.has-sessions-control.sessions-control-orientation-stacked {
+
+	.agent-sessions-container {
+		/* center it above the chat which has this max-width restriction */
+		max-width: 950px;
+		margin: 0 auto;
+		width: 100%;
+	}
+
+	.agent-sessions-new-button-container {
+		/* hide new session button when stacked */
+		display: none;
+	}
+}
+
+/* Sessions control: side by side */
+.chat-viewpane.has-sessions-control.sessions-control-orientation-sidebyside {
+
+	&.chat-view-position-left > .voice-agent-controls-wrapper {
+		flex-direction: row;
+
+		.agent-sessions-container {
+			border-right: 1px solid var(--vscode-panel-border);
+		}
+	}
+
+	&.chat-view-position-right > .voice-agent-controls-wrapper {
+		flex-direction: row-reverse;
+
+		.agent-sessions-container {
+			border-left: 1px solid var(--vscode-panel-border);
+		}
+	}
+
+	.agent-sessions-container:not(.backboard-side-chat-sessions) .agent-sessions-new-button-container {
+		padding: 8px;
+	}
+}
+
+/* Sessions control: panel location */
+.chat-viewpane.has-sessions-control.chat-view-location-panel {
+
+	.agent-sessions-new-button-container {
+		/* hide new session button in the panel considering less vertical space */
+		display: none !important;
+	}
+}
+
+/*
+ * Padding rules for agent sessions elements based on:
+ * - orientation (stacked vs sidebyside)
+ * - view position (left vs right)
+ * - activity bar location (default vs other for auxiliarybar)
+ */
+.chat-viewpane.has-sessions-control {
+
+	/* Base padding: left-aligned content */
+	.agent-sessions-container:not(.backboard-side-chat-sessions) .agent-sessions-title-container {
+		padding: 0 8px 0 20px;
+	}
+
+	.agent-sessions-container:not(.backboard-side-chat-sessions) .agent-session-section {
+		padding: 0 6px 0 14px;
+	}
+
+	/* Stacked: symmetric padding */
+	&.sessions-control-orientation-stacked {
+
+		.agent-sessions-empty-filter-message {
+			padding-left: 20px;
+		}
+	}
+
+	/* Right position: symmetric padding */
+	&.sessions-control-orientation-sidebyside.chat-view-position-right {
+
+		.agent-sessions-container:not(.backboard-side-chat-sessions) .agent-sessions-title-container {
+			padding: 0 8px;
+		}
+
+		.agent-sessions-container:not(.backboard-side-chat-sessions) .agent-session-section {
+			padding: 0 6px 0 8px;
+		}
+	}
+
+	/* Auxiliarybar with non-default activity bar: tighter title padding */
+	&.activity-bar-location-other.chat-view-location-auxiliarybar {
+
+		.agent-sessions-container:not(.backboard-side-chat-sessions) .agent-sessions-title-container {
+			padding-right: 4px;
+		}
+
+		/* Right position needs adjusted left padding too */
+		&.sessions-control-orientation-sidebyside.chat-view-position-right {
+
+			.agent-sessions-container:not(.backboard-side-chat-sessions) .agent-sessions-title-container,
+			.agent-sessions-container:not(.backboard-side-chat-sessions) .agent-session-section {
+				padding-left: 8px;
+			}
+		}
+	}
+}
+
+
+/* Cursor drawer measurements from the latest 2x capture. */
+.chat-viewpane.has-sessions-control .agent-sessions-container.backboard-side-chat-sessions {
+	--backboard-side-chat-primary: var(--vscode-foreground);
+	--backboard-side-chat-secondary: var(--vscode-descriptionForeground, var(--vscode-foreground));
+	--backboard-side-chat-muted: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+	padding: 12px 8px 8px 12px;
+	font-size: 13px;
+
+	.agent-sessions-search-button,
+	.agent-sessions-action-row,
+	.agent-sessions-workspaces-title {
+		font-size: 13px;
+	}
+
+	.agent-sessions-search-button {
+		height: 30px;
+	}
+
+	.agent-sessions-action-shortcut {
+		font-size: 12px;
+	}
+
+	.agent-sessions-workspaces-header {
+		height: 34px;
+		flex-basis: 34px;
+	}
+
+	.agent-sessions-control-container {
+		margin-left: -4px;
+	}
+
+	.agent-sessions-viewer .agent-session-title {
+		font-family: var(--backboard-vscode-ui-font) !important;
+		font-size: 13px;
+		font-weight: 400;
+	}
+}

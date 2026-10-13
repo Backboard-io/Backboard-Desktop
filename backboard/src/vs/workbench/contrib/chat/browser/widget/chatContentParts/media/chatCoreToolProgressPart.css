@@ -1,0 +1,752 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.chat-core-tool-card {
+	container-type: inline-size;
+	--bb-core-tool-border: var(--bb-cursor-diff-border, var(--vscode-chat-requestBorder));
+	--bb-core-tool-surface: var(--bb-cursor-diff-surface, var(--vscode-editor-background));
+	--bb-core-tool-inset-surface: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	margin: 5px 0;
+	overflow: hidden;
+	border: 1px solid var(--bb-core-tool-border);
+	border-radius: 8px;
+	background: var(--bb-core-tool-surface);
+	color: var(--vscode-foreground);
+	font-size: 12px;
+	line-height: 18px;
+	transition: border-color 100ms ease-out;
+}
+
+.chat-core-tool-card:hover {
+	border-color: color-mix(in srgb, var(--vscode-foreground) 12%, var(--bb-core-tool-border));
+}
+
+/* A failed call reads from across the transcript: quiet red accent on the
+ * card's leading edge instead of a loud filled banner. */
+.chat-core-tool-card-error {
+	border-inline-start: 2px solid color-mix(in srgb, var(--vscode-errorForeground) 55%, transparent);
+}
+
+.chat-core-tool-card-header {
+	display: grid;
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	min-height: 29px;
+	grid-template-columns: 14px minmax(0, 1fr) auto auto auto;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 9px;
+	border: 0;
+	appearance: none;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+}
+
+button.chat-core-tool-card-header {
+	cursor: pointer;
+	transition: background-color 80ms ease-out, color 80ms ease-out;
+}
+
+button.chat-core-tool-card-header:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent);
+}
+
+button.chat-core-tool-card-header:hover .chat-core-tool-card-disclosure {
+	color: var(--vscode-foreground);
+}
+
+button.chat-core-tool-card-header:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.chat-core-tool-card-icon,
+.chat-core-tool-card-status,
+.chat-core-tool-card-disclosure {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.chat-core-tool-card-icon {
+	width: 14px;
+	height: 18px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+}
+
+.chat-core-tool-card-heading {
+	display: flex;
+	min-width: 0;
+	align-items: baseline;
+	gap: 6px;
+	overflow: hidden;
+	white-space: nowrap;
+}
+
+.chat-core-tool-card-title-line {
+	display: flex;
+	min-width: 0;
+	flex: 0 1 auto;
+	align-items: baseline;
+	gap: 6px;
+	overflow: hidden;
+}
+
+.chat-core-tool-card-title {
+	flex: 0 0 auto;
+	font-size: 13px;
+	font-weight: 500;
+	line-height: 18px;
+}
+
+.chat-core-tool-card-summary,
+.chat-core-tool-card-subtitle {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-core-tool-card-summary {
+	flex: 1 1 auto;
+	font-size: 11px;
+}
+
+.chat-core-tool-card-location {
+	display: none;
+}
+
+.chat-core-tool-card-subtitle {
+	flex: 0 1 auto;
+	font-size: 11px;
+	line-height: 18px;
+}
+
+.chat-core-tool-card-subtitle::before {
+	margin-inline-end: 6px;
+	content: "·";
+}
+
+.chat-core-tool-card-subtitle-error {
+	color: var(--vscode-errorForeground);
+}
+
+.chat-core-tool-card-read .chat-core-tool-card-summary,
+.chat-core-tool-card-grep .chat-core-tool-card-summary,
+.chat-core-tool-card-glob .chat-core-tool-card-summary,
+.chat-core-tool-card-fetchUrl .chat-core-tool-card-summary,
+.chat-core-tool-card-browser .chat-core-tool-card-summary {
+	font-family: var(--monaco-monospace-font);
+}
+
+.chat-core-tool-card-count {
+	grid-column: -4 / -3;
+	max-width: 100px;
+	overflow: hidden;
+	padding: 0 6px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--vscode-foreground) 7%, transparent);
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+	line-height: 18px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-core-tool-card-status {
+	grid-column: -3 / -2;
+	width: 16px;
+	height: 18px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+}
+
+.chat-core-tool-card-status-running {
+	color: var(--vscode-progressBar-background);
+}
+
+.chat-core-tool-card-status-complete {
+	color: var(--vscode-terminalCommandDecoration-successBackground, var(--vscode-descriptionForeground));
+	opacity: 0.72;
+	animation: bb-core-tool-status-pop 160ms ease-out;
+}
+
+@keyframes bb-core-tool-status-pop {
+	0% {
+		opacity: 0;
+		transform: scale(0.6);
+	}
+
+	100% {
+		opacity: 0.72;
+		transform: scale(1);
+	}
+}
+
+.chat-core-tool-card-status-error,
+.chat-core-tool-card-error-message {
+	color: var(--vscode-errorForeground);
+}
+
+.chat-core-tool-card-status-cancelled {
+	opacity: 0.72;
+}
+
+.chat-core-tool-card-visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+}
+
+/* Shared disclosure slot: same 16x20 / 12px spec as every other tool-row
+ * chevron so stacked cards line up with work rows and terminal headers. */
+.chat-core-tool-card-disclosure {
+	grid-column: -2 / -1;
+	width: 16px;
+	height: 20px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	transition: transform 100ms ease;
+}
+
+.chat-core-tool-card-expanded .chat-core-tool-card-disclosure {
+	transform: rotate(90deg);
+}
+
+.chat-core-tool-card-error-message {
+	padding: 6px 9px 7px 31px;
+	border-top: 1px solid color-mix(in srgb, var(--vscode-errorForeground) 20%, var(--bb-core-tool-border));
+	background: color-mix(in srgb, var(--vscode-errorForeground) 4%, transparent);
+	font-size: 11px;
+	line-height: 16px;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.chat-core-tool-card-details {
+	box-sizing: border-box;
+	width: 100%;
+	max-height: 360px;
+	padding: 4px 0;
+	overflow: auto;
+	scrollbar-width: thin;
+	border-top: 1px solid var(--bb-core-tool-border);
+	background: var(--bb-core-tool-surface);
+}
+
+.chat-core-tool-card-details:not([hidden]) {
+	animation: bb-core-tool-details-in 140ms ease-out;
+}
+
+@keyframes bb-core-tool-details-in {
+	0% {
+		opacity: 0;
+		transform: translateY(-2px);
+	}
+
+	100% {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.chat-core-tool-card-details[hidden] {
+	display: none;
+}
+
+.chat-core-tool-card-items {
+	display: flex;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	flex-direction: column;
+	list-style: none;
+}
+
+.chat-core-tool-card-item {
+	display: flex;
+	box-sizing: border-box;
+	min-width: 0;
+	min-height: 22px;
+	align-items: flex-start;
+	gap: 6px;
+	margin: 0 4px;
+	padding: 3px 5px;
+	border-radius: 4px;
+	transition: background-color 80ms ease-out;
+}
+
+.chat-core-tool-card-item-marker {
+	display: inline-flex;
+	width: 14px;
+	height: 18px;
+	flex: 0 0 14px;
+	align-items: center;
+	justify-content: center;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+}
+
+.chat-core-tool-card-item-active .chat-core-tool-card-item-marker {
+	color: var(--vscode-textLink-foreground);
+}
+
+.chat-core-tool-card-item-complete .chat-core-tool-card-item-marker {
+	color: var(--vscode-terminalCommandDecoration-successBackground, var(--vscode-testing-iconPassed));
+}
+
+.chat-core-tool-card-item-error .chat-core-tool-card-item-marker {
+	color: var(--vscode-errorForeground);
+}
+
+.chat-core-tool-card-item-skipped {
+	opacity: 0.72;
+}
+
+.chat-core-tool-card-item-content {
+	display: flex;
+	min-width: 0;
+	flex: 1 1 auto;
+	flex-direction: column;
+}
+
+.chat-core-tool-card-item-title {
+	min-width: 0;
+	overflow: hidden;
+	color: inherit;
+	font-size: 12px;
+	text-decoration: none;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-core-tool-card-glob .chat-core-tool-card-item-title,
+.chat-core-tool-card-fetchUrl .chat-core-tool-card-item-title {
+	font-family: var(--monaco-monospace-font);
+	font-size: 11px;
+}
+
+a.chat-core-tool-card-item-title {
+	color: var(--vscode-textLink-foreground);
+}
+
+a.chat-core-tool-card-item-title:hover {
+	text-decoration: underline;
+}
+
+.chat-core-tool-card-item-detail {
+	display: -webkit-box;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+}
+
+.chat-core-tool-card-preview {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+}
+
+.chat-core-tool-card-items + .chat-core-tool-card-preview {
+	margin-top: 4px;
+	border-top: 1px solid color-mix(in srgb, var(--bb-core-tool-border) 72%, transparent);
+	padding-top: 4px;
+}
+
+.chat-core-tool-card-section-label {
+	padding: 3px 9px 2px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.05em;
+	text-transform: uppercase;
+}
+
+.chat-core-tool-card-preview pre {
+	box-sizing: border-box;
+	max-height: 260px;
+	margin: 2px 8px 6px;
+	padding: 7px 9px;
+	overflow: auto;
+	border: 0;
+	border-radius: 6px;
+	background: var(--bb-core-tool-inset-surface);
+	color: var(--vscode-editor-foreground);
+	font-family: var(--monaco-monospace-font);
+	font-size: 12px;
+	line-height: 18px;
+	tab-size: 4;
+	scrollbar-width: thin;
+	white-space: pre;
+}
+
+.chat-core-tool-card-preview pre:focus-visible,
+.chat-core-tool-card-item-title:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+}
+
+.chat-core-tool-card-truncated {
+	padding: 4px 9px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+	font-style: italic;
+}
+
+.chat-core-tool-card-partial-note {
+	margin: 4px 8px;
+	padding: 7px 9px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 8%, transparent);
+	color: var(--vscode-foreground);
+	font-style: normal;
+}
+
+.chat-core-tool-card-item:hover {
+	background: color-mix(in srgb, var(--vscode-foreground) 4%, transparent);
+}
+
+/* Task lists carry their completion ratio (set by the renderer) as a small
+ * inline track after the "n / m tasks done" summary. */
+.chat-core-tool-card-progress .chat-core-tool-card-summary::after {
+	display: inline-block;
+	width: 48px;
+	height: 4px;
+	border-radius: 2px;
+	margin-inline-start: 8px;
+	background: linear-gradient(
+		to right,
+		var(--vscode-progressBar-background) var(--bb-core-tool-progress, 0%),
+		color-mix(in srgb, var(--vscode-foreground) 12%, transparent) 0);
+	content: '';
+	vertical-align: 1px;
+}
+
+.monaco-workbench:is(.hc-black, .hc-light) .chat-core-tool-card {
+	border-color: var(--vscode-contrastBorder);
+}
+
+/* Respond to the chat column, not the width of the entire desktop window. */
+@container (max-width: 380px) {
+	.chat-core-tool-card-heading,
+	.chat-core-tool-card-title-line {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0;
+		width: 100%;
+	}
+
+	.chat-core-tool-card-summary {
+		flex: none;
+		max-width: 100%;
+	}
+
+	.chat-core-tool-card-subtitle:not(.chat-core-tool-card-subtitle-error) {
+		display: none;
+	}
+
+	.chat-core-tool-card-subtitle-error::before {
+		content: none;
+	}
+}
+
+/* A core card owns its header and disclosure; clean chat must not inset or decorate it as a generic work row. */
+.monaco-workbench .backboard-clean-chat .chat-thinking-tool-wrapper.chat-thinking-core-tool-row {
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	background: transparent;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-tool-wrapper.chat-thinking-core-tool-row:hover {
+	background: transparent;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-thinking-tool-wrapper.chat-thinking-core-tool-row > :not(.chat-thinking-icon),
+.monaco-workbench .backboard-clean-chat .chat-thinking-tool-wrapper.chat-thinking-core-tool-row .chat-tool-invocation-part,
+.monaco-workbench .backboard-clean-chat .chat-thinking-tool-wrapper.chat-thinking-core-tool-row .chat-tool-invocation-part > div {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript .interactive-response .value .chat-thinking-box .chat-used-context-list.chat-thinking-collapsible .chat-thinking-tool-wrapper.chat-thinking-core-tool-row .chat-tool-invocation-part {
+	padding: 0;
+}
+
+/* Adjacent reads share one dense flow without adding another card around the
+ * native rows. Each header remains an independent disclosure. */
+.monaco-workbench .backboard-clean-chat .chat-core-tool-stack-read {
+	display: flex;
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	margin: 0;
+	flex-direction: column;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-core-tool-stack-read:empty {
+	display: none;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-core-tool-stack-read > .chat-thinking-core-tool-row {
+	margin: 0;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-core-tool-stack-read .chat-core-tool-card-read {
+	margin: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+}
+
+.monaco-workbench .backboard-clean-chat .chat-core-tool-stack-read .chat-core-tool-card-read .chat-core-tool-card-header {
+	min-height: 25px;
+	padding-block: 2px;
+}
+
+/* Task progress, file discovery, and generated media are full transcript rows.
+ * Cancel the thinking list's 5px timeline inset so their card edges share the
+ * prose rail. */
+.monaco-workbench .backboard-clean-chat .interactive-list.backboard-cursor-transcript :is(
+	.chat-thinking-core-tool-row:has(.chat-core-tool-card-todo),
+	.chat-thinking-core-tool-row:has(.chat-core-tool-card-glob),
+	.chat-thinking-core-tool-row:has(.chat-core-tool-card-generateVideo),
+	.chat-thinking-cursor-plan-row
+) {
+	width: 100%;
+	margin-inline: 0;
+}
+
+/* --- Generating video: a live film frame ---------------------------------
+ * A clip can take minutes, so the running card shows a real animation rather
+ * than a static skeleton: sprocket rails travel, three frame tiles cross-fade,
+ * and a light sweep passes over the stage. All of it is decorative and paints
+ * only transform/opacity so the transcript stays cheap to animate. */
+.chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-title-live {
+	background: linear-gradient(
+		90deg,
+		var(--vscode-descriptionForeground) 0%,
+		var(--vscode-foreground) 45%,
+		var(--vscode-descriptionForeground) 90%) 0 0 / 300% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+	animation: backboard-cursor-video-title-shimmer 2.4s linear infinite;
+}
+
+.chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-generating {
+	--bb-video-shell-line: color-mix(in srgb, var(--bb-cursor-transcript-muted, var(--vscode-descriptionForeground)) 20%, transparent);
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	margin: 4px 0 6px;
+	padding: 0 9px 9px;
+}
+
+.chat-core-tool-card-generating-stage {
+	position: relative;
+	box-sizing: border-box;
+	width: 100%;
+	height: 148px;
+	overflow: hidden;
+	border: 1px solid var(--bb-core-tool-border);
+	border-radius: 8px;
+	background:
+		radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--vscode-progressBar-background) 12%, transparent), transparent 62%),
+		var(--bb-core-tool-surface);
+}
+
+/* Travelling sprocket holes: one repeating gradient shifted by exactly one
+ * period, so the loop is seamless at any card width. */
+.chat-core-tool-card-generating-rail {
+	position: absolute;
+	left: 0;
+	width: 200%;
+	height: 9px;
+	background: repeating-linear-gradient(
+		90deg,
+		var(--bb-video-shell-line) 0 8px,
+		transparent 8px 18px);
+	animation: backboard-cursor-video-rail-travel 1.6s linear infinite;
+}
+
+.chat-core-tool-card-generating-rail-top {
+	top: 6px;
+}
+
+.chat-core-tool-card-generating-rail-bottom {
+	bottom: 6px;
+	animation-direction: reverse;
+}
+
+.chat-core-tool-card-generating-frames {
+	position: absolute;
+	inset: 22px 12px;
+	display: flex;
+	align-items: stretch;
+	gap: 8px;
+}
+
+.chat-core-tool-card-generating-frame {
+	flex: 1 1 0;
+	border: 1px solid var(--bb-video-shell-line);
+	border-radius: 5px;
+	background: linear-gradient(
+		160deg,
+		color-mix(in srgb, var(--vscode-progressBar-background) 26%, transparent),
+		color-mix(in srgb, var(--vscode-foreground) 7%, transparent));
+	animation: backboard-cursor-video-frame-cycle 1.44s ease-in-out infinite;
+}
+
+.chat-core-tool-card-generating-sweep {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: -40%;
+	width: 40%;
+	background: linear-gradient(
+		90deg,
+		transparent,
+		color-mix(in srgb, var(--vscode-foreground) 9%, transparent),
+		transparent);
+	animation: backboard-cursor-video-sweep 2.6s ease-in-out infinite;
+}
+
+.chat-core-tool-card-generating-caption {
+	max-width: 100%;
+	margin-top: 7px;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground);
+	font-size: 11px;
+	line-height: 16px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.chat-core-tool-card-generating-track {
+	box-sizing: border-box;
+	width: 100%;
+	height: 3px;
+	margin-top: 7px;
+	overflow: hidden;
+	border-radius: 3px;
+	background: var(--bb-video-shell-line);
+}
+
+.chat-core-tool-card-generating-bar {
+	display: block;
+	width: 38%;
+	height: 100%;
+	border-radius: 3px;
+	background: linear-gradient(
+		90deg,
+		transparent,
+		var(--vscode-progressBar-background),
+		transparent);
+	animation: backboard-cursor-video-bar-travel 1.9s ease-in-out infinite;
+}
+
+@keyframes backboard-cursor-video-title-shimmer {
+	0% { background-position: 100% 0; }
+	100% { background-position: -100% 0; }
+}
+
+@keyframes backboard-cursor-video-rail-travel {
+	0% { transform: translateX(0); }
+	100% { transform: translateX(-18px); }
+}
+
+@keyframes backboard-cursor-video-frame-cycle {
+	0%, 100% { opacity: 0.28; transform: scaleY(0.9); }
+	50% { opacity: 1; transform: scaleY(1); }
+}
+
+@keyframes backboard-cursor-video-sweep {
+	0% { left: -40%; }
+	60%, 100% { left: 100%; }
+}
+
+@keyframes backboard-cursor-video-bar-travel {
+	0% { transform: translateX(-100%); }
+	100% { transform: translateX(264%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.chat-core-tool-card .codicon-modifier-spin {
+		animation: none;
+	}
+
+	.chat-core-tool-card,
+	button.chat-core-tool-card-header,
+	.chat-core-tool-card-item,
+	.chat-core-tool-card-disclosure {
+		transition: none;
+	}
+
+	.chat-core-tool-card-status-complete,
+	.chat-core-tool-card-details:not([hidden]) {
+		animation: none;
+	}
+
+	.chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-title-live,
+	.chat-core-tool-card-generating-rail,
+	.chat-core-tool-card-generating-frame,
+	.chat-core-tool-card-generating-sweep,
+	.chat-core-tool-card-generating-bar {
+		animation: none;
+	}
+
+	.chat-core-tool-card-generateVideo.chat-core-tool-card-running .chat-core-tool-card-title-live {
+		-webkit-text-fill-color: currentColor;
+		background: none;
+	}
+
+	.chat-core-tool-card-generating-frame {
+		opacity: 0.6;
+	}
+
+	.chat-core-tool-card-generating-sweep {
+		display: none;
+	}
+}
+
+/* Screenshot results are the image itself, with no activity card or disclosure. */
+.chat-computer-screenshots {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 0;
+	width: 100%;
+}
+
+.chat-computer-screenshot {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	object-fit: contain;
+	border: 0;
+	border-radius: 4px;
+}
