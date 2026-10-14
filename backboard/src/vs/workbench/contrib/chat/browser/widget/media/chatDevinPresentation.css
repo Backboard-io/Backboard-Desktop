@@ -1478,6 +1478,15 @@
 	margin: 0 auto -18px !important;
 }
 
+/* Keep the file rows in the review band when the changed-files list opens. */
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-input-part .chat-editing-session:has(.chat-editing-session-list:not(.collapsed)) {
+	margin-bottom: 0 !important;
+}
+
+.monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-input-part .chat-editing-session:has(.chat-editing-session-list:not(.collapsed)) .chat-editing-session-container {
+	padding-bottom: 8px;
+}
+
 /* No bottom border leaks through where the review card tucks under the input. */
 .monaco-workbench :is(.part.auxiliarybar .chat-viewpane .backboard-composer, .part.sessionspart) .interactive-input-part .chat-editing-session-container {
 	border-bottom: 0 !important;

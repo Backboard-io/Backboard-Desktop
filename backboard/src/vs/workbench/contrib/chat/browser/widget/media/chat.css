@@ -1867,6 +1867,7 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	/* Counter the flex gap */
 	/* reset the 4px gap of the container for editing sessions */
 	width: 100%;
+	flex-shrink: 0;
 	position: relative;
 }
 
