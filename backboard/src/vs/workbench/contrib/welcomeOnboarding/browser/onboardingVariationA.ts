@@ -6,6 +6,8 @@
 import { $, addDisposableListener, append, clearNode, EventType, getActiveWindow } from '../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { disposableTimeout } from '../../../../base/common/async.js';
 import { applyEdits, setProperty } from '../../../../base/common/jsonEdit.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
@@ -896,10 +898,9 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 		const keyLabel = append(form, $('label'));
 		keyLabel.textContent = localize('onboarding.byok.key', "API Key");
-		const key = this._registerStepFocusable(append(keyLabel, $<HTMLInputElement>('input')));
-		key.type = 'password';
-		key.autocomplete = 'off';
-		key.spellcheck = false;
+		const { input: key, toggle: keyVisibilityToggle } = this._appendSecretInput(keyLabel);
+		this._registerStepFocusable(key);
+		this._registerStepFocusable(keyVisibilityToggle);
 		key.placeholder = localize('onboarding.byok.placeholder', "Paste your provider API key");
 		const privacy = append(form, $('p.onboarding-backboard-provider-hint'));
 		privacy.textContent = localize('onboarding.byok.storage', "Stored encrypted on this device.");
@@ -949,6 +950,43 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this.stepDisposables.add(addDisposableListener(save, EventType.CLICK, () => { void submit(); }));
 		this.stepDisposables.add(addDisposableListener(back, EventType.CLICK, () => this._renderStepFrame()));
 		provider.focus();
+	}
+
+	/**
+	 * Appends a masked key input with an eye button that shows or hides its value.
+	 */
+	private _appendSecretInput(parent: HTMLElement, inputClassName?: string): { input: HTMLInputElement; toggle: HTMLButtonElement } {
+		const field = append(parent, $('.onboarding-secret-field'));
+		const input = append(field, $<HTMLInputElement>(inputClassName ? `input.${inputClassName}` : 'input'));
+		input.type = 'password';
+		input.autocomplete = 'off';
+		input.spellcheck = false;
+
+		const toggle = append(field, $<HTMLButtonElement>('button.onboarding-secret-visibility'));
+		toggle.type = 'button';
+		const icon = append(toggle, $('span'));
+		icon.setAttribute('aria-hidden', 'true');
+		const updateVisibility = (visible: boolean) => {
+			input.type = visible ? 'text' : 'password';
+			icon.className = ThemeIcon.asClassName(visible ? Codicon.eyeClosed : Codicon.eye);
+			const label = visible
+				? localize('onboarding.secretInput.hide', "Hide API key")
+				: localize('onboarding.secretInput.show', "Show API key");
+			toggle.title = label;
+			toggle.setAttribute('aria-label', label);
+			toggle.setAttribute('aria-pressed', String(visible));
+		};
+		updateVisibility(false);
+		this.stepDisposables.add(addDisposableListener(toggle, EventType.CLICK, (event: MouseEvent) => {
+			// The BYOK field sits inside a <label>; keep the click from re-targeting the input.
+			event.preventDefault();
+			const start = input.selectionStart;
+			const end = input.selectionEnd;
+			updateVisibility(input.type === 'password');
+			input.focus();
+			input.setSelectionRange(start, end);
+		}));
+		return { input, toggle };
 	}
 
 	private _createBackboardMark(parent: HTMLElement, className: string): HTMLElement {
@@ -1791,10 +1829,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const description = append(dialog, $('p.onboarding-backboard-api-import-description'));
 		description.textContent = localize('onboarding.backboard.apiKey.importDescription', "Paste the key you created in Backboard.");
 
-		const input = append(dialog, $<HTMLInputElement>('input.onboarding-backboard-api-import-input'));
-		input.type = 'password';
-		input.autocomplete = 'off';
-		input.spellcheck = false;
+		const { input } = this._appendSecretInput(dialog, 'onboarding-backboard-api-import-input');
 		input.placeholder = localize('onboarding.backboard.apiKey.inputPlaceholder', "espr_...");
 		input.setAttribute('aria-label', localize('onboarding.backboard.apiKey.inputAria', "Backboard API key"));
 
