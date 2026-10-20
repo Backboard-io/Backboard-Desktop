@@ -13,6 +13,8 @@ export interface ISignInPanel {
 	readonly logInButton: HTMLButtonElement;
 	readonly apiKeyButton: HTMLButtonElement;
 	readonly skipButton: HTMLButtonElement;
+	/** Hidden until a sign-in is in flight; see {@link setSignInRetryVisible}. */
+	readonly retryButton: HTMLButtonElement;
 }
 
 function createMark(parent: HTMLElement, className: string): void {
@@ -67,9 +69,20 @@ export function createSignInPanel(parent: HTMLElement): ISignInPanel {
 
 	const help = append(element, $('p.onboarding-signin-help'));
 	append(help, $('span')).textContent = localize('onboarding.signIn.trouble', "Having trouble?");
+	const retryButton = createLink(help, localize('onboarding.signIn.retry', "Retry sign-in"));
+	const retrySeparator = append(help, $('span'));
+	retrySeparator.textContent = '·';
+	retrySeparator.setAttribute('aria-hidden', 'true');
 	const apiKeyButton = createLink(help, localize('onboarding.signIn.apiKey', "Use an API key"));
 	append(help, $('span')).textContent = localize('onboarding.signIn.or', "or");
 	const skipButton = createLink(help, localize('onboarding.signIn.skip', "skip for now"));
 
-	return { element, signUpButton, logInButton, apiKeyButton, skipButton };
+	const panel = { element, signUpButton, logInButton, apiKeyButton, skipButton, retryButton };
+	setSignInRetryVisible(panel, false);
+	return panel;
+}
+
+export function setSignInRetryVisible(panel: ISignInPanel, visible: boolean): void {
+	panel.retryButton.hidden = !visible;
+	(panel.retryButton.nextElementSibling as HTMLElement).hidden = !visible;
 }

@@ -58,7 +58,7 @@ import {
 	ONBOARDING_STEPS,
 } from '../common/onboardingTypes.js';
 import { createCustomizePanel, IThemePreviewPalette, OTHER_PREVIEW_PALETTE, ThemeChoice } from './onboardingCustomize.js';
-import { createMadeByFooter, createSignInPanel } from './onboardingSignIn.js';
+import { createMadeByFooter, createSignInPanel, setSignInRetryVisible } from './onboardingSignIn.js';
 
 type OnboardingStepViewClassification = {
 	owner: 'cwebster-99';
@@ -786,8 +786,9 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _renderConnectAIStep(container: HTMLElement): void {
-		const { element, signUpButton, logInButton, apiKeyButton, skipButton } = createSignInPanel(container);
-		for (const button of [signUpButton, logInButton, apiKeyButton, skipButton]) {
+		const panel = createSignInPanel(container);
+		const { element, signUpButton, logInButton, apiKeyButton, skipButton, retryButton } = panel;
+		for (const button of [signUpButton, logInButton, retryButton, apiKeyButton, skipButton]) {
 			this._registerStepFocusable(button);
 		}
 		this.enterAction = () => signUpButton.click();
@@ -819,22 +820,30 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		// tokens). So wait for the sign-in to finish before advancing; the
 		// browser opens once the device code is ready, and this page stays up
 		// until approval. Signing up and logging in share the Backboard SSO
-		// page, which offers both.
-		const startSignIn = async (sourceButton: HTMLButtonElement, action: string): Promise<void> => {
-			if (signUpButton.disabled) {
+		// page, which offers both. Retrying starts a new device login, which
+		// supersedes the pending one; only the latest attempt updates this page.
+		let attempt = 0;
+		let idleLabel: { label: Element; text: string | null } | undefined;
+		const startSignIn = async (sourceButton: HTMLButtonElement | undefined, action: string): Promise<void> => {
+			if (sourceButton && signUpButton.disabled) {
 				return;
 			}
+			const thisAttempt = ++attempt;
 			this._logAction(action);
 			signUpButton.disabled = logInButton.disabled = true;
-			const label = sourceButton.querySelector('.onboarding-signin-btn-label');
-			const idleLabel = label?.textContent;
+			setSignInRetryVisible(panel, true);
+			const label = sourceButton?.querySelector('.onboarding-signin-btn-label');
 			if (label) {
+				idleLabel = { label, text: label.textContent };
 				label.textContent = localize('onboarding.backboard.signInConnecting', "Connecting to Backboard…");
 			}
 			try {
 				// Resolves true once the tokens are saved; false when the sign-in
 				// failed or was denied (the extension already surfaced that error).
 				const connected = await this.commandService.executeCommand<boolean>('backboard.signIn');
+				if (thisAttempt !== attempt) {
+					return;
+				}
 				if (connected && !didContinueWithoutAccount && element.isConnected) {
 					this.hasConfirmedBackboardSignIn = true;
 					this.postOnboardingSignInPromptShown = true;
@@ -842,6 +851,9 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 					return;
 				}
 			} catch (error) {
+				if (thisAttempt !== attempt) {
+					return;
+				}
 				this.notificationService.notify({
 					severity: Severity.Error,
 					message: localize('onboarding.connectionFailed', "Could not connect. Please try again."),
@@ -849,10 +861,16 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 				});
 			}
 			signUpButton.disabled = logInButton.disabled = false;
-			if (label) {
-				label.textContent = idleLabel ?? null;
+			setSignInRetryVisible(panel, false);
+			if (idleLabel) {
+				idleLabel.label.textContent = idleLabel.text;
+				idleLabel = undefined;
 			}
 		};
+
+		this.stepDisposables.add(addDisposableListener(retryButton, EventType.CLICK, () => {
+			void startSignIn(undefined, 'retryBackboardSignIn');
+		}));
 
 		this.stepDisposables.add(addDisposableListener(signUpButton, EventType.CLICK, () => {
 			void startSignIn(signUpButton, 'signUpBackboard');
