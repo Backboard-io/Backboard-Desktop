@@ -325,12 +325,26 @@ async function promptBackboardSso(bridge: BackboardBridge): Promise<boolean> {
  * browser, then poll the token endpoint until the user approves. No localhost
  * redirect or callback server is involved.
  */
+let activeBackboardSignIn: vscode.CancellationTokenSource | undefined;
+
 async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
+	// A new sign-in (e.g. "Retry sign-in") supersedes the pending one, so the
+	// abandoned device code stops polling instead of timing out with an error.
+	activeBackboardSignIn?.cancel();
+	const signIn = new vscode.CancellationTokenSource();
+	activeBackboardSignIn = signIn;
 	try {
 		const device = await requestBackboardDeviceCode();
+		if (signIn.token.isCancellationRequested) {
+			return false;
+		}
 		backboardToolOutput?.appendLine(`[oauth] Device login code ${device.user_code}; approve at ${device.verification_uri}`);
 		await openBackboardOAuthAuthorizeUrl(device.verification_uri_complete);
-		const tokens = await pollBackboardDeviceToken(device);
+		const tokens = await pollBackboardDeviceToken(device, signIn.token);
+		if (!tokens) {
+			backboardToolOutput?.appendLine(`[oauth] Device login ${device.user_code} superseded by a newer sign-in`);
+			return false;
+		}
 		const saveResult = await saveBackboardOAuthTokens(tokens);
 		await cacheBackboardUserName(stringValueFromRecord(tokens.access_token));
 		bridge.restart();
@@ -342,8 +356,16 @@ async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
 		return true;
 	} catch (error) {
 		backboardToolOutput?.appendLine(`[oauth] sign in failed: ${error instanceof Error ? error.message : String(error)}`);
+		if (signIn.token.isCancellationRequested) {
+			return false;
+		}
 		await vscode.window.showErrorMessage(`Backboard sign in failed: ${error instanceof Error ? error.message : String(error)}`);
 		return false;
+	} finally {
+		if (activeBackboardSignIn === signIn) {
+			activeBackboardSignIn = undefined;
+		}
+		signIn.dispose();
 	}
 }
 
@@ -400,12 +422,19 @@ async function requestBackboardDeviceCode(): Promise<BackboardDeviceCodeResponse
  * in the browser, following the standard `authorization_pending`/`slow_down`
  * back-off semantics (RFC 8628, section 3.5).
  */
-async function pollBackboardDeviceToken(device: BackboardDeviceCodeResponse): Promise<BackboardOAuthTokens> {
+/** Resolves undefined when `token` is cancelled (a newer sign-in took over). */
+async function pollBackboardDeviceToken(device: BackboardDeviceCodeResponse, token: vscode.CancellationToken): Promise<BackboardOAuthTokens | undefined> {
 	let intervalMs = Math.max(1, device.interval) * 1000;
 	const expiresAt = Date.now() + Math.min(backboardOAuthTimeoutMs, device.expires_in * 1000);
 
 	while (Date.now() < expiresAt) {
-		await new Promise<void>(resolve => setTimeout(resolve, intervalMs));
+		await new Promise<void>(resolve => {
+			const timer = setTimeout(() => { listener.dispose(); resolve(); }, intervalMs);
+			const listener = token.onCancellationRequested(() => { clearTimeout(timer); listener.dispose(); resolve(); });
+		});
+		if (token.isCancellationRequested) {
+			return undefined;
+		}
 		const body = new URLSearchParams({
 			grant_type: backboardOAuthDeviceGrantType,
 			device_code: device.device_code,
@@ -2369,11 +2398,16 @@ class BackboardBridge implements vscode.Disposable {
 	 */
 	async signOut(): Promise<void> {
 		await clearBackboardConfigApiKey();
+		const cliPath = this.resolveCliPath();
 		const failures: string[] = [];
 		for (const args of [['logout'], ['subscription', 'logout'], ['claude-subscription', 'logout']]) {
 			await new Promise<void>(resolve => {
-				cp.execFile(this.resolveCliPath(), args, { timeout: 15000, maxBuffer: 64 * 1024 }, error => {
-					if (error) { failures.push(args.join(' ')); }
+				cp.execFile(cliPath, args, { timeout: 15000, maxBuffer: 64 * 1024 }, (error, _stdout, stderr) => {
+					if (error) {
+						const detail = stderr.trim() || error.message;
+						this.output.appendLine(`[signOut] ${cliPath} ${args.join(' ')} failed: ${detail}`);
+						failures.push(`${args.join(' ')} (${detail.split('\n')[0]})`);
+					}
 					resolve();
 				});
 			});
@@ -2381,7 +2415,7 @@ class BackboardBridge implements vscode.Disposable {
 		this.restart();
 		await updateBackboardAuthContext();
 		if (failures.length) {
-			throw new Error(vscode.l10n.t('Signed out of Backboard, but could not finish: {0}.', failures.join(', ')));
+			throw new Error(vscode.l10n.t('Signed out of Backboard, but could not finish: {0}.', failures.join('; ')));
 		}
 	}
 

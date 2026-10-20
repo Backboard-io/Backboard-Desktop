@@ -183,10 +183,10 @@
 
 .onboarding-signin-help {
 	display: flex;
-	flex-wrap: wrap;
 	justify-content: center;
 	gap: 4px;
 	margin: 26px 0 0;
+	white-space: nowrap;
 	font-size: 13px;
 	color: var(--vscode-descriptionForeground);
 }

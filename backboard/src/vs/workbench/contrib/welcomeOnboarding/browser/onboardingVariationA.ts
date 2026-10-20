@@ -6,6 +6,8 @@
 import { $, addDisposableListener, append, clearNode, EventType, getActiveWindow } from '../../../../base/browser/dom.js';
 import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { disposableTimeout } from '../../../../base/common/async.js';
 import { applyEdits, setProperty } from '../../../../base/common/jsonEdit.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
@@ -56,7 +58,7 @@ import {
 	ONBOARDING_STEPS,
 } from '../common/onboardingTypes.js';
 import { createCustomizePanel, IThemePreviewPalette, OTHER_PREVIEW_PALETTE, ThemeChoice } from './onboardingCustomize.js';
-import { createMadeByFooter, createSignInPanel } from './onboardingSignIn.js';
+import { createMadeByFooter, createSignInPanel, setSignInRetryVisible } from './onboardingSignIn.js';
 
 type OnboardingStepViewClassification = {
 	owner: 'cwebster-99';
@@ -784,8 +786,9 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _renderConnectAIStep(container: HTMLElement): void {
-		const { element, signUpButton, logInButton, apiKeyButton, skipButton } = createSignInPanel(container);
-		for (const button of [signUpButton, logInButton, apiKeyButton, skipButton]) {
+		const panel = createSignInPanel(container);
+		const { element, signUpButton, logInButton, apiKeyButton, skipButton, retryButton } = panel;
+		for (const button of [signUpButton, logInButton, retryButton, apiKeyButton, skipButton]) {
 			this._registerStepFocusable(button);
 		}
 		this.enterAction = () => signUpButton.click();
@@ -817,22 +820,30 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		// tokens). So wait for the sign-in to finish before advancing; the
 		// browser opens once the device code is ready, and this page stays up
 		// until approval. Signing up and logging in share the Backboard SSO
-		// page, which offers both.
-		const startSignIn = async (sourceButton: HTMLButtonElement, action: string): Promise<void> => {
-			if (signUpButton.disabled) {
+		// page, which offers both. Retrying starts a new device login, which
+		// supersedes the pending one; only the latest attempt updates this page.
+		let attempt = 0;
+		let idleLabel: { label: Element; text: string | null } | undefined;
+		const startSignIn = async (sourceButton: HTMLButtonElement | undefined, action: string): Promise<void> => {
+			if (sourceButton && signUpButton.disabled) {
 				return;
 			}
+			const thisAttempt = ++attempt;
 			this._logAction(action);
 			signUpButton.disabled = logInButton.disabled = true;
-			const label = sourceButton.querySelector('.onboarding-signin-btn-label');
-			const idleLabel = label?.textContent;
+			setSignInRetryVisible(panel, true);
+			const label = sourceButton?.querySelector('.onboarding-signin-btn-label');
 			if (label) {
+				idleLabel = { label, text: label.textContent };
 				label.textContent = localize('onboarding.backboard.signInConnecting', "Connecting to Backboard…");
 			}
 			try {
 				// Resolves true once the tokens are saved; false when the sign-in
 				// failed or was denied (the extension already surfaced that error).
 				const connected = await this.commandService.executeCommand<boolean>('backboard.signIn');
+				if (thisAttempt !== attempt) {
+					return;
+				}
 				if (connected && !didContinueWithoutAccount && element.isConnected) {
 					this.hasConfirmedBackboardSignIn = true;
 					this.postOnboardingSignInPromptShown = true;
@@ -840,6 +851,9 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 					return;
 				}
 			} catch (error) {
+				if (thisAttempt !== attempt) {
+					return;
+				}
 				this.notificationService.notify({
 					severity: Severity.Error,
 					message: localize('onboarding.connectionFailed', "Could not connect. Please try again."),
@@ -847,10 +861,16 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 				});
 			}
 			signUpButton.disabled = logInButton.disabled = false;
-			if (label) {
-				label.textContent = idleLabel ?? null;
+			setSignInRetryVisible(panel, false);
+			if (idleLabel) {
+				idleLabel.label.textContent = idleLabel.text;
+				idleLabel = undefined;
 			}
 		};
+
+		this.stepDisposables.add(addDisposableListener(retryButton, EventType.CLICK, () => {
+			void startSignIn(undefined, 'retryBackboardSignIn');
+		}));
 
 		this.stepDisposables.add(addDisposableListener(signUpButton, EventType.CLICK, () => {
 			void startSignIn(signUpButton, 'signUpBackboard');
@@ -896,10 +916,9 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 		const keyLabel = append(form, $('label'));
 		keyLabel.textContent = localize('onboarding.byok.key', "API Key");
-		const key = this._registerStepFocusable(append(keyLabel, $<HTMLInputElement>('input')));
-		key.type = 'password';
-		key.autocomplete = 'off';
-		key.spellcheck = false;
+		const { input: key, toggle: keyVisibilityToggle } = this._appendSecretInput(keyLabel);
+		this._registerStepFocusable(key);
+		this._registerStepFocusable(keyVisibilityToggle);
 		key.placeholder = localize('onboarding.byok.placeholder', "Paste your provider API key");
 		const privacy = append(form, $('p.onboarding-backboard-provider-hint'));
 		privacy.textContent = localize('onboarding.byok.storage', "Stored encrypted on this device.");
@@ -949,6 +968,43 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this.stepDisposables.add(addDisposableListener(save, EventType.CLICK, () => { void submit(); }));
 		this.stepDisposables.add(addDisposableListener(back, EventType.CLICK, () => this._renderStepFrame()));
 		provider.focus();
+	}
+
+	/**
+	 * Appends a masked key input with an eye button that shows or hides its value.
+	 */
+	private _appendSecretInput(parent: HTMLElement, inputClassName?: string): { input: HTMLInputElement; toggle: HTMLButtonElement } {
+		const field = append(parent, $('.onboarding-secret-field'));
+		const input = append(field, $<HTMLInputElement>(inputClassName ? `input.${inputClassName}` : 'input'));
+		input.type = 'password';
+		input.autocomplete = 'off';
+		input.spellcheck = false;
+
+		const toggle = append(field, $<HTMLButtonElement>('button.onboarding-secret-visibility'));
+		toggle.type = 'button';
+		const icon = append(toggle, $('span'));
+		icon.setAttribute('aria-hidden', 'true');
+		const updateVisibility = (visible: boolean) => {
+			input.type = visible ? 'text' : 'password';
+			icon.className = ThemeIcon.asClassName(visible ? Codicon.eyeClosed : Codicon.eye);
+			const label = visible
+				? localize('onboarding.secretInput.hide', "Hide API key")
+				: localize('onboarding.secretInput.show', "Show API key");
+			toggle.title = label;
+			toggle.setAttribute('aria-label', label);
+			toggle.setAttribute('aria-pressed', String(visible));
+		};
+		updateVisibility(false);
+		this.stepDisposables.add(addDisposableListener(toggle, EventType.CLICK, (event: MouseEvent) => {
+			// The BYOK field sits inside a <label>; keep the click from re-targeting the input.
+			event.preventDefault();
+			const start = input.selectionStart;
+			const end = input.selectionEnd;
+			updateVisibility(input.type === 'password');
+			input.focus();
+			input.setSelectionRange(start, end);
+		}));
+		return { input, toggle };
 	}
 
 	private _createBackboardMark(parent: HTMLElement, className: string): HTMLElement {
@@ -1791,10 +1847,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const description = append(dialog, $('p.onboarding-backboard-api-import-description'));
 		description.textContent = localize('onboarding.backboard.apiKey.importDescription', "Paste the key you created in Backboard.");
 
-		const input = append(dialog, $<HTMLInputElement>('input.onboarding-backboard-api-import-input'));
-		input.type = 'password';
-		input.autocomplete = 'off';
-		input.spellcheck = false;
+		const { input } = this._appendSecretInput(dialog, 'onboarding-backboard-api-import-input');
 		input.placeholder = localize('onboarding.backboard.apiKey.inputPlaceholder', "espr_...");
 		input.setAttribute('aria-label', localize('onboarding.backboard.apiKey.inputAria', "Backboard API key"));
 
