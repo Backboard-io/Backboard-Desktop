@@ -31,6 +31,8 @@ const backboardOAuthClientId = 'Backboard_oauth_q_cli';
 const backboardOAuthScope = 'openid email profile';
 const backboardOAuthDeviceGrantType = 'urn:ietf:params:oauth:grant-type:device_code';
 const backboardOAuthTimeoutMs = 5 * 60 * 1000;
+// app.backboard.io opens <uriScheme>://<this extension>/signed-in once a sign-in started here is approved.
+const backboardSignedInPath = '/signed-in';
 const commitMessageModelProvider = 'openai';
 const commitMessageModel = 'gpt-4o-mini';
 // One-shot generation: hide the chat tools that survive manual mode so the
@@ -38,6 +40,7 @@ const commitMessageModel = 'gpt-4o-mini';
 const commitMessageExcludedTools = ['Read', 'Create', 'Grep', 'Glob', 'FetchUrl', 'WebSearch', 'TodoWrite', 'Agent'];
 const maxCommitDiffChars = 60_000;
 let backboardToolOutput: vscode.OutputChannel | undefined;
+let backboardExtensionId = 'backboard.backboard';
 
 interface GitChange {
 	readonly uri: vscode.Uri;
@@ -97,6 +100,15 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signIn', () => promptBackboardSso(bridge)));
+	// Opening the signed-in link brings this window forward; show the Backboard panel the sign-in was for.
+	backboardExtensionId = context.extension.id;
+	context.subscriptions.push(vscode.window.registerUriHandler({
+		handleUri: uri => {
+			if (uri.path === backboardSignedInPath) {
+				void openBackboardView();
+			}
+		}
+	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signOut', () => bridge.signOut()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => panelProvider.refreshModels()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.generateCommitMessage', (rootUri: vscode.Uri | undefined, _context: unknown, token: vscode.CancellationToken | undefined) => generateBackboardCommitMessage(bridge, rootUri, token)));
@@ -329,7 +341,7 @@ async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
 	try {
 		const device = await requestBackboardDeviceCode();
 		backboardToolOutput?.appendLine(`[oauth] Device login code ${device.user_code}; approve at ${device.verification_uri}`);
-		await openBackboardOAuthAuthorizeUrl(device.verification_uri_complete);
+		await openBackboardOAuthAuthorizeUrl(withReturnToApp(device.verification_uri_complete));
 		const tokens = await pollBackboardDeviceToken(device);
 		const saveResult = await saveBackboardOAuthTokens(tokens);
 		await cacheBackboardUserName(stringValueFromRecord(tokens.access_token));
@@ -345,6 +357,18 @@ async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
 		await vscode.window.showErrorMessage(`Backboard sign in failed: ${error instanceof Error ? error.message : String(error)}`);
 		return false;
 	}
+}
+
+/**
+ * Adds return_to=<this app's signed-in link> to the approval page URL. The page then names Backboard
+ * Studio instead of the CLI, skips the device code (this app only logs it), and opens this app again
+ * after Allow instead of leaving people on "close this tab".
+ */
+function withReturnToApp(verificationUrl: string): string {
+	const url = new URL(verificationUrl);
+	const signedIn = vscode.Uri.from({ scheme: vscode.env.uriScheme, authority: backboardExtensionId, path: backboardSignedInPath });
+	url.searchParams.set('return_to', signedIn.toString());
+	return url.toString();
 }
 
 function openBackboardOAuthAuthorizeUrl(authorizeUrl: string): Promise<void> {
