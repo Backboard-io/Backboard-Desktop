@@ -15,6 +15,7 @@ import { dirname, join } from '../../../../base/common/path.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { localize } from '../../../../nls.js';
 import { ILogService } from '../../../log/common/log.js';
+import product from '../../../product/common/product.js';
 import { bridgeConfig } from './backboardRuntimeShared.js';
 import { CLI_TS_HOST_MANAGED_BYOK_CAPABILITY, type CliTsAgentEvent, type CliTsMcpListPayload, type CliTsReadyPayload, type CliTsRecord, type CliTsServeControl, isCliTsRecord } from './cliTsProtocol.js';
 
@@ -203,7 +204,7 @@ export function runCliTsCommand(logService: ILogService, args: readonly string[]
 	return new Promise<string>((resolve, reject) => {
 		const child = spawn(invocation.command, [...invocation.args, ...args], {
 			cwd: process.cwd(),
-			env: { ...process.env, ...cliTsCredentialEnv() },
+			env: { ...process.env, ...cliTsCredentialEnv(), ...studioClientEnv() },
 			stdio: ['pipe', 'pipe', 'pipe'],
 		});
 		let stdout = '';
@@ -484,7 +485,7 @@ export class CliTsServeProcess extends Disposable {
 		if (this.options.workingDirectory) {
 			args.push('--cwd', this.options.workingDirectory);
 		}
-		const env = { ...process.env, ...cliTsCredentialEnv() };
+		const env = { ...process.env, ...cliTsCredentialEnv(), ...studioClientEnv() };
 		// Keep cli-ts's per-session logs/scratch out of the user's workspace so
 		// they never show up as agent file edits in the Changes/Review view.
 		env['BACKBOARD_SESSION_ROOT'] = join(os.homedir(), '.backboard_ide', 'cli-ts-sessions');
@@ -757,6 +758,14 @@ export function cliTsCredentialFingerprint(): string {
 		subscriptions = null;
 	}
 	return createHash('sha256').update(JSON.stringify([cliTsCredentialEnv(), subscriptions])).digest('hex');
+}
+
+/**
+ * Lets the backend count cli-ts runs as Backboard Studio activity. Kept out of
+ * `cliTsCredentialEnv`, whose fingerprint decides when the runtime restarts.
+ */
+function studioClientEnv(): Record<string, string> {
+	return { BACKBOARD_CLIENT: `studio/${product.backboardVersion ?? 'dev'}` };
 }
 
 export function cliTsCredentialEnv(): Record<string, string> {

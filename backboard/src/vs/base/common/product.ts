@@ -99,6 +99,11 @@ export interface IProductConfiguration {
 	 * the VS Code engine version without breaking extension compatibility.
 	 */
 	readonly backboardVersion?: string;
+	/**
+	 * The release channel this build updates from (e.g. `stable`, `sandbox`),
+	 * stamped by the release packaging scripts. Absent in development builds.
+	 */
+	readonly backboardUpdateChannel?: string;
 	readonly date?: string;
 	readonly quality?: string;
 	readonly commit?: string;

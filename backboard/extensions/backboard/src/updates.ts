@@ -986,15 +986,20 @@ function getBackboardUpdateChannel(config: vscode.WorkspaceConfiguration): strin
 		return configured;
 	}
 
-	const packagedChannel = normalizeBackboardUpdateChannel(
-		readBackboardReleaseMetadataString('channel', 'backboardUpdateChannel', 'productJsonBackboardUpdateChannel')
-		|| readBackboardProductMetadataString('backboardUpdateChannel')
-	);
+	const packagedChannel = readPackagedBackboardChannel();
 	if (packagedChannel) {
 		return packagedChannel;
 	}
 
 	return isBackboardDevelopmentBuild() ? sandboxUpdateChannel : stableUpdateChannel;
+}
+
+/** The release channel this build was packaged for, without user or environment overrides; undefined for development builds. */
+export function readPackagedBackboardChannel(): string | undefined {
+	return normalizeBackboardUpdateChannel(
+		readBackboardReleaseMetadataString('channel', 'backboardUpdateChannel', 'productJsonBackboardUpdateChannel')
+		|| readBackboardProductMetadataString('backboardUpdateChannel')
+	);
 }
 
 function normalizeBackboardUpdateChannel(channel: string | undefined): string | undefined {
