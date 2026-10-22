@@ -41,3 +41,6 @@ export const BACKBOARD_STREAM_EVENTS = {
 	runCancelled: "run_cancelled",
 	error: "error",
 } as const;
+
+/** Identifies the calling product to the backend, which tracks daily activity per product surface. */
+export const CLIENT_HEADER = "X-Backboard-Client";

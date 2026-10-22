@@ -56,6 +56,32 @@ describe("BackboardClient streaming transport", () => {
 		});
 	});
 
+	it("names the calling product only when BACKBOARD_CLIENT is set", async () => {
+		const sent: (string | null)[] = [];
+		globalThis.fetch = (async (
+			_input: Parameters<typeof fetch>[0],
+			init?: Parameters<typeof fetch>[1],
+		) => {
+			sent.push(new Headers(init?.headers).get("X-Backboard-Client"));
+			return Response.json([]);
+		}) as unknown as typeof fetch;
+		const client = new BackboardClient({
+			apiKey: "test",
+			apiUrl: "https://api.example.test",
+		});
+		const previous = process.env.BACKBOARD_CLIENT;
+		try {
+			process.env.BACKBOARD_CLIENT = "studio/3.1.26";
+			await client.listThreads();
+			delete process.env.BACKBOARD_CLIENT;
+			await client.listThreads();
+		} finally {
+			if (previous === undefined) delete process.env.BACKBOARD_CLIENT;
+			else process.env.BACKBOARD_CLIENT = previous;
+		}
+		expect(sent).toEqual(["studio/3.1.26", null]);
+	});
+
 	it("lists and fetches threads", async () => {
 		const requestedUrls: string[] = [];
 		globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
