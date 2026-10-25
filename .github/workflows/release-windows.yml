@@ -195,6 +195,11 @@ jobs:
           BACKBOARD_LIVE_UPDATE_EVENTS_URL: ${{ vars.BACKBOARD_LIVE_UPDATE_EVENTS_URL }}
         run: |
           $ErrorActionPreference = 'Stop'
+          # Older source refs (such as the windows branch) predate live updates.
+          if (-not (Test-Path -LiteralPath 'scripts/live-updates/stamp-product.mjs')) {
+            Write-Host 'This source has no live update support; skipping.'
+            exit 0
+          }
           node scripts/live-updates/stamp-product.mjs `
             --product backboard/product.json `
             --channel $env:RELEASE_CHANNEL `
