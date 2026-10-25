@@ -219,9 +219,13 @@ class LiveUpdates implements LiveUpdatesController {
 		if (!leader) {
 			this.events?.dispose();
 			this.events = undefined;
-			return;
+			// Background checks belong to the leader; a check the user asked for
+			// runs in whichever window they asked in.
+			if (!manual) {
+				return;
+			}
 		}
-		if (this.config.eventsUrl && !this.events) {
+		if (leader && this.config.eventsUrl && !this.events) {
 			const eventsUrl = new URL(this.config.eventsUrl);
 			eventsUrl.searchParams.set('channel', this.options.channel);
 			eventsUrl.searchParams.set('platform', `${process.platform}-${process.arch}`);
