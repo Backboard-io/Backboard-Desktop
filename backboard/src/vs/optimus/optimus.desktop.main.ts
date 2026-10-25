@@ -218,7 +218,6 @@ import '../sessions/contrib/providers/remoteAgentHost/browser/wslAgentHost.contr
 import '../sessions/contrib/agentFeedback/browser/agentFeedback.contribution.js';
 import '../sessions/contrib/chat/electron-browser/chat.contribution.js';
 import '../workbench/contrib/chat/electron-browser/backboardSso.contribution.js';
-import '../workbench/contrib/backboardLiveUpdate/electron-browser/backboardLiveUpdate.contribution.js';
 
 // Local Agent Host
 import '../sessions/contrib/providers/agentHost/browser/localAgentHost.contribution.js';

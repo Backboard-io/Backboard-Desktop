@@ -24,8 +24,6 @@ name: Prod Release
 #   plus the Azure secrets release-windows.yml already uses.
 # Repository variables:
 #   BACKBOARD_UPDATE_MANIFEST_BASE_URL  update feed stamped into the macOS app
-#   BACKBOARD_LIVE_UPDATE_PUBLIC_KEYS   optional; live update signing key(s) from
-#                                       `publish.mjs keygen`. Unset = live updates off.
 #   WINDOWS_RELEASE_REF                 optional, see above
 
 on:
@@ -100,10 +98,6 @@ jobs:
       BACKBOARD_RELEASE_ENV_FILE: /nonexistent
       BACKBOARD_UPDATE_MANIFEST_BASE_URL: ${{ vars.BACKBOARD_UPDATE_MANIFEST_BASE_URL }}
       BACKBOARD_GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.BACKBOARD_GITHUB_OAUTH_CLIENT_SECRET }}
-      # Stamped into product.json by the packaging script (scripts/live-updates/stamp-product.mjs).
-      BACKBOARD_LIVE_UPDATE_PUBLIC_KEYS: ${{ vars.BACKBOARD_LIVE_UPDATE_PUBLIC_KEYS }}
-      BACKBOARD_LIVE_UPDATE_MANIFEST_BASE_URL: ${{ vars.BACKBOARD_LIVE_UPDATE_MANIFEST_BASE_URL }}
-      BACKBOARD_LIVE_UPDATE_EVENTS_URL: ${{ vars.BACKBOARD_LIVE_UPDATE_EVENTS_URL }}
       # Compiled into the computer-use driver; without it the driver sends no telemetry.
       CUA_DRIVER_POSTHOG_KEY: ${{ secrets.CUA_DRIVER_POSTHOG_KEY }}
       APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
@@ -193,10 +187,6 @@ jobs:
       CHANNEL: stable
       BACKBOARD_RELEASE_ENV_FILE: /nonexistent
       BACKBOARD_GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.BACKBOARD_GITHUB_OAUTH_CLIENT_SECRET }}
-      # Passed into the build container and stamped into product.json.
-      BACKBOARD_LIVE_UPDATE_PUBLIC_KEYS: ${{ vars.BACKBOARD_LIVE_UPDATE_PUBLIC_KEYS }}
-      BACKBOARD_LIVE_UPDATE_MANIFEST_BASE_URL: ${{ vars.BACKBOARD_LIVE_UPDATE_MANIFEST_BASE_URL }}
-      BACKBOARD_LIVE_UPDATE_EVENTS_URL: ${{ vars.BACKBOARD_LIVE_UPDATE_EVENTS_URL }}
     steps:
       # The VS Code build plus its dependencies does not fit in the runner's
       # default free space.

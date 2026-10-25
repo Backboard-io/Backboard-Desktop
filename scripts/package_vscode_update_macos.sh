@@ -511,14 +511,6 @@ set_plist_string "${INFO_PLIST}" "CFBundleShortVersionString" "${VERSION}"
 set_plist_string "${INFO_PLIST}" "CFBundleVersion" "${VERSION}"
 echo "Writing Backboard release metadata"
 write_release_metadata
-case "${ARCH}" in
-  aarch64) LIVE_UPDATE_PLATFORM="darwin-arm64" ;;
-  x86_64) LIVE_UPDATE_PLATFORM="darwin-x64" ;;
-esac
-node "${REPO_ROOT}/scripts/live-updates/stamp-product.mjs" \
-  --product "${APP_PATH}/Contents/Resources/app/product.json" \
-  --channel "${CHANNEL}" \
-  --platform "${LIVE_UPDATE_PLATFORM}"
 
 rename_helper_app() {
   local old_name="$1"

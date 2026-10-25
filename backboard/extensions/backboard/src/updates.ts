@@ -16,7 +16,6 @@ import { setTimeout as delay } from 'timers/promises';
 import { deprecatedBridgeDetail, deprecatedBridgeDownloadAction, deprecatedBridgeTitle, getReplacementDownloadUrl, replacementManifestBaseUrl, shouldShowDeprecatedBridgeNotice, shouldUseReplacementManifest } from './migrationNotice';
 import { macUpdateInstallerScript } from './updatesInstaller';
 import { updatePreparationFailure } from './updateDiagnostics';
-import type { LiveRestartState, LiveUpdatesController } from './liveUpdates';
 import { innoProgressPercent, windowsSignatureCheckScript, windowsSignatureRejection, WindowsSignatures, windowsSilentUpdateArguments, windowsUpdateReadyFileName, windowsUpdaterEnvironment } from './updatesWindowsInstaller';
 
 interface UpdateManifest {
@@ -46,8 +45,7 @@ interface UpdateLockOwner {
 	readonly createdAt: string;
 }
 
-/** Returns false when this build must not update itself (the deprecated bridge). */
-export function initializeBackboardUpdates(context: vscode.ExtensionContext, output: vscode.OutputChannel | undefined): boolean {
+export function initializeBackboardUpdates(context: vscode.ExtensionContext, output: vscode.OutputChannel | undefined): void {
 	backboardUpdateOutput = output;
 	// The deprecated Bagel bridge is intentionally a manual certificate migration.
 	// It must show only the direct-DMG notice: offering Install and Restart here
@@ -55,7 +53,7 @@ export function initializeBackboardUpdates(context: vscode.ExtensionContext, out
 	// bridge exists to avoid.
 	if (showDeprecatedBridgeNotice(context)) {
 		backboardUpdateOutput?.appendLine('[updates] automatic updater disabled for deprecated Alpha bridge');
-		return false;
+		return;
 	}
 	backboardUpdateStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 	backboardUpdateStatusItem.command = 'backboard.installAvailableUpdate';
@@ -71,16 +69,6 @@ export function initializeBackboardUpdates(context: vscode.ExtensionContext, out
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.cancelUpdate', () => backboardUpdateCancellation?.abort()));
 	context.subscriptions.push({ dispose: () => backboardUpdateCancellation?.abort() });
 	scheduleAutomaticBackboardUpdateChecks(context);
-	return true;
-}
-
-/** Live updates (liveUpdates.ts) share the Update button and the manual check. */
-export function attachBackboardLiveUpdates(controller: LiveUpdatesController | undefined): void {
-	backboardLiveUpdates = controller;
-}
-
-export function currentBackboardUpdateChannel(): string {
-	return getBackboardUpdateChannel(vscode.workspace.getConfiguration('backboard'));
 }
 
 const automaticUpdateCheckStartupDelayMs = 8_000;
@@ -168,18 +156,9 @@ let backboardUpdateTestMode = false;
 let backboardUpdateCancellation: AbortController | undefined;
 let backboardUpdateCheckInProgress = false;
 let availableBackboardUpdate: UpdateManifest | undefined;
-/** Live updates ship JavaScript between releases; see liveUpdates.ts. */
-let backboardLiveUpdates: LiveUpdatesController | undefined;
-/** A staged live update that takes effect with a quick restart, no installer. */
-let pendingLiveRestart: LiveRestartState | undefined;
 let backboardUpdateStatusItem: vscode.StatusBarItem | undefined;
 let backboardUpdateCheckStatusItem: vscode.StatusBarItem | undefined;
 async function checkBackboardUpdates(manual: boolean): Promise<void> {
-	// A full release replaces live updates, so the live check only prompts when
-	// there is no newer release to install.
-	if (manual && backboardLiveUpdates) {
-		await checkBackboardLiveUpdates();
-	}
 	// A development build's update test keeps its simulated release on offer until it is installed.
 	if (!manual && availableBackboardUpdate && isSimulatedBackboardUpdate(availableBackboardUpdate)) {
 		return;
@@ -230,8 +209,6 @@ async function checkBackboardUpdates(manual: boolean): Promise<void> {
 			await setAvailableBackboardUpdate(undefined);
 			if (manual && backboardUpdateTestMode) {
 				void vscode.window.showWarningMessage(`The latest published release (${manifest.version}) is older than this build (${currentVersion}). Publish this build to its update channel first; the update test reinstalls the latest published release.`);
-			} else if (manual && pendingLiveRestart) {
-				await backboardLiveUpdates?.promptRestart();
 			} else if (manual) {
 				vscode.window.setStatusBarMessage(`Backboard Studio is up to date (${currentVersion}).`, 4000);
 			}
@@ -382,48 +359,22 @@ function updateBackboardUpdateCheckStatusItem(checking: boolean): void {
 	backboardUpdateCheckStatusItem.hide();
 }
 
-async function checkBackboardLiveUpdates(): Promise<void> {
-	try {
-		// The Update button prompts for a full release when one exists; this
-		// only fetches, so a staged live update lights the same button.
-		await backboardLiveUpdates?.check();
-	} catch (error) {
-		backboardUpdateOutput?.appendLine(`[live] ${error instanceof Error ? error.message : String(error)}`);
-	}
-}
-
 async function setAvailableBackboardUpdate(manifest: UpdateManifest | undefined): Promise<void> {
 	availableBackboardUpdate = manifest;
-	await refreshBackboardUpdateButton();
-}
-
-export async function setPendingLiveRestart(state: LiveRestartState | undefined): Promise<void> {
-	pendingLiveRestart = state;
-	await refreshBackboardUpdateButton();
-}
-
-/** One Update button for both: a full release wins over a staged live update. */
-async function refreshBackboardUpdateButton(): Promise<void> {
-	const manifest = availableBackboardUpdate;
-	await vscode.commands.executeCommand('setContext', 'backboard.updateAvailable', Boolean(manifest || pendingLiveRestart));
+	await vscode.commands.executeCommand('setContext', 'backboard.updateAvailable', Boolean(manifest));
 	if (!backboardUpdateStatusItem) {
 		return;
 	}
-	if (manifest) {
-		backboardUpdateStatusItem.text = `$(cloud-download) Update ${manifest.version}`;
-		backboardUpdateStatusItem.tooltip = `Install Backboard Studio ${manifest.version}`;
-	} else if (pendingLiveRestart) {
-		backboardUpdateStatusItem.text = '$(debug-restart) Restart to Update';
-		backboardUpdateStatusItem.tooltip = pendingLiveRestart.notes ?? 'Restart Backboard Studio to apply the latest update';
+	if (!manifest) {
+		backboardUpdateStatusItem.hide();
+		return;
 	}
+	backboardUpdateStatusItem.text = `$(cloud-download) Update ${manifest.version}`;
+	backboardUpdateStatusItem.tooltip = `Install Backboard Studio ${manifest.version}`;
 	backboardUpdateStatusItem.hide();
 }
 
 async function installAvailableBackboardUpdate(): Promise<void> {
-	if (!availableBackboardUpdate && pendingLiveRestart) {
-		await vscode.commands.executeCommand('backboard.relaunchApp');
-		return;
-	}
 	if (!availableBackboardUpdate) {
 		await checkBackboardUpdates(true);
 		return;

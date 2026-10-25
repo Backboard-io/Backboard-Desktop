@@ -22,7 +22,6 @@ import { IStorageService, StorageScope, StorageTarget } from '../../storage/comm
 import { isString } from '../../../base/common/types.js';
 import { StreamSplitter } from '../../../base/node/nodeStreams.js';
 import { joinPath } from '../../../base/common/resources.js';
-import { installedAppRoot } from '../../backboardLiveUpdate/node/liveUpdateBoot.js';
 
 type RemoteTunnelEnablementClassification = {
 	owner: 'aeschli';
@@ -189,21 +188,21 @@ export class RemoteTunnelService extends Disposable implements IRemoteTunnelServ
 			if (isMacintosh) {
 				// appRoot = /Applications/Visual Studio Code - Insiders.app/Contents/Resources/app
 				// bin = /Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin
-				binParentLocation = installedAppRoot(this.environmentService.appRoot);
+				binParentLocation = this.environmentService.appRoot;
 			} else if (isWindows) {
 				if (this.productService.win32VersionedUpdate) {
 					// appRoot = C:\Users\<name>\AppData\Local\Programs\Microsoft VS Code Insiders\<version>\resources\app
 					// bin = C:\Users\<name>\AppData\Local\Programs\Microsoft VS Code Insiders\bin
-					binParentLocation = dirname(dirname(dirname(installedAppRoot(this.environmentService.appRoot))));
+					binParentLocation = dirname(dirname(dirname(this.environmentService.appRoot)));
 				} else {
 					// appRoot = C:\Users\<name>\AppData\Local\Programs\Microsoft VS Code Insiders\resources\app
 					// bin = C:\Users\<name>\AppData\Local\Programs\Microsoft VS Code Insiders\bin
-					binParentLocation = dirname(dirname(installedAppRoot(this.environmentService.appRoot)));
+					binParentLocation = dirname(dirname(this.environmentService.appRoot));
 				}
 			} else {
 				// appRoot = /usr/share/code-insiders/resources/app
 				// bin = /usr/share/code-insiders/bin
-				binParentLocation = dirname(dirname(installedAppRoot(this.environmentService.appRoot)));
+				binParentLocation = dirname(dirname(this.environmentService.appRoot));
 			}
 			this._tunnelCommand = join(binParentLocation, 'bin', `${this.productService.tunnelApplicationName}${isWindows ? '.exe' : ''}`);
 		}

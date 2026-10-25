@@ -12,7 +12,6 @@ import { TernarySearchTree } from '../../../base/common/ternarySearchTree.js';
 import { URI } from '../../../base/common/uri.js';
 import { generateUuid } from '../../../base/common/uuid.js';
 import { validatedIpcMain } from '../../../base/parts/ipc/electron-main/ipcMain.js';
-import { LIVE_BASE_APP_ROOT_ENV } from '../../backboardLiveUpdate/common/liveUpdate.js';
 import { INativeEnvironmentService } from '../../environment/common/environment.js';
 import { ILogService } from '../../log/common/log.js';
 import { IIPCObjectUrl, IProtocolMainService } from './protocol.js';
@@ -42,13 +41,6 @@ export class ProtocolMainService extends Disposable implements IProtocolMainServ
 		this.addValidFileRoot(environmentService.extensionsPath);
 		this.addValidFileRoot(userDataProfilesService.defaultProfile.globalStorageHome.with({ scheme: Schemas.file }).fsPath);
 		this.addValidFileRoot(environmentService.workspaceStorageHome.with({ scheme: Schemas.file }).fsPath);
-
-		// A live update overlay becomes the app root, but links node_modules
-		// back into the installed app, so files there resolve to that root.
-		const liveBaseAppRoot = process.env[LIVE_BASE_APP_ROOT_ENV];
-		if (liveBaseAppRoot && liveBaseAppRoot !== environmentService.appRoot) {
-			this.addValidFileRoot(liveBaseAppRoot);
-		}
 
 		// Handle protocols
 		this.handleProtocols();

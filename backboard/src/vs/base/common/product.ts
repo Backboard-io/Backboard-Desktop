@@ -276,18 +276,6 @@ export interface IProductConfiguration {
 	readonly onboardingKeymaps?: readonly IProductOnboardingKeymap[];
 	readonly onboardingThemes?: readonly IProductOnboardingTheme[];
 
-	/**
-	 * Signed JavaScript updates delivered without a new app build. Unset or
-	 * without `publicKeys` = live updates off.
-	 */
-	readonly backboardLiveUpdate?: {
-		readonly manifestUrl?: string;
-		/** Server-sent events endpoint that announces new manifests. Unset = polling only. */
-		readonly eventsUrl?: string;
-		/** Base64 DER (SPKI) Ed25519 keys allowed to sign manifests. */
-		readonly publicKeys?: readonly string[];
-	};
-
 	/** PostHog project for Backboard product analytics. Unset = analytics off. */
 	readonly backboardAnalytics?: {
 		readonly posthogKey?: string;

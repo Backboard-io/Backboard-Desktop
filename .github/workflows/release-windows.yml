@@ -183,28 +183,6 @@ jobs:
             --source-commit $env:BACKBOARD_SOURCE_COMMIT `
             --build-info windows-build-info.json
 
-      # Live updates trust only the public keys in product.json. They come from
-      # the BACKBOARD_LIVE_UPDATE_PUBLIC_KEYS repository variable (the output of
-      # `publish.mjs keygen`); without it this build ships with live updates off.
-      - name: Stamp live update key
-        if: ${{ !inputs.reuse_signed_run }}
-        shell: pwsh
-        env:
-          BACKBOARD_LIVE_UPDATE_PUBLIC_KEYS: ${{ vars.BACKBOARD_LIVE_UPDATE_PUBLIC_KEYS }}
-          BACKBOARD_LIVE_UPDATE_MANIFEST_BASE_URL: ${{ vars.BACKBOARD_LIVE_UPDATE_MANIFEST_BASE_URL }}
-          BACKBOARD_LIVE_UPDATE_EVENTS_URL: ${{ vars.BACKBOARD_LIVE_UPDATE_EVENTS_URL }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          # Older source refs (such as the windows branch) predate live updates.
-          if (-not (Test-Path -LiteralPath 'scripts/live-updates/stamp-product.mjs')) {
-            Write-Host 'This source has no live update support; skipping.'
-            exit 0
-          }
-          node scripts/live-updates/stamp-product.mjs `
-            --product backboard/product.json `
-            --channel $env:RELEASE_CHANNEL `
-            --platform "win32-$env:RELEASE_ARCH"
-
       - name: Install Windows build dependencies
         if: ${{ !inputs.reuse_signed_run }}
         shell: pwsh

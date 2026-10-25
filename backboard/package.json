@@ -6,7 +6,7 @@
     "name": "Microsoft Corporation"
   },
   "license": "MIT",
-  "main": "./out/bootstrap-live.js",
+  "main": "./out/main.js",
   "type": "module",
   "private": true,
   "scripts": {

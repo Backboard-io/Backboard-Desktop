@@ -143,7 +143,6 @@ const serverEntryPoints = [
 
 // Bootstrap files per target
 const bootstrapEntryPointsDesktop = [
-	'bootstrap-live',
 	'main',
 	'cli',
 	'bootstrap-fork',

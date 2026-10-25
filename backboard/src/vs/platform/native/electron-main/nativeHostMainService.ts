@@ -23,7 +23,6 @@ import { localize } from '../../../nls.js';
 import { ISerializableCommandAction } from '../../action/common/action.js';
 import { INativeOpenDialogOptions } from '../../dialogs/common/dialogs.js';
 import { IDialogMainService } from '../../dialogs/electron-main/dialogMainService.js';
-import { installedAppRoot } from '../../backboardLiveUpdate/node/liveUpdateBoot.js';
 import { IEnvironmentMainService } from '../../environment/electron-main/environmentMainService.js';
 import { createDecorator, IInstantiationService } from '../../instantiation/common/instantiation.js';
 import { ILifecycleMainService, IRelaunchOptions } from '../../lifecycle/electron-main/lifecycleMainService.js';
@@ -595,7 +594,7 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 	}
 
 	private async getShellCommandLink(): Promise<{ readonly source: string; readonly target: string }> {
-		const target = resolve(installedAppRoot(this.environmentMainService.appRoot), 'bin', 'code');
+		const target = resolve(this.environmentMainService.appRoot, 'bin', 'code');
 		const source = `/usr/local/bin/${this.productService.applicationName}`;
 
 		// Ensure source exists
@@ -818,7 +817,7 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 
 				const promptOptions = {
 					name: this.productService.nameLong.replace('-', ''),
-					icns: (isMacintosh && this.environmentMainService.isBuilt) ? join(dirname(installedAppRoot(this.environmentMainService.appRoot)), `${this.productService.nameShort}.icns`) : undefined
+					icns: (isMacintosh && this.environmentMainService.isBuilt) ? join(dirname(this.environmentMainService.appRoot), `${this.productService.nameShort}.icns`) : undefined
 				};
 
 				this.logService.trace(`[sudo-prompt] running command: ${sudoCommand.join(' ')}`);
@@ -875,7 +874,7 @@ export class NativeHostMainService extends Disposable implements INativeHostMain
 
 		// macOS
 		if (this.environmentMainService.isBuilt) {
-			return join(installedAppRoot(this.environmentMainService.appRoot), 'bin', 'code');
+			return join(this.environmentMainService.appRoot, 'bin', 'code');
 		}
 
 		return join(this.environmentMainService.appRoot, 'scripts', 'code-cli.sh');

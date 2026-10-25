@@ -13,8 +13,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as readline from 'readline';
 import { codiconsStylesheetUri, fontBaseUri, iconBaseUri, panelHtml, webviewLocalResourceRoots } from './panel/panelHtml';
-import { attachBackboardLiveUpdates, currentBackboardUpdateChannel, initializeBackboardUpdates, readCurrentAppVersion, setPendingLiveRestart } from './updates';
-import { initializeBackboardLiveUpdates, installedAppRoot, liveCliInvocation } from './liveUpdates';
+import { initializeBackboardUpdates, readCurrentAppVersion } from './updates';
 import { installTerminalCommand } from './terminalCommand';
 import type { BackboardAttachment, BackboardConfigJson, BackboardDeviceCodeResponse, BackboardOAuthSaveResult, BackboardOAuthTokens, BridgeEvent, BridgeModel, FileAttachment, FileChangePayload, ImageAttachment, ModelCacheEntry, PanelOptions, PanelPersistedState, PanelStateStore, PanelThreadFile, PendingRequest, ResponseSink, ToolCacheEntry, ToolResultRequest, VoiceAttachment } from './types';
 import { BackboardUsagePanel, readLocalUsageSnapshot, type BackboardUsageSnapshot } from './usagePanel';
@@ -75,14 +74,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(backboardToolOutput);
 	context.subscriptions.push(bridge);
 	context.subscriptions.push(usagePanel);
-	if (initializeBackboardUpdates(context, backboardToolOutput)) {
-		attachBackboardLiveUpdates(initializeBackboardLiveUpdates(context, backboardToolOutput, {
-			appVersion: readCurrentAppVersion(),
-			channel: currentBackboardUpdateChannel(),
-			userAgent: `Backboard-Studio/${readCurrentAppVersion()}`,
-			onRestartStateChange: state => void setPendingLiveRestart(state),
-		}));
-	}
+	initializeBackboardUpdates(context, backboardToolOutput);
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.hasAlternativeCredentials', () => bridge.hasAlternativeCredentials()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setupProviderKey', async () => {
 		const provider = await vscode.window.showQuickPick([
@@ -97,7 +89,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.configureProviderKey', (provider: string, key: string) => bridge.configureProviderKey(provider, key)));
 	// Onboarding's "Install terminal command" option; no admin prompt, see installTerminalCommand.
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.installTerminalCommand', (commandName: string) => installTerminalCommand(installedAppRoot(), commandName)));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.installTerminalCommand', (commandName: string) => installTerminalCommand(vscode.env.appRoot, commandName)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setApiKey', async () => {
 		if (await setApiKey()) {
 			bridge.restart();
@@ -2338,10 +2330,9 @@ class BackboardBridge implements vscode.Disposable {
 		this.output.appendLine(`  workspaceRoot: ${workspacePath() ?? '<none>'}`);
 		this.output.appendLine(`  configuredWorkspaceRoot: ${configuredWorkspaceRoot() ?? '<none>'}`);
 		this.currentCwd = cwd;
-		const cli = this.resolveCli(['--serve', '--cwd', cwd]);
-		const child = cp.spawn(cli.command, cli.args, {
+		const child = cp.spawn(cliPath, ['--serve', '--cwd', cwd], {
 			cwd,
-			env: { ...cli.env, ...serveCredentialEnv() },
+			env: { ...process.env, ...serveCredentialEnv() },
 			stdio: ['pipe', 'pipe', 'pipe']
 		});
 		this.child = child;
@@ -2381,8 +2372,7 @@ class BackboardBridge implements vscode.Disposable {
 		const failures: string[] = [];
 		for (const args of [['logout'], ['subscription', 'logout'], ['claude-subscription', 'logout']]) {
 			await new Promise<void>(resolve => {
-				const cli = this.resolveCli(args);
-				cp.execFile(cli.command, cli.args, { env: cli.env, timeout: 15000, maxBuffer: 64 * 1024 }, error => {
+				cp.execFile(this.resolveCliPath(), args, { timeout: 15000, maxBuffer: 64 * 1024 }, error => {
 					if (error) { failures.push(args.join(' ')); }
 					resolve();
 				});
@@ -2397,8 +2387,7 @@ class BackboardBridge implements vscode.Disposable {
 
 	async hasAlternativeCredentials(): Promise<boolean> {
 		return new Promise<boolean>((resolve, reject) => {
-			const cli = this.resolveCli(['--alternative-auth-status']);
-			cp.execFile(cli.command, cli.args, { env: cli.env, timeout: 10000, maxBuffer: 4096 }, (error, stdout) => {
+			cp.execFile(this.resolveCliPath(), ['--alternative-auth-status'], { timeout: 10000, maxBuffer: 4096 }, (error, stdout) => {
 				if (error) { reject(new Error('Could not check alternative credentials.')); return; }
 				try {
 					const status = JSON.parse(stdout);
@@ -2415,8 +2404,7 @@ class BackboardBridge implements vscode.Disposable {
 		}
 		// Keep secrets out of command arguments, bridge diagnostics and output logs.
 		await new Promise<void>((resolve, reject) => {
-			const cli = this.resolveCli(['--configure-provider-key']);
-			const child = cp.spawn(cli.command, cli.args, { env: cli.env, stdio: ['pipe', 'ignore', 'pipe'] });
+			const child = cp.spawn(this.resolveCliPath(), ['--configure-provider-key'], { stdio: ['pipe', 'ignore', 'pipe'] });
 			const timeout = setTimeout(() => child.kill(), 45000);
 			child.stderr.resume();
 			child.stdin.on('error', () => { /* Process errors are handled below. */ });
@@ -2444,15 +2432,6 @@ class BackboardBridge implements vscode.Disposable {
 			return configured;
 		}
 		return path.join(this.context.extensionPath, 'bin', process.platform === 'win32' ? 'backboard-cli-ts.exe' : 'backboard-cli-ts');
-	}
-
-	/** The packaged runtime, running a live-updated bundle when one is staged (never for a configured cliPath). */
-	private resolveCli(args: readonly string[]): { command: string; args: string[]; env: NodeJS.ProcessEnv } {
-		const cliPath = this.resolveCliPath();
-		const live = vscode.workspace.getConfiguration('backboard').get<string>('cliPath')?.trim() ? undefined : liveCliInvocation(cliPath);
-		return live
-			? { command: live.command, args: [...live.args, ...args], env: { ...process.env, ...live.env } }
-			: { command: cliPath, args: [...args], env: process.env };
 	}
 
 	private write(payload: unknown): void {
