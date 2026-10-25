@@ -3034,6 +3034,12 @@ export class CliTsAgent extends Disposable implements IAgent {
 		if (session.proc?.isRunning && !session.proc.isInvocationStale) {
 			return session.proc;
 		}
+		// A newer runtime (a live update, or a rebuilt executable) waits while
+		// background subagents still run in this process: restarting now would
+		// kill them. Changed credentials still restart immediately.
+		if (session.proc?.isRunning && !session.proc.isCredentialStale && session.subagentTurnOwners.size > 0) {
+			return session.proc;
+		}
 		if (session.proc?.isInvocationStale) {
 			this._logService.info(`[cli-ts] restarting session ${session.sessionId} because the CLI executable or credentials changed.`);
 		}

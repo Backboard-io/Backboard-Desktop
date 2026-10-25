@@ -109,9 +109,18 @@ echo "Copying the current tracked and untracked source state into an isolated Do
 	"${IMAGE_TAG}" \
 	tar -xf - -C /work/source
 
+# The container cannot read ~/.backboard, so the live update key goes in as env.
+LIVE_UPDATE_KEY_FILE="${HOME}/.backboard/live-update-signing/public-key.txt"
+if [[ -z "${BACKBOARD_LIVE_UPDATE_PUBLIC_KEYS:-}" && -f "${LIVE_UPDATE_KEY_FILE}" ]]; then
+	BACKBOARD_LIVE_UPDATE_PUBLIC_KEYS="$(tr -d '[:space:]' < "${LIVE_UPDATE_KEY_FILE}")"
+fi
+
 "${DOCKER[@]}" create \
 	--name "${BUILD_CONTAINER}" \
 	--platform linux/amd64 \
+	-e "BACKBOARD_LIVE_UPDATE_PUBLIC_KEYS=${BACKBOARD_LIVE_UPDATE_PUBLIC_KEYS:-}" \
+	-e "BACKBOARD_LIVE_UPDATE_MANIFEST_BASE_URL=${BACKBOARD_LIVE_UPDATE_MANIFEST_BASE_URL:-}" \
+	-e "BACKBOARD_LIVE_UPDATE_EVENTS_URL=${BACKBOARD_LIVE_UPDATE_EVENTS_URL:-}" \
 	-e "VERSION=${VERSION}" \
 	-e "ARCH=${ARCH}" \
 	-e "CHANNEL=${CHANNEL}" \

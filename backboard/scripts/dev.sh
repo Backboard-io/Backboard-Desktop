@@ -30,6 +30,7 @@ REQUIRED_NODE_MAJOR="${REQUIRED_NODE%%.*}"
 
 # Files that must exist in out/ before the Electron main process can boot.
 LAUNCH_FILES=(
+	"out/bootstrap-live.js"
 	"out/bootstrap-esm.js"
 	"out/main.js"
 	"out/vs/code/electron-main/main.js"
@@ -38,6 +39,7 @@ LAUNCH_FILES=(
 
 # Rebuilt main-process output that requires a full relaunch rather than a window reload.
 MAIN_PROCESS_PATHS=(
+	"out/bootstrap-live.js"
 	"out/main.js"
 	"out/bootstrap-esm.js"
 	"out/vs/code/electron-main"

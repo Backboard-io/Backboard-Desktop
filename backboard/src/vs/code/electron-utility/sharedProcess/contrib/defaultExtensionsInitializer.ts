@@ -7,6 +7,7 @@ import { dirname, join } from '../../../../base/common/path.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { isWindows } from '../../../../base/common/platform.js';
 import { URI } from '../../../../base/common/uri.js';
+import { installedAppRoot } from '../../../../platform/backboardLiveUpdate/node/liveUpdateBoot.js';
 import { INativeEnvironmentService } from '../../../../platform/environment/common/environment.js';
 import { INativeServerExtensionManagementService } from '../../../../platform/extensionManagement/node/extensionManagementService.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
@@ -75,11 +76,11 @@ export class DefaultExtensionsInitializer extends Disposable {
 		if (this.productService.win32VersionedUpdate) {
 			// appRoot = C:\Users\<name>\AppData\Local\Programs\Microsoft VS Code Insiders\<version>\resources\app
 			// extensionsPath = C:\Users\<name>\AppData\Local\Programs\Microsoft VS Code Insiders\<version>\bootstrap\extensions
-			return URI.file(join(dirname(dirname(dirname(this.environmentService.appRoot))), 'bootstrap', 'extensions'));
+			return URI.file(join(dirname(dirname(dirname(installedAppRoot(this.environmentService.appRoot)))), 'bootstrap', 'extensions'));
 		} else {
 			// appRoot = C:\Users\<name>\AppData\Local\Programs\Microsoft VS Code Insiders\resources\app
 			// extensionsPath = C:\Users\<name>\AppData\Local\Programs\Microsoft VS Code Insiders\bootstrap\extensions
-			return URI.file(join(dirname(dirname(this.environmentService.appRoot)), 'bootstrap', 'extensions'));
+			return URI.file(join(dirname(dirname(installedAppRoot(this.environmentService.appRoot))), 'bootstrap', 'extensions'));
 		}
 	}
 

@@ -14,7 +14,9 @@ import { FileAccess } from '../../../../base/common/network.js';
 import { dirname, join } from '../../../../base/common/path.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { localize } from '../../../../nls.js';
+import { resolveLiveAgent } from '../../../backboardLiveUpdate/node/liveAgent.js';
 import { ILogService } from '../../../log/common/log.js';
+import product from '../../../product/common/product.js';
 import { bridgeConfig } from './backboardRuntimeShared.js';
 import { CLI_TS_HOST_MANAGED_BYOK_CAPABILITY, type CliTsAgentEvent, type CliTsMcpListPayload, type CliTsReadyPayload, type CliTsRecord, type CliTsServeControl, isCliTsRecord } from './cliTsProtocol.js';
 
@@ -35,6 +37,8 @@ interface PendingServeRequest {
 export interface CliTsInvocation {
 	readonly command: string;
 	readonly args: readonly string[];
+	/** Added to the child's environment. */
+	readonly env?: Readonly<Record<string, string>>;
 }
 
 function resolveBunCommand(): string | undefined {
@@ -90,6 +94,7 @@ export function cliTsInvocationFingerprint(invocation: CliTsInvocation): string 
 	return JSON.stringify({
 		command: invocation.command,
 		args: invocation.args,
+		env: invocation.env,
 		file,
 	});
 }
@@ -146,6 +151,18 @@ function isCliTsExecutableCompatible(path: string): boolean {
 }
 
 /**
+ * Runs a live-updated cli-ts bundle with the app's signed cli-ts executable.
+ * `BUN_BE_BUN` makes a Bun single-file executable act as the Bun runtime, so
+ * the executable keeps its signature and entitlements while running newer
+ * JavaScript. The bundle removes the variable on startup so its own children
+ * (other Bun executables such as `claude`) start normally.
+ */
+function liveAgentInvocation(packagedExecutable: string): CliTsInvocation | undefined {
+	const live = resolveLiveAgent(product);
+	return live ? { command: packagedExecutable, args: ['run', live.entry], env: { BUN_BE_BUN: '1' } } : undefined;
+}
+
+/**
  * Resolves how to start cli-ts, shared by persistent serve processes and
  * one-shot account commands such as ChatGPT subscription login.
  */
@@ -175,7 +192,7 @@ export function resolveCliTsInvocation(logService: ILogService, appRoot = dirnam
 	for (const candidate of candidates) {
 		if (fs.existsSync(candidate)) {
 			if (isCliTsExecutableCompatible(candidate)) {
-				return { command: candidate, args: [] };
+				return liveAgentInvocation(candidate) ?? { command: candidate, args: [] };
 			}
 			logService.warn(`[cli-ts] skipping packaged binary for the wrong CPU architecture: ${candidate} (host=${process.platform}-${process.arch})`);
 		}
@@ -203,7 +220,7 @@ export function runCliTsCommand(logService: ILogService, args: readonly string[]
 	return new Promise<string>((resolve, reject) => {
 		const child = spawn(invocation.command, [...invocation.args, ...args], {
 			cwd: process.cwd(),
-			env: { ...process.env, ...cliTsCredentialEnv() },
+			env: { ...process.env, ...cliTsCredentialEnv(), ...invocation.env },
 			stdio: ['pipe', 'pipe', 'pipe'],
 		});
 		let stdout = '';
@@ -339,11 +356,13 @@ export class CliTsServeProcess extends Disposable {
 	 * holding the old key in its environment).
 	 */
 	get isInvocationStale(): boolean {
-		if (!this.isRunning || !this.spawnedInvocationFingerprint) {
-			return false;
-		}
-		return cliTsInvocationFingerprint(this.resolveCliTsInvocation()) !== this.spawnedInvocationFingerprint
-			|| cliTsCredentialFingerprint() !== this.spawnedCredentialFingerprint;
+		return this.isCredentialStale
+			|| (this.isRunning && !!this.spawnedInvocationFingerprint && cliTsInvocationFingerprint(this.resolveCliTsInvocation()) !== this.spawnedInvocationFingerprint);
+	}
+
+	/** True when the credentials changed since spawn. Such a process must not keep running. */
+	get isCredentialStale(): boolean {
+		return this.isRunning && !!this.spawnedInvocationFingerprint && cliTsCredentialFingerprint() !== this.spawnedCredentialFingerprint;
 	}
 
 	/** Starts the serve subprocess without submitting a turn. */
@@ -484,7 +503,7 @@ export class CliTsServeProcess extends Disposable {
 		if (this.options.workingDirectory) {
 			args.push('--cwd', this.options.workingDirectory);
 		}
-		const env = { ...process.env, ...cliTsCredentialEnv() };
+		const env = { ...process.env, ...cliTsCredentialEnv(), ...invocation.env };
 		// Keep cli-ts's per-session logs/scratch out of the user's workspace so
 		// they never show up as agent file edits in the Changes/Review view.
 		env['BACKBOARD_SESSION_ROOT'] = join(os.homedir(), '.backboard_ide', 'cli-ts-sessions');
