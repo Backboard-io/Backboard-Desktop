@@ -543,15 +543,22 @@ export function readDesiredApp(liveUpdatesDir: string, publicKeys: readonly stri
 }
 
 /**
- * Called once the app runs from an overlay: it started, so the boot loader
- * stops counting its attempts. Keeps the record's pid, which tells later
- * launches that this instance is running.
+ * Called by every window once the app is up. Records that the running overlay
+ * started (so the boot loader stops counting its attempts) and the real main
+ * process id: the boot loader writes its own pid before it knows whether it
+ * becomes the running instance, and two processes started together (as a
+ * relaunch can do) leave the id of the one that only handed over arguments.
+ * Later launches rely on that id to recognise a running instance.
  */
-export async function markLiveAppHealthy(liveUpdatesDir: string, id: string): Promise<void> {
+export async function recordLiveAppRunning(liveUpdatesDir: string, runningAppId: string | undefined, mainPid: number): Promise<void> {
 	const bootPath = path.join(liveAppDir(liveUpdatesDir), 'boot.json');
 	const record = readLiveJson<{ id?: string; attempts?: number; pid?: number; healthy?: boolean }>(bootPath);
-	if (record?.id === id && !record.healthy) {
-		await writeLiveJson(bootPath, { ...record, attempts: 0, healthy: true });
+	if (runningAppId) {
+		if (record?.id !== runningAppId || !record.healthy || record.pid !== mainPid) {
+			await writeLiveJson(bootPath, { id: runningAppId, attempts: 0, pid: mainPid, healthy: true });
+		}
+	} else if (record?.id !== undefined || record?.pid !== mainPid) {
+		await writeLiveJson(bootPath, { attempts: 0, pid: mainPid });
 	}
 }
 

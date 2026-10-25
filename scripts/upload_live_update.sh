@@ -34,6 +34,7 @@ Options:
   --platform PLATFORM  darwin-arm64, darwin-x64, win32-x64, linux-x64, ...
   --bucket BUCKET      Default: ${BUCKET}
   --region REGION      Default: ${REGION}
+  --profile PROFILE    AWS CLI profile, e.g. backboard-release. Default: \$AWS_PROFILE
   --notify URL         Events server publish URL. Default: \$BACKBOARD_LIVE_EVENTS_PUBLISH_URL
   --dry-run            Print what would be uploaded
 EOF
@@ -45,6 +46,7 @@ while [[ $# -gt 0 ]]; do
     --platform) PLATFORM="$2"; shift 2 ;;
     --bucket) BUCKET="$2"; shift 2 ;;
     --region) REGION="$2"; shift 2 ;;
+    --profile) AWS_PROFILE_NAME="$2"; shift 2 ;;
     --notify) NOTIFY_URL="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;

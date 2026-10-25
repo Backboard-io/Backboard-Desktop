@@ -10,7 +10,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { describe, test } from 'node:test';
-import { isAllowedLiveUpdateUrl, isSafeRelativePath, parseLiveFileList, rolloutBucket, tryAcquireLiveUpdateLeadership } from '../liveUpdatesCore';
+import { isAllowedLiveUpdateUrl, isSafeRelativePath, parseLiveFileList, recordLiveAppRunning, rolloutBucket, tryAcquireLiveUpdateLeadership } from '../liveUpdatesCore';
 
 describe('live update staging', () => {
 	test('accepts only relative paths that stay inside the component folder', () => {
@@ -52,6 +52,25 @@ describe('live update staging', () => {
 				child.once('exit', () => resolve(out.trim()));
 			})));
 			assert.equal(results.filter(result => result === 'true').length, 1, results.join(','));
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test('the running app corrects the boot record a relaunch left behind', async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-boot-'));
+		const bootPath = path.join(dir, 'app', 'boot.json');
+		const read = () => JSON.parse(fs.readFileSync(bootPath, 'utf8'));
+		try {
+			fs.mkdirSync(path.dirname(bootPath));
+			// The process that wrote this only handed over its arguments and exited.
+			fs.writeFileSync(bootPath, JSON.stringify({ id: 'app-1', attempts: 1, pid: 111, healthy: false }));
+			await recordLiveAppRunning(dir, 'app-1', 222);
+			const overlay = read();
+			// A second launch recorded an overlay attempt while the installed app runs.
+			fs.writeFileSync(bootPath, JSON.stringify({ id: 'app-2', attempts: 1, pid: 333, healthy: false }));
+			await recordLiveAppRunning(dir, undefined, 222);
+			assert.deepEqual([overlay, read()], [{ id: 'app-1', attempts: 0, pid: 222, healthy: true }, { attempts: 0, pid: 222 }]);
 		} finally {
 			fs.rmSync(dir, { recursive: true, force: true });
 		}

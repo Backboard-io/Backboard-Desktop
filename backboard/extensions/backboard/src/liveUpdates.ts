@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { applyLiveManifest, connectLiveUpdateEvents, fetchLiveUpdateBuffer, LiveComponentPointer, LiveConfigRecord, LiveEventSource, LiveUpdateConfig, LiveUpdateEnvelope, liveAgentDir, liveAgentProtocolVersion, markLiveAppHealthy, readDesiredApp, readLiveJson, releaseLiveUpdateLeadership, tryAcquireLiveUpdateLeadership, verifyLiveUpdateEnvelope } from './liveUpdatesCore';
+import { applyLiveManifest, connectLiveUpdateEvents, fetchLiveUpdateBuffer, LiveComponentPointer, LiveConfigRecord, LiveEventSource, LiveUpdateConfig, LiveUpdateEnvelope, liveAgentDir, liveAgentProtocolVersion, readDesiredApp, readLiveJson, recordLiveAppRunning, releaseLiveUpdateLeadership, tryAcquireLiveUpdateLeadership, verifyLiveUpdateEnvelope } from './liveUpdatesCore';
 
 /** A restart the user can take to switch the app to (or off) a live update. */
 export interface LiveRestartState {
@@ -44,6 +44,12 @@ const defaultPollIntervalSeconds = 300;
 const focusCheckThrottleMs = 60_000;
 /** Spreads the fetches that one pushed event causes across clients. */
 const pushedCheckJitterMs = 20_000;
+/**
+ * How often every window re-reads the staged state. The file watcher on the
+ * live updates folder (outside the workspace) does not fire reliably, and
+ * only the leading window fetches, so the others would miss a staged update.
+ */
+const localRefreshIntervalMs = 15_000;
 const flagContextPrefix = 'backboard.flag.';
 
 let currentLiveConfig: LiveUpdateConfig | undefined;
@@ -103,15 +109,16 @@ export function initializeBackboardLiveUpdates(context: vscode.ExtensionContext,
 	const liveUpdatesDir = liveUpdatesDirectory(context);
 	const runningAppId = process.env.BACKBOARD_LIVE_APP_ID || undefined;
 	log(`[live] started from ${runningAppId ? `overlay ${runningAppId}` : 'the installed app'} (${process.env.BACKBOARD_LIVE_APP_SELECTION ?? 'no boot loader'})`);
-	if (runningAppId) {
-		// The extension host only runs once main, the window and the extension
-		// host itself have started, so the overlay counts as healthy.
-		void markLiveAppHealthy(liveUpdatesDir, runningAppId).catch(error => log(`[live] could not record a healthy start: ${error}`));
-	}
 	const config = readLiveProductConfig();
 	if (!config?.manifestUrl || !config.publicKeys?.length) {
 		log('[live] off: product.json has no backboardLiveUpdate manifest URL and keys');
 		return undefined;
+	}
+	if (process.env.BACKBOARD_LIVE_APP_SELECTION && !process.env.VSCODE_DEV) {
+		// The extension host only runs once main, the window and the extension
+		// host itself have started, so a running overlay counts as healthy. Its
+		// parent is the app's main process.
+		void recordLiveAppRunning(liveUpdatesDir, runningAppId, process.ppid).catch(error => log(`[live] could not record the running app: ${error}`));
 	}
 	const controller = new LiveUpdates(context, liveUpdatesDir, runningAppId, { ...config, manifestUrl: config.manifestUrl, publicKeys: config.publicKeys }, options, log);
 	context.subscriptions.push(controller);
@@ -127,6 +134,7 @@ class LiveUpdates implements LiveUpdatesController {
 	private lastCheck = 0;
 	private running: Promise<void> | undefined;
 	private flagKeys = new Set<string>();
+	private appliedConfig: string | undefined;
 	private notifiedUrgentId: string | undefined;
 	/** Withdrawn as broken: leaving such an overlay is urgent. */
 	private revokedIds: ReadonlySet<string> = new Set();
@@ -149,6 +157,8 @@ class LiveUpdates implements LiveUpdatesController {
 			this.applyConfigFromDisk();
 		};
 		this.disposables.push(watcher, watcher.onDidChange(onChange), watcher.onDidCreate(onChange), watcher.onDidDelete(onChange));
+		const localRefresh = setInterval(onChange, localRefreshIntervalMs);
+		this.disposables.push({ dispose: () => clearInterval(localRefresh) });
 		// Spread so windows restored together do not all check at once.
 		const startup = setTimeout(() => void this.tick(false), startupCheckDelayMs + Math.random() * startupCheckDelayMs);
 		this.disposables.push({ dispose: () => clearTimeout(startup) });
@@ -287,6 +297,11 @@ class LiveUpdates implements LiveUpdatesController {
 	private applyConfigFromDisk(): void {
 		const record = readLiveJson<LiveConfigRecord>(path.join(this.liveUpdatesDir, 'config.json'));
 		const config = record?.config ?? {};
+		const serialized = JSON.stringify(config);
+		if (serialized === this.appliedConfig) {
+			return;
+		}
+		this.appliedConfig = serialized;
 		currentLiveConfig = config;
 		const flags = config.flags ?? {};
 		const keys = new Set(Object.keys(flags));

@@ -56,8 +56,12 @@ BASE_VERSION=3.1.27 ./scripts/build_live_update_macos.sh --rollout 10 --notes "F
 
 Upload (objects first, manifest last), then optionally announce to connected apps:
 ```bash
-BACKBOARD_LIVE_EVENTS_PUBLISH_URL=https://…/publish BACKBOARD_LIVE_EVENTS_TOKEN=… ./scripts/upload_live_update.sh --channel stable --platform darwin-arm64
+./scripts/upload_live_update.sh --channel stable --platform darwin-arm64 --profile backboard-release
 ```
+
+Use the `backboard-release` AWS profile (the default profile's key is not valid for the
+bucket). With an events server, also set `BACKBOARD_LIVE_EVENTS_PUBLISH_URL` and
+`BACKBOARD_LIVE_EVENTS_TOKEN` so connected apps fetch immediately.
 
 Useful `publish.mjs` options: `--rollout N` (percent of machines), `--urgent` (prompt to
 restart now), `--bases 3.1.27,3.1.28` (several installed versions),
