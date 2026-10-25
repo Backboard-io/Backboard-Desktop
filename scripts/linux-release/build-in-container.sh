@@ -145,6 +145,11 @@ node "${SOURCE_ROOT}/scripts/linux-release/stamp-product.mjs" \
 	--source-commit "${SOURCE_COMMIT}" \
 	--source-dirty-sha256 "${SOURCE_DIRTY_SHA256}"
 
+node "${SOURCE_ROOT}/scripts/live-updates/stamp-product.mjs" \
+	--product "${APP_RESOURCES}/product.json" \
+	--channel "${CHANNEL}" \
+	--platform "linux-x64"
+
 echo "Removing unused and foreign native runtime payloads"
 bash "${SOURCE_ROOT}/scripts/linux-release/prune-native-payloads.sh" "${APP_RESOURCES}"
 

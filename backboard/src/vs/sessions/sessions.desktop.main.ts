@@ -221,6 +221,7 @@ import './contrib/rightWorkbench/electron-browser/canvasMediaTime.js';
 import '../workbench/contrib/chat/electron-browser/backboardSso.contribution.js';
 import '../workbench/contrib/backboardBilling/electron-browser/backboardBillingUrl.contribution.js';
 import '../workbench/contrib/backboardAnalytics/electron-browser/backboardAttribution.contribution.js';
+import '../workbench/contrib/backboardLiveUpdate/electron-browser/backboardLiveUpdate.contribution.js';
 import '../workbench/contrib/chat/electron-browser/agentSessions/byokKeysService.js';
 
 // Local Agent Host
