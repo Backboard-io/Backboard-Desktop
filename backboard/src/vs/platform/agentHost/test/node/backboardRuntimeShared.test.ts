@@ -32,6 +32,16 @@ suite('Backboard runtime configuration', () => {
 		assert.strictEqual(resolved.values.showReasoning, undefined);
 	});
 
+	test('starts new chats with Computer Use off and keeps an explicit choice', () => {
+		const resolved = resolveBackboardSessionConfig(undefined);
+
+		assert.strictEqual(resolved.schema.properties?.computerUse?.default, false);
+		assert.strictEqual(resolved.values.computerUse, false);
+		assert.strictEqual(createBackboardTurnSettings(undefined, undefined, undefined).computerUse, false);
+		assert.strictEqual(resolveBackboardSessionConfig({ computerUse: true }).values.computerUse, true);
+		assert.strictEqual(createBackboardTurnSettings({ computerUse: true }, undefined, undefined).computerUse, true);
+	});
+
 	test('derives the billing route from the selected model id', () => {
 		const keyBilled = createBackboardTurnSettings(undefined, undefined, { id: 'openai-key/gpt-5.5' });
 		const backboard = createBackboardTurnSettings(undefined, undefined, { id: 'openai/gpt-5.5' });

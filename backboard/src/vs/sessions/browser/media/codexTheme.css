@@ -2436,5 +2436,12 @@ html body .monaco-workbench.agent-sessions-workbench .part.sessionspart :is(.new
 		}
 		.chat-input-toolbars { height: auto !important; min-height: 28px !important; margin-top: 6px !important; }
 	}
+	/* Editing a sent message keeps the composer surface but fills its request
+	 * row, aligned with the transcript column, instead of floating. */
+	.monaco-workbench.agent-sessions-workbench :is(.part.sessionspart, .optimus-chat-view) .interactive-session .interactive-input-part.chat-inline-edit {
+		width: 100% !important;
+		max-width: none !important;
+		margin: 0 !important;
+	}
 }
 

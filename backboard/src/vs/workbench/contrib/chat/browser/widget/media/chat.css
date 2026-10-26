@@ -4858,6 +4858,8 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .interactive-item-container .chat-edit-input-container {
 	width: 100%;
 	min-width: 0;
+	/* Room for the edit box's focus ring: the list row clips its content. */
+	padding-bottom: 2px;
 }
 
 /* Keep the inline editor's layout and controls within the request bubble. */
@@ -4885,11 +4887,62 @@ have to be updated for changes to the rules above, or to support more deeply nes
 	cursor: default;
 }
 
-/* Inactive bottom composers dim as one card. A transparent hit target covers
- * the editor and controls, without painting a dark rectangle over the prompt. */
+/* Inactive bottom composers keep their card opaque, because a floating
+ * composer sits over the transcript, and dim only what is drawn on it. A
+ * transparent hit target covers the editor and controls. */
 .interactive-session .interactive-input-part.chat-input-inactive {
 	position: relative;
-	opacity: 0.6;
+}
+
+.interactive-session .interactive-input-part.chat-input-inactive :is(.chat-input-container > *, .chat-secondary-toolbar) {
+	opacity: 0.5;
+}
+
+/* Editing a sent message turns it into a plain text box with Cancel and Send.
+ * Capability chips, pickers, voice input, context usage and the widgets that
+ * stack above the input (whose negative margins tuck them under it) belong to
+ * the bottom composer. The panel skins float the bottom composer with
+ * !important margins, widths and padding, so `:not(#chat-inline-edit)` lets
+ * the edit box fill its request row, aligned with the transcript column.
+ * (Simple's layered skin is scoped in codexTheme.css.) */
+.interactive-session .interactive-input-part.chat-inline-edit:not(#chat-inline-edit) {
+	width: 100% !important;
+	max-width: none !important;
+	margin: 0 !important;
+	padding: 0 !important;
+}
+
+.interactive-session .interactive-input-part.chat-inline-edit:not(.compact) > :not(.interactive-input-and-side-toolbar),
+.interactive-session .interactive-input-part.chat-inline-edit :is(.chat-input-toolbar, .chat-secondary-generic-chips, .chat-context-usage-container) {
+	display: none !important;
+}
+
+.interactive-session .interactive-input-part.chat-inline-edit .chat-input-toolbars {
+	align-items: center;
+	gap: 4px;
+}
+
+.interactive-session .interactive-input-part.chat-inline-edit .chat-inline-edit-cancel {
+	margin-left: auto;
+	height: 28px;
+	padding: 0 12px;
+	border: none;
+	border-radius: 14px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	font: inherit;
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.interactive-session .interactive-input-part.chat-inline-edit .chat-inline-edit-cancel:hover {
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+}
+
+.interactive-session .interactive-input-part.chat-inline-edit .chat-inline-edit-cancel:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
 }
 
 .interactive-session .interactive-input-part > .chat-input-overlay.disabled {
