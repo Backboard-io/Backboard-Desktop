@@ -118,7 +118,7 @@ import { getLatestTurnEditedFiles, IChatResponseViewModel, isResponseVM } from '
 import { IChatAgentService } from '../../../common/participants/chatAgents.js';
 import { ILanguageModelToolsService } from '../../../common/tools/languageModelToolsService.js';
 import { ChatHistoryNavigator } from '../../../common/widget/chatWidgetHistoryService.js';
-import { BackboardUsageMetricsAction, ChatSessionPrimaryPickerAction, ChatSubmitAction, IChatExecuteActionContext, OpenBackboardComposerOptionsAction, OpenChatThinkingPickerAction, OpenDelegationPickerAction, OpenModelPickerAction, OpenModePickerAction, OpenPermissionPickerAction, OpenSessionTargetPickerAction, OpenWorkspacePickerAction } from '../../actions/chatExecuteActions.js';
+import { BackboardUsageMetricsAction, ChatEditingSessionSubmitAction, ChatSessionPrimaryPickerAction, ChatSubmitAction, IChatExecuteActionContext, OpenBackboardComposerOptionsAction, OpenChatThinkingPickerAction, OpenDelegationPickerAction, OpenModelPickerAction, OpenModePickerAction, OpenPermissionPickerAction, OpenSessionTargetPickerAction, OpenWorkspacePickerAction } from '../../actions/chatExecuteActions.js';
 import { AgentSessionProviders, AgentSessionTarget, getAgentSessionProvider } from '../../agentSessions/agentSessions.js';
 import { IAgentSessionsService } from '../../agentSessions/agentSessionsService.js';
 import { ChatAttachmentModel } from '../../attachments/chatAttachmentModel.js';
@@ -1403,7 +1403,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		dom.clearNode(this.capabilityChips);
 		// Image and video generation are always available on Backboard models
 		// (their models are picked in the + menu), so they are not chips.
-		const selected = this.getBackboardGenericConfigOptions().filter(option => option.composerSelected && !isBackboardUnchippedOption(option.id));
+		// Capabilities belong to the session, so editing a sent message shows none.
+		const selected = this.inline ? [] : this.getBackboardGenericConfigOptions().filter(option => option.composerSelected && !isBackboardUnchippedOption(option.id));
 		this.capabilityChips.style.display = selected.length ? '' : 'none';
 		this.hasCapabilityChips = selected.length > 0;
 		this.updateAttachmentsRowVisibility();
@@ -3357,6 +3358,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		this.container = elements.root;
 		container.append(this.container);
 		this.container.classList.toggle('compact', this.options.renderStyle === 'compact');
+		// Editing a sent message renders a plain text box inside its request row.
+		this.container.classList.toggle('chat-inline-edit', this.inline);
 
 		// Create a scoped context key service for option group visibility expressions
 		// This isolates chatSessionOption.* context keys to this specific chat input instance
@@ -3793,9 +3796,19 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			},
 			hoverDelegate,
 			hiddenItemStrategy: HiddenItemStrategy.NoHide,
+			// An inline edit only resends the message: voice input and the
+			// other composer actions stay on the bottom composer.
+			actionViewItemProvider: this.inline
+				? action => action.id === ChatSubmitAction.ID || action.id === ChatEditingSessionSubmitAction.ID ? undefined : new HiddenActionViewItem(action)
+				: undefined,
 		}));
 		this.executeToolbar.getElement().classList.add('chat-execute-toolbar');
 		this.executeToolbar.context = { widget } satisfies IChatExecuteActionContext;
+		if (this.inline) {
+			const cancelEdit = dom.$('button.chat-inline-edit-cancel', { type: 'button', title: localize('chatInlineEdit.cancel.title', "Cancel editing (Escape)") }, localize('chatInlineEdit.cancel', "Cancel"));
+			this.executeToolbar.getElement().before(cancelEdit);
+			this._register(dom.addDisposableListener(cancelEdit, dom.EventType.CLICK, () => widget.finishedEditing()));
+		}
 		this._register(this.executeToolbar.onDidChangeMenuItems(() => {
 			if (this.cachedWidth && typeof this.cachedExecuteToolbarWidth === 'number' && this.cachedExecuteToolbarWidth !== this.executeToolbar.getItemsWidth()) {
 				this._toolbarRelayoutScheduler.schedule();

@@ -804,9 +804,9 @@ export function resolveBackboardSessionConfig(rawConfig: Record<string, unknown>
 						type: 'boolean',
 						title: localize('backboard.config.computerUse.title', "Computer Use"),
 						description: localize('backboard.config.computerUse.description', "Lets Backboard operate desktop apps. A fast vision model watches each app window, acts on it in the background, and shows an on-screen agent cursor; screenshots, mouse, and keyboard are the fallback."),
-						// On by default: an "operate my screen" request in a chat that
-						// happened to start with it off was simply refused by the model.
-						default: true,
+						// Off by default: a new chat only gets desktop control after the
+						// user turns Computer on in the composer.
+						default: false,
 						sessionMutable: true,
 					},
 					[BACKBOARD_BROWSER_USE_CONFIG_KEY]: {
@@ -872,7 +872,7 @@ function normalizeBackboardConfig(rawConfig: Record<string, unknown> | undefined
 		// Web search is an automatic model capability, not a composer setting.
 		// Keep it enabled even for sessions that persisted the retired toggle as off.
 		[BACKBOARD_WEB_SEARCH_CONFIG_KEY]: true,
-		[BACKBOARD_COMPUTER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_COMPUTER_USE_CONFIG_KEY], true),
+		[BACKBOARD_COMPUTER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_COMPUTER_USE_CONFIG_KEY], false),
 		[BACKBOARD_BROWSER_USE_CONFIG_KEY]: booleanOf(merged[BACKBOARD_BROWSER_USE_CONFIG_KEY], false),
 		[BACKBOARD_NOTIFICATIONS_CONFIG_KEY]: booleanOf(merged[BACKBOARD_NOTIFICATIONS_CONFIG_KEY], false),
 		[BACKBOARD_IMAGE_MODEL_CONFIG_KEY]: normalizeImageModelSelection(merged[BACKBOARD_IMAGE_MODEL_CONFIG_KEY], merged[BACKBOARD_IMAGE_GENERATION_CONFIG_KEY]),
@@ -920,7 +920,7 @@ export function createBackboardTurnSettings(
 		intensity,
 		memory: stringConfigValue(values, BACKBOARD_MEMORY_CONFIG_KEY, 'off'),
 		webSearch: true,
-		computerUse: booleanConfigValue(values, BACKBOARD_COMPUTER_USE_CONFIG_KEY, true),
+		computerUse: booleanConfigValue(values, BACKBOARD_COMPUTER_USE_CONFIG_KEY, false),
 		browserUse: booleanConfigValue(values, BACKBOARD_BROWSER_USE_CONFIG_KEY, false),
 		notifications: booleanConfigValue(values, BACKBOARD_NOTIFICATIONS_CONFIG_KEY, false),
 		// The wire booleans are derived from the selected models so the composer
