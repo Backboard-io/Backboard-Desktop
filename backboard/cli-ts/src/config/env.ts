@@ -87,6 +87,15 @@ export function resolveApiUrl(fileApiUrl?: string): string {
 }
 
 /**
+ * The product reported in `X-Backboard-Client`, e.g. `studio/3.1.26`. Backboard
+ * Studio sets BACKBOARD_CLIENT when it spawns cli-ts, so the backend counts its
+ * runs as Studio activity; standalone runs send no header.
+ */
+export function resolveClientHeader(): string | undefined {
+	return optionalTrimmed(process.env.BACKBOARD_CLIENT);
+}
+
+/**
  * Reads Backboard credentials from env first, then ~/.backboard/config.json.
  * Bun auto-loads `.env`, so no dotenv dependency is needed.
  */

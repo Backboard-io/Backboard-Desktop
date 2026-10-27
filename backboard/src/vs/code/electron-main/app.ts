@@ -129,6 +129,7 @@ import { ElectronPtyHostStarter } from '../../platform/terminal/electron-main/el
 import { PtyHostService } from '../../platform/terminal/node/ptyHostService.js';
 import { ElectronAgentHostStarter } from '../../platform/agentHost/electron-main/electronAgentHostStarter.js';
 import { ByokKeyStoreMainService } from '../../platform/agentHost/electron-main/byokKeyStoreMainService.js';
+import { StudioFirstLaunchReporter } from '../../platform/studioTracking/electron-main/studioFirstLaunchReporter.js';
 import { BYOK_KEY_STORE_CHANNEL } from '../../platform/agentHost/common/byokKeyStore.js';
 import { AgentHostProcessManager } from '../../platform/agentHost/node/agentHostService.js';
 import { isAgentHostEnabled } from '../../platform/agentHost/common/agentService.js';
@@ -723,7 +724,7 @@ export class CodeApplication extends Disposable {
 				this.lifecycleMainService.phase = LifecycleMainPhase.Eventually;
 
 				// Eventually Post Open Window Tasks
-				this.eventuallyAfterWindowOpen();
+				this.eventuallyAfterWindowOpen(appInstantiationService);
 			}, 2500));
 		}, 2500));
 		eventuallyPhaseScheduler.schedule();
@@ -1812,10 +1813,13 @@ export class CodeApplication extends Disposable {
 		}
 	}
 
-	private eventuallyAfterWindowOpen(): void {
+	private eventuallyAfterWindowOpen(instantiationService: IInstantiationService): void {
 
 		// Validate Device ID is up to date (delay this as it has shown significant perf impact)
 		// Refs: https://github.com/microsoft/vscode/issues/234064
 		validateDevDeviceId(this.stateService, this.logService);
+
+		// Report this installation's first launch for Backboard Studio adoption analytics
+		void instantiationService.createInstance(StudioFirstLaunchReporter, process).report();
 	}
 }

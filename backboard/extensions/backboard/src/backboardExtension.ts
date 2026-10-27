@@ -13,6 +13,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as readline from 'readline';
 import { codiconsStylesheetUri, fontBaseUri, iconBaseUri, panelHtml, webviewLocalResourceRoots } from './panel/panelHtml';
+import { registerStudioSignInTracking } from './studioTracking';
 import { attachBackboardLiveUpdates, currentBackboardUpdateChannel, initializeBackboardUpdates, readCurrentAppVersion, setPendingLiveRestart } from './updates';
 import { initializeBackboardLiveUpdates, installedAppRoot, liveCliInvocation } from './liveUpdates';
 import { installTerminalCommand } from './terminalCommand';
@@ -83,6 +84,9 @@ export function activate(context: vscode.ExtensionContext): void {
 			onRestartStateChange: state => void setPendingLiveRestart(state),
 		}));
 	}
+	const reportStudioSignIn = registerStudioSignInTracking(context, { apiConfig: backboardUsageApiConfig, output: backboardToolOutput });
+	const startupSignInCheck = setTimeout(reportStudioSignIn, 10_000);
+	context.subscriptions.push(new vscode.Disposable(() => clearTimeout(startupSignInCheck)));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.hasAlternativeCredentials', () => bridge.hasAlternativeCredentials()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.setupProviderKey', async () => {
 		const provider = await vscode.window.showQuickPick([
@@ -102,9 +106,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		if (await setApiKey()) {
 			bridge.restart();
 			bridge.warmUp();
+			reportStudioSignIn();
 		}
 	}));
-	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signIn', () => promptBackboardSso(bridge)));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signIn', async () => {
+		const signedIn = await promptBackboardSso(bridge);
+		if (signedIn) {
+			reportStudioSignIn();
+		}
+		return signedIn;
+	}));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signOut', () => bridge.signOut()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => panelProvider.refreshModels()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.generateCommitMessage', (rootUri: vscode.Uri | undefined, _context: unknown, token: vscode.CancellationToken | undefined) => generateBackboardCommitMessage(bridge, rootUri, token)));
@@ -124,11 +135,18 @@ export function activate(context: vscode.ExtensionContext): void {
 	const refreshBackboardState = () => {
 		void updateBackboardAuthContext();
 		panelProvider.refreshState();
+		// Every way of signing in ends by writing config.json, including onboarding's paste-a-key in the renderer.
+		reportStudioSignIn();
 	};
 	context.subscriptions.push(configWatcher);
 	context.subscriptions.push(configWatcher.onDidCreate(refreshBackboardState));
 	context.subscriptions.push(configWatcher.onDidChange(refreshBackboardState));
 	context.subscriptions.push(configWatcher.onDidDelete(refreshBackboardState));
+	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+		if (event.affectsConfiguration('backboard.apiKey') || event.affectsConfiguration('backboard.env') || event.affectsConfiguration('backboard.apiUrl')) {
+			reportStudioSignIn();
+		}
+	}));
 	const panelStateWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(backboardPanelStatePath()), path.basename(backboardPanelStatePath())));
 	const panelThreadsWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(backboardThreadsDir(), '*.json'));
 	let panelHistoryRefreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2740,6 +2758,8 @@ function serveCredentialEnv(): Record<string, string> {
 	const out: Record<string, string> = {
 		// Keep cli-ts session logs out of the user's workspace.
 		BACKBOARD_SESSION_ROOT: path.join(os.homedir(), '.backboard_ide', 'cli-ts-sessions'),
+		// Lets the backend count these runs as Backboard Studio activity.
+		BACKBOARD_CLIENT: `studio/${readCurrentAppVersion()}`,
 	};
 	const settings = readSettings().config;
 	const apiKey = configuredBackboardApiKey();
