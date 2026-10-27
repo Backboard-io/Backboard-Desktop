@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import type { BackboardEnv } from "../../config/env.ts";
+import { type BackboardEnv, resolveClientHeader } from "../../config/env.ts";
 import type { ServerEventLog } from "../../core/session/ServerEventLog.ts";
 import type { OpenAITool } from "../../core/tools/schema.ts";
 import { errorMessage } from "../../utils/errors.ts";
@@ -10,6 +10,7 @@ import type {
 	RunMessageOptions,
 } from "../AgentClient.ts";
 import {
+	CLIENT_HEADER,
 	MODEL_PAGE_LIMIT,
 	SYSTEM_ONE_DEFAULT_MODEL,
 	SYSTEM_ONE_PROVIDER,
@@ -109,9 +110,11 @@ export class BackboardClient implements AgentClient {
 	) {}
 
 	private headers(): Record<string, string> {
+		const client = resolveClientHeader();
 		return {
 			"X-API-Key": this.env.apiKey,
 			"Content-Type": "application/json",
+			...(client ? { [CLIENT_HEADER]: client } : {}),
 		};
 	}
 
