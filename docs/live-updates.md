@@ -23,9 +23,9 @@ itself. `publish.mjs` refuses these.
   unchanged files are cloned from the installed app, changed files are downloaded and
   hash-checked, and native files are symlinked to the signed originals.
 - `out/bootstrap-live.js` is the app's entry point. It starts the overlay when its
-  signature, base version and Electron version check out, otherwise the installed
-  app. If an overlay fails to start 3 times in a row it is marked bad, and the
-  installed app runs.
+  signature, base version, base build and Electron version check out, otherwise the
+  installed app. If an overlay fails to start 3 times in a row it is marked bad, and
+  the installed app runs.
 - The agent host runs the bundle with the app's signed `backboard-cli-ts` in Bun
   runtime mode (`BUN_BE_BUN=1`), so no new executable needs signing.
 
@@ -64,8 +64,33 @@ bucket). With an events server, also set `BACKBOARD_LIVE_EVENTS_PUBLISH_URL` and
 `BACKBOARD_LIVE_EVENTS_TOKEN` so connected apps fetch immediately.
 
 Useful `publish.mjs` options: `--rollout N` (percent of machines), `--urgent` (prompt to
-restart now), `--bases 3.1.27,3.1.28` (several installed versions),
-`--config flags.json`.
+restart now), `--bases 3.1.27,3.1.28` (several installed versions; list their builds with
+`--builds`, see below), `--config flags.json`.
+
+## Base builds
+
+A version number does not identify a build: a release can be packaged again under the
+same number from newer source. Each `app` and `agent` component therefore records
+`builds`, the installed apps it was made from, and runs only on those.
+
+- A build id is product.json `backboardBuildInfo.sourceCommit`, plus
+  `+<sourceDirtySha256>` when the package included uncommitted changes. Every release
+  package script stamps it (Windows stamps the commit only; CI builds are clean). A
+  package of the same clean commit has the same id.
+- `publish.mjs publish` takes the id from `--base-app` and refuses a base app without
+  one. `--builds ID,ID` adds the builds of the other releases named in `--bases`.
+- The extension, the boot loader and the agent host refuse a component whose `builds`
+  do not include the installed app's, like a version mismatch: the update log says
+  why, the installed app (or runtime) runs, and the extension drops the pointer at its
+  next check.
+- Components without `builds` (published before this check) are **refused**, not
+  matched by version. Nothing shows they are not older code than the installed build,
+  which is how sandbox 3.1.27 ran stale overlays after its rebuild on 2026-10-27.
+  Republish or roll back any `app`/`agent` component still live on a channel;
+  `publish.mjs` warns when it carries one over.
+- Installs from before this check (their boot loader and extension ignore `builds`)
+  still match by version alone. On those versions, roll back the `app` and `agent`
+  components before a rebuild under the same number goes latest.
 
 ## Roll back
 
@@ -79,8 +104,8 @@ machines that already staged it.
 
 ## Rules
 
-- Live updates only target the base releases they were built against. A user on an
-  older full release gets the full update first.
+- Live updates only target the base builds they were made from. A user on an older
+  full release gets the full update first.
 - Sequences only go up; apps refuse older manifests. Publish from one place, or keep
   `vscode-live-updates/` in sync.
 - Rotating the signing key means shipping the new public key in a full release before
@@ -96,7 +121,9 @@ machines that already staged it.
 
 ## Test
 
+Node only; no Electron test runner needed:
 ```bash
-node --test scripts/live-updates/test/live-updates.e2e.test.mjs   # needs ./scripts/dev.sh watch output
-./scripts/test.sh --run src/vs/platform/backboardLiveUpdate/test/node/liveUpdate.test.ts   # from backboard/
+node --test scripts/live-updates/test/live-updates.e2e.test.mjs   # needs compiled out/ (dev.sh watch, or transpile-client)
+npm run test-updater   # from backboard/extensions/backboard/, after tsgo --project ./tsconfig.json
+npm run test-node -- --run src/vs/platform/backboardLiveUpdate/test/node/liveUpdate.test.ts   # from backboard/, Node 24, after transpile-client
 ```

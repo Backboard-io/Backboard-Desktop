@@ -5,12 +5,92 @@
 
 import * as assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { describe, test } from 'node:test';
-import { isAllowedLiveUpdateUrl, isSafeRelativePath, parseLiveFileList, recordLiveAppRunning, rolloutBucket, tryAcquireLiveUpdateLeadership } from '../liveUpdatesCore';
+import { applyLiveManifest, isAllowedLiveUpdateUrl, isSafeRelativePath, LiveAgentComponent, LiveAppComponent, LiveApplyContext, liveAgentProtocolVersion, LiveUpdateEnvelope, LiveUpdateManifest, liveUpdateBuildId, liveUpdateKeyId, parseLiveFileList, readDesiredApp, recordLiveAppRunning, rolloutBucket, sha256, tryAcquireLiveUpdateLeadership } from '../liveUpdatesCore';
+
+describe('live update builds', () => {
+	const commit = 'af5489c6cb81d23ed6675756a9dadbe370434678';
+	const otherCommit = '0123456789abcdef0123456789abcdef01234567';
+	const cleanTree = sha256(Buffer.alloc(0));
+
+	test('identifies a build by its commit and any uncommitted changes', () => {
+		const dirty = 'b'.repeat(64);
+		assert.deepEqual([
+			liveUpdateBuildId({ sourceCommit: commit, sourceDirtySha256: cleanTree }),
+			liveUpdateBuildId({ sourceCommit: commit.toUpperCase() }),
+			liveUpdateBuildId({ sourceCommit: commit, sourceDirtySha256: dirty }),
+			liveUpdateBuildId({ sourceCommit: 'unknown', sourceDirtySha256: cleanTree }),
+			liveUpdateBuildId({ sourceDirtySha256: dirty }),
+			liveUpdateBuildId(undefined),
+		], [commit, commit, `${commit}+${dirty}`, undefined, undefined, undefined]);
+	});
+
+	test('uses only components made from the installed build and drops pointers to the rest', async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-builds-'));
+		const keys = crypto.generateKeyPairSync('ed25519');
+		const publicKey = keys.publicKey.export({ format: 'der', type: 'spki' }).toString('base64');
+		let sequence = 0;
+		const envelopeFor = (components: LiveUpdateManifest['components']): LiveUpdateEnvelope => {
+			const payload = Buffer.from(JSON.stringify({ schema: 1, channel: 'stable', platform: process.platform, arch: process.arch, sequence: ++sequence, createdAt: '', components } satisfies LiveUpdateManifest));
+			return { payload: payload.toString('base64'), signatures: [{ keyId: liveUpdateKeyId(publicKey), signature: crypto.sign(null, payload, keys.privateKey).toString('base64') }] };
+		};
+		const files = { url: 'files/x.json.gz', sha256: '0'.repeat(64), count: 1, bytes: 1 };
+		const bundle = 'console.log("live");\n';
+		const app: LiveAppComponent = { id: 'app-3.1.27-abc', bases: ['3.1.27'], builds: [commit], electron: '42.2.0', files };
+		const agent: LiveAgentComponent = { id: 'agent-abc', bases: ['3.1.27'], builds: [commit], protocolVersion: liveAgentProtocolVersion, bunVersion: '1.3.14', entry: 'cli.js', entrySha256: sha256(Buffer.from(bundle)), files };
+		// Folders that are already complete are not downloaded again, so no server is needed.
+		const stageFolders = () => {
+			fs.mkdirSync(path.join(dir, 'app', app.id, 'out'), { recursive: true });
+			fs.writeFileSync(path.join(dir, 'app', app.id, 'out', 'main.js'), '');
+			fs.writeFileSync(path.join(dir, 'app', app.id, '.complete'), '');
+			fs.mkdirSync(path.join(dir, 'agent', agent.id), { recursive: true });
+			fs.writeFileSync(path.join(dir, 'agent', agent.id, 'cli.js'), bundle);
+			fs.writeFileSync(path.join(dir, 'agent', agent.id, '.complete'), '');
+		};
+		const log: string[] = [];
+		const context = (appBuild: string | undefined): LiveApplyContext => ({
+			liveUpdatesDir: dir, baseAppRoot: dir, userAgent: 'test', log: line => log.push(line),
+			publicKeys: [publicKey], channel: 'stable', appVersion: '3.1.27', appBuild, electronVersion: '42.2.0', machineId: 'machine',
+		});
+		const apply = async (appBuild: string | undefined, components: LiveUpdateManifest['components']) => {
+			const result = await applyLiveManifest(context(appBuild), 'http://127.0.0.1/manifest.json', envelopeFor(components));
+			return {
+				app: result.desiredAppId,
+				agent: result.agentId,
+				pointers: ['app', 'agent'].filter(component => fs.existsSync(path.join(dir, component, 'current.json'))),
+				errors: result.errors,
+			};
+		};
+		try {
+			stageFolders();
+			const sameBuild = await apply(commit, { app, agent });
+			const desired = [commit, otherCommit].map(appBuild => readDesiredApp(dir, [publicKey], { appVersion: '3.1.27', appBuild }, '42.2.0')?.id);
+			// The same version rebuilt from other source.
+			const rebuilt = await apply(otherCommit, { app, agent });
+			stageFolders();
+			await apply(commit, { app, agent });
+			// Published before builds were recorded.
+			const legacy = await apply(commit, { app: { ...app, builds: undefined }, agent: { ...agent, builds: undefined } });
+			const unknownBuild = await apply(undefined, { app, agent });
+			assert.deepEqual({ sameBuild, desired, rebuilt, legacy, unknownBuild }, {
+				sameBuild: { app: app.id, agent: agent.id, pointers: ['app', 'agent'], errors: [] },
+				desired: [app.id, undefined],
+				rebuilt: { app: undefined, agent: undefined, pointers: [], errors: [] },
+				legacy: { app: undefined, agent: undefined, pointers: [], errors: [] },
+				unknownBuild: { app: undefined, agent: undefined, pointers: [], errors: [] },
+			});
+			assert.ok(log.includes(`[live] app overlay ${app.id} was made from build ${commit}, installed app is build ${otherCommit}; not using it`), log.join('\n'));
+			assert.ok(log.includes(`[live] agent runtime ${agent.id} records no base build; not using it`), log.join('\n'));
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
 
 describe('live update staging', () => {
 	test('accepts only relative paths that stay inside the component folder', () => {
