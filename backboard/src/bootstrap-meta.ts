@@ -5,6 +5,7 @@
 
 import { createRequire } from 'node:module';
 import type { IProductConfiguration } from './vs/base/common/product.js';
+import { LIVE_APP_ID_ENV } from './vs/platform/backboardLiveUpdate/common/liveUpdate.js';
 
 const require = createRequire(import.meta.url);
 
@@ -24,6 +25,13 @@ if (process.env['VSCODE_DEV']) {
 		productOverridesObj = require('../product.overrides.json');
 		productObj = Object.assign(productObj, productOverridesObj);
 	} catch (error) { /* ignore */ }
+}
+
+// A live update overlay replaces files whose checksums the installed app's
+// product.json records. Its integrity comes from its signed manifest, so the
+// installation check would only report a false "corrupt installation".
+if (process.env[LIVE_APP_ID_ENV]) {
+	productObj = { ...productObj, checksums: undefined };
 }
 
 export const product = productObj;
