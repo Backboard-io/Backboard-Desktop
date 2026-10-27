@@ -7,8 +7,9 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import { tmpdir } from 'os';
 import { join } from '../../../../base/common/path.js';
+import { isWindows } from '../../../../base/common/platform.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { claudeSubscriptionProbeEnv, ensureClaudeCodeReady, isClaudeCodeOutdated, isClaudeLoggedInRecently, isClaudeSubscriptionAuthStatus } from '../../node/shared/agentLoginProbes.js';
+import { claudeSubscriptionProbeEnv, claudeSupportsAuthCommands, ensureClaudeCodeReady, isClaudeCodeOutdated, isClaudeLoggedInRecently, isClaudeSubscriptionAuthStatus, isSpawnableExecutable } from '../../node/shared/agentLoginProbes.js';
 
 suite('Agent login probes', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -69,6 +70,34 @@ suite('Agent login probes', () => {
 			isClaudeCodeOutdated('1.9.999', '2.0.0'),
 			isClaudeCodeOutdated('unknown', '2.1.285'),
 		], [true, false, false, false, true, false]);
+	});
+
+	test('skips the npm stub left when Claude Code\'s postinstall did not run, instead of failing with spawn ENOEXEC', async () => {
+		if (isWindows) {
+			return;
+		}
+		const dir = await fs.promises.mkdtemp(join(tmpdir(), 'claude-spawnable-'));
+		try {
+			const files: Record<string, Buffer> = {
+				npmStub: Buffer.from('echo "Error: claude native binary not installed." >&2\nexit 1\n'),
+				script: Buffer.from('#!/bin/sh\necho "2.1.308 (Claude Code)"\n'),
+				machO: Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01]),
+				universal: Buffer.from([0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x02]),
+				elf: Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00]),
+				empty: Buffer.alloc(0),
+			};
+			const spawnable: Record<string, boolean> = {};
+			for (const [name, contents] of Object.entries(files)) {
+				await fs.promises.writeFile(join(dir, name), contents, { mode: 0o755 });
+				spawnable[name] = isSpawnableExecutable(join(dir, name));
+			}
+			assert.deepStrictEqual({ spawnable, stubSupportsAuth: await claudeSupportsAuthCommands(join(dir, 'npmStub')) }, {
+				spawnable: { npmStub: false, script: true, machO: true, universal: true, elf: true, empty: false },
+				stubSupportsAuth: false,
+			});
+		} finally {
+			await fs.promises.rm(dir, { recursive: true, force: true });
+		}
 	});
 
 	suite('ensureClaudeCodeReady', () => {
