@@ -6,12 +6,13 @@
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import { isAbsolute, join, relative } from '../../../base/common/path.js';
-import { ILiveAgentPointer, ILiveUpdateProductConfiguration, LIVE_AGENT_PROTOCOL_VERSION, LIVE_UPDATE_ID_PATTERN, LIVE_UPDATES_DIR_ENV } from '../common/liveUpdate.js';
+import { ILiveAgentPointer, ILiveUpdateBuildInfo, ILiveUpdateProductConfiguration, LIVE_AGENT_PROTOCOL_VERSION, LIVE_UPDATE_ID_PATTERN, LIVE_UPDATES_DIR_ENV, liveComponentBuildMismatch, liveUpdateBuildId } from '../common/liveUpdate.js';
 import { readLiveUpdateJson } from './liveUpdateBoot.js';
 import { verifyLiveUpdateEnvelope } from './liveUpdateSignature.js';
 
 export interface ILiveAgentProduct {
 	readonly backboardVersion?: string;
+	readonly backboardBuildInfo?: ILiveUpdateBuildInfo;
 	readonly backboardLiveUpdate?: ILiveUpdateProductConfiguration;
 }
 
@@ -55,7 +56,8 @@ export function resolveLiveAgent(product: ILiveAgentProduct, liveUpdatesDir = pr
 	const component = verifyLiveUpdateEnvelope(pointer.manifest, publicKeys)?.components.agent;
 	if (component?.id !== pointer.id
 		|| component.protocolVersion !== LIVE_AGENT_PROTOCOL_VERSION
-		|| !component.bases.includes(product.backboardVersion)) {
+		|| !component.bases.includes(product.backboardVersion)
+		|| liveComponentBuildMismatch(component.builds, liveUpdateBuildId(product.backboardBuildInfo))) {
 		return undefined;
 	}
 	const bundleDir = join(agentDir, pointer.id);

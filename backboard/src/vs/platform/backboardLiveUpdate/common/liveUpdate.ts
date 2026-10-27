@@ -46,6 +46,49 @@ export interface ILiveUpdateProductConfiguration {
 	readonly publicKeys?: readonly string[];
 }
 
+/** `backboardBuildInfo` in product.json, stamped by every release package script. */
+export interface ILiveUpdateBuildInfo {
+	readonly sourceCommit?: string;
+	/** sha256 of the uncommitted changes the build included; the empty-input hash when there were none. */
+	readonly sourceDirtySha256?: string;
+}
+
+/** sha256 of no bytes: what the package scripts record for a clean source tree. */
+const CLEAN_SOURCE_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
+/**
+ * Identifies the source an installed app was built from: the commit, plus the
+ * hash of uncommitted changes when there were any. Two packages of one version
+ * built from different source get different ids. Undefined when the app does
+ * not record its source (development builds, `unknown` commits).
+ * scripts/live-updates/publish.mjs and the extension compute the same string.
+ */
+export function liveUpdateBuildId(info: ILiveUpdateBuildInfo | undefined): string | undefined {
+	const commit = info?.sourceCommit;
+	if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/i.test(commit)) {
+		return undefined;
+	}
+	const dirty = info?.sourceDirtySha256;
+	return typeof dirty === 'string' && /^[0-9a-f]{64}$/i.test(dirty) && dirty.toLowerCase() !== CLEAN_SOURCE_SHA256
+		? `${commit}+${dirty}`.toLowerCase()
+		: commit.toLowerCase();
+}
+
+/**
+ * Why a component's `builds` rule out the installed app, or undefined when they
+ * include it. A component without builds was published before they were
+ * recorded, so nothing shows it is not older code than this build: refused.
+ */
+export function liveComponentBuildMismatch(builds: readonly string[] | undefined, installedBuild: string | undefined): string | undefined {
+	if (!Array.isArray(builds) || !builds.length) {
+		return 'records no base build';
+	}
+	if (!installedBuild) {
+		return 'needs a known build, installed app records none';
+	}
+	return builds.includes(installedBuild) ? undefined : `was made from build ${builds.join(', ')}, installed app is build ${installedBuild}`;
+}
+
 export interface ILiveUpdateSignature {
 	/** First 16 hex characters of sha256 over the DER public key. */
 	readonly keyId: string;
@@ -77,6 +120,13 @@ export interface ILiveAppComponent {
 	readonly id: string;
 	/** Installed app versions (`backboardVersion`) the overlay was built against. */
 	readonly bases: readonly string[];
+	/**
+	 * `liveUpdateBuildId` of each installed app the component was made from. A
+	 * release rebuilt under the same version is a different build, and an
+	 * overlay of older code must not run over it. Components without builds
+	 * (published before they were recorded) are refused.
+	 */
+	readonly builds?: readonly string[];
 	/** Electron version of those installs. Native modules are shared, so it must match. */
 	readonly electron: string;
 	readonly files: ILiveUpdateFileSet;
@@ -89,6 +139,8 @@ export interface ILiveAppComponent {
 export interface ILiveAgentComponent {
 	readonly id: string;
 	readonly bases: readonly string[];
+	/** As for app overlays: the bundle replaces the runtime compiled into those builds only. */
+	readonly builds?: readonly string[];
 	readonly protocolVersion: number;
 	/** Bun version embedded in the cli-ts executable the bundle was built for. */
 	readonly bunVersion: string;

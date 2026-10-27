@@ -170,6 +170,25 @@ function readJson(file) {
 	return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+/** sha256 of no bytes: what the package scripts record for a clean source tree. */
+const CLEAN_SOURCE_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
+/**
+ * The source build of a packaged app (product.json `backboardBuildInfo`): its
+ * commit, plus the hash of uncommitted changes when there were any. Must equal
+ * liveUpdateBuildId in src/vs/platform/backboardLiveUpdate/common/liveUpdate.ts.
+ */
+function buildId(info) {
+	const commit = info?.sourceCommit;
+	if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/i.test(commit)) {
+		return undefined;
+	}
+	const dirty = info?.sourceDirtySha256;
+	return typeof dirty === 'string' && /^[0-9a-f]{64}$/i.test(dirty) && dirty.toLowerCase() !== CLEAN_SOURCE_SHA256
+		? `${commit}+${dirty}`.toLowerCase()
+		: commit.toLowerCase();
+}
+
 function electronVersion(appRoot) {
 	const plist = path.resolve(appRoot, '..', '..', 'Frameworks', 'Electron Framework.framework', 'Resources', 'Info.plist');
 	if (fs.existsSync(plist)) {
@@ -301,7 +320,7 @@ function checkSourceForFullReleaseChanges(baseRoot, force) {
 	}
 }
 
-function buildAppComponent(options, store, baseRoot, bases) {
+function buildAppComponent(options, store, baseRoot, bases, builds) {
 	const newRoot = resolveAppRoot(required(options, 'new-app'));
 	const force = !!options.force;
 	const electron = electronVersion(baseRoot);
@@ -381,6 +400,7 @@ function buildAppComponent(options, store, baseRoot, bases) {
 	return {
 		id,
 		bases,
+		builds,
 		electron,
 		files: fileSet,
 		...rolloutAndNotes(options, id),
@@ -393,7 +413,7 @@ function packagedCliPath(appRoot) {
 	return path.join(appRoot, 'extensions', 'backboard', 'bin', name);
 }
 
-function buildAgentComponent(options, store, baseRoot, bases, platform) {
+function buildAgentComponent(options, store, baseRoot, bases, builds, platform) {
 	const protocolSource = fs.readFileSync(path.join(CLI_TS_ROOT, 'src', 'config', 'runtimeIdentity.ts'), 'utf8');
 	const protocolVersion = Number(/PROTOCOL_VERSION\s*=\s*(\d+)/.exec(protocolSource)?.[1]);
 	if (protocolVersion !== HOST_AGENT_PROTOCOL_VERSION) {
@@ -440,7 +460,7 @@ function buildAgentComponent(options, store, baseRoot, bases, platform) {
 		const fileSet = store.putFileList({ schema: 1, files });
 		const id = `agent-${fileSet.sha256.slice(0, 12)}`;
 		console.log(`agent ${id}: ${files.length} files, ${Math.round(fileSet.bytes / 1024)} KB, Bun ${bunVersion}`);
-		return { id, bases, protocolVersion, bunVersion, entry, entrySha256, files: fileSet, ...rolloutAndNotes(options, id) };
+		return { id, bases, builds, protocolVersion, bunVersion, entry, entrySha256, files: fileSet, ...rolloutAndNotes(options, id) };
 	} finally {
 		fs.rmSync(outdir, { recursive: true, force: true });
 	}
@@ -540,15 +560,36 @@ function publish(options) {
 		if (!bases.length || bases.some(base => !base)) {
 			fail('cannot tell which release this update is for; pass --bases');
 		}
+		// Clients refuse a component made from another build of their version,
+		// so a release rebuilt under the same number never runs older overlays.
+		const baseBuild = buildId(baseProduct.backboardBuildInfo);
+		if (!baseBuild) {
+			fail('the base app does not record the source it was built from (product.json backboardBuildInfo.sourceCommit); use a packaged release build');
+		}
+		const extraBuilds = typeof options.builds === 'string' ? options.builds.split(',').map(value => value.trim().toLowerCase()).filter(Boolean) : [];
+		const invalidBuild = extraBuilds.find(value => !/^[0-9a-f]{40}(\+[0-9a-f]{64})?$/.test(value));
+		if (invalidBuild) {
+			fail(`--builds takes build ids (commit, or commit+dirty-tree sha256), not ${invalidBuild}`);
+		}
+		const builds = [...new Set([baseBuild, ...extraBuilds])];
+		console.log(`base build ${baseBuild}${builds.length > 1 ? ` (+${builds.length - 1} from --builds)` : ''}`);
+		if (bases.length > 1 && builds.length === 1) {
+			console.warn('warning: installs of the other --bases take this update only if their builds are listed with --builds');
+		}
 		if (wantsApp) {
-			manifest.components.app = buildAppComponent(options, store, baseRoot, bases);
+			manifest.components.app = buildAppComponent(options, store, baseRoot, bases, builds);
 		}
 		if (wantsAgent) {
-			manifest.components.agent = buildAgentComponent(options, store, baseRoot, bases, platform);
+			manifest.components.agent = buildAgentComponent(options, store, baseRoot, bases, builds, platform);
 		}
 	}
 	if (config) {
 		manifest.config = config;
+	}
+	for (const [name, component] of Object.entries(manifest.components)) {
+		if (!component.builds?.length) {
+			console.warn(`warning: ${name} ${component.id} (kept from the previous manifest) records no base build, so current apps ignore it; republish or roll it back`);
+		}
 	}
 	console.log(`objects: ${store.added} new (${Math.round(store.addedBytes / 1024)} KB compressed)`);
 	writeManifest(dir, manifest, key);

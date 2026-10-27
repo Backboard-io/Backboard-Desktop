@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { applyLiveManifest, connectLiveUpdateEvents, fetchLiveUpdateBuffer, LiveComponentPointer, LiveConfigRecord, LiveEventSource, LiveUpdateConfig, LiveUpdateEnvelope, liveAgentDir, liveAgentProtocolVersion, readDesiredApp, readLiveJson, recordLiveAppRunning, releaseLiveUpdateLeadership, tryAcquireLiveUpdateLeadership, verifyLiveUpdateEnvelope } from './liveUpdatesCore';
+import { applyLiveManifest, connectLiveUpdateEvents, fetchLiveUpdateBuffer, installedAppMismatch, LiveComponentPointer, LiveConfigRecord, LiveEventSource, LiveUpdateConfig, LiveUpdateEnvelope, liveAgentDir, liveAgentProtocolVersion, liveUpdateBuildId, readDesiredApp, readLiveJson, recordLiveAppRunning, releaseLiveUpdateLeadership, tryAcquireLiveUpdateLeadership, verifyLiveUpdateEnvelope } from './liveUpdatesCore';
 
 /** A restart the user can take to switch the app to (or off) a live update. */
 export interface LiveRestartState {
@@ -37,6 +37,8 @@ interface LiveUpdateProductConfig {
 	readonly eventsUrl?: string;
 	readonly publicKeys?: readonly string[];
 	readonly backboardVersion?: string;
+	/** `liveUpdateBuildId` of the installed app. */
+	readonly backboardBuild?: string;
 }
 
 const startupCheckDelayMs = 5_000;
@@ -65,12 +67,12 @@ export function installedAppRoot(): string {
 }
 
 function readLiveProductConfig(): LiveUpdateProductConfig | undefined {
-	const product = readLiveJson<{ backboardVersion?: string; backboardLiveUpdate?: LiveUpdateProductConfig }>(path.join(vscode.env.appRoot, 'product.json'));
+	const product = readLiveJson<{ backboardVersion?: string; backboardBuildInfo?: { sourceCommit?: unknown; sourceDirtySha256?: unknown }; backboardLiveUpdate?: LiveUpdateProductConfig }>(path.join(vscode.env.appRoot, 'product.json'));
 	// Development builds take their keys from product.overrides.json, which the
 	// main process merges the same way (bootstrap-meta.ts).
 	const overrides = process.env.VSCODE_DEV ? readLiveJson<{ backboardLiveUpdate?: LiveUpdateProductConfig }>(path.join(vscode.env.appRoot, 'product.overrides.json')) : undefined;
 	const config = overrides?.backboardLiveUpdate ?? product?.backboardLiveUpdate;
-	return config ? { ...config, backboardVersion: product?.backboardVersion } : undefined;
+	return config ? { ...config, backboardVersion: product?.backboardVersion, backboardBuild: liveUpdateBuildId(product?.backboardBuildInfo) } : undefined;
 }
 
 function liveUpdatesDirectory(context: vscode.ExtensionContext): string {
@@ -90,7 +92,8 @@ export function liveCliInvocation(packagedCliPath: string): { command: string; a
 	}
 	const pointer = readLiveJson<LiveComponentPointer>(path.join(liveAgentDir(liveUpdatesDir), 'current.json'));
 	const component = verifyLiveUpdateEnvelope(pointer?.manifest, config.publicKeys)?.components.agent;
-	if (!pointer?.entry || component?.id !== pointer.id || component.protocolVersion !== liveAgentProtocolVersion || !component.bases.includes(config.backboardVersion)) {
+	if (!pointer?.entry || component?.id !== pointer.id || component.protocolVersion !== liveAgentProtocolVersion
+		|| installedAppMismatch(component, { appVersion: config.backboardVersion, appBuild: config.backboardBuild })) {
 		return undefined;
 	}
 	const entry = path.join(liveAgentDir(liveUpdatesDir), pointer.id, ...component.entry.split('/'));
@@ -248,6 +251,7 @@ class LiveUpdates implements LiveUpdatesController {
 				publicKeys: this.config.publicKeys,
 				channel: this.options.channel,
 				appVersion: this.options.appVersion,
+				appBuild: this.config.backboardBuild,
 				electronVersion: process.versions.electron ?? '',
 				machineId: vscode.env.machineId,
 				runningAppId: this.runningAppId,
@@ -272,7 +276,7 @@ class LiveUpdates implements LiveUpdatesController {
 		if (process.env.VSCODE_DEV || !process.env.BACKBOARD_LIVE_APP_SELECTION) {
 			return;
 		}
-		const app = readDesiredApp(this.liveUpdatesDir, this.config.publicKeys, this.options.appVersion, process.versions.electron ?? '');
+		const app = readDesiredApp(this.liveUpdatesDir, this.config.publicKeys, { appVersion: this.options.appVersion, appBuild: this.config.backboardBuild }, process.versions.electron ?? '');
 		const leavingRevoked = !!this.runningAppId && this.revokedIds.has(this.runningAppId);
 		const next: LiveRestartState | undefined = app?.id !== this.runningAppId ? { targetId: app?.id, urgent: !!app?.urgent || leavingRevoked, notes: app?.notes } : undefined;
 		if (next?.targetId === this._restartState?.targetId && next?.urgent === this._restartState?.urgent && !!next === !!this._restartState) {

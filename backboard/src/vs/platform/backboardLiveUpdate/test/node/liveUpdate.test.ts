@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { dirname, join } from '../../../../base/common/path.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { ILiveAgentComponent, ILiveAppComponent, ILiveUpdateEnvelope, ILiveUpdateManifest } from '../../common/liveUpdate.js';
+import { ILiveAgentComponent, ILiveAppComponent, ILiveUpdateBuildInfo, ILiveUpdateEnvelope, ILiveUpdateManifest, liveUpdateBuildId } from '../../common/liveUpdate.js';
 import { resolveLiveAgent } from '../../node/liveAgent.js';
 import { selectLiveAppRoot } from '../../node/liveUpdateBoot.js';
 import { liveUpdateKeyId, verifyLiveUpdateEnvelope } from '../../node/liveUpdateSignature.js';
@@ -30,6 +30,9 @@ function signManifest(manifest: ILiveUpdateManifest, key: ITestKey): ILiveUpdate
 }
 
 const files = { url: 'files/x.json.gz', sha256: '0'.repeat(64), count: 1, bytes: 1 };
+const commit = 'af5489c6cb81d23ed6675756a9dadbe370434678';
+const cleanTree = createHash('sha256').digest('hex');
+const buildInfo: ILiveUpdateBuildInfo = { sourceCommit: commit, sourceDirtySha256: cleanTree };
 
 function manifestWith(components: ILiveUpdateManifest['components']): ILiveUpdateManifest {
 	return { schema: 1, channel: 'stable', platform: process.platform, arch: process.arch, sequence: 1, createdAt: '', components };
@@ -59,16 +62,28 @@ suite('Backboard live updates', () => {
 		fs.writeFileSync(join(liveUpdatesDir, 'app', 'current.json'), JSON.stringify({ schema: 1, id: app.id, manifest: signManifest(manifestWith({ app }), signer), stagedAt: '' }));
 	}
 
-	function select(overrides: { keys?: string[]; version?: string; electron?: string; isDev?: boolean } = {}) {
+	function select(overrides: { keys?: string[]; version?: string; build?: ILiveUpdateBuildInfo; electron?: string; isDev?: boolean } = {}) {
 		return selectLiveAppRoot({
 			liveUpdatesDir,
-			product: { backboardVersion: overrides.version ?? '3.1.27', backboardLiveUpdate: { publicKeys: overrides.keys ?? [key.publicKey] } },
+			product: { backboardVersion: overrides.version ?? '3.1.27', backboardBuildInfo: overrides.build ?? buildInfo, backboardLiveUpdate: { publicKeys: overrides.keys ?? [key.publicKey] } },
 			electronVersion: overrides.electron ?? '42.2.0',
 			isDev: overrides.isDev ?? false,
 		});
 	}
 
-	const app: ILiveAppComponent = { id: 'app-3.1.27-abc', bases: ['3.1.27'], electron: '42.2.0', files };
+	const app: ILiveAppComponent = { id: 'app-3.1.27-abc', bases: ['3.1.27'], builds: [commit], electron: '42.2.0', files };
+
+	test('identifies a build by its commit and any uncommitted changes', () => {
+		const dirty = 'b'.repeat(64);
+		assert.deepStrictEqual([
+			liveUpdateBuildId(buildInfo),
+			liveUpdateBuildId({ sourceCommit: commit.toUpperCase() }),
+			liveUpdateBuildId({ sourceCommit: commit, sourceDirtySha256: dirty }),
+			liveUpdateBuildId({ sourceCommit: 'unknown', sourceDirtySha256: cleanTree }),
+			liveUpdateBuildId({ sourceDirtySha256: dirty }),
+			liveUpdateBuildId(undefined),
+		], [commit, commit, `${commit}+${dirty}`, undefined, undefined, undefined]);
+	});
 
 	test('verifies envelopes only against trusted keys', () => {
 		const envelope = signManifest(manifestWith({ app }), key);
@@ -126,7 +141,33 @@ suite('Backboard live updates', () => {
 		]);
 	});
 
-	test('picks a staged agent bundle only when it is intact and speaks the host protocol', () => {
+	test('runs the installed app instead of an overlay made from another build of its version', () => {
+		const otherCommit = '0123456789abcdef0123456789abcdef01234567';
+		const dirty = 'c'.repeat(64);
+		stageApp(app);
+		const reasons = [
+			select({ build: { sourceCommit: otherCommit, sourceDirtySha256: cleanTree } }),
+			select({ build: { sourceCommit: commit, sourceDirtySha256: dirty } }),
+			select({ build: { sourceCommit: 'unknown' } }),
+		].map(selection => selection.root ?? selection.reason);
+		// Published before builds were recorded: nothing shows it is not older code.
+		stageApp({ ...app, id: 'app-3.1.27-legacy', builds: undefined });
+		const legacy = select();
+		reasons.push(legacy.root ?? legacy.reason);
+		// Several builds may be listed; any one of them fits.
+		stageApp({ ...app, id: 'app-3.1.27-both', builds: [otherCommit, commit] });
+		const listed = select({ build: { sourceCommit: otherCommit } });
+		reasons.push(listed.root ?? listed.reason);
+		assert.deepStrictEqual(reasons, [
+			`overlay ${app.id} was made from build ${commit}, installed app is build ${otherCommit}`,
+			`overlay ${app.id} was made from build ${commit}, installed app is build ${commit}+${dirty}`,
+			`overlay ${app.id} needs a known build, installed app records none`,
+			'overlay app-3.1.27-legacy records no base build',
+			join(liveUpdatesDir, 'app', 'app-3.1.27-both'),
+		]);
+	});
+
+	test('picks a staged agent bundle only when it is made from this build, intact and speaks the host protocol', () => {
 		const bundle = 'console.log("live");\n';
 		const stageAgent = (agent: ILiveAgentComponent) => {
 			const entry = join(liveUpdatesDir, 'agent', agent.id, agent.entry);
@@ -135,15 +176,19 @@ suite('Backboard live updates', () => {
 			fs.writeFileSync(join(liveUpdatesDir, 'agent', 'current.json'), JSON.stringify({ schema: 1, id: agent.id, entry, manifest: signManifest(manifestWith({ agent }), key), stagedAt: '' }));
 			return entry;
 		};
-		const product = { backboardVersion: '3.1.27', backboardLiveUpdate: { publicKeys: [key.publicKey] } };
-		const agent: ILiveAgentComponent = { id: 'agent-abc', bases: ['3.1.27'], protocolVersion: 1, bunVersion: '1.3.14', entry: 'cli.js', entrySha256: createHash('sha256').update(bundle).digest('hex'), files };
+		const product = { backboardVersion: '3.1.27', backboardBuildInfo: buildInfo, backboardLiveUpdate: { publicKeys: [key.publicKey] } };
+		const agent: ILiveAgentComponent = { id: 'agent-abc', bases: ['3.1.27'], builds: [commit], protocolVersion: 1, bunVersion: '1.3.14', entry: 'cli.js', entrySha256: createHash('sha256').update(bundle).digest('hex'), files };
 		const entry = stageAgent(agent);
 		const valid = resolveLiveAgent(product, liveUpdatesDir)?.entry;
 		const otherBase = resolveLiveAgent({ ...product, backboardVersion: '3.1.26' }, liveUpdatesDir);
+		const otherBuild = resolveLiveAgent({ ...product, backboardBuildInfo: { sourceCommit: '0123456789abcdef0123456789abcdef01234567' } }, liveUpdatesDir);
+		stageAgent({ ...agent, builds: undefined });
+		const unrecordedBuild = resolveLiveAgent(product, liveUpdatesDir);
+		stageAgent(agent);
 		fs.writeFileSync(entry, 'console.log("tampered with");\n');
 		const tampered = resolveLiveAgent(product, liveUpdatesDir);
 		stageAgent({ ...agent, id: 'agent-def', protocolVersion: 2 });
 		const newerProtocol = resolveLiveAgent(product, liveUpdatesDir);
-		assert.deepStrictEqual([valid, otherBase, tampered, newerProtocol], [entry, undefined, undefined, undefined]);
+		assert.deepStrictEqual([valid, otherBase, otherBuild, unrecordedBuild, tampered, newerProtocol], [entry, undefined, undefined, undefined, undefined, undefined]);
 	});
 });
