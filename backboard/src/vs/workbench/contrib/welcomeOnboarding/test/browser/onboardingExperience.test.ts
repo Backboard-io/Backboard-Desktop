@@ -6,6 +6,10 @@
 import assert from 'assert';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
+import { ContextKeyService } from '../../../../../platform/contextkey/browser/contextKeyService.js';
+import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
+import { BackboardAuthContextKeys } from '../../../chat/common/backboardAuth.js';
 import { OnboardingVariationA } from '../../browser/onboardingVariationA.js';
 import { OnboardingExperience, ONBOARDING_STEPS, OnboardingStepId } from '../../common/onboardingTypes.js';
 
@@ -19,7 +23,7 @@ type ExperienceHarness = {
 suite('Backboard onboarding experience', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('Simple onboarding customizes, signs in, then offers plans before completion', () => {
+	function stepHarness(alreadyConnected: boolean) {
 		const harness = Object.create(OnboardingVariationA.prototype) as {
 			selectedExperience: OnboardingExperience;
 			steps: typeof ONBOARDING_STEPS;
@@ -27,7 +31,9 @@ suite('Backboard onboarding experience', () => {
 			_renderStepFrame(): void;
 			_logAction(): void;
 			_dismiss(reason: string): void;
+			_isAlreadyConnected(): boolean;
 			_advanceOrComplete(): void;
+			_prevStep(): void;
 			_visibleSteps(): readonly OnboardingStepId[];
 		};
 		harness.selectedExperience = OnboardingExperience.Simple;
@@ -35,17 +41,56 @@ suite('Backboard onboarding experience', () => {
 		harness.currentStepIndex = 0;
 		harness._renderStepFrame = () => undefined;
 		harness._logAction = () => undefined;
+		harness._isAlreadyConnected = () => alreadyConnected;
 		const outcomes: string[] = [];
 		harness._dismiss = reason => outcomes.push(reason);
 		const visited: OnboardingStepId[] = [];
-		for (let index = 0; index < ONBOARDING_STEPS.length; index++) {
-			visited.push(harness.steps[harness.currentStepIndex]);
-			harness._advanceOrComplete();
-		}
+		const walk = () => {
+			while (!outcomes.length) {
+				visited.push(harness.steps[harness.currentStepIndex]);
+				harness._advanceOrComplete();
+			}
+		};
+		return { harness, outcomes, visited, walk };
+	}
+
+	test('Simple onboarding customizes, signs in, then offers plans before completion', () => {
+		const { harness, outcomes, visited, walk } = stepHarness(false);
+		walk();
 		assert.deepStrictEqual({ visible: harness._visibleSteps(), visited, outcomes }, {
 			visible: [OnboardingStepId.Theme, OnboardingStepId.Welcome, OnboardingStepId.Billing],
 			visited: [OnboardingStepId.Theme, OnboardingStepId.Welcome, OnboardingStepId.Billing],
 			outcomes: ['complete'],
+		});
+	});
+
+	test('someone already signed in is not asked to sign in again', () => {
+		const { harness, outcomes, visited, walk } = stepHarness(true);
+		walk();
+		harness._prevStep();
+		assert.deepStrictEqual({ visible: harness._visibleSteps(), visited, outcomes, backTo: harness.steps[harness.currentStepIndex] }, {
+			visible: [OnboardingStepId.Theme, OnboardingStepId.Billing],
+			visited: [OnboardingStepId.Theme, OnboardingStepId.Billing],
+			outcomes: ['complete'],
+			backTo: OnboardingStepId.Theme,
+		});
+	});
+
+	test('only a Backboard sign-in or a provider key skips the sign-in screen', () => {
+		const harness = Object.create(OnboardingVariationA.prototype) as { contextKeyService: IContextKeyService; _isAlreadyConnected(): boolean };
+		const context = disposables.add(new ContextKeyService(new TestConfigurationService()));
+		harness.contextKeyService = context;
+		const nothing = harness._isAlreadyConnected();
+		// A guest key or a ChatGPT/Claude connection: the sign-in screen still has something to offer.
+		BackboardAuthContextKeys.alternativeConfigured.bindTo(context).set(true);
+		const guestOrSubscription = harness._isAlreadyConnected();
+		const providerKey = BackboardAuthContextKeys.providerKeyConfigured.bindTo(context);
+		providerKey.set(true);
+		const withProviderKey = harness._isAlreadyConnected();
+		providerKey.set(false);
+		BackboardAuthContextKeys.signedIn.bindTo(context).set(true);
+		assert.deepStrictEqual({ nothing, guestOrSubscription, withProviderKey, signedIn: harness._isAlreadyConnected() }, {
+			nothing: false, guestOrSubscription: false, withProviderKey: true, signedIn: true,
 		});
 	});
 

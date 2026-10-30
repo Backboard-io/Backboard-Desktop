@@ -18,6 +18,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { Severity, INotificationService } from '../../../../platform/notification/common/notification.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { EXTENSION_IDENTIFIER_REGEX, EXTENSION_INSTALL_SKIP_PUBLISHER_TRUST_CONTEXT, EXTENSION_INSTALL_SKIP_WALKTHROUGH_CONTEXT, IExtensionGalleryService, IExtensionIdentifier, IExtensionManagementService } from '../../../../platform/extensionManagement/common/extensionManagement.js';
@@ -31,13 +32,14 @@ import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { IBackboardAnalyticsService } from '../../../services/backboardAnalytics/common/backboardAnalytics.js';
 import { IAccessibilityService } from '../../../../platform/accessibility/common/accessibility.js';
-import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+import { IStorageService, IStorageValueChangeEvent, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 import { IWorkbenchColorTheme, IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
 import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
 import { IBackboardBillingService } from '../../backboardBilling/common/backboardBilling.js';
 import { BillingPlansView } from '../../backboardBilling/browser/billingPlansView.js';
+import { BackboardAuthContextKeys } from '../../chat/common/backboardAuth.js';
 import { OPEN_AGENTS_WINDOW_COMMAND_ID } from '../../chat/common/constants.js';
 import { SessionType } from '../../chat/common/chatSessionsService.js';
 import { ADD_PROVIDER_KEY_COMMAND_ID } from '../../chat/browser/byokKeys/byokKeys.js';
@@ -57,6 +59,7 @@ import {
 } from '../common/onboardingTypes.js';
 import { createCustomizePanel, IThemePreviewPalette, OTHER_PREVIEW_PALETTE, ThemeChoice } from './onboardingCustomize.js';
 import { createMadeByFooter, createSignInPanel } from './onboardingSignIn.js';
+import { isWorkbenchVisible, onceWorkbenchVisible } from './workbenchVisibility.js';
 
 type OnboardingStepViewClassification = {
 	owner: 'cwebster-99';
@@ -201,6 +204,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private readonly footerFocusableElements: HTMLElement[] = [];
 	private readonly stepFocusableElements: HTMLElement[] = [];
 	private readonly stepFade = this._register(new MutableDisposable());
+	/** Waits for this mode to come on screen before a first-run show. */
+	private readonly pendingShow = this._register(new MutableDisposable());
 
 	/** What Enter does on the current screen, as on Devin's onboarding. */
 	private enterAction: (() => void) | undefined;
@@ -236,10 +241,25 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		@IBackboardAnalyticsService private readonly analytics: IBackboardAnalyticsService,
 		@IBackboardBillingService private readonly billingService: IBackboardBillingService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
+		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 	) {
 		super();
 
 		this._syncSelectedThemeWithCurrentTheme();
+		this._register(this.storageService.onDidChangeValue(StorageScope.APPLICATION, ONBOARDING_STORAGE_KEY, this._store)(event => this._onDidChangeOnboardingState(event)));
+	}
+
+	/**
+	 * Another mode window finished or skipped onboarding: put this copy away
+	 * without recording a dismissal or overwriting the state it saved.
+	 */
+	private _onDidChangeOnboardingState(event: IStorageValueChangeEvent): void {
+		if (event.external && this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)) {
+			this.pendingShow.clear();
+			if (this.overlay) {
+				this._removeFromDOM();
+			}
+		}
 	}
 
 	private _syncSelectedThemeWithCurrentTheme(): void {
@@ -254,7 +274,25 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		return this._isShowing;
 	}
 
+	showWhenVisible(): void {
+		if (this.overlay || this.pendingShow.value) {
+			return;
+		}
+		const showIfStillNew = () => {
+			this.pendingShow.clear();
+			if (!this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)) {
+				this.show();
+			}
+		};
+		if (isWorkbenchVisible()) {
+			showIfStillNew();
+		} else {
+			this.pendingShow.value = onceWorkbenchVisible(showIfStillNew);
+		}
+	}
+
 	show(): void {
+		this.pendingShow.clear();
 		if (this.overlay) {
 			return;
 		}
@@ -572,6 +610,15 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		return product.defaultChatAgent?.provider?.default?.id === 'backboard';
 	}
 
+	/**
+	 * A Backboard sign-in or a provider key from the API Keys page, so the
+	 * sign-in screen has nothing to offer. A guest key does not count.
+	 */
+	private _isAlreadyConnected(): boolean {
+		return this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) === true
+			|| this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.providerKeyConfigured.key) === true;
+	}
+
 	private _nextStep(): void {
 		const nextStepIndex = this._nextVisibleStepIndex();
 		if (nextStepIndex === undefined) {
@@ -661,6 +708,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _shouldSkipStep(step: OnboardingStepId): boolean {
+		if (step === OnboardingStepId.Welcome && this._isAlreadyConnected()) {
+			return true;
+		}
+
 		if (this.selectedExperience === OnboardingExperience.Simple) {
 			return step === OnboardingStepId.ImportSettings;
 		}

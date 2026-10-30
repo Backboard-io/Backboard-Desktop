@@ -19,7 +19,7 @@ import { InMemoryFileSystemProvider } from '../../../../../platform/files/common
 import { NullLogService } from '../../../../../platform/log/common/log.js';
 import { IPathService } from '../../../../services/path/common/pathService.js';
 import { BackboardAuthService } from '../../browser/backboardAuthService.js';
-import { BackboardAuthContextKeys } from '../../common/backboardAuth.js';
+import { BackboardAuthContextKeys, BackboardTitleBarSignInWhen } from '../../common/backboardAuth.js';
 
 suite('Backboard auth state', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
@@ -85,6 +85,50 @@ suite('Backboard auth state', () => {
 		});
 		assert.deepStrictEqual(auth.state(), [false, true]);
 		assert.strictEqual(auth.context.getContextKeyValue(BackboardAuthContextKeys.resolved.key), true);
+	});
+
+	test('keeps a guest key apart from a connected subscription or provider key', async () => {
+		const auth = await setup('{"guest":{"api_key":"guest-test-key"}}', false);
+		const byo = () => auth.context.getContextKeyValue<boolean>(BackboardAuthContextKeys.byoConfigured.key);
+		assert.deepStrictEqual([auth.state(), byo()], [[false, true], false]);
+		auth.setCheck(async () => true);
+		await auth.service.refresh();
+		assert.deepStrictEqual([auth.state(), byo()], [[false, true], true]);
+		auth.setCheck(async () => false);
+		await auth.service.refresh();
+		BackboardAuthContextKeys.providerKeyConfigured.bindTo(auth.context).set(true);
+		assert.deepStrictEqual([auth.state(), byo()], [[false, true], true]);
+	});
+
+	test('keeps a connected subscription through a failed probe and drops it on verified sign-out', async () => {
+		const auth = await setup('{}', true);
+		const byo = () => auth.context.getContextKeyValue<boolean>(BackboardAuthContextKeys.byoConfigured.key);
+		const connected = byo();
+		auth.setCheck(async () => { throw new Error('extension host restarting'); });
+		await auth.service.refresh();
+		const duringFailure = byo();
+		auth.setCheck(async () => false);
+		await auth.service.refresh();
+		assert.deepStrictEqual({ connected, duringFailure, afterSignOut: byo() }, { connected: true, duringFailure: true, afterSignOut: false });
+	});
+
+	test('offers the title bar Sign in only to someone with no credentials of their own', async () => {
+		const shown = (auth: { context: ContextKeyService }) => auth.context.contextMatchesRules(BackboardTitleBarSignInWhen);
+		const probe = new DeferredPromise<boolean>();
+		const starting = await setup('{}', false, { check: () => probe.p, waitForInitial: false });
+		const whileChecking = shown(starting);
+		await probe.complete(false);
+		await starting.service.refresh();
+		const providerKey = await setup('{}', false);
+		BackboardAuthContextKeys.providerKeyConfigured.bindTo(providerKey.context).set(true);
+		assert.deepStrictEqual({
+			whileChecking,
+			signedOut: shown(starting),
+			guest: shown(await setup('{"guest":{"api_key":"guest-test-key"}}', false)),
+			subscription: shown(await setup('{}', true)),
+			providerKey: shown(providerKey),
+			signedIn: shown(await setup('{"oauth":{"access_token":"test-token"}}')),
+		}, { whileChecking: false, signedOut: true, guest: true, subscription: false, providerKey: false, signedIn: false });
 	});
 
 	test('restores saved SSO credentials on window startup', async () => {

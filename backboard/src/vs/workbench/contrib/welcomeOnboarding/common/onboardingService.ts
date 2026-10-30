@@ -29,6 +29,14 @@ export interface IOnboardingService {
 	show(): void;
 
 	/**
+	 * Show the onboarding modal for a new user once this window is on screen.
+	 * Every mode window starts at launch, so each would otherwise put up its
+	 * own copy. Does nothing if onboarding was finished or skipped elsewhere
+	 * by then.
+	 */
+	showWhenVisible(): void;
+
+	/**
 	 * Reset onboarding state in the current session and show the modal.
 	 */
 	reset(): void;
