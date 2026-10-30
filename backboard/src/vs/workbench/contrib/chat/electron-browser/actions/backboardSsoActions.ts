@@ -22,7 +22,7 @@ import { ILogService } from '../../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
 import { ChatEntitlementContextKeys, IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
-import { BackboardAuthContextKeys, IBackboardAuthService } from '../../common/backboardAuth.js';
+import { BackboardAuthContextKeys, BackboardTitleBarSignInWhen, IBackboardAuthService } from '../../common/backboardAuth.js';
 
 
 const backboardCategory = localize2('backboard.category', "Backboard");
@@ -138,10 +138,7 @@ export function registerBackboardSsoActions(): void {
 		},
 		group: 'navigation',
 		order: 0,
-		when: ContextKeyExpr.and(
-			BackboardAuthContextKeys.enabled,
-			BackboardAuthContextKeys.signedIn.negate()
-		),
+		when: BackboardTitleBarSignInWhen,
 	});
 }
 
