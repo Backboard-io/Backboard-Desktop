@@ -191,6 +191,42 @@
 	color: var(--vscode-descriptionForeground);
 }
 
+.onboarding-signin-waiting {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 4px 10px;
+	margin: 14px 0 0;
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.onboarding-signin-waiting .onboarding-signin-link {
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+.onboarding-signin-message {
+	max-width: 100%;
+	margin: 10px 0 0;
+	font-size: 12px;
+	line-height: 1.4;
+	color: var(--vscode-descriptionForeground);
+	overflow-wrap: anywhere;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+	overflow: hidden;
+}
+
+.onboarding-signin-message:empty {
+	display: none;
+}
+
+.onboarding-signin-message.error {
+	color: var(--vscode-errorForeground);
+}
+
 .onboarding-signin-link {
 	padding: 0;
 	font: inherit;
