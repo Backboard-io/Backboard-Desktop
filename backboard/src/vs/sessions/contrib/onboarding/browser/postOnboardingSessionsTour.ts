@@ -4,12 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { getActiveWindow } from '../../../../base/browser/dom.js';
-import { Disposable, DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution } from '../../../../workbench/common/contributions.js';
 import { ISpotlightTourIntro, ISpotlightTourStep, SpotlightTour, TourPlacement } from '../../../../workbench/contrib/welcomeOnboarding/browser/spotlightTour.js';
+import { isWorkbenchVisible, onceWorkbenchVisible } from '../../../../workbench/contrib/welcomeOnboarding/browser/workbenchVisibility.js';
 import { IBackboardOnboardingState, OnboardingExperience, ONBOARDING_SESSIONS_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY, shouldOfferOnboardingTour } from '../../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../workbench/services/layout/browser/layoutService.js';
 import { RightWorkbenchCommandId } from '../../rightWorkbench/browser/rightWorkbench.js';
@@ -35,6 +36,7 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
 	static readonly ID = 'workbench.contrib.postOnboardingSessionsTour';
 
 	private started = false;
+	private readonly whenVisible = this._register(new MutableDisposable());
 
 	constructor(
 		@IStorageService private readonly storageService: IStorageService,
@@ -50,7 +52,7 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
 		this._register(onboardingService.onDidFinishOnboardingFlow(() => this._maybeStart()));
 		if (!this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)
 			&& !environmentService.extensionDevelopmentLocationURI && !environmentService.extensionTestsLocationURI) {
-			onboardingService.show();
+			onboardingService.showWhenVisible();
 		}
 
 		this._maybeStart();
@@ -63,6 +65,14 @@ export class PostOnboardingSessionsTour extends Disposable implements IWorkbench
 
 	private _maybeStart(): void {
 		if (this.started || getActiveWindow().document.querySelector('.onboarding-a-overlay') || !this._shouldShowTour()) {
+			return;
+		}
+		if (!isWorkbenchVisible()) {
+			// Onboarding finished in another mode: offer the tour once the user comes here.
+			this.whenVisible.value ??= onceWorkbenchVisible(() => {
+				this.whenVisible.clear();
+				this._maybeStart();
+			});
 			return;
 		}
 

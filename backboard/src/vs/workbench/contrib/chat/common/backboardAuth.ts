@@ -6,7 +6,7 @@
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
 import { localize } from '../../../../nls.js';
-import { RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
+import { ContextKeyExpr, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
 import { FileOperationResult, IFileService, toFileOperationResult } from '../../../../platform/files/common/files.js';
 import product from '../../../../platform/product/common/product.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -39,6 +39,8 @@ export const SHOW_SIGN_IN_PROMPT_COMMAND_ID = 'backboard.showSignInPrompt';
 
 export namespace BackboardAuthContextKeys {
 	export const alternativeConfigured = new RawContextKey<boolean>('backboard.alternativeConfigured', false);
+	/** Like {@link alternativeConfigured}, but only a ChatGPT/Claude subscription or a provider key counts, not a guest key. */
+	export const byoConfigured = new RawContextKey<boolean>('backboard.byoConfigured', false);
 	/** A provider API key is stored in the IDE's key store (API Keys page). Set by the desktop key service. */
 	export const providerKeyConfigured = new RawContextKey<boolean>('backboard.providerKeyConfigured', false);
 	export const enabled = new RawContextKey<boolean>('backboard.authGateEnabled', false, {
@@ -57,6 +59,19 @@ export namespace BackboardAuthContextKeys {
 		description: localize('backboard.signedIn', "True when Backboard credentials are available on this machine."),
 	});
 }
+
+/**
+ * When the title bar offers Sign in: not while the startup credential check is
+ * still running, and not to someone already chatting on their own subscription
+ * or provider key. Both looked signed out and sent people through sign-in
+ * again. A guest still sees it.
+ */
+export const BackboardTitleBarSignInWhen = ContextKeyExpr.and(
+	BackboardAuthContextKeys.enabled,
+	BackboardAuthContextKeys.resolved,
+	BackboardAuthContextKeys.signedIn.negate(),
+	BackboardAuthContextKeys.byoConfigured.negate(),
+);
 
 export const BackboardAuthGateContextKeys = new Set([
 	BackboardAuthContextKeys.enabled.key,

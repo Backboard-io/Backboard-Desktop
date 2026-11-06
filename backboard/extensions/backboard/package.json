@@ -24,6 +24,7 @@
   "activationEvents": [
     "onStartupFinished",
     "onCommand:backboard.extension.signIn",
+    "onCommand:backboard.extension.runSignIn",
     "onCommand:backboard.extension.signOut",
     "onCommand:backboard.setApiKey",
     "onCommand:backboard.configureProviderKey",
@@ -254,7 +255,8 @@
     "test-updater": "node --test ./out/test/updatesCancellation.test.js ./out/test/updatesInstaller.test.js ./out/test/migrationNotice.test.js ./out/test/liveUpdatesCore.test.js",
     "test-updater-integration": "node --test ./out/test/updatesInstaller.integration.test.js",
     "test-updater-e2e": "node --test ./out/test/updatesInstaller.e2e.test.js",
-    "test-studio-tracking": "node --test ./out/test/studioTracking.test.js"
+    "test-studio-tracking": "node --test ./out/test/studioTracking.test.js",
+    "test-sign-in": "node --test ./out/test/signInCore.test.js"
   },
   "devDependencies": {
     "@types/node": "24.x"

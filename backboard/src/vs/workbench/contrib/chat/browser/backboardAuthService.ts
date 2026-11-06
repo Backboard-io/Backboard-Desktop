@@ -25,6 +25,7 @@ export class BackboardAuthService extends Disposable implements IBackboardAuthSe
 	private revision = 0;
 	private readonly signedInKey;
 	private readonly alternativeKey;
+	private readonly byoKey;
 	private readonly resolvedKey;
 	private readonly configResource;
 	private readonly enabled = isBackboardProduct();
@@ -35,6 +36,8 @@ export class BackboardAuthService extends Disposable implements IBackboardAuthSe
 	private fileRefreshQueued = false;
 	/** The latest answer from the CLI probe or a guest key; kept while a probe fails. */
 	private probedAlternative = false;
+	/** The latest answer from the CLI probe alone; kept while a probe fails. */
+	private probedByo = false;
 
 	constructor(
 		@IContextKeyService private readonly contextKeyService: IContextKeyService,
@@ -46,6 +49,7 @@ export class BackboardAuthService extends Disposable implements IBackboardAuthSe
 		super();
 		this.signedInKey = BackboardAuthContextKeys.signedIn.bindTo(contextKeyService);
 		this.alternativeKey = BackboardAuthContextKeys.alternativeConfigured.bindTo(contextKeyService);
+		this.byoKey = BackboardAuthContextKeys.byoConfigured.bindTo(contextKeyService);
 		this.resolvedKey = BackboardAuthContextKeys.resolved.bindTo(contextKeyService);
 		BackboardAuthContextKeys.enabled.bindTo(contextKeyService).set(this.enabled);
 		this.configResource = backboardConfigResource(pathService);
@@ -146,6 +150,9 @@ export class BackboardAuthService extends Disposable implements IBackboardAuthSe
 		if (revision !== this.revision || this._store.isDisposed) { return; }
 		this.contextKeyService.bufferChangeEvents(() => {
 			this.signedInKey.set(signedIn);
+			if (typeof alternative === 'boolean') {
+				this.probedByo = alternative;
+			}
 			if (guest) {
 				this.probedAlternative = true;
 			} else if (typeof alternative === 'boolean') {
@@ -166,6 +173,7 @@ export class BackboardAuthService extends Disposable implements IBackboardAuthSe
 	private updateAlternative(): void {
 		const providerKey = this.hasProviderKey();
 		this.alternativeKey.set(this.probedAlternative || providerKey);
+		this.byoKey.set(this.probedByo || providerKey);
 		if (providerKey) {
 			this.resolvedKey.set(true);
 		}

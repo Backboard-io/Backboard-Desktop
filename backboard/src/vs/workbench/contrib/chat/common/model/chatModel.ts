@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { ChatHistory } from './chatHistory.js';
+import { IChatSessionHistoryController, IChatSessionHistoryItem } from '../chatSessionsService.js';
 import { asArray } from '../../../../../base/common/arrays.js';
 import { softAssertNever } from '../../../../../base/common/assert.js';
 import { VSBuffer, decodeHex, encodeHex } from '../../../../../base/common/buffer.js';
@@ -1697,7 +1699,10 @@ export interface IChatModel extends IDisposable {
 	/** Whether this model will be kept alive while it is running or has edits */
 	readonly willKeepAlive: boolean;
 	readonly lastRequestObs: IObservable<IChatRequestModel | undefined>;
+	readonly history?: ChatHistory;
 	getRequests(): IChatRequestModel[];
+	toFullExport?(): Promise<IExportableChatData>;
+	takeHistoryTruncation?(): string | undefined;
 	setCheckpoint(requestId: string | undefined): void;
 
 	toExport(): IExportableChatData;
@@ -2759,12 +2764,42 @@ export class ChatModel extends Disposable implements IChatModel {
 
 
 
+	history: ChatHistory | undefined;
+	private historyTruncation: string | undefined;
+	takeHistoryTruncation(): string | undefined {
+		const id = this.historyTruncation;
+		this.historyTruncation = undefined;
+		return id;
+	}
+
+	setHistoryController(source: IChatSessionHistoryController, hydrate: (history: readonly IChatSessionHistoryItem[]) => ChatRequestModel[]): void {
+		this.history = this._register(new ChatHistory(source, this._requests, hydrate, () => this._requests));
+		// The live model owns the latest request. History windows own the rest.
+		this._requests = this._requests.slice(-1);
+		this._register(source.onDidChange(() => {
+			const ids = new Set(source.getTurnIds());
+			const live = this._requests.filter(request => !request.response?.isComplete || ids.has(request.id));
+			if (live.length !== this._requests.length) {
+				this._requests = live;
+				this._onDidChange.fire({ kind: 'initialize' });
+			}
+		}));
+	}
+
 	getRequests(): ChatRequestModel[] {
-		return this._requests;
+		if (!this.history) { return this._requests; }
+		return this.history.orderedRequests();
+	}
+
+	async toFullExport(): Promise<IExportableChatData> {
+		if (!this.history) { return this.toExport(); }
+		const result = { ...this.toExport([]), requests: [] as ISerializableChatRequestData[] };
+		await this.history.forEachPage(requests => result.requests.push(...this.toExport(requests).requests));
+		return result;
 	}
 
 	resetCheckpoint(): void {
-		for (const request of this._requests) {
+		for (const request of this.getRequests()) {
 			request.setShouldBeBlocked(false);
 			if (request.response) {
 				request.response.setBlockedState(false);
@@ -2776,7 +2811,7 @@ export class ChatModel extends Disposable implements IChatModel {
 		let checkpoint: ChatRequestModel | undefined;
 		let checkpointIndex = -1;
 		if (requestId !== undefined) {
-			this._requests.forEach((request, index) => {
+			this.getRequests().forEach((request, index) => {
 				if (request.id === requestId) {
 					checkpointIndex = index;
 					checkpoint = request;
@@ -2789,8 +2824,8 @@ export class ChatModel extends Disposable implements IChatModel {
 			}
 		}
 
-		for (let i = this._requests.length - 1; i >= 0; i -= 1) {
-			const request = this._requests[i];
+		for (let i = this.getRequests().length - 1; i >= 0; i -= 1) {
+			const request = this.getRequests()[i];
 			if (this._checkpoint && !checkpoint) {
 				request.setShouldBeBlocked(false);
 				if (request.response) {
@@ -2819,7 +2854,7 @@ export class ChatModel extends Disposable implements IChatModel {
 	}
 
 	private _setDisabledRequests(requestIds: IChatRequestDisablement[]) {
-		this._requests.forEach((request) => {
+		this.getRequests().forEach((request) => {
 			const shouldBeRemovedOnSend = requestIds.find(r => r.requestId === request.id);
 			request.shouldBeRemovedOnSend = shouldBeRemovedOnSend;
 			if (request.response) {
@@ -2846,10 +2881,11 @@ export class ChatModel extends Disposable implements IChatModel {
 		id?: string,
 		isSystemInitiated?: boolean,
 		systemInitiatedLabel?: string,
-		terminalExecutionId?: string
+		terminalExecutionId?: string,
+		historical = false
 	): ChatRequestModel {
-		const editedFileEvents = [...this.currentEditedFileEvents.values()];
-		this.currentEditedFileEvents.clear();
+		const editedFileEvents = historical ? [] : [...this.currentEditedFileEvents.values()];
+		if (!historical) { this.currentEditedFileEvents.clear(); }
 		const request = new ChatRequestModel({
 			restoredId: id,
 			session: this,
@@ -2879,9 +2915,20 @@ export class ChatModel extends Disposable implements IChatModel {
 			codeBlockInfos: undefined,
 		});
 
-		this._requests.push(request);
-		markChat(this.sessionResource, ChatPerfMark.RequestUiUpdated);
-		this._onDidChange.fire({ kind: 'addRequest', request });
+		if (historical) {
+			const disabled = this.editingSession?.requestDisablement.get().find(item => item.requestId === request.id);
+			request.shouldBeRemovedOnSend = disabled;
+			request.response.shouldBeRemovedOnSend = disabled;
+		} else {
+			this._requests.push(request);
+			this.history?.adopt(request);
+			markChat(this.sessionResource, ChatPerfMark.RequestUiUpdated);
+			this._onDidChange.fire({ kind: 'addRequest', request });
+			if (this.history) {
+				this._requests = this._requests.filter(item => item === request || !item.response?.isComplete);
+				this.history.collect();
+			}
+		}
 		return request;
 	}
 
@@ -2948,14 +2995,21 @@ export class ChatModel extends Disposable implements IChatModel {
 	}
 
 	removeRequest(id: string, reason: ChatRequestRemovalReason = ChatRequestRemovalReason.Removal): void {
-		const index = this._requests.findIndex(request => request.id === id);
-		const request = this._requests[index];
-
-		if (index !== -1) {
-			this._onDidChange.fire({ kind: 'removeRequest', requestId: request.id, responseId: request.response?.id, reason });
-			this._requests.splice(index, 1);
-			request.response?.dispose();
+		const request = this.getRequests().find(request => request.id === id);
+		if (!request) { return; }
+		if (this.history) {
+			const ids = this.history.source.getTurnIds();
+			const index = ids.indexOf(id);
+			if (index >= 0 && (this.historyTruncation === undefined || index < ids.indexOf(this.historyTruncation))) {
+				this.historyTruncation = id;
+			}
+			request.shouldBeRemovedOnSend = { requestId: id };
+			if (request.response) { request.response.shouldBeRemovedOnSend = { requestId: id }; }
 		}
+		this._requests = this._requests.filter(candidate => candidate !== request);
+		this._onDidChange.fire({ kind: 'removeRequest', requestId: request.id, responseId: request.response?.id, reason });
+		if (this.history) { this.history.collect(); }
+		else { request.response?.dispose(); }
 	}
 
 	cancelRequest(request: ChatRequestModel): void {
@@ -2990,11 +3044,11 @@ export class ChatModel extends Disposable implements IChatModel {
 		this._onDidChange.fire({ kind: 'addResponse', response });
 	}
 
-	toExport(): IExportableChatData {
+	toExport(requests: readonly ChatRequestModel[] = this.getRequests()): IExportableChatData {
 		return {
 			responderUsername: this.responderUsername,
 			initialLocation: this.initialLocation,
-			requests: this._requests.map((r): ISerializableChatRequestData => {
+			requests: requests.map((r): ISerializableChatRequestData => {
 				const message = {
 					...r.message,
 					// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3060,6 +3114,7 @@ export class ChatModel extends Disposable implements IChatModel {
 		// conversation data, serialization snapshot, and editing session are
 		// freed regardless.
 		this._requests.length = 0;
+		this.history = undefined;
 		this.dataSerializer = undefined;
 		this._editingSession = undefined;
 	}

@@ -31,7 +31,7 @@ export function registerChatPromptNavigationActions() {
 		}
 
 		run(accessor: ServicesAccessor, ...args: unknown[]) {
-			navigateUserPrompts(accessor, false);
+			return navigateUserPrompts(accessor, false);
 		}
 	});
 
@@ -52,12 +52,12 @@ export function registerChatPromptNavigationActions() {
 		}
 
 		run(accessor: ServicesAccessor, ...args: unknown[]) {
-			navigateUserPrompts(accessor, true);
+			return navigateUserPrompts(accessor, true);
 		}
 	});
 }
 
-function navigateUserPrompts(accessor: ServicesAccessor, reverse: boolean) {
+async function navigateUserPrompts(accessor: ServicesAccessor, reverse: boolean) {
 	const chatWidgetService = accessor.get(IChatWidgetService);
 	const widget = chatWidgetService.lastFocusedWidget;
 	if (!widget) {
@@ -87,6 +87,22 @@ function navigateUserPrompts(accessor: ServicesAccessor, reverse: boolean) {
 			// If a response is focused, find the associated request's index
 			// Response view models have a requestId property
 			currentIndex = userPrompts.findIndex(prompt => prompt.id === focused.requestId);
+		}
+	}
+
+	const history = widget.viewModel?.historyWindow;
+	if (history && currentIndex >= 0) {
+		const ids = history.history.source.getTurnIds();
+		const currentId = userPrompts[currentIndex].id;
+		const index = ids.indexOf(currentId);
+		const target = index >= 0 ? ids[index + (reverse ? -1 : 1)] : undefined;
+		if (target && !userPrompts.some(prompt => prompt.id === target)) {
+			const viewModel = widget.viewModel;
+			if (await history.load('latest', false, target) && widget.viewModel === viewModel) {
+				const prompt = viewModel.getItems().find((item): item is IChatRequestViewModel => isRequestVM(item) && item.id === target);
+				if (prompt) { widget.focus(prompt); widget.reveal(prompt); }
+			}
+			return;
 		}
 	}
 
