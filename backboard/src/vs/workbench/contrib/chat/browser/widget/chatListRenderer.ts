@@ -4571,6 +4571,31 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		}
 	}
 
+	/** Release resources of evicted history, including recycled offscreen templates. */
+	releaseHistoryItems(retained: ReadonlySet<string>): void {
+		for (const template of this._templates) {
+			const item = template.currentElement;
+			if (item && !retained.has(item.id)) {
+				template.elementDisposables.clear();
+				this.templateDataByRequestId.delete(item.id);
+				if (isResponseVM(item)) { this.responseTemplateDataByRequestId.delete(item.requestId); }
+				this.clearRenderedParts(template);
+			}
+		}
+		for (const map of [this.templateDataByRequestId, this.responseTemplateDataByRequestId]) {
+			for (const id of map.keys()) { if (!retained.has(id)) { map.delete(id); } }
+		}
+		for (const id of this.backboardTurnExpansionByResponseId.keys()) {
+			if (!retained.has(id)) { this.backboardTurnExpansionByResponseId.delete(id); }
+		}
+		for (const id of this.backboardTurnsSeenLive) {
+			if (!retained.has(id)) { this.backboardTurnsSeenLive.delete(id); }
+		}
+		for (const id of this._partEntranceWatermarkByResponseId.keys()) {
+			if (!retained.has(id)) { this._partEntranceWatermarkByResponseId.delete(id); }
+		}
+	}
+
 	disposeElement(node: ITreeNode<ChatTreeItem, FuzzyScore>, index: number, templateData: IChatListItemTemplate, details?: IListElementRenderDetails): void {
 		if (this.isLayoutTracingEnabled) {
 			this.traceLayout('disposeElement', `Disposing element, index=${index}`);

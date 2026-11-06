@@ -157,13 +157,13 @@ export function registerChatCopyActions() {
 			});
 		}
 
-		run(accessor: ServicesAccessor, context?: ChatTreeItem) {
+		async run(accessor: ServicesAccessor, context?: ChatTreeItem) {
 			const clipboardService = accessor.get(IClipboardService);
 			const chatWidgetService = accessor.get(IChatWidgetService);
 			const widget = ((isRequestVM(context) || isResponseVM(context)) && chatWidgetService.getWidgetBySessionResource(context.sessionResource)) || chatWidgetService.lastFocusedWidget;
 			if (widget) {
 				const viewModel = widget.viewModel;
-				const sessionAsText = viewModel?.getItems()
+				const sessionAsText = viewModel?.historyWindow && viewModel.getAllText ? await viewModel.getAllText() : viewModel?.getItems()
 					.filter((item): item is (IChatRequestViewModel | IChatResponseViewModel) => isRequestVM(item) || (isResponseVM(item) && !item.errorDetails?.responseIsFiltered))
 					.map(item => stringifyItem(item))
 					.join('\n\n');

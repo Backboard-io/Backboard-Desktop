@@ -3,10 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { ChatHistoryWindow } from './chatHistory.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
-import { Disposable, DisposableMap, dispose } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, IReference, dispose } from '../../../../../base/common/lifecycle.js';
 import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { IObservable } from '../../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
@@ -74,6 +75,8 @@ export interface IChatSetHiddenEvent {
 }
 
 export interface IChatViewModel {
+	readonly historyWindow?: ChatHistoryWindow;
+	getAllText?(): Promise<string>;
 	readonly model: IChatModel;
 	readonly sessionResource: URI;
 	readonly onDidDisposeModel: Event<void>;
@@ -340,6 +343,7 @@ export interface IChatViewModelOptions {
 }
 
 export class ChatViewModel extends Disposable implements IChatViewModel {
+	historyWindow: ChatHistoryWindow | undefined;
 
 	private readonly _onDidDisposeModel = this._register(new Emitter<void>());
 	readonly onDidDisposeModel = this._onDidDisposeModel.event;
@@ -348,6 +352,8 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 	readonly onDidChange = this._onDidChange.event;
 
 	private readonly _items: (ChatRequestViewModel | ChatResponseViewModel)[] = [];
+	private readonly _liveHistoryReferences = new Map<string, IReference<readonly IChatRequestModel[]>>();
+	private readonly _interactionPinned = new Set<string>();
 	private readonly _responseListeners = this._register(new DisposableMap<string>());
 	private _cachedVisibleItems: readonly (IChatRequestViewModel | IChatResponseViewModel | IChatPendingDividerViewModel)[] | undefined;
 
@@ -381,14 +387,22 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 	) {
 		super();
 
-		_model.getRequests().forEach((request, i) => {
-			const requestModel = this.instantiationService.createInstance(ChatRequestViewModel, request);
-			this._items.push(requestModel);
-
-			if (request.response) {
-				this.onAddResponse(request.response);
+		if (_model.history) {
+			this.historyWindow = this._register(new ChatHistoryWindow(_model.history));
+			this.syncHistoryItems();
+			this._register(this.historyWindow.onDidChange(() => {
+				this.syncHistoryItems();
+				this._onDidChange.fire(null);
+			}));
+			if (!this.historyWindow.requests.length && _model.history.source.getTurnIds().length) {
+				void this.historyWindow.load('latest');
 			}
-		});
+		} else {
+			_model.getRequests().forEach(request => {
+				this._items.push(this.instantiationService.createInstance(ChatRequestViewModel, request));
+				if (request.response) { this.onAddResponse(request.response); }
+			});
+		}
 
 		this._register(_model.onDidDispose(() => this._onDidDisposeModel.fire()));
 		this._register(_model.onDidChangePendingRequests(() => {
@@ -397,6 +411,12 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 		}));
 		this._register(_model.onDidChange(e => {
 			this._cachedVisibleItems = undefined;
+			if (this.historyWindow) {
+				if (e.kind === 'removeRequest' || e.kind === 'setHidden') { this.historyWindow.cancelLoading(); }
+				this.syncHistoryItems();
+				this._onDidChange.fire(e.kind === 'addRequest' && this.historyWindow.followingLatest && this.historyWindow.followLive ? { kind: 'addRequest' } : null);
+				return;
+			}
 			if (e.kind === 'addRequest') {
 				const requestModel = this.instantiationService.createInstance(ChatRequestViewModel, e.request);
 				this._items.push(requestModel);
@@ -432,6 +452,79 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 		}));
 	}
 
+	private syncHistoryItems(): void {
+		const history = this.historyWindow;
+		if (!history) { return; }
+		const requests: IChatRequestModel[] = [...history.requests];
+		const live = this._model.lastRequest;
+		if (live && history.followingLatest && !requests.some(request => request.id === live.id)) {
+			requests.push(live);
+			if (!this._liveHistoryReferences.has(live.id)) {
+				const ref = this._model.history!.acquireLoaded([live.id]);
+				if (ref) { this._liveHistoryReferences.set(live.id, ref); }
+			}
+		}
+		this._interactionPinned.clear();
+		for (const [id, ref] of this._liveHistoryReferences) {
+			if (!requests.some(request => request.id === id) && (id === live?.id || history.history.source.getTurnIds().includes(id)) && !history.canEvict([id], true)) {
+				requests.push(...ref.object);
+				this._interactionPinned.add(id);
+			}
+		}
+		if (this._interactionPinned.size) { history.followingLatest = false; }
+		const positions = new Map(this._model.history!.orderedRequests().map((request, index) => [request.id, index]));
+		requests.sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
+		const wanted = new Set(requests.map(request => request.id));
+		for (let index = this._items.length - 1; index >= 0; index--) {
+			const item = this._items[index];
+			if (!wanted.has(isResponseVM(item) ? item.requestId : item.id)) {
+				this._items.splice(index, 1);
+				if (item instanceof ChatResponseViewModel) {
+					this._responseListeners.deleteAndDispose(item.id);
+					item.dispose();
+				}
+			}
+		}
+		for (const [id, ref] of this._liveHistoryReferences) {
+			if (!wanted.has(id) || history.requests.some(request => request.id === id)) {
+				this._liveHistoryReferences.delete(id);
+				ref.dispose();
+			}
+		}
+		const existing = new Map(this._items.filter(isRequestVM).map(item => [item.id, item]));
+		for (const request of requests) {
+			if (!existing.has(request.id)) {
+				this._items.push(this.instantiationService.createInstance(ChatRequestViewModel, request));
+				if (request.response) { this.onAddResponse(request.response); }
+			}
+		}
+		const order = new Map(requests.map((request, index) => [request.id, index]));
+		this._items.sort((a, b) => (order.get(isResponseVM(a) ? a.requestId : a.id)! * 2 + (isResponseVM(a) ? 1 : 0))
+			- (order.get(isResponseVM(b) ? b.requestId : b.id)! * 2 + (isResponseVM(b) ? 1 : 0)));
+		this._cachedVisibleItems = undefined;
+	}
+
+	async getAllText(): Promise<string> {
+		const text: string[] = [];
+		const append = (requests: readonly IChatRequestModel[]) => {
+			for (const request of requests) {
+				if (request.shouldBeRemovedOnSend && !request.shouldBeRemovedOnSend.afterUndoStop) { continue; }
+				const prompt = this.instantiationService.createInstance(ChatRequestViewModel, request);
+				text.push(`${prompt.username}: ${prompt.messageText}`);
+				if (request.response) {
+					const response = this.instantiationService.createInstance(ChatResponseViewModel, request.response, this);
+					try {
+						if (!response.errorDetails?.responseIsFiltered) { text.push(`${response.username}: ${response.response.toString()}`); }
+					} finally { response.dispose(); }
+				}
+			}
+		};
+		if (this._model.history) { await this._model.history.forEachPage(append); }
+		else { append(this._model.getRequests()); }
+		append(this._model.getPendingRequests().map(pending => pending.request));
+		return text.join('\n\n');
+	}
+
 	private onAddResponse(responseModel: IChatResponseModel) {
 		const response = this.instantiationService.createInstance(ChatResponseViewModel, responseModel, this);
 		const request = this._items.findLast((item): item is ChatRequestViewModel => isRequestVM(item) && item.id === response.requestId);
@@ -454,7 +547,13 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 			return this._cachedVisibleItems;
 		}
 
+		const historyIds = this.historyWindow && !this.historyWindow.followingLatest
+			? new Set(this.historyWindow.requests.map(request => request.id)) : undefined;
 		let items: (IChatRequestViewModel | IChatResponseViewModel | IChatPendingDividerViewModel)[] = this._items.filter((item) => {
+			if (historyIds) {
+				const id = isResponseVM(item) ? item.requestId : item.id;
+				if (!this._interactionPinned.has(id) && !historyIds.has(id)) { return false; }
+			}
 			if (item.shouldBeRemovedOnSend && !item.shouldBeRemovedOnSend.afterUndoStop) {
 				return false;
 			}
@@ -507,10 +606,14 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 	}
 
 	override dispose() {
-		super.dispose();
 		dispose(this._items.filter((item): item is ChatResponseViewModel => item instanceof ChatResponseViewModel));
 		this._items.length = 0;
 		this._cachedVisibleItems = undefined;
+		for (const ref of this._liveHistoryReferences.values()) { ref.dispose(); }
+		this._liveHistoryReferences.clear();
+		this._editing = undefined;
+		super.dispose();
+		this.historyWindow = undefined;
 	}
 }
 

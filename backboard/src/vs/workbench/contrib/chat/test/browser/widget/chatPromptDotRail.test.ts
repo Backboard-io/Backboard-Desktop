@@ -6,7 +6,7 @@
 import * as assert from 'assert';
 import { toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
-import { activePromptIndex, ChatPromptDotRail, IChatPromptDot, promptWindowStart } from '../../../browser/widget/chatPromptDotRail.js';
+import { ChatPromptDotRail, IChatPromptDot, promptWindowStart } from '../../../browser/widget/chatPromptDotRail.js';
 
 suite('ChatPromptDotRail', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -49,7 +49,7 @@ suite('ChatPromptDotRail', () => {
 
 	function visibleIndices(container: HTMLElement): number[] {
 		return dots(container)
-			.map((dot, index) => dot.style.visibility === 'hidden' ? -1 : index)
+			.map(dot => dot.style.visibility === 'hidden' ? -1 : Number(dot.dataset.index))
 			.filter(index => index >= 0);
 	}
 
@@ -112,19 +112,19 @@ suite('ChatPromptDotRail', () => {
 		// 14) sits seven dots into the window.
 		rail.update(prompts(30), 14);
 		assert.strictEqual(trackOffset(container), `translateY(${-7 * SPACING}px)`);
-		assert.strictEqual(dots(container).findIndex(dot => dot.classList.contains('active')), 14);
+		assert.strictEqual(Number(dots(container).find(dot => dot.classList.contains('active'))?.dataset.index), 14);
 		assert.deepStrictEqual(visibleIndices(container), Array.from({ length: VISIBLE_DOTS }, (_, index) => index + 7));
 
 		// The last prompt keeps the window on the tail instead of scrolling past it.
 		rail.update(prompts(30), 29);
 		assert.strictEqual(trackOffset(container), `translateY(${-15 * SPACING}px)`);
-		assert.strictEqual(dots(container).findIndex(dot => dot.classList.contains('active')), 29);
+		assert.strictEqual(Number(dots(container).find(dot => dot.classList.contains('active'))?.dataset.index), 29);
 		assert.deepStrictEqual(visibleIndices(container), Array.from({ length: VISIBLE_DOTS }, (_, index) => index + 15));
 
 		// An out-of-range active index is clamped rather than dropping the window.
 		rail.update(prompts(30), 99);
 		assert.strictEqual(trackOffset(container), `translateY(${-15 * SPACING}px)`);
-		assert.strictEqual(dots(container).findIndex(dot => dot.classList.contains('active')), 29);
+		assert.strictEqual(Number(dots(container).find(dot => dot.classList.contains('active'))?.dataset.index), 29);
 	});
 
 	test('fades the dots at the edges of the window and hides the ones outside it', () => {
@@ -132,14 +132,13 @@ suite('ChatPromptDotRail', () => {
 
 		rail.update(prompts(30), 14);
 
-		const rendered = dots(container);
+		const rendered = Object.fromEntries(dots(container).map(dot => [Number(dot.dataset.index), dot]));
 		// Prompt 15 (index 14) is centred, so the window covers indices 7 through 21.
-		assert.strictEqual(rendered[0].style.visibility, 'hidden');
-		assert.strictEqual(rendered[0].style.pointerEvents, 'none');
+		assert.strictEqual(rendered[0], undefined);
 		assert.strictEqual(rendered[6].style.visibility, 'hidden');
 		assert.strictEqual(rendered[22].style.visibility, 'hidden');
 		assert.strictEqual(rendered[22].style.pointerEvents, 'none');
-		assert.strictEqual(rendered[29].style.visibility, 'hidden');
+		assert.strictEqual(rendered[29], undefined);
 
 		// Every dot inside the window stays visible, at the edge most faded.
 		assert.deepStrictEqual(visibleIndices(container), Array.from({ length: VISIBLE_DOTS }, (_, index) => index + 7));
@@ -180,7 +179,8 @@ suite('ChatPromptDotRail', () => {
 		assert.deepStrictEqual(clicked, [3]);
 
 		// A dot parked outside the window is inert in the DOM too.
-		assert.strictEqual(rendered[29].style.pointerEvents, 'none');
+		assert.strictEqual(dots(container).find(dot => dot.dataset.index === '29'), undefined);
+		assert.strictEqual(dots(container).find(dot => dot.dataset.index === '16')!.style.pointerEvents, 'none');
 	});
 
 	test('scrolls the transcript for wheel gestures anywhere on the rail', () => {
@@ -222,7 +222,7 @@ suite('ChatPromptDotRail', () => {
 	});
 });
 
-suite('ChatPromptDotRail window and active prompt maths', () => {
+suite('ChatPromptDotRail window maths', () => {
 
 	test('centres the window on the active dot and clamps it to the list', () => {
 		assert.strictEqual(promptWindowStart(30, 14, 15), 7);
@@ -239,17 +239,4 @@ suite('ChatPromptDotRail window and active prompt maths', () => {
 		assert.strictEqual(promptWindowStart(30, 99, 15), 15);
 	});
 
-	test('tracks the prompt at the top of the viewport', () => {
-		const offsets = [0, 100, 250, 900];
-
-		assert.strictEqual(activePromptIndex([], 0), 0);
-		assert.strictEqual(activePromptIndex(offsets, 0), 0);
-		assert.strictEqual(activePromptIndex(offsets, 90), 0);
-		assert.strictEqual(activePromptIndex(offsets, 100), 1);
-		assert.strictEqual(activePromptIndex(offsets, 240), 1);
-		// A row the scroll landed a hair above still counts as reached.
-		assert.strictEqual(activePromptIndex(offsets, 246), 2);
-		assert.strictEqual(activePromptIndex(offsets, 900), 3);
-		assert.strictEqual(activePromptIndex(offsets, 5000), 3);
-	});
 });

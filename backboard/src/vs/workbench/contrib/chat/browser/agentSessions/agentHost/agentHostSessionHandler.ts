@@ -3,10 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { CHAT_HISTORY_PAGE_SIZE } from '../../../common/model/chatHistory.js';
 import { resolveAgentHostForkIndex } from './agentHostFork.js';
 import { encodeBase64, VSBuffer } from '../../../../../../base/common/buffer.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
-import { isCancellationError, onUnexpectedError } from '../../../../../../base/common/errors.js';
+import { CancellationError, isCancellationError, onUnexpectedError } from '../../../../../../base/common/errors.js';
 import { Emitter } from '../../../../../../base/common/event.js';
 import { MarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { getChatErrorDetailsFromMeta, getCopilotPlanFromEntitlement, IChatErrorContext } from '../../../common/chatErrorMessages.js';
@@ -47,7 +48,7 @@ import {
 } from '../../../common/attachments/chatVariableEntries.js';
 import { coerceImageBuffer } from '../../../common/chatImageExtraction.js';
 import { ChatRequestQueueKind, ConfirmedReason, ElicitationState, IChatProgress, IChatQuestion, IChatQuestionAnswers, IChatService, IChatToolInvocation, ToolConfirmKind, type IChatMultiSelectAnswer, type IChatQuestionAnswerValue, type IChatResponseErrorDetails, type IChatSingleSelectAnswer, type IChatTerminalToolInvocationData } from '../../../common/chatService/chatService.js';
-import { IChatSession, IChatSessionContentProvider, IChatSessionHistoryItem, IChatSessionItem, IChatSessionRequestHistoryItem, type IChatInputCompletionItem, type IChatInputCompletionsParams, type IChatInputCompletionsResult, type IChatSessionServerRequest } from '../../../common/chatSessionsService.js';
+import { IChatSession, IChatSessionContentProvider, IChatSessionHistoryController, IChatSessionHistoryItem, IChatSessionItem, IChatSessionRequestHistoryItem, type IChatInputCompletionItem, type IChatInputCompletionsParams, type IChatInputCompletionsResult, type IChatSessionServerRequest } from '../../../common/chatSessionsService.js';
 import { IChatEntitlementService } from '../../../../../services/chat/common/chatEntitlementService.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../common/constants.js';
 import { IChatEditingService } from '../../../common/editing/chatEditingService.js';
@@ -131,6 +132,7 @@ interface IObserveTurnOptions {
 }
 
 interface IStartServerRequestOptions {
+	readonly id?: string;
 	readonly isSystemInitiated?: boolean;
 }
 
@@ -322,6 +324,7 @@ function convertProtocolAnswers(raw: Record<string, ChatInputAnswer> | undefined
 // =============================================================================
 
 class AgentHostChatSession extends Disposable implements IChatSession {
+	historyController?: IChatSessionHistoryController;
 	readonly progressObs = observableValue<IChatProgress[]>('agentHostProgress', []);
 	readonly isCompleteObs = observableValue<boolean>('agentHostComplete', true);
 
@@ -410,6 +413,7 @@ class AgentHostChatSession extends Disposable implements IChatSession {
 			this.isCompleteObs.set(false, tx);
 		});
 		this._onDidStartServerRequest.fire({
+			id: options?.id,
 			prompt,
 			variableData,
 			isSystemInitiated: options?.isSystemInitiated,
@@ -728,7 +732,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 					sessionTitle = sessionState.summary.title;
 					const fallbackRawModelId = sessionState.summary.model?.id;
 					const lookup = this._createTurnModelLookup(sessionResource, fallbackRawModelId);
-					history.push(...turnsToHistory(resolvedSession, sessionState.turns, this._config.agentId, this._config.connectionAuthority, lookup, this._chatErrorContext()));
+					history.push(...turnsToHistory(resolvedSession, sessionState.turns.slice(-CHAT_HISTORY_PAGE_SIZE), this._config.agentId, this._config.connectionAuthority, lookup, this._chatErrorContext()));
 
 					// Enrich history with inner tool calls from subagent
 					// child sessions. Subscribes to each child session so
@@ -754,6 +758,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 						const activeRawModelId = sessionState.activeTurn.usage?.model ?? fallbackRawModelId;
 						history.push({
 							type: 'request',
+							id: sessionState.activeTurn.id,
 							prompt: sessionState.activeTurn.message.text,
 							participant: this._config.agentId,
 							modelId: lookup.toLanguageModelId(activeRawModelId),
@@ -817,6 +822,47 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				return true;
 			},
 		);
+		const historySubscription = this._ensureDefaultChatSubscription(resolvedSession.toString());
+		let historyTurns = this._getSessionState(resolvedSession.toString())?.turns;
+		let historyIds = historyTurns?.map(turn => turn.id) ?? [];
+		const updateHistoryIds = () => {
+			const turns = this._getSessionState(resolvedSession.toString())?.turns;
+			if (turns !== undefined && turns !== historyTurns) {
+				historyTurns = turns;
+				historyIds = turns?.map(turn => turn.id) ?? [];
+				return true;
+			}
+			return false;
+		};
+		session.historyController = {
+			onDidChange: (listener, thisArgs, disposables) => {
+				// Each consumer observes changes independently; reading IDs in one
+				// view must not consume another view's notification.
+				let previous = this._getSessionState(resolvedSession.toString())?.turns;
+				return historySubscription.onDidChange(() => {
+					const turns = this._getSessionState(resolvedSession.toString())?.turns;
+					if (turns === undefined || turns === previous) { return; }
+					previous = turns;
+					updateHistoryIds();
+					listener.call(thisArgs, undefined);
+				}, undefined, disposables);
+			},
+			getTurnIds: () => { updateHistoryIds(); return historyIds; },
+			fetchTurns: async (query, token) => {
+				if (token.isCancellationRequested) { throw new CancellationError(); }
+				const state = this._getSessionState(resolvedSession.toString());
+				if (!state) { throw new Error('History is unavailable'); }
+				const end = query.before === undefined ? state.turns.length : state.turns.findIndex(turn => turn.id === query.before);
+				if (end < 0) { throw new Error('History cursor no longer exists'); }
+				const turns = state.turns.slice(Math.max(0, end - (query.limit ?? CHAT_HISTORY_PAGE_SIZE)), end);
+				const lookup = this._createTurnModelLookup(sessionResource, state.summary.model?.id);
+				const result = turnsToHistory(resolvedSession, turns, this._config.agentId, this._config.connectionAuthority, lookup, this._chatErrorContext());
+				await this._enrichHistoryWithSubagentCalls(result, resolvedSession);
+				if (token.isCancellationRequested) { throw new CancellationError(); }
+				return result;
+			},
+		};
+
 		this._activeSessions.set(sessionResource, session);
 
 		if (!isNewSession) {
@@ -1358,6 +1404,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				activeTurn.message.text,
 				messageToVariableData(activeTurn.message, this._config.connectionAuthority),
 				{
+					id: activeTurn.id,
 					isSystemInitiated: activeTurn.message.origin.kind === MessageKind.SystemNotification,
 				},
 			);
@@ -1456,29 +1503,22 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			});
 		}
 
-		// If the chat model has fewer previous requests than the protocol has
-		// turns, a checkpoint was restored or a message was edited. Dispatch
-		// session/truncated so the server drops the stale tail.
+		// Only an explicit checkpoint restore/edit may truncate durable history.
+		// Missing viewport pages are never evidence of a rewind.
 		const chatModel = this._chatService.getSession(request.sessionResource);
 		const protocolState = this._getSessionState(session.toString());
-		if (!options?.skipHistoryTruncation && chatModel && protocolState?.turns.length) {
-			// -2 since -1 will already be the current request
-			const previousRequestIndex = chatModel.getRequests().findIndex(i => i.id === request.requestId) - 1;
-			const previousRequest = previousRequestIndex >= 0 ? chatModel.getRequests()[previousRequestIndex] : undefined;
-			if (!previousRequest && protocolState.turns.length > 0) {
+		const disabled = chatModel?.editingSession?.requestDisablement.get() ?? [];
+		const removed = !options?.skipHistoryTruncation ? chatModel?.takeHistoryTruncation?.() : undefined;
+		if (!options?.skipHistoryTruncation && protocolState && (disabled.length || removed !== undefined)) {
+			const disabledIds = new Set(disabled.map(item => item.requestId));
+			if (removed !== undefined) { disabledIds.add(removed); }
+			const boundary = protocolState.turns.findIndex(turn => disabledIds.has(turn.id));
+			if (boundary >= 0) {
 				const truncateAction: ChatTruncatedAction = {
 					type: ActionType.ChatTruncated,
+					...(boundary > 0 ? { turnId: protocolState.turns[boundary - 1].id } : {}),
 				};
 				this._config.connection.dispatch(session.toString(), truncateAction);
-			} else {
-				const seenAtIndex = protocolState.turns.findIndex(t => t.id === previousRequest!.id);
-				if (seenAtIndex !== -1 && seenAtIndex < protocolState.turns.length - 1) {
-					const truncateAction: ChatTruncatedAction = {
-						type: ActionType.ChatTruncated,
-						turnId: previousRequest!.id,
-					};
-					this._config.connection.dispatch(session.toString(), truncateAction);
-				}
 			}
 		}
 
