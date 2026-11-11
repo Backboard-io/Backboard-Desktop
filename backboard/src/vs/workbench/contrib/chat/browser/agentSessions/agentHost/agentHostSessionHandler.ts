@@ -829,10 +829,8 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			const turns = this._getSessionState(resolvedSession.toString())?.turns;
 			if (turns !== undefined && turns !== historyTurns) {
 				historyTurns = turns;
-				historyIds = turns?.map(turn => turn.id) ?? [];
-				return true;
+				historyIds = turns.map(turn => turn.id);
 			}
-			return false;
 		};
 		session.historyController = {
 			onDidChange: (listener, thisArgs, disposables) => {

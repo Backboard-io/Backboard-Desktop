@@ -73,8 +73,11 @@ export class ChatHistory extends Disposable {
 				const messages = await this.source.fetchTurns({ before: allIds[end + 1], limit: batch.length }, token);
 				if (token.isCancellationRequested || this._store.isDisposed) { throw new CancellationError(); }
 				for (const request of this.hydrate(messages)) {
-					if (this.entries.has(request.id)) { request.response?.dispose(); }
-					else { this.adopt(request); }
+					if (this.entries.has(request.id)) {
+						request.response?.dispose();
+					} else {
+						this.adopt(request);
+					}
 				}
 				pins.push(this.acquireLoaded(batch.filter(id => this.entries.has(id)))!);
 			}

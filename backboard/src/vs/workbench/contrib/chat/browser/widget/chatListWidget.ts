@@ -213,7 +213,7 @@ export class ChatListWidget extends Disposable {
 	private _historyScrollSuppressed = false;
 	private _scrollingToEnd = false;
 	private _historyAnchor: IChatHistoryAnchor | undefined;
-	private _historyRetry!: HTMLButtonElement;
+	private readonly _historyRetry: HTMLButtonElement;
 	private _promptDotRailPrompts: IChatRequestViewModel[] = [];
 	private readonly _promptDotRailItemIndices = new Map<string, number>();
 	private _promptDotRailIndices: number[] = [];
@@ -497,8 +497,9 @@ export class ChatListWidget extends Disposable {
 		}));
 		this._scrollDownButton.element.classList.add('chat-scroll-down');
 		this._scrollDownButton.label = `$(${Codicon.chevronDown.id})`;
-		this._scrollDownButton.element.title = localize('chat.history.latest', 'Jump to latest');
-		this._scrollDownButton.element.setAttribute('aria-label', localize('chat.history.latest', 'Jump to latest'));
+		const jumpToLatest = localize('chat.history.latest', "Jump to latest");
+		this._scrollDownButton.element.title = jumpToLatest;
+		this._scrollDownButton.element.setAttribute('aria-label', jumpToLatest);
 		this._scrollDownButton.element.style.display = 'none'; // Hidden by default
 
 		this._register(this._scrollDownButton.onDidClick(() => {
@@ -660,8 +661,9 @@ export class ChatListWidget extends Disposable {
 	}
 
 	/**
-	 * Scroll a prompt's row to the top of the viewport. The tree reveals virtual rows using its cached heights; the next frame
-	 * corrects the position after measuring the newly rendered row.
+	 * Scroll a prompt's row to the top of the viewport. The tree reveals virtual
+	 * rows using its cached heights; the next frame corrects the position after
+	 * measuring the newly rendered row.
 	 */
 	private scrollToPromptRow(index: number): void {
 		const prompt = this._promptDotRailPrompts[index];
@@ -720,23 +722,24 @@ export class ChatListWidget extends Disposable {
 		const view = this._viewModel;
 		if (!view?.historyWindow) { return; }
 		const anchor = this._pendingHistoryRestore ?? (!view.historyWindow.followLive ? this.captureHistoryAnchor() : undefined);
-		if (anchor) { this._historyViewStates.set(view.sessionResource.toString(), anchor); }
-		else { this._historyViewStates.delete(view.sessionResource.toString()); }
+		if (anchor) {
+			this._historyViewStates.set(view.sessionResource.toString(), anchor);
+		} else {
+			this._historyViewStates.delete(view.sessionResource.toString());
+		}
 	}
 
 	/** Set the view model for the list to render. */
 	setViewModel(viewModel: IChatViewModel | undefined): void {
 		if (this._viewModel === viewModel) { return; }
 		this.saveHistoryViewState();
-		if (this._viewModel !== viewModel) {
-			this._accessibilityProvider.clearCache();
-			this._historyListeners.clear();
-			this._historyAnchorRestore.clear();
-			this._historyAnchor = undefined;
-			this._pendingHistoryRestore = undefined;
-			this._hiddenHistoryAnchor = undefined;
-			this._historyScrollSuppressed = false;
-		}
+		this._accessibilityProvider.clearCache();
+		this._historyListeners.clear();
+		this._historyAnchorRestore.clear();
+		this._historyAnchor = undefined;
+		this._pendingHistoryRestore = undefined;
+		this._hiddenHistoryAnchor = undefined;
+		this._historyScrollSuppressed = false;
 		this._viewModel = viewModel;
 		this._renderer.updateViewModel(viewModel);
 		const history = viewModel?.historyWindow;

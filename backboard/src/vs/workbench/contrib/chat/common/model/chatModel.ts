@@ -2808,10 +2808,11 @@ export class ChatModel extends Disposable implements IChatModel {
 	}
 
 	setCheckpoint(requestId: string | undefined) {
+		const requests = this.getRequests();
 		let checkpoint: ChatRequestModel | undefined;
 		let checkpointIndex = -1;
 		if (requestId !== undefined) {
-			this.getRequests().forEach((request, index) => {
+			requests.forEach((request, index) => {
 				if (request.id === requestId) {
 					checkpointIndex = index;
 					checkpoint = request;
@@ -2824,8 +2825,8 @@ export class ChatModel extends Disposable implements IChatModel {
 			}
 		}
 
-		for (let i = this.getRequests().length - 1; i >= 0; i -= 1) {
-			const request = this.getRequests()[i];
+		for (let i = requests.length - 1; i >= 0; i -= 1) {
+			const request = requests[i];
 			if (this._checkpoint && !checkpoint) {
 				request.setShouldBeBlocked(false);
 				if (request.response) {
@@ -3008,8 +3009,11 @@ export class ChatModel extends Disposable implements IChatModel {
 		}
 		this._requests = this._requests.filter(candidate => candidate !== request);
 		this._onDidChange.fire({ kind: 'removeRequest', requestId: request.id, responseId: request.response?.id, reason });
-		if (this.history) { this.history.collect(); }
-		else { request.response?.dispose(); }
+		if (this.history) {
+			this.history.collect();
+		} else {
+			request.response?.dispose();
+		}
 	}
 
 	cancelRequest(request: ChatRequestModel): void {

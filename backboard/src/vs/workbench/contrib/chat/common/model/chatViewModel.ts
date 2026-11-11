@@ -519,8 +519,11 @@ export class ChatViewModel extends Disposable implements IChatViewModel {
 				}
 			}
 		};
-		if (this._model.history) { await this._model.history.forEachPage(append); }
-		else { append(this._model.getRequests()); }
+		if (this._model.history) {
+			await this._model.history.forEachPage(append);
+		} else {
+			append(this._model.getRequests());
+		}
 		append(this._model.getPendingRequests().map(pending => pending.request));
 		return text.join('\n\n');
 	}
