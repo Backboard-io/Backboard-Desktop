@@ -47,6 +47,11 @@ export interface MutationLockTurn {
 export interface ToolContext {
 	/** Immutable route inherited from the originating user turn. */
 	modelRoute?: Readonly<ModelRoute>;
+	directVideoGeneration?: {
+		model: Readonly<{ provider: string; name: string }>;
+		askBeforeGenerating: boolean;
+		framePaths: readonly string[];
+	};
 	/** Internal worker-engine sink; never a provider-supplied tool argument. */
 	workerLifecycle?: {
 		onWorkspaceProgress(record: WorkerWorkspaceRecord): void;

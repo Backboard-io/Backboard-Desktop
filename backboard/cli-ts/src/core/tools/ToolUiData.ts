@@ -101,6 +101,7 @@ function backboardToolKind(toolName: string): BackboardToolKind | undefined {
 		case "findmcp":
 			return "findMcp";
 		case "generatevideo":
+		case "generatevideodirect":
 			return "generateVideo";
 		default:
 			return undefined;

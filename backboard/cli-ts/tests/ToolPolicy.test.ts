@@ -3,6 +3,8 @@ import {
 	ToolPolicy,
 	type ToolPolicySnapshot,
 } from "../src/core/tools/ToolPolicy.ts";
+import { ToolRegistry } from "../src/core/tools/ToolRegistry.ts";
+import { GenerateVideoTool } from "../src/tools/GenerateVideoTool.tsx";
 
 function snapshot(
 	overrides: Partial<ToolPolicySnapshot> = {},
@@ -50,6 +52,27 @@ describe("ToolPolicy skill-discovery gate", () => {
 		const on = new ToolPolicy(snapshot({ videoGenerationEnabled: true }));
 		expect(on.isRuntimeAllowed("GenerateVideo")).toBe(true);
 		expect(on.schemaExcludedNames()).toContain("generate_video");
+	});
+
+	it("exposes the direct video schema only for enabled, opted-in turns", () => {
+		const registry = new ToolRegistry([
+			new GenerateVideoTool({
+				generate: async () => ({ url: "https://example.test/video.mp4" }),
+			}),
+		]);
+		const enabled = new ToolPolicy(
+			snapshot({ profileTools: ["GenerateVideo"] }),
+		);
+		const disabled = new ToolPolicy(
+			snapshot({ videoGenerationEnabled: false }),
+		);
+		expect(enabled.visibleSchemas(registry)).toEqual([]);
+		expect(disabled.visibleSchemas(registry, [], undefined, true)).toEqual([]);
+		expect(
+			enabled
+				.visibleSchemas(registry, [], undefined, true)
+				.map((schema) => schema.function.name),
+		).toEqual(["generate_video_direct"]);
 	});
 
 	it("allows find_skill/find_mcp when discovery is enabled", () => {

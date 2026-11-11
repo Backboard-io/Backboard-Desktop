@@ -305,6 +305,72 @@ describe("BackboardClient attachment endpoints", () => {
 		await rm(testTmpDir, { recursive: true, force: true });
 	});
 
+	it("uploads direct video frames in their own fields with the JSON video config", async () => {
+		const firstFramePath = join(testTmpDir, "first.png");
+		const lastFramePath = join(testTmpDir, "last.png");
+		await Bun.write(firstFramePath, "first");
+		await Bun.write(lastFramePath, "last");
+		const client = new BackboardClient({
+			apiKey: "test",
+			apiUrl: "https://api.example.test",
+		});
+		const video_config = { duration: 4, generate_audio: false };
+		globalThis.fetch = (async (url, init) => {
+			expect(String(url)).toBe("https://api.example.test/threads/messages");
+			expect(new Headers(init?.headers).has("Content-Type")).toBe(false);
+			const form = await new Request(url, init).formData();
+			expect(form.get("operation")).toBe("generate_video");
+			expect(form.get("video_model_name")).toBe("google/veo-3.1-lite");
+			expect(form.get("video_config")).toBe(JSON.stringify(video_config));
+			expect(form.has("files")).toBe(false);
+			const first = form.get("input_image") as File;
+			const last = form.get("input_last_frame") as File;
+			expect(first.name).toBe("first.png");
+			expect(last.name).toBe("last.png");
+			expect(await first.text()).toBe("first");
+			expect(await last.text()).toBe("last");
+			return Response.json({
+				generated_media: [{ url: "https://example.test/video.mp4" }],
+			});
+		}) as typeof fetch;
+		const result = await client.generateVideo({
+			prompt: "Animate these frames",
+			video_model_provider: "openrouter",
+			video_model_name: "google/veo-3.1-lite",
+			video_config,
+			firstFramePath,
+			lastFramePath,
+		});
+		expect(result).toEqual({ url: "https://example.test/video.mp4" });
+	});
+
+	it("does not retry a paid video request after an ambiguous upstream failure", async () => {
+		let posts = 0;
+		globalThis.fetch = (async (_url, init) => {
+			posts++;
+			expect(JSON.parse(String(init?.body))).toEqual({
+				operation: "generate_video",
+				content: "A toy boat",
+				video_model_provider: "openrouter",
+				video_model_name: "google/veo-3.1-lite",
+				stream: false,
+			});
+			return Response.json({ detail: "Upstream timed out" }, { status: 504 });
+		}) as typeof fetch;
+		const client = new BackboardClient({
+			apiKey: "test",
+			apiUrl: "https://api.example.test",
+		});
+		await expect(
+			client.generateVideo({
+				prompt: "A toy boat",
+				video_model_provider: "openrouter",
+				video_model_name: "google/veo-3.1-lite",
+			}),
+		).rejects.toThrow(BackboardError);
+		expect(posts).toBe(1);
+	});
+
 	it("runMessage with attachment file paths posts multipart form data", async () => {
 		const filePath = join(
 			testTmpDir,
