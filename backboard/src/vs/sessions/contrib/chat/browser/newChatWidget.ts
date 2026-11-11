@@ -39,6 +39,7 @@ import { IChatViewOptions } from '../../../browser/parts/chatView.js';
 import { ISessionTypePickerDelegate, IWorkspacePickerDelegate, IWorkspacePickerItem as IChatWorkspacePickerItem } from '../../../../workbench/contrib/chat/browser/chat.js';
 import { IModelPickerSetupCandidate } from '../../../../workbench/contrib/chat/browser/widget/input/modelPickerActionItem.js';
 import { AgentSessionProviders, AgentSessionTarget } from '../../../../workbench/contrib/chat/browser/agentSessions/agentSessions.js';
+import { isComposerCapabilityProperty } from '../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostGenericConfigChips.js';
 import { IAgentCliSetupService } from '../../../../workbench/contrib/chat/browser/agentSessions/agentCliSetup.js';
 import { ChatWidget } from '../../../../workbench/contrib/chat/browser/widget/chatWidget.js';
 import { IChatModelReference, IChatService } from '../../../../workbench/contrib/chat/common/chatService/chatService.js';
@@ -1161,9 +1162,19 @@ export class NewChatWidget extends Disposable {
 		if (input.currentLanguageModel) {
 			provider?.setModel(session.sessionId, input.currentLanguageModel);
 		}
+		// Like the chat model above, send what the composer shows for the
+		// settings it owns (for example the image and video models).
+		const sessionConfigOverrides: Record<string, unknown> = {};
+		for (const option of input.getBackboardGenericConfigOptions()) {
+			const value = isComposerCapabilityProperty(option.id) ? option.getCurrentValue?.() : undefined;
+			if (value !== undefined) {
+				sessionConfigOverrides[option.id] = value;
+			}
+		}
 		const modeKind = input.currentModeKind;
 		const sendOptions: ISendRequestOptions = {
 			query,
+			sessionConfigOverrides,
 			attachedContext: input.getAttachedAndImplicitContext().asArray(),
 			userSelectedModelId: input.currentLanguageModel,
 			userSelectedModelConfiguration: input.currentLanguageModel ? input.getModelConfiguration(input.currentLanguageModel) : undefined,

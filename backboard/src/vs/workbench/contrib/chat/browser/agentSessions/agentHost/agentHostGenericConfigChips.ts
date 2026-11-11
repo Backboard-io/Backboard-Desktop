@@ -94,6 +94,14 @@ const composerCapabilityProperties = new Set([
 	'askBeforeGenerating',
 ]);
 
+/**
+ * Whether the composer owns this session config property: only the composer's
+ * capability chips write it, never the sessions provider's own pickers.
+ */
+export function isComposerCapabilityProperty(property: string): boolean {
+	return composerCapabilityProperties.has(property);
+}
+
 function getComposerActivationValue(property: string, schema: SessionConfigPropertySchema): string | undefined {
 	if (!composerCapabilityProperties.has(property)) {
 		return undefined;

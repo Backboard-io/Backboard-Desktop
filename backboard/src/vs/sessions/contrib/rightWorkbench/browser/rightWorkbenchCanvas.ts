@@ -78,7 +78,7 @@ export interface ICanvasComment {
  */
 const GENERATED_IMAGE_MARKDOWN = /!\[(?<label>[^\]]*)\]\(\s*(?<url>[^)\s]+)\s*\)(?:\s*Saved to `(?<saved>[^`]+)`)?/g;
 const VIDEO_EXTENSION = /\.(?:mp4|mov|webm|m4v)(?:[?#].*)?$/i;
-const IMAGE_EXTENSION = /\.(?:png|jpe?g|webp|gif|avif|bmp)(?:[?#].*)?$/i;
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.bmp', '.svg'];
 /** Where Backboard's hosted generators put their output. */
 const GENERATED_MEDIA_PATH = /\/generated-(?:image|video)s?\//i;
 /** Fenced code blocks and inline code: media links quoted there are examples, not output. */
@@ -98,7 +98,13 @@ function isMediaUrl(url: string, saved: string | undefined): boolean {
 		// saved copy are screenshots and the like, not something the user made.
 		return !!saved && /(?:^|\/)generated-/.test(saved);
 	}
-	return IMAGE_EXTENSION.test(url) || VIDEO_EXTENSION.test(url) || GENERATED_MEDIA_PATH.test(url) || (!!saved && (IMAGE_EXTENSION.test(saved) || VIDEO_EXTENSION.test(saved)));
+	return hasImageExtension(url) || VIDEO_EXTENSION.test(url) || GENERATED_MEDIA_PATH.test(url) || (!!saved && (hasImageExtension(saved) || VIDEO_EXTENSION.test(saved)));
+}
+
+/** Whether a link or path names an image file, in any case, before any query or fragment. */
+function hasImageExtension(url: string): boolean {
+	const lower = url.toLowerCase();
+	return IMAGE_EXTENSIONS.some(extension => lower.endsWith(extension) || lower.includes(`${extension}?`) || lower.includes(`${extension}#`));
 }
 
 /** An image the user attached to a message, shown above it in the thread. */

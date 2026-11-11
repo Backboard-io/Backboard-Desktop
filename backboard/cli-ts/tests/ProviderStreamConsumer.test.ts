@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1180,6 +1181,57 @@ describe("ProviderStreamConsumer", () => {
 			const files = await readdir(directory);
 			expect(files).toHaveLength(1);
 			expect(files[0]).toMatch(/^generated-[a-f0-9]{12}\.png$/);
+		} finally {
+			await rm(projectRoot, { recursive: true, force: true });
+		}
+	});
+
+	it.each([
+		["a URL without an extension", "generated-images/vector", "image/svg+xml"],
+		["an .svg URL", "generated-images/vector.svg", "application/octet-stream"],
+	])("saves a vector image from %s as .svg", async (_label, path, contentType) => {
+		const projectRoot = await mkdtemp(join(tmpdir(), "backboard-images-"));
+		const directory = join(projectRoot, "generated-images");
+		const imageUrl = `https://backboard-prod.s3.ca-central-1.amazonaws.com/${path}`;
+		const svg = new TextEncoder().encode(
+			'<svg xmlns="http://www.w3.org/2000/svg"/>',
+		);
+		const assistant = {
+			appendDelta: () => {},
+			appendReasoning: () => {},
+			flushAnswer: () => {},
+			flushReasoning: () => {},
+			finalize: () => {},
+			discardPartial: () => {},
+		} as unknown as AssistantAccumulator;
+
+		try {
+			const consumer = new ProviderStreamConsumer(
+				new EventBus(),
+				new Session("sess_test"),
+				{
+					imageGeneration: true,
+					generatedMediaDir: directory,
+					fetch: async () =>
+						new Response(svg, { headers: { "content-type": contentType } }),
+				},
+			);
+			await consumer.consumeWithRetry(
+				() =>
+					streamOf([
+						{
+							kind: "completed",
+							finalText: `A vector.\n\n![vector](${imageUrl})`,
+						},
+					]),
+				assistant,
+				new AbortController().signal,
+			);
+
+			const hash = createHash("sha256").update(svg).digest("hex");
+			expect(await readdir(directory)).toEqual([
+				`generated-${hash.slice(0, 12)}.svg`,
+			]);
 		} finally {
 			await rm(projectRoot, { recursive: true, force: true });
 		}
