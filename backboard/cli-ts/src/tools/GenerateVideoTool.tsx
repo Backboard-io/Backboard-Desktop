@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { z } from "zod";
 import type { PermissionDecision } from "../core/permissions/types.ts";
+import { DIRECT_VIDEO_TOOL } from "../core/tools/names.ts";
 import { Tool } from "../core/tools/Tool.ts";
 import type { ToolContext } from "../core/tools/ToolContext.ts";
 import { ok, type ToolResult } from "../core/tools/ToolResult.ts";
-import type { PromptContext } from "../prompts/PromptModule.ts";
-import { getToolPrompt } from "../prompts/tools/index.tsx";
+import { ASK_BEFORE_GENERATING_OPTIONS } from "../prompts/system/generativeMedia.ts";
 import type { RequestOptions } from "../providers/AgentClient.ts";
 import type {
 	GenerateVideoRequest,
@@ -15,48 +15,44 @@ import type {
 } from "../providers/backboard/types.ts";
 
 const schema = z.object({
-	prompt: z
-		.string()
-		.min(1)
-		.describe("Scene description for the clip. Do not include a model name."),
+	prompt: z.string().trim().min(1).describe("Scene description for the clip."),
 	duration: z
 		.number()
-		.positive()
+		.min(4)
+		.max(8)
+		.multipleOf(2)
 		.optional()
-		.describe("Clip length in seconds, if the selected model supports it."),
-	resolution: z
-		.string()
-		.min(1)
-		.optional()
-		.describe('Output resolution such as "480p", "720p", or "1080p".'),
+		.describe("Clip length in seconds."),
+	resolution: z.enum(["720p", "1080p"]).optional(),
 	generate_audio: z
 		.boolean()
 		.optional()
-		.describe("Whether to generate native audio in the clip, when supported."),
-	aspect_ratio: z
-		.string()
-		.min(1)
+		.describe("Whether to generate native audio."),
+	aspect_ratio: z.enum(["16:9", "9:16"]).optional(),
+	seed: z
+		.number()
+		.int()
 		.optional()
-		.describe('Output aspect ratio such as "16:9" or "9:16", when supported.'),
-	images: z
-		.array(z.string().min(1))
-		.max(8)
+		.describe("Include only if the user supplies a seed."),
+	first_frame: z
+		.number()
+		.int()
+		.positive()
+		.optional()
+		.describe("Number of the attached image to use as the first frame."),
+	last_frame: z
+		.number()
+		.int()
+		.positive()
 		.optional()
 		.describe(
-			"Local image paths the user attached as references or first frames.",
+			"Number of the attached image to use as the last frame. Requires first_frame.",
 		),
 });
 
-type SchemaInput = z.infer<typeof schema>;
-
-export interface GenerateVideoToolInput extends SchemaInput {
-	model_provider?: string;
-	model_name?: string;
-	model_label?: string;
-}
+type GenerateVideoToolInput = z.infer<typeof schema>;
 
 export interface GenerateVideoToolDeps {
-	getModel: () => { provider: string; name: string } | undefined;
 	generate: (
 		request: GenerateVideoRequest,
 		options?: RequestOptions,
@@ -65,8 +61,6 @@ export interface GenerateVideoToolDeps {
 }
 
 const VIDEO_TIMEOUT_MS = 30 * 60 * 1000;
-const DURATION_OPTIONS = ["5s", "8s", "10s", "15s", "30s"] as const;
-const QUALITY_OPTIONS = ["480p", "720p", "1080p"] as const;
 
 export class GenerateVideoTool extends Tool<
 	GenerateVideoToolInput,
@@ -79,81 +73,115 @@ export class GenerateVideoTool extends Tool<
 		super();
 	}
 
-	override get displayName(): string {
-		return "Edit Video";
+	override get agentName(): string {
+		return DIRECT_VIDEO_TOOL;
 	}
 
-	override prompt(context: PromptContext = {}): string {
-		return getToolPrompt(this.name, context);
+	override prompt(): string {
+		return "Generate a clip with the composer’s selected Veo 3.1 Lite model. Pass settings requested by the user or set in the Canvas project. Use numbered images attached to this turn as frames. The tool handles confirmation.";
 	}
 
 	override isReadOnly(): boolean {
 		return false;
 	}
 
-	override isConcurrencySafe(): boolean {
-		return false;
-	}
-
 	override checkPermissions(): PermissionDecision {
-		return { behavior: "allow", reason: "video approval card" };
+		return { behavior: "allow", reason: "composer video generation setting" };
 	}
 
 	override permissionContent(input: GenerateVideoToolInput): string {
-		return this.summarizeInput(input) ?? input.prompt;
-	}
-
-	override parseInput(raw: unknown): GenerateVideoToolInput {
-		const parsed = super.parseInput(raw);
-		const selected = this.deps.getModel();
-		return {
-			...parsed,
-			...(selected
-				? {
-						model_provider: selected.provider,
-						model_name: selected.name,
-						model_label: videoModelLabel(selected),
-					}
-				: {}),
-		};
-	}
-
-	override summarizeInput(input: GenerateVideoToolInput): string | undefined {
-		const parts = [
-			input.model_label,
-			formatDuration(input.duration),
+		// Preserve the summary used by existing generate_video permission rules.
+		return [
+			"Veo 3.1 Lite",
+			input.duration === undefined ? undefined : `${input.duration}s`,
 			input.resolution,
 			input.generate_audio === undefined
 				? undefined
 				: input.generate_audio
 					? "audio on"
 					: "audio off",
-			input.prompt.trim(),
-		].filter((part): part is string => !!part);
-		return parts.length ? parts.join(" · ") : undefined;
+			input.prompt,
+		]
+			.filter(Boolean)
+			.join(" · ");
+	}
+
+	override summarizeInput(input: GenerateVideoToolInput): string {
+		return [
+			input.duration === undefined ? undefined : `${input.duration}s`,
+			input.resolution,
+			input.aspect_ratio,
+			input.generate_audio === undefined
+				? undefined
+				: input.generate_audio
+					? "audio on"
+					: "audio off",
+			input.seed === undefined ? undefined : `seed ${input.seed}`,
+			input.prompt,
+		]
+			.filter(Boolean)
+			.join(" · ");
 	}
 
 	override async execute(
 		input: GenerateVideoToolInput,
 		ctx: ToolContext,
 	): Promise<ToolResult<GenerateVideoResult & { savedPath?: string }>> {
-		const selected = this.deps.getModel();
-		if (!selected) {
-			throw new Error(
-				"No video model is selected in the composer. Ask the user to pick one from the Video menu instead of choosing a model yourself.",
-			);
+		const selection = ctx.directVideoGeneration;
+		if (!selection || ctx.agentDepth) {
+			throw new Error("Direct video generation is unavailable on this turn.");
 		}
 
-		const approved = await confirmVideoGeneration(input, ctx);
-		const videoConfig = compactVideoConfig(approved);
-		const timeout = AbortSignal.timeout(VIDEO_TIMEOUT_MS);
-		const signal = AbortSignal.any([ctx.signal, timeout]);
+		const { prompt, first_frame, last_frame, ...videoConfig } = input;
+		const firstFramePath = framePath(selection.framePaths, first_frame);
+		const lastFramePath = framePath(selection.framePaths, last_frame);
+		if (lastFramePath && !firstFramePath) {
+			throw new Error("A last frame requires a first frame.");
+		}
+
+		if (selection.askBeforeGenerating) {
+			const question = [
+				videoModelLabel(selection.model),
+				this.summarizeInput(input),
+				firstFramePath && `First frame: ${basename(firstFramePath)}`,
+				lastFramePath && `Last frame: ${basename(lastFramePath)}`,
+				"Generating uses Backboard credits. Longer or higher-resolution clips cost more.",
+			]
+				.filter(Boolean)
+				.join("\n\n");
+			const [answer] =
+				(await ctx.askQuestions?.([
+					{
+						header: "Confirm generation",
+						question,
+						options: [...ASK_BEFORE_GENERATING_OPTIONS],
+					},
+				])) ?? [];
+			if (answer === "Change something") {
+				throw new Error(
+					"The user wants a change. Ask what to change before calling this tool again.",
+				);
+			}
+			if (answer !== "Generate") {
+				throw new Error("Video generation was not approved.");
+			}
+		}
+
+		const signal = AbortSignal.any([
+			ctx.signal,
+			AbortSignal.timeout(VIDEO_TIMEOUT_MS),
+		]);
+		signal.throwIfAborted();
 		const generated = await this.deps.generate(
 			{
-				prompt: approved.prompt,
-				video_model_provider: selected.provider,
-				video_model_name: selected.name,
-				...(videoConfig ? { video_config: videoConfig } : {}),
+				prompt,
+				video_model_provider: selection.model.provider,
+				video_model_name: selection.model.name,
+				...(Object.values(videoConfig).some((value) => value !== undefined)
+					? { video_config: videoConfig }
+					: {}),
+				firstFramePath,
+				lastFramePath,
 			},
 			{ signal },
 		);
@@ -164,7 +192,7 @@ export class GenerateVideoTool extends Tool<
 			this.deps.fetch ?? fetch,
 			signal,
 		);
-		const label = generated.label?.trim() || approved.prompt.trim() || "Video";
+		const label = generated.label?.trim() || prompt;
 		const relativePath = savedPath
 			? projectRelativePath(savedPath, ctx.cwd)
 			: undefined;
@@ -181,7 +209,17 @@ export class GenerateVideoTool extends Tool<
 	}
 }
 
-export function videoModelLabel(selection: {
+function framePath(
+	paths: readonly string[],
+	index: number | undefined,
+): string | undefined {
+	if (index === undefined) return undefined;
+	const path = paths[index - 1];
+	if (!path) throw new Error(`No attached image with frame number ${index}.`);
+	return path;
+}
+
+function videoModelLabel(selection: {
 	provider: string;
 	name: string;
 }): string {
@@ -195,116 +233,6 @@ export function videoModelLabel(selection: {
 				: `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`,
 		)
 		.join(" ");
-}
-
-async function confirmVideoGeneration(
-	input: GenerateVideoToolInput,
-	ctx: ToolContext,
-): Promise<GenerateVideoToolInput> {
-	if (!ctx.askQuestions) {
-		return input;
-	}
-	const duration = preferredOption(
-		DURATION_OPTIONS,
-		formatDuration(input.duration),
-	);
-	const quality = preferredOption(QUALITY_OPTIONS, input.resolution);
-	const audio = input.generate_audio === false ? "Off" : "On";
-	const imageMarkdown = (input.images ?? [])
-		.slice(0, 4)
-		.map((image, index) => `![Reference ${index + 1}](${image})`)
-		.join(" ");
-	const modelLine = input.model_label ? `Model: ${input.model_label}` : "";
-	const promptBody = [input.prompt.trim(), modelLine, imageMarkdown]
-		.filter(Boolean)
-		.join("\n\n");
-	const answers = await ctx.askQuestions([
-		{
-			header: "Edit Video",
-			question: promptBody,
-			options: ["Approve"],
-		},
-		{
-			header: "Duration",
-			question: "Duration",
-			options: orderedOptions(DURATION_OPTIONS, duration),
-		},
-		{
-			header: "Quality",
-			question: "Quality",
-			options: orderedOptions(QUALITY_OPTIONS, quality),
-		},
-		{
-			header: "Native Audio",
-			question: "Native Audio",
-			options: orderedOptions(["On", "Off"], audio),
-		},
-	]);
-	if (answers[0] && answers[0] !== "Approve") {
-		throw new Error("Video generation was not approved.");
-	}
-	return {
-		...input,
-		duration: parseDuration(answers[1]) ?? input.duration,
-		resolution: parseQuality(answers[2]) ?? input.resolution,
-		generate_audio: parseAudio(answers[3], input.generate_audio),
-	};
-}
-
-function preferredOption(
-	options: readonly string[],
-	value: string | undefined,
-): string {
-	return value && options.includes(value) ? value : (options[0] ?? "");
-}
-
-function orderedOptions(
-	options: readonly string[],
-	preferred: string,
-): string[] {
-	const rest = options.filter((option) => option !== preferred);
-	return preferred ? [preferred, ...rest] : [...options];
-}
-
-function parseDuration(value: string | undefined): number | undefined {
-	const match = /^(\d+(?:\.\d+)?)s$/i.exec(value?.trim() ?? "");
-	return match ? Number(match[1]) : undefined;
-}
-
-function parseQuality(value: string | undefined): string | undefined {
-	const trimmed = value?.trim();
-	return trimmed &&
-		QUALITY_OPTIONS.includes(trimmed as (typeof QUALITY_OPTIONS)[number])
-		? trimmed
-		: undefined;
-}
-
-function parseAudio(
-	value: string | undefined,
-	fallback: boolean | undefined,
-): boolean | undefined {
-	if (value?.trim().toLowerCase() === "on") return true;
-	if (value?.trim().toLowerCase() === "off") return false;
-	return fallback;
-}
-
-function compactVideoConfig(
-	input: GenerateVideoToolInput,
-): GenerateVideoRequest["video_config"] | undefined {
-	const config = {
-		...(input.duration !== undefined ? { duration: input.duration } : {}),
-		...(input.resolution ? { resolution: input.resolution } : {}),
-		...(input.generate_audio !== undefined
-			? { generate_audio: input.generate_audio }
-			: {}),
-		...(input.aspect_ratio ? { aspect_ratio: input.aspect_ratio } : {}),
-	};
-	return Object.keys(config).length ? config : undefined;
-}
-
-function formatDuration(duration: number | undefined): string | undefined {
-	if (duration === undefined) return undefined;
-	return Number.isInteger(duration) ? `${duration}s` : `${duration}s`;
 }
 
 function projectRelativePath(path: string, cwd: string): string {

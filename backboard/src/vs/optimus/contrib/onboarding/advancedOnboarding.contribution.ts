@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { getActiveWindow } from '../../../base/browser/dom.js';
-import { Disposable, DisposableStore, IDisposable } from '../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../base/common/lifecycle.js';
 import { localize, localize2 } from '../../../nls.js';
 import { Categories } from '../../../platform/action/common/actionCommonCategories.js';
 import { Action2, registerAction2 } from '../../../platform/actions/common/actions.js';
@@ -12,6 +12,7 @@ import { ServicesAccessor } from '../../../platform/instantiation/common/instant
 import { IStorageService, StorageScope, StorageTarget } from '../../../platform/storage/common/storage.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../workbench/common/contributions.js';
 import { SpotlightTour, ISpotlightTourStep, TourPlacement } from '../../../workbench/contrib/welcomeOnboarding/browser/spotlightTour.js';
+import { isWorkbenchVisible, onceWorkbenchVisible } from '../../../workbench/contrib/welcomeOnboarding/browser/workbenchVisibility.js';
 import { IOnboardingService } from '../../../workbench/contrib/welcomeOnboarding/common/onboardingService.js';
 import { ONBOARDING_ADVANCED_TOUR_STORAGE_KEY, ONBOARDING_STORAGE_KEY, shouldOfferOnboardingTour } from '../../../workbench/contrib/welcomeOnboarding/common/onboardingTypes.js';
 import { IWorkbenchLayoutService } from '../../../workbench/services/layout/browser/layoutService.js';
@@ -20,6 +21,7 @@ import { IWorkbenchEnvironmentService } from '../../../workbench/services/enviro
 class AdvancedOnboardingTour extends Disposable {
 	static readonly ID = 'optimus.contrib.onboardingTour';
 	private started = false;
+	private readonly whenVisible = this._register(new MutableDisposable());
 
 	constructor(
 		@IStorageService private readonly storageService: IStorageService,
@@ -32,7 +34,7 @@ class AdvancedOnboardingTour extends Disposable {
 		this._register(this.storageService.onDidChangeValue(StorageScope.APPLICATION, ONBOARDING_STORAGE_KEY, this._store)(() => this.maybeStart()));
 		if (!this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)
 			&& !environmentService.extensionDevelopmentLocationURI && !environmentService.extensionTestsLocationURI) {
-			onboardingService.show();
+			onboardingService.showWhenVisible();
 		}
 		this.maybeStart();
 	}
@@ -48,6 +50,14 @@ class AdvancedOnboardingTour extends Disposable {
 				return;
 			}
 		} catch {
+			return;
+		}
+		if (!isWorkbenchVisible()) {
+			// Onboarding finished in another mode: offer the tour once the user comes here.
+			this.whenVisible.value ??= onceWorkbenchVisible(() => {
+				this.whenVisible.clear();
+				this.maybeStart();
+			});
 			return;
 		}
 		this.started = true;

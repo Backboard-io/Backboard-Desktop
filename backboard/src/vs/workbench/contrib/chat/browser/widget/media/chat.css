@@ -4318,7 +4318,8 @@ have to be updated for changes to the rules above, or to support more deeply nes
 .interactive-session .chat-scroll-down {
 	display: none;
 	position: absolute;
-	bottom: 7px;
+	bottom: calc(var(--chat-list-bottom-inset, 0px) + 7px);
+	z-index: 12;
 	right: 12px;
 	border-radius: 100%;
 	width: 27px;
@@ -11295,4 +11296,18 @@ html body .monaco-workbench .interactive-session .interactive-input-part .chat-i
 .interactive-list > .chat-prompt-dot-rail .chat-prompt-dot.active {
 	background: var(--vscode-focusBorder);
 	transform: translate(-50%, 0) scale(1.35);
+}
+
+.interactive-list > .chat-history-retry {
+	position: absolute;
+	top: 8px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 10;
+	padding: 6px 10px;
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 4px;
+	color: var(--vscode-button-secondaryForeground);
+	background: var(--vscode-button-secondaryBackground);
+	cursor: pointer;
 }
