@@ -218,6 +218,30 @@ suite('ChatMarkdownRenderer', () => {
 		assert.strictEqual(result.element.querySelector('img'), null);
 	});
 
+	test('a generated SVG shows the copy saved into the session folder', () => {
+		const bucket = 'https://backboard-prod.s3.ca-central-1.amazonaws.com/generated-images';
+		const shown = (body: string, inFolder = true) => {
+			const markdown = new MarkdownString(body);
+			const result = store.add(testRenderer.render(inFolder ? withChatMarkdownBaseUri(markdown, URI.file('/workspace/project')) : markdown));
+			const image = result.element.querySelector('img');
+			const src = image?.getAttribute('src');
+			return src?.startsWith('https:') ? src : src && URI.parse(src).path;
+		};
+		assert.deepStrictEqual({
+			svg: shown(`Done.\n\n![Apple](${bucket}/apple.svg)\n\nSaved to \`generated-images/generated-b72bb587fc46.svg\`.`),
+			raster: shown(`![Dog](${bucket}/dog.png)\n\nSaved to \`generated-images/generated-1.png\`.`),
+			notSaved: shown(`![Apple](${bucket}/apple.svg)`),
+			outsideFolder: shown(`![Apple](${bucket}/apple.svg)\n\nSaved to \`generated-images/../../../etc/apple.svg\`.`),
+			noFolder: shown(`![Apple](${bucket}/apple.svg)\n\nSaved to \`generated-images/apple.svg\`.`, false),
+		}, {
+			svg: '/workspace/project/generated-images/generated-b72bb587fc46.svg',
+			raster: `${bucket}/dog.png`,
+			notSaved: `${bucket}/apple.svg`,
+			outsideFolder: `${bucket}/apple.svg`,
+			noFolder: `${bucket}/apple.svg`,
+		});
+	});
+
 	test('a remote clip on another host is neither rendered nor upgraded', () => {
 		const result = store.add(testRenderer.render(new MarkdownString('![clip](https://cdn.example.com/clip.mp4)')));
 

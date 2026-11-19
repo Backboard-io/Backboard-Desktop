@@ -1865,6 +1865,62 @@ suite('LocalAgentHostSessionsProvider', () => {
 		});
 	}
 
+	test('first send keeps a shared composer pick the draft never saw', async () => {
+		const sent: IChatSendRequestOptions[] = [];
+		agentHost.resolveSessionConfigResult = { schema: { type: 'object', properties: {} }, values: { isolation: 'folder', imageModel: 'openrouter/openai/gpt-5.4-image-2' } };
+		const provider = createProvider(disposables, agentHost, undefined, {
+			openSession: true,
+			sendRequest: async (_resource, _message, options): Promise<ChatSendResult> => {
+				if (options) { sent.push(options); }
+				agentHost.addSession(createSession('shared-composer-pick'));
+				return { kind: 'sent', data: {} as ChatSendResult extends { kind: 'sent'; data: infer D } ? D : never };
+			},
+		});
+		const session = provider.createNewSession(URI.parse('file:///home/user/project'), provider.sessionTypes[0].id);
+		await timeout(0);
+		const backend = agentHost.createdSessionUris[0];
+		// The composer's pick is the first state the draft hears about, so there is no earlier snapshot to diff against.
+		agentHost.setSessionState(AgentSession.id(backend.toString()), backend.scheme, {
+			summary: { resource: backend.toString(), provider: backend.scheme, title: '', status: ProtocolSessionStatus.Idle, createdAt: 0, modifiedAt: 0 },
+			lifecycle: SessionLifecycle.Ready, chats: [],
+			config: { schema: { type: 'object', properties: {} }, values: { isolation: 'folder', imageModel: 'fal/fal-ai/flux/schnell' } },
+		});
+		const chat = await provider.createNewChat(session.sessionId);
+		await provider.sendRequest(session.sessionId, chat.resource, {
+			query: 'draw a lighthouse',
+			sessionConfigOverrides: { imageModel: 'fal/fal-ai/flux/schnell' },
+		});
+		assert.strictEqual(sent[0].agentHostSessionConfig?.imageModel, 'fal/fal-ai/flux/schnell');
+		assert.strictEqual(sent[0].agentHostSessionConfig?.isolation, 'folder');
+	});
+
+	test('first snapshot does not undo a provider picker choice made after create', async () => {
+		const sent: IChatSendRequestOptions[] = [];
+		agentHost.resolveSessionConfigResult = { schema: { type: 'object', properties: {} }, values: { isolation: 'folder' } };
+		const provider = createProvider(disposables, agentHost, undefined, {
+			openSession: true,
+			sendRequest: async (_resource, _message, options): Promise<ChatSendResult> => {
+				if (options) { sent.push(options); }
+				agentHost.addSession(createSession('provider-picker-choice'));
+				return { kind: 'sent', data: {} as ChatSendResult extends { kind: 'sent'; data: infer D } ? D : never };
+			},
+		});
+		const session = provider.createNewSession(URI.parse('file:///home/user/project'), provider.sessionTypes[0].id);
+		await timeout(0);
+		const backend = agentHost.createdSessionUris[0];
+		agentHost.resolveSessionConfigResult = { schema: { type: 'object', properties: {} }, values: { isolation: 'worktree' } };
+		await provider.setSessionConfigValue(session.sessionId, 'isolation', 'worktree');
+		// The eager-create snapshot still carries the value the session was created with.
+		agentHost.setSessionState(AgentSession.id(backend.toString()), backend.scheme, {
+			summary: { resource: backend.toString(), provider: backend.scheme, title: '', status: ProtocolSessionStatus.Idle, createdAt: 0, modifiedAt: 0 },
+			lifecycle: SessionLifecycle.Ready, chats: [],
+			config: { schema: { type: 'object', properties: {} }, values: { isolation: 'folder' } },
+		});
+		const chat = await provider.createNewChat(session.sessionId);
+		await provider.sendRequest(session.sessionId, chat.resource, { query: 'hello' });
+		assert.strictEqual(sent[0].agentHostSessionConfig?.isolation, 'worktree');
+	});
+
 	test('shared composer config survives an in-flight draft schema resolve', async () => {
 		const provider = createProvider(disposables, agentHost);
 		const session = provider.createNewSession(URI.parse('file:///home/user/project'), provider.sessionTypes[0].id);

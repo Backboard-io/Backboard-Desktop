@@ -13,6 +13,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as readline from 'readline';
 import { codiconsStylesheetUri, fontBaseUri, iconBaseUri, panelHtml, webviewLocalResourceRoots } from './panel/panelHtml';
+import { BackboardSignIns, type BackboardSignInOutcome } from './signInCore';
 import { registerStudioSignInTracking } from './studioTracking';
 import { attachBackboardLiveUpdates, currentBackboardUpdateChannel, initializeBackboardUpdates, readCurrentAppVersion, setPendingLiveRestart } from './updates';
 import { initializeBackboardLiveUpdates, installedAppRoot, liveCliInvocation } from './liveUpdates';
@@ -40,6 +41,7 @@ const commitMessageModel = 'gpt-4o-mini';
 const commitMessageExcludedTools = ['Read', 'Create', 'Grep', 'Glob', 'FetchUrl', 'WebSearch', 'TodoWrite', 'Agent'];
 const maxCommitDiffChars = 60_000;
 let backboardToolOutput: vscode.OutputChannel | undefined;
+const backboardSignIns = new BackboardSignIns();
 
 interface GitChange {
 	readonly uri: vscode.Uri;
@@ -116,6 +118,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 		return signedIn;
 	}));
+	// For onboarding, which shows the outcome in its own screen: toasts sit underneath it.
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.runSignIn', async () => {
+		const outcome = await runBackboardSignIn(bridge);
+		if (outcome.status === 'signedIn') {
+			reportStudioSignIn();
+		}
+		return outcome;
+	}));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.cancelSignIn', () => backboardSignIns.cancel()));
+	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signInLink', () => backboardSignIns.link()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.extension.signOut', () => bridge.signOut()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.refreshModels', () => panelProvider.refreshModels()));
 	context.subscriptions.push(vscode.commands.registerCommand('backboard.generateCommitMessage', (rootUri: vscode.Uri | undefined, _context: unknown, token: vscode.CancellationToken | undefined) => generateBackboardCommitMessage(bridge, rootUri, token)));
@@ -352,25 +364,43 @@ async function promptBackboardSso(bridge: BackboardBridge): Promise<boolean> {
  * redirect or callback server is involved.
  */
 async function signInBackboard(bridge: BackboardBridge): Promise<boolean> {
-	try {
-		const device = await requestBackboardDeviceCode();
-		backboardToolOutput?.appendLine(`[oauth] Device login code ${device.user_code}; approve at ${device.verification_uri}`);
-		await openBackboardOAuthAuthorizeUrl(device.verification_uri_complete);
-		const tokens = await pollBackboardDeviceToken(device);
-		const saveResult = await saveBackboardOAuthTokens(tokens);
-		await cacheBackboardUserName(stringValueFromRecord(tokens.access_token));
-		bridge.restart();
-		bridge.warmUp();
-		if (saveResult.apiKeySaved) {
-			backboardToolOutput?.appendLine(`[oauth] Backboard SSO complete. API key saved to ${backboardConfigPath()}.`);
-		}
+	const outcome = await runBackboardSignIn(bridge);
+	if (outcome.status === 'signedIn') {
 		void vscode.window.showInformationMessage('Backboard SSO complete.');
-		return true;
-	} catch (error) {
-		backboardToolOutput?.appendLine(`[oauth] sign in failed: ${error instanceof Error ? error.message : String(error)}`);
-		await vscode.window.showErrorMessage(`Backboard sign in failed: ${error instanceof Error ? error.message : String(error)}`);
-		return false;
+	} else if (outcome.status === 'failed') {
+		// Not awaited: the promise settles only once the message is closed,
+		// and callers are waiting on this sign-in to finish.
+		void vscode.window.showErrorMessage(`Backboard sign in failed: ${outcome.error}`);
 	}
+	return outcome.status === 'signedIn';
+}
+
+/** The sign-in itself, without any messages. */
+async function runBackboardSignIn(bridge: BackboardBridge): Promise<BackboardSignInOutcome> {
+	const outcome = await backboardSignIns.run({
+		requestDeviceCode: async () => {
+			const device = await requestBackboardDeviceCode();
+			backboardToolOutput?.appendLine(`[oauth] Device login code ${device.user_code}; approve at ${device.verification_uri}`);
+			return device;
+		},
+		openBrowser: openBackboardOAuthAuthorizeUrl,
+		pollForTokens: pollBackboardDeviceToken,
+		save: async tokens => {
+			const saveResult = await saveBackboardOAuthTokens(tokens);
+			await cacheBackboardUserName(stringValueFromRecord(tokens.access_token));
+			bridge.restart();
+			bridge.warmUp();
+			if (saveResult.apiKeySaved) {
+				backboardToolOutput?.appendLine(`[oauth] Backboard SSO complete. API key saved to ${backboardConfigPath()}.`);
+			}
+		},
+	});
+	if (outcome.status === 'failed') {
+		backboardToolOutput?.appendLine(`[oauth] sign in failed: ${outcome.error}`);
+	} else if (outcome.status === 'cancelled') {
+		backboardToolOutput?.appendLine('[oauth] sign in cancelled');
+	}
+	return outcome;
 }
 
 function openBackboardOAuthAuthorizeUrl(authorizeUrl: string): Promise<void> {
@@ -426,12 +456,15 @@ async function requestBackboardDeviceCode(): Promise<BackboardDeviceCodeResponse
  * in the browser, following the standard `authorization_pending`/`slow_down`
  * back-off semantics (RFC 8628, section 3.5).
  */
-async function pollBackboardDeviceToken(device: BackboardDeviceCodeResponse): Promise<BackboardOAuthTokens> {
+async function pollBackboardDeviceToken(device: BackboardDeviceCodeResponse, isCancelled: () => boolean): Promise<BackboardOAuthTokens> {
 	let intervalMs = Math.max(1, device.interval) * 1000;
 	const expiresAt = Date.now() + Math.min(backboardOAuthTimeoutMs, device.expires_in * 1000);
 
 	while (Date.now() < expiresAt) {
 		await new Promise<void>(resolve => setTimeout(resolve, intervalMs));
+		if (isCancelled()) {
+			throw new Error('Backboard device login was cancelled.');
+		}
 		const body = new URLSearchParams({
 			grant_type: backboardOAuthDeviceGrantType,
 			device_code: device.device_code,

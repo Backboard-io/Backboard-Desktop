@@ -271,7 +271,6 @@ export function createDefaultTools(deps?: DefaultToolDeps): Tool[] {
 	const tools: Tool[] = [
 		...base,
 		new GenerateVideoTool({
-			getModel: () => deps.config.selectedVideoModel,
 			generate: (request, options) => {
 				if (!deps.client.generateVideo) {
 					throw new Error(

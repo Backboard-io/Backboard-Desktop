@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { Config } from "../config/Config.ts";
@@ -47,6 +47,7 @@ import { createAgentClient } from "../providers/createAgentClient.ts";
 import { createDefaultTools } from "../tools/index.ts";
 import { errorMessage } from "../utils/errors.ts";
 import { shortId } from "../utils/id.ts";
+import { ServeSessionRestore } from "./ServeSessionRestore.ts";
 import {
 	SERVE_CAPABILITIES,
 	type ServeControl,
@@ -56,7 +57,6 @@ import {
 } from "./ServeTypes.ts";
 import { parseControlLine } from "./serveControl.ts";
 import { buildServeConversationContext } from "./serveConversationContext.ts";
-import { ServeSessionRestore } from "./ServeSessionRestore.ts";
 import {
 	McpStatusPublisher,
 	McpWorkQueue,
@@ -347,12 +347,13 @@ export async function runServe(argv: string[]): Promise<void> {
 	): Promise<string[]> => {
 		const attachmentsDir = join(store.paths.root, "attachments");
 		await mkdir(attachmentsDir, { recursive: true });
+		const turnDir = await mkdtemp(join(attachmentsDir, "turn-"));
 		const paths: string[] = [];
 		for (let index = 0; index < files.length; index++) {
 			const file = files[index];
 			if (!file) continue;
 			const safeName = basename(file.fileName) || `attachment-${index + 1}`;
-			const target = join(attachmentsDir, `${index + 1}-${safeName}`);
+			const target = join(turnDir, `${index + 1}-${safeName}`);
 			await writeFile(target, Buffer.from(file.dataBase64, "base64"));
 			paths.push(target);
 		}

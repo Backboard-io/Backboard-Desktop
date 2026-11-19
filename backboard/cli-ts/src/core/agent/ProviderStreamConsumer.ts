@@ -804,6 +804,21 @@ function dedupeParagraphs(text: string): string {
 		.join("\n\n");
 }
 
+/** Source extensions a saved file keeps; any other is named by content type. */
+const GENERATED_MEDIA_EXTENSIONS = new Set([
+	".png",
+	".jpg",
+	".jpeg",
+	".webp",
+	".gif",
+	".avif",
+	".svg",
+	".mp4",
+	".webm",
+	".mov",
+	".m4v",
+]);
+
 function generatedMediaFilename(
 	contentHash: string,
 	url: string,
@@ -815,9 +830,7 @@ function generatedMediaFilename(
 	} catch {
 		// Data URLs and malformed provider URLs fall through to content type.
 	}
-	const extension = /^[.](?:png|jpe?g|webp|gif|avif|mp4|webm|mov|m4v)$/.test(
-		sourceExtension,
-	)
+	const extension = GENERATED_MEDIA_EXTENSIONS.has(sourceExtension)
 		? sourceExtension === ".jpeg"
 			? ".jpg"
 			: sourceExtension
@@ -831,6 +844,7 @@ function extensionForContentType(contentType: string | null): string {
 	if (type === "image/webp") return ".webp";
 	if (type === "image/gif") return ".gif";
 	if (type === "image/avif") return ".avif";
+	if (type === "image/svg+xml") return ".svg";
 	if (type === "video/mp4") return ".mp4";
 	if (type === "video/webm") return ".webm";
 	if (type === "video/quicktime") return ".mov";

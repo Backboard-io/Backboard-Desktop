@@ -259,7 +259,7 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
 		}
 
 		// Show the onboarding overlay on top of the welcome page
-		this.onboardingService.show();
+		this.onboardingService.showWhenVisible();
 	}
 
 	private hasSeenOnboarding(): boolean {

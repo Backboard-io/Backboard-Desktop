@@ -4,6 +4,7 @@ import {
 	buildGenerativeMediaPrompt,
 	parseCanvasProjectSettings,
 } from "../src/prompts/system/generativeMedia.ts";
+import { getToolPrompt } from "../src/prompts/tools/index.tsx";
 
 describe("buildGenerativeMediaPrompt", () => {
 	it("names the models the composer selected and pins them for the turn", () => {
@@ -31,6 +32,23 @@ describe("buildGenerativeMediaPrompt", () => {
 		expect(prompt).toContain("openrouter/bytedance/seedance-2.0-mini");
 	});
 
+	it("uses the Desktop Veo function with numbered frames and separate image approval", () => {
+		const prompt = buildGenerativeMediaPrompt({
+			videoModel: { provider: "openrouter", name: "google/veo-3.1-lite" },
+			imageModel: {
+				provider: "openrouter",
+				name: "google/gemini-3.1-flash-image-preview",
+			},
+			directVideoFrames: ["start.png", "end.png"],
+			askBeforeGenerating: true,
+		});
+		expect(prompt).toContain("call the `generate_video_direct` function tool");
+		expect(prompt).toContain('1. "start.png"\n2. "end.png"');
+		expect(prompt).toContain("The tool asks for confirmation");
+		expect(prompt).toContain("Before calling `generate_image`, use `ask_user`");
+		expect(prompt).not.toContain("`video_config`");
+	});
+
 	it("tells the agent to call generate_video instead of curling", () => {
 		const prompt = buildGenerativeMediaPrompt({
 			videoModel: { provider: "openrouter", name: "bytedance/seedance-2.5" },
@@ -39,15 +57,53 @@ describe("buildGenerativeMediaPrompt", () => {
 		expect(prompt).toContain("call the `generate_video` function tool");
 		expect(prompt).toContain("Never use execute, curl");
 		expect(prompt).not.toContain("operation=generate_video");
-		// On OpenRouter an attached clip is a video reference described as a new video, sent with the images
-		// that should appear in it; only some models take a clip. Never read with Read; failures are retried
-		// from the tool's hint or reported.
-		expect(prompt).toContain("pass that clip in the references (`input_reference_document_ids`), together with any attached images");
-		expect(prompt).toContain("Only Hailuo 3 takes a clip plus images");
-		expect(prompt).toContain("Write the prompt as a new video that follows the reference, never as an edit of it");
-		expect(prompt).not.toContain("Keep the same footage, camera motion");
 		expect(prompt).toContain("Never open attached images or videos with Read");
-		expect(prompt).toContain("If `generate_video` fails with a `hint`, follow it and retry once");
+		expect(prompt).toContain(
+			"If `generate_video` fails with a `hint`, follow it and retry once",
+		);
+	});
+
+	it("uses the selected tool schema for source clips and video settings", () => {
+		for (const name of ["runway/aleph-2", "bytedance/seedance-2.5"]) {
+			const prompt = buildGenerativeMediaPrompt({
+				videoModel: { provider: "openrouter", name },
+			});
+
+			expect(prompt).toContain("input_video_document_id");
+			expect(prompt).toContain("video_config");
+			expect(prompt).toContain(
+				"Omit unused optional settings and input fields instead of sending null",
+			);
+			expect(prompt).toContain(
+				"only settings exposed by the selected tool's schema",
+			);
+			expect(prompt).toContain("describe only the requested change");
+			expect(prompt).toContain(
+				"Do not invent duration or resolution overrides for an edit or upscale",
+			);
+			expect(prompt).not.toContain("this provider has no source-video field");
+			expect(prompt).not.toContain("Only Hailuo 3 takes a clip plus images");
+			expect(prompt).not.toContain(
+				"Seedance models take no video input at all",
+			);
+			expect(prompt).not.toContain("never as an edit of it");
+		}
+	});
+
+	it("keeps the video tool description consistent with hosted media arguments", () => {
+		for (const profile of ["default", "openai", "anthropic"] as const) {
+			const prompt = getToolPrompt("generate_video", { profile });
+			expect(prompt).toContain("video_config");
+			expect(prompt).toContain(
+				"Omit unused optional settings and input fields instead of sending null",
+			);
+			expect(prompt).toContain("input_video_document_id");
+			expect(prompt).toContain(
+				"only settings exposed by the selected tool's schema",
+			);
+			expect(prompt).not.toContain("not input_video_document_id");
+			expect(prompt).not.toContain("Only Hailuo 3");
+		}
 	});
 
 	it("tells the agent to ask for a model instead of calling the media endpoints", () => {
@@ -99,7 +155,7 @@ describe("buildGenerativeMediaPrompt", () => {
 			imageModel: { provider: "google", name: "gemini-3.1-flash-image" },
 		});
 
-		expect(video).toContain('call `ask_user` before `generate_video`');
+		expect(video).toContain("call `ask_user` before `generate_video`");
 		expect(video).toContain('options "5s", "8s", "10s", "15s"');
 		expect(video).toContain("without asking");
 		expect(imageOnly).not.toContain("Video length");
@@ -126,13 +182,20 @@ describe("buildGenerativeMediaPrompt", () => {
 		expect(asking).toContain(
 			`options ${ASK_BEFORE_GENERATING_OPTIONS.map((option) => `"${option}"`).join(", ")}`,
 		);
-		expect(ASK_BEFORE_GENERATING_OPTIONS).toEqual(["Generate", "Change something"]);
+		expect(ASK_BEFORE_GENERATING_OPTIONS).toEqual([
+			"Generate",
+			"Change something",
+		]);
 		expect(asking).toContain('only after the user answers "Generate"');
 		expect(asking).toContain("Never quote a price you do not know.");
 		// The length question rides in the same card, and a retry of an approved request is not re-asked.
-		expect(asking).toContain('put the "Video length" question first in that same `ask_user` call');
+		expect(asking).toContain(
+			'put the "Video length" question first in that same `ask_user` call',
+		);
 		expect(asking).toContain("needs no new confirmation");
-		expect(asking).toContain("call `generate_video` yourself once the user approves");
+		expect(asking).toContain(
+			"call `generate_video` yourself once the user approves",
+		);
 		expect(asking).not.toContain("you must call `generate_video` directly");
 		// Off keeps today's prompt byte for byte.
 		expect(off).toBe(buildGenerativeMediaPrompt(selection));
@@ -156,7 +219,10 @@ describe("buildGenerativeMediaPrompt", () => {
 		const selection = {
 			videoModel: { provider: "openrouter", name: "runway/aleph-2" },
 		};
-		const canvas = buildGenerativeMediaPrompt({ ...selection, canvasProject: true });
+		const canvas = buildGenerativeMediaPrompt({
+			...selection,
+			canvasProject: true,
+		});
 		const plain = buildGenerativeMediaPrompt(selection);
 
 		expect(canvas).toContain("## Canvas project");
@@ -172,16 +238,29 @@ describe("buildGenerativeMediaPrompt", () => {
 			JSON.stringify({
 				version: 1,
 				nodes: [],
-				settings: { aspectRatio: "9:16", duration: 8, resolution: "720p", audio: false },
+				settings: {
+					aspectRatio: "9:16",
+					duration: 8,
+					resolution: "720p",
+					audio: false,
+				},
 			}),
 		);
 		const prompt = buildGenerativeMediaPrompt({
-			videoModel: { provider: "openrouter", name: "bytedance/seedance-2.0-fast" },
+			videoModel: {
+				provider: "openrouter",
+				name: "bytedance/seedance-2.0-fast",
+			},
 			canvasProject: true,
 			canvasSettings: settings,
 		});
 
-		expect(settings).toEqual({ aspectRatio: "9:16", duration: 8, resolution: "720p", audio: false });
+		expect(settings).toEqual({
+			aspectRatio: "9:16",
+			duration: 8,
+			resolution: "720p",
+			audio: false,
+		});
 		expect(prompt).toContain(
 			"Project defaults for new clips (chosen in the Canvas settings under the chat): 9:16, 8 seconds, 720p, no audio.",
 		);

@@ -111,6 +111,9 @@ function itemName(image: ICanvasImage): string {
 /** Blob types to play videos as. QuickTime `.mov` is typed as MP4: Chromium plays H.264 `.mov` that way, but not as `video/quicktime`. */
 const VIDEO_MIME_TYPES: Record<string, string> = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/mp4', webm: 'video/webm' };
 
+/** Chromium sniffs raster formats in an untyped blob, but shows SVG only when typed as such. */
+const SVG_MIME_TYPE = 'image/svg+xml';
+
 /**
  * Canvas as its own surface, like Codex's image playground: every image and
  * video from all chats on one timeline, each turn labelled with its chat. It
@@ -639,9 +642,9 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 		}
 		try {
 			const content = await this.fileService.readFile(file);
-			// Videos need their type for the element to play a blob.
+			// Videos and SVGs need their type for the element to show a blob.
 			const extension = file.path.split('.').pop()?.toLowerCase() ?? '';
-			const type = image.kind === 'video' ? VIDEO_MIME_TYPES[extension] ?? 'video/mp4' : undefined;
+			const type = image.kind === 'video' ? VIDEO_MIME_TYPES[extension] ?? 'video/mp4' : extension === 'svg' ? SVG_MIME_TYPE : undefined;
 			const url = URL.createObjectURL(new Blob([content.value.buffer.slice()], type ? { type } : undefined));
 			blobUrls.push(url);
 			return url;
@@ -675,6 +678,10 @@ export class SessionsCanvasOverlay extends Disposable implements IWorkbenchContr
 		}
 		try {
 			const content = await this.fileService.readFile(file);
+			if (file.path.toLowerCase().endsWith('.svg')) {
+				// createImageBitmap cannot decode SVG, and a vector image scales down by itself.
+				return URL.createObjectURL(new Blob([content.value.buffer.slice()], { type: SVG_MIME_TYPE }));
+			}
 			const bitmap = await createImageBitmap(new Blob([content.value.buffer.slice()]));
 			const scale = Math.min(1, THUMBNAIL_EDGE / Math.max(bitmap.width, bitmap.height));
 			const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(bitmap.height * scale)));

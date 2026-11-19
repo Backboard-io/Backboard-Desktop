@@ -287,6 +287,8 @@ export type IChatSessionHistoryItem = {
 export type IChatSessionRequestHistoryItem = Extract<IChatSessionHistoryItem, { type: 'request' }>;
 
 export interface IChatSessionServerRequest {
+	/** Durable turn identity, shared with fetched history and other views. */
+	readonly id?: string;
 	readonly prompt: string;
 	readonly variableData?: IChatRequestVariableData;
 	readonly isSystemInitiated?: boolean;
@@ -343,6 +345,13 @@ export function isAgentHostTarget(target: string): boolean {
  */
 export const localChatSessionType = SessionType.Local;
 
+/** Optional desktop capability. History outside the viewport is hydrated on demand. */
+export interface IChatSessionHistoryController {
+	readonly onDidChange: Event<void>;
+	getTurnIds(): readonly string[];
+	fetchTurns(query: { readonly before?: string; readonly limit?: number }, token: CancellationToken): Promise<readonly IChatSessionHistoryItem[]>;
+}
+
 export interface IChatSession extends IDisposable {
 	readonly onWillDispose: Event<void>;
 
@@ -351,6 +360,7 @@ export interface IChatSession extends IDisposable {
 	readonly title?: string;
 
 	readonly history: readonly IChatSessionHistoryItem[];
+	readonly historyController?: IChatSessionHistoryController;
 
 
 	readonly options?: ReadonlyChatSessionOptionsMap;

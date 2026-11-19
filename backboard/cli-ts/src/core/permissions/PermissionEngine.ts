@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import { DIRECT_VIDEO_TOOL } from "../tools/names.ts";
 import type { Tool } from "../tools/Tool.ts";
 import { findMatch, type PermissionRule } from "./PermissionRules.ts";
 import type { PermissionContext } from "./types.ts";
@@ -58,9 +59,16 @@ export function decidePermission(
 		? normalizedPathRules(pctx.rules.allow, ruleCwd)
 		: pctx.rules.allow;
 	const name = tool.agentName;
+	const ruleNames =
+		name === DIRECT_VIDEO_TOOL ? [name, "generate_video"] : [name];
 	const strictManual = pctx.mode === "manual" && pctx.interactive;
 
-	const denyRule = findFirstMatch(denyRules, name, contentCandidates, paths);
+	const denyRule = findFirstMatch(
+		denyRules,
+		ruleNames,
+		contentCandidates,
+		paths,
+	);
 	if (denyRule) {
 		return {
 			behavior: "deny",
@@ -68,7 +76,7 @@ export function decidePermission(
 		};
 	}
 
-	const askRule = findFirstMatch(askRules, name, contentCandidates, paths);
+	const askRule = findFirstMatch(askRules, ruleNames, contentCandidates, paths);
 	if (askRule) {
 		return content === undefined
 			? { behavior: "ask" }
@@ -92,7 +100,7 @@ export function decidePermission(
 
 	const allowRule = findFirstMatch(
 		allowRules,
-		name,
+		ruleNames,
 		contentCandidates,
 		paths,
 		true,
@@ -111,14 +119,16 @@ export function decidePermission(
 
 function findFirstMatch(
 	rules: PermissionRule[],
-	toolName: string,
+	toolNames: readonly string[],
 	contents: readonly (string | undefined)[],
 	paths?: readonly string[],
 	requireAllPaths = false,
 ): PermissionRule | null {
-	for (const content of contents) {
-		const match = findMatch(rules, toolName, content, paths, requireAllPaths);
-		if (match) return match;
+	for (const toolName of toolNames) {
+		for (const content of contents) {
+			const match = findMatch(rules, toolName, content, paths, requireAllPaths);
+			if (match) return match;
+		}
 	}
 	return null;
 }

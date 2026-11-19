@@ -1,3 +1,4 @@
+import { DIRECT_VIDEO_TOOL } from "../../core/tools/names.ts";
 import type { ModelSource } from "../../providers/backboard/types.ts";
 
 /**
@@ -12,6 +13,8 @@ import type { ModelSource } from "../../providers/backboard/types.ts";
 export interface GenerativeMediaSelection {
 	imageModel?: { provider: string; name: string };
 	videoModel?: { provider: string; name: string };
+	/** Presence selects the Desktop tool. Frame labels are numbered in this order. */
+	directVideoFrames?: readonly string[];
 	/**
 	 * Where the turn is billed. Backboard's media tools only run on
 	 * Backboard-billed turns; a key or subscription turn never reaches them.
@@ -129,7 +132,8 @@ function buildMediaToolsPrompt(selection: GenerativeMediaSelection): string {
 	if (selection.route && selection.route.source !== "backboard") {
 		return buildOwnBillingMediaPrompt(selection.route);
 	}
-	const { imageModel, videoModel } = selection;
+	const { imageModel, videoModel, directVideoFrames } = selection;
+	const hostedVideo = videoModel && !directVideoFrames;
 	if (!imageModel && !videoModel) {
 		return [
 			"## Image and video generation",
@@ -146,8 +150,9 @@ function buildMediaToolsPrompt(selection: GenerativeMediaSelection): string {
 		);
 	}
 	if (videoModel) {
+		const videoTool = directVideoFrames ? DIRECT_VIDEO_TOOL : "generate_video";
 		enabled.push(
-			`- Videos: call the \`generate_video\` function tool. The Video picker already selected \`${formatSelection(videoModel)}\`; that model is pinned on the tool call, so do not pass a model argument.`,
+			`- Videos: call the \`${videoTool}\` function tool. The Video picker already selected \`${formatSelection(videoModel)}\`; that model is pinned on the tool call, so do not pass a model argument.`,
 		);
 	}
 	return [
@@ -156,13 +161,49 @@ function buildMediaToolsPrompt(selection: GenerativeMediaSelection): string {
 		"Backboard's built-in media tools are enabled for this turn:",
 		...enabled,
 		"",
-		videoModel
-			? `For video, you must call \`generate_video\` ${selection.askBeforeGenerating ? "yourself once the user approves (see Ask Before Generating below)" : "directly"} — do not search docs, MCP, or the web to check capability first; the tool is available right now. Never use execute, curl, FetchUrl, or POST /threads/messages to create a clip. Fill \`prompt\` and optional duration/resolution/native audio; Backboard supplies the selected model.`
-			: "Ask for the media in natural language and let the thread model call the tool.",
-		...(videoModel ? ["", VIDEO_LENGTH_GUIDANCE, "", attachedMediaGuidance(videoModel.provider)] : []),
+		hostedVideo
+			? `For video, you must call \`generate_video\` ${selection.askBeforeGenerating ? "yourself once the user approves (see Ask Before Generating below)" : "directly"} — do not search docs, MCP, or the web to check capability first; the tool is available right now. Never use execute, curl, FetchUrl, or POST /threads/messages to create a clip. Fill \`prompt\`; put requested duration, resolution, aspect ratio and native audio inside \`video_config\`, using only settings exposed by the selected tool's schema. Backboard supplies the selected model. Do not invent duration or resolution overrides for an edit or upscale; preserve the source clip's settings unless the user requests a supported change.`
+			: directVideoFrames
+				? directVideoGuidance(directVideoFrames, selection.askBeforeGenerating)
+				: "Ask for the media in natural language and let the thread model call the tool.",
+		...(hostedVideo
+			? [
+					"Omit unused optional settings and input fields instead of sending null. Do not add size, seed, or provider routing unless the user requested them. An empty configuration should be omitted entirely.",
+					"",
+					VIDEO_LENGTH_GUIDANCE,
+					"",
+					ATTACHED_MEDIA_GUIDANCE,
+				]
+			: []),
 		"",
 		"The selected model is fixed for the turn. Never substitute another media model. If the selected model cannot satisfy the request — an unsupported duration or input, for instance — say so and offer a supported alternative instead of switching models.",
-		...(selection.askBeforeGenerating ? ["", ASK_BEFORE_GENERATING_GUIDANCE] : []),
+		...(selection.askBeforeGenerating
+			? directVideoFrames
+				? imageModel
+					? ["", IMAGE_CONFIRMATION_GUIDANCE]
+					: []
+				: ["", ASK_BEFORE_GENERATING_GUIDANCE]
+			: []),
+	].join("\n");
+}
+
+function directVideoGuidance(
+	frames: readonly string[],
+	askBefore?: boolean,
+): string {
+	const labels = frames.map(
+		(label, index) => `${index + 1}. ${JSON.stringify(label)}`,
+	);
+	return [
+		`Call \`${DIRECT_VIDEO_TOOL}\` for Veo clips. Pass duration (4, 6, or 8 seconds), resolution, aspect ratio, audio, or seed only when requested or set in the Canvas project. Omit unused fields. If length is unspecified and there is no project default, use ask_user to offer 4s, 6s, and 8s. State the length once the video is ready.`,
+		"Use first_frame to animate an attached image. A last_frame also requires a first_frame. Use the image numbers below. If an image from an earlier turn is needed, ask the user to attach it again. Veo 3.1 Lite cannot edit a source video or take other reference inputs. Do not generate without the requested input.",
+		labels.length
+			? `Attached frame images:\n${labels.join("\n")}`
+			: "No frame images are attached.",
+		askBefore
+			? "The tool asks for confirmation before spending credits. Call it once with the proposed settings without a separate ask_user confirmation. If the user wants a change, clarify it and submit the revised request. If approval is declined, stop."
+			: "Ask Before Generating is off. Call the tool directly.",
+		"Never use a shell, file tools, or an HTTP request to generate the clip. If generation fails, report the error and wait before starting another job. Show the tool's video in your reply.",
 	].join("\n");
 }
 
@@ -171,7 +212,13 @@ function buildMediaToolsPrompt(selection: GenerativeMediaSelection): string {
  * hosted media tools run server-side where the client cannot interject, so
  * the agent itself must stop and ask before it spends credits.
  */
-export const ASK_BEFORE_GENERATING_OPTIONS = ["Generate", "Change something"] as const;
+export const ASK_BEFORE_GENERATING_OPTIONS = [
+	"Generate",
+	"Change something",
+] as const;
+
+const IMAGE_CONFIRMATION_GUIDANCE =
+	'Before calling `generate_image`, use `ask_user` to confirm with the header "Confirm generation" and options "Generate" and "Change something". Summarize the model, image prompt and any inputs, and say that generation uses Backboard credits. Generate only after approval.';
 
 const ASK_BEFORE_GENERATING_GUIDANCE = [
 	"### Ask Before Generating",
@@ -238,31 +285,20 @@ export const VIDEO_LENGTH_OPTIONS = ["5s", "8s", "10s", "15s"] as const;
  * agent read a clip with Read (binary into context), guessed among IDs, and
  * silently regenerated from scratch when an edit failed.
  *
- * OpenRouter (every video model the picker lists today) has no source-video
- * field: the clip goes in as a video *reference* (`input_references` with a
- * `video_url`). Live tests (2026-10-02) showed which models take one: Hailuo 3
- * (clip alone or clip plus images, e.g. "the man at the mic is the fox from
- * the reference image"), Aleph 2 and FLUX Video Edit (clip alone). Seedance
- * failed on every video input however the prompt was worded, and references
- * past ~10s or above 720p failed everywhere.
+ * Source-video editing and reference-guided generation have different input
+ * roles. The backend binds the selected model's live schema, including which
+ * roles and settings it supports; provider-wide assumptions can contradict it.
  */
-function attachedMediaGuidance(videoProvider: string): string {
-	const sourceClip = videoProvider === "openrouter"
-		? [
-			"pass that clip in the references (`input_reference_document_ids`), together with any attached images that should appear in it, not `input_video_document_id` (this provider has no source-video field).",
-			"Write the prompt as a new video that follows the reference, never as an edit of it: describe the whole shot you want (subject, action, setting) with the user's change built in, say it follows the reference video's camera motion, framing, movement and scene, and name which reference image becomes which person or object. For example, \"The man at the microphone is the fox character from the reference image, rapping with the same gestures; follows the reference video's camera motion, framing, the other performer and the studio.\"",
-			"Only Hailuo 3 takes a clip plus images; Aleph 2 and FLUX Video Edit take a clip alone; Seedance models take no video input at all. If the selected model cannot take what the user attached, say so and name a model that can instead of calling the tool.",
-		].join(" ")
-		: "pass that clip as the source video (`input_video_document_id`) and describe only the change.";
-	return [
-		"Attached media: images and videos the user attaches are uploaded with their message and reach `generate_video` as document IDs, not file paths. Never open attached images or videos with Read or other file tools; they are binary.",
-		`- To edit, restyle, extend or continue an attached video ("change the jerseys", "make it night", "replace him with @image_2"), ${sourceClip} Use first/last-frame images only to animate a still.`,
-		"- The user's attachment is the file their message names. If several document IDs are offered and you cannot tell which one it is, prefer the one uploaded with this message and say which you used.",
-		"- If `generate_video` fails with a `hint`, follow it and retry once with the same inputs. Otherwise tell the user the tool's error and what you passed. Do not quietly switch to generating a new clip from scratch, or from a still of the clip; offer that as an option instead.",
-	].join("\n");
-}
+const ATTACHED_MEDIA_GUIDANCE = [
+	"Attached media: images and videos the user attaches are uploaded with their message and reach `generate_video` as document IDs, not file paths. Never open attached images or videos with Read or other file tools; they are binary.",
+	'- To edit, restyle, extend or upscale an attached video ("change the jerseys", "make it night"), pass the source clip as `input_video_document_id` when that field is exposed by the selected tool and describe only the requested change. Do not move a required source clip into `input_reference_document_ids`.',
+	"- Reference-guided generation makes a new clip following supplied references. Use `input_reference_document_ids` only when the selected tool exposes it and the user wants that operation; follow its model-specific prompt guidance. If source-video editing is unavailable, explain the limitation rather than silently substituting reference-guided generation.",
+	"- Use `input_image_document_id` and `input_last_frame_document_id` only for the roles described by the selected tool: animation frames or an edited first-frame keyframe. Do not combine frames and references unless the schema allows it. If an edit requires an edited first frame, preserve the source composition; a standalone identity portrait is not an edited video frame.",
+	"- The user's attachment is the file their message names. If several document IDs are offered and you cannot tell which one it is, prefer the one uploaded with this message and say which you used.",
+	"- If `generate_video` fails with a `hint`, follow it and retry once with the same inputs. Otherwise tell the user the tool's error and what you passed. Do not quietly switch to generating a new clip from scratch, or from a still of the clip; offer that as an option instead.",
+].join("\n");
 
-const VIDEO_LENGTH_GUIDANCE = `Video length: if the user has not said how long the clip should be (e.g. "10 seconds", "a 5s clip", "short"), call \`ask_user\` before \`generate_video\` with one question — header "Video length", question "How long should the video be?", options ${VIDEO_LENGTH_OPTIONS.map((option) => `"${option}"`).join(", ")} — then pass the chosen length as \`duration\` in seconds. If they already gave a length, use it (as \`duration\`) without asking. Always state the clip length in your reply once the video is ready.`;
+const VIDEO_LENGTH_GUIDANCE = `Video length: for a new clip, if the user has not said how long it should be (e.g. "10 seconds", "a 5s clip", "short") and the selected tool supports duration, call \`ask_user\` before \`generate_video\` with one question — header "Video length", question "How long should the video be?", options ${VIDEO_LENGTH_OPTIONS.map((option) => `"${option}"`).join(", ")} restricted to supported lengths — then pass the chosen length as \`video_config.duration\` in seconds. If they already gave a supported length, use it without asking. For source-video edits and upscales, preserve the source duration unless the user requests a supported change. Always state the clip length in your reply once the video is ready.`;
 
 function formatSelection(selection: {
 	provider: string;

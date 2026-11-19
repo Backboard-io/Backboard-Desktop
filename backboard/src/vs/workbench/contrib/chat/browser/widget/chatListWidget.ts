@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { localize } from '../../../../../nls.js';
 import * as dom from '../../../../../base/browser/dom.js';
 import { IMouseWheelEvent } from '../../../../../base/browser/mouseEvent.js';
 import { Button } from '../../../../../base/browser/ui/button/button.js';
@@ -10,7 +11,8 @@ import { ITreeContextMenuEvent, ITreeElement, ITreeFilter } from '../../../../..
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { FuzzyScore } from '../../../../../base/common/filters.js';
-import { Disposable, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { LRUCache } from '../../../../../base/common/map.js';
 import { ScrollbarVisibility, ScrollEvent } from '../../../../../base/common/scrollable.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
@@ -36,7 +38,14 @@ import { CodeBlockPart } from './chatContentParts/codeBlockPart.js';
 import { ChatListDelegate, ChatListItemRenderer, IChatListItemTemplate, IChatRendererDelegate } from './chatListRenderer.js';
 import { ChatEditorOptions } from './chatOptions.js';
 import { ChatPendingDragController } from './chatPendingDragAndDrop.js';
-import { activePromptIndex, ChatPromptDotRail, IChatPromptDot } from './chatPromptDotRail.js';
+import { ChatPromptDotRail, IChatPromptDot } from './chatPromptDotRail.js';
+
+interface IChatHistoryAnchor {
+	id: string;
+	requestId: string;
+	isResponse: boolean;
+	offset: number;
+}
 
 export interface IChatListWidgetStyles {
 	listForeground?: string;
@@ -195,8 +204,20 @@ export class ChatListWidget extends Disposable {
 	private _visibleChangeCount: number = 0;
 	private readonly _promptDotRail: ChatPromptDotRail | undefined;
 	private _promptDotRailUpdateScheduled = false;
+	private _promptDotRailItems: readonly ChatTreeItem[] | undefined;
+	private readonly _historyListeners = this._register(new DisposableStore());
+	private readonly _historyAnchorRestore = this._register(new MutableDisposable());
+	private readonly _historyViewStates = new LRUCache<string, IChatHistoryAnchor>(100);
+	private _pendingHistoryRestore: IChatHistoryAnchor | undefined;
+	private _hiddenHistoryAnchor: IChatHistoryAnchor | undefined;
+	private _historyScrollSuppressed = false;
+	private _scrollingToEnd = false;
+	private _historyAnchor: IChatHistoryAnchor | undefined;
+	private readonly _historyRetry: HTMLButtonElement;
 	private _promptDotRailPrompts: IChatRequestViewModel[] = [];
-	private _promptDotRailOffsets: number[] = [];
+	private readonly _promptDotRailItemIndices = new Map<string, number>();
+	private _promptDotRailIndices: number[] = [];
+	private _promptDotRailDots: IChatPromptDot[] = [];
 	private _promptDotRailJumpIndex: number | undefined;
 
 	private readonly _container: HTMLElement;
@@ -476,12 +497,20 @@ export class ChatListWidget extends Disposable {
 		}));
 		this._scrollDownButton.element.classList.add('chat-scroll-down');
 		this._scrollDownButton.label = `$(${Codicon.chevronDown.id})`;
+		const jumpToLatest = localize('chat.history.latest', "Jump to latest");
+		this._scrollDownButton.element.title = jumpToLatest;
+		this._scrollDownButton.element.setAttribute('aria-label', jumpToLatest);
 		this._scrollDownButton.element.style.display = 'none'; // Hidden by default
 
 		this._register(this._scrollDownButton.onDidClick(() => {
 			this.setScrollLock(true);
 			this.scrollToEnd();
 		}));
+		this._historyRetry = dom.append(container, dom.$('button.chat-history-retry'));
+		this._historyRetry.textContent = localize('chat.history.retry', "Couldn't load history. Retry");
+		this._historyRetry.hidden = true;
+		this._register(dom.addDisposableListener(this._historyRetry, 'click', () => { void this._viewModel?.historyWindow?.retry(); }));
+		this._register(toDisposable(() => this._historyRetry.remove()));
 
 		// Prompt dot rail: one dot per user prompt on the left edge. Clicking a
 		// dot jumps to the start of that prompt, and scrolling over the rail scrolls
@@ -525,14 +554,23 @@ export class ChatListWidget extends Disposable {
 			// even when it lands in the same event as a streaming height update. Other
 			// standalone scrollTop changes cover touch, keyboard, and scrollbar input.
 			if (this._scrollLock
+				&& !this._scrollingToEnd
+				&& !this._historyScrollSuppressed
 				&& e.scrollTopChanged
 				&& (e.scrollTop < e.oldScrollTop || (!e.heightChanged && !e.scrollHeightChanged))
 				&& !this.isScrolledToBottom) {
 				this._scrollLock = false;
 			}
+			const history = this._viewModel?.historyWindow;
+			if (history && e.scrollTopChanged && !this._scrollingToEnd && !this._suppressAutoScroll && !this._historyScrollSuppressed) {
+				history.followLive = this.isScrolledToBottom || this._scrollLock;
+			}
 			this._onDidScroll.fire(e);
 			this.updateScrollDownButtonVisibility();
+			if (e.scrollTopChanged) { this.pageHistoryAtBoundary(e.scrollTop - e.oldScrollTop); }
 		}));
+
+		this._register(dom.addDisposableListener(container, 'wheel', event => this.pageHistoryAtBoundary(event.deltaY), { passive: true }));
 
 		// Set initial at-bottom state (scrollLock defaults to true)
 		this.updateScrollDownButtonVisibility();
@@ -556,13 +594,13 @@ export class ChatListWidget extends Disposable {
 	 * Update scroll-down button visibility based on scroll position and scroll lock.
 	 */
 	private updateScrollDownButtonVisibility(): void {
-		const atBottom = this.isScrolledToBottom || this._scrollLock;
-		this._scrollDownButton.element.style.display = atBottom ? 'none' : '';
+		const atBottom = !this._viewModel?.historyWindow?.hasNewer && (this.isScrolledToBottom || this._scrollLock);
+		this._scrollDownButton.element.style.display = atBottom ? 'none' : 'flex';
 		this._container.classList.toggle('chat-list-at-bottom', atBottom);
 	}
 
 	private schedulePromptDotRailUpdate(): void {
-		if (!this._promptDotRail || this._promptDotRailUpdateScheduled) {
+		if (!this._visible || !this._promptDotRail || this._promptDotRailUpdateScheduled) {
 			return;
 		}
 		this._promptDotRailUpdateScheduled = true;
@@ -572,76 +610,34 @@ export class ChatListWidget extends Disposable {
 		});
 	}
 
-	private updatePromptDotRail(): void {
-		if (!this._promptDotRail) {
-			return;
-		}
-		const items = this.getItems();
-		const prompts: IChatRequestViewModel[] = [];
-		const promptItemIndices: number[] = [];
+	private cachePromptDotRail(items: readonly ChatTreeItem[]): void {
+		if (this._promptDotRailItems === items) { return; }
+		this._promptDotRailItems = items;
+		this._promptDotRailPrompts = [];
+		this._promptDotRailIndices = [];
+		this._promptDotRailItemIndices.clear();
 		items.forEach((item, index) => {
+			this._promptDotRailItemIndices.set(item.id, index);
 			if (isRequestVM(item) && !item.pendingKind) {
-				prompts.push(item);
-				promptItemIndices.push(index);
+				this._promptDotRailPrompts.push(item);
+				this._promptDotRailIndices.push(index);
 			}
 		});
-		this._promptDotRailPrompts = prompts;
+		this._promptDotRailDots = this._promptDotRailPrompts.map(prompt => ({ id: prompt.id, label: prompt.messageText.slice(0, 100) }));
+	}
 
-		if (prompts.length < 2) {
-			this._promptDotRailOffsets = [];
-			this._promptDotRailJumpIndex = undefined;
-			this._promptDotRail.update([], 0);
-			return;
+	private updatePromptDotRail(): void {
+		if (!this._visible || !this._promptDotRail) { return; }
+		// The tree exposes its visible row; no transcript scan or layout read is
+		// needed on scroll. Prompt metadata changes only at structural refresh.
+		const first = this._tree.firstVisibleElement;
+		const firstIndex = first ? this._promptDotRailItemIndices.get(first.id) ?? 0 : 0;
+		let low = 0, high = this._promptDotRailIndices.length;
+		while (low < high) {
+			const middle = (low + high) >>> 1;
+			if (this._promptDotRailIndices[middle] <= firstIndex) { low = middle + 1; } else { high = middle; }
 		}
-
-		// Offsets of the rows currently in the DOM (content coordinates). Rows are
-		// virtualized, so prompts whose rows are not rendered get an interpolated
-		// offset from the nearest rendered neighbors.
-		const rowsTop = this._container.querySelector('.monaco-list-rows')?.getBoundingClientRect().top ?? 0;
-		const knownOffsets = new Map<number, number>();
-		this._container.querySelectorAll<HTMLElement>('.monaco-list-row[data-index]').forEach(row => {
-			const index = Number(row.getAttribute('data-index'));
-			if (Number.isInteger(index) && index >= 0 && index < items.length) {
-				knownOffsets.set(index, row.getBoundingClientRect().top - rowsTop);
-			}
-		});
-		const offsets = promptItemIndices.map(itemIndex => {
-			const exact = knownOffsets.get(itemIndex);
-			if (exact !== undefined) {
-				return exact;
-			}
-			let prevIndex = -1, prevOffset = 0, nextIndex = -1, nextOffset = 0;
-			for (const [index, offset] of knownOffsets) {
-				if (index < itemIndex && index > prevIndex) {
-					prevIndex = index;
-					prevOffset = offset;
-				}
-				if (index > itemIndex && (nextIndex === -1 || index < nextIndex)) {
-					nextIndex = index;
-					nextOffset = offset;
-				}
-			}
-			if (prevIndex === -1 && nextIndex === -1) {
-				return 0;
-			}
-			if (prevIndex === -1) {
-				return nextOffset;
-			}
-			if (nextIndex === -1) {
-				return prevOffset;
-			}
-			const t = (itemIndex - prevIndex) / (nextIndex - prevIndex);
-			return prevOffset + t * (nextOffset - prevOffset);
-		});
-
-		const dots: IChatPromptDot[] = prompts.map(prompt => ({
-			id: prompt.id,
-			label: prompt.messageText.length > 100 ? `${prompt.messageText.slice(0, 100)}…` : prompt.messageText,
-		}));
-		this._promptDotRailOffsets = offsets;
-		this._promptDotRail.update(dots, activePromptIndex(offsets, this._tree.scrollTop));
-		// A jump that landed while its prompt row was still virtualized is corrected
-		// here, against the freshly measured offset.
+		this._promptDotRail.update(this._promptDotRailDots, Math.max(0, low - 1));
 		if (this._promptDotRailJumpIndex !== undefined) {
 			const pending = this._promptDotRailJumpIndex;
 			this._promptDotRailJumpIndex = undefined;
@@ -665,15 +661,11 @@ export class ChatListWidget extends Disposable {
 	}
 
 	/**
-	 * Scroll a prompt's row to the top of the viewport. Rows outside the render
-	 * window have no element to reveal, so the offset the rail computed for the
-	 * prompt is the primary target and `reveal` refines it when available.
+	 * Scroll a prompt's row to the top of the viewport. The tree reveals virtual
+	 * rows using its cached heights; the next frame corrects the position after
+	 * measuring the newly rendered row.
 	 */
 	private scrollToPromptRow(index: number): void {
-		const offset = this._promptDotRailOffsets[index];
-		if (typeof offset === 'number' && Number.isFinite(offset)) {
-			this._tree.scrollTop = Math.min(Math.max(offset, 0), this.maxScrollTop);
-		}
 		const prompt = this._promptDotRailPrompts[index];
 		if (prompt && this._tree.hasElement(prompt)) {
 			this._tree.reveal(prompt, 0);
@@ -691,6 +683,7 @@ export class ChatListWidget extends Disposable {
 		this.setScrollLock(false);
 		this._tree.scrollTop = Math.min(Math.max(this._tree.scrollTop + deltaY, 0), this.maxScrollTop);
 		this.updateScrollDownButtonVisibility();
+		this.pageHistoryAtBoundary(deltaY);
 	}
 
 	/**
@@ -724,15 +717,132 @@ export class ChatListWidget extends Disposable {
 
 	//#region ViewModel methods
 
-	/**
-	 * Set the view model for the list to render.
-	 */
-	setViewModel(viewModel: IChatViewModel | undefined): void {
-		if (this._viewModel !== viewModel) {
-			this._accessibilityProvider.clearCache();
+	/** Save only a stable reading bookmark, never the old page's models. */
+	saveHistoryViewState(): void {
+		const view = this._viewModel;
+		if (!view?.historyWindow) { return; }
+		const anchor = this._pendingHistoryRestore ?? (!view.historyWindow.followLive ? this.captureHistoryAnchor() : undefined);
+		if (anchor) {
+			this._historyViewStates.set(view.sessionResource.toString(), anchor);
+		} else {
+			this._historyViewStates.delete(view.sessionResource.toString());
 		}
+	}
+
+	/** Set the view model for the list to render. */
+	setViewModel(viewModel: IChatViewModel | undefined): void {
+		if (this._viewModel === viewModel) { return; }
+		this.saveHistoryViewState();
+		this._accessibilityProvider.clearCache();
+		this._historyListeners.clear();
+		this._historyAnchorRestore.clear();
+		this._historyAnchor = undefined;
+		this._pendingHistoryRestore = undefined;
+		this._hiddenHistoryAnchor = undefined;
+		this._historyScrollSuppressed = false;
 		this._viewModel = viewModel;
 		this._renderer.updateViewModel(viewModel);
+		const history = viewModel?.historyWindow;
+		this._historyRetry.hidden = !history?.error;
+		if (history) {
+			history.canEvict = (ids, preserveAnchor) => this.canEvictHistory(ids, preserveAnchor);
+			this._historyListeners.add(toDisposable(() => { history.canEvict = () => true; }));
+			this._historyListeners.add(history.onWillChange(({ direction, target }) => {
+				this._historyAnchorRestore.clear();
+				this._historyAnchor = target && target === this._pendingHistoryRestore?.requestId
+					? this._pendingHistoryRestore : direction === 'latest' || target || (direction === 'newer' && history.followLive) ? undefined : this.captureHistoryAnchor();
+				if (this._pendingHistoryRestore && this._historyAnchor === this._pendingHistoryRestore) {
+					this._scrollLock = false;
+					history.followLive = false;
+				}
+				this._pendingHistoryRestore = undefined;
+				this._historyScrollSuppressed = !!this._historyAnchor;
+			}));
+			this._historyListeners.add(history.onDidChange(() => {
+				this._historyRetry.hidden = !history.error;
+				if (!this._visible) { this.suspendRendering(); }
+				this.updateScrollDownButtonVisibility();
+			}));
+			const anchor = this._historyViewStates.get(viewModel.sessionResource.toString());
+			if (anchor && history.history.source.getTurnIds().includes(anchor.requestId)) {
+				this._scrollLock = false;
+				history.followLive = false;
+				this._pendingHistoryRestore = anchor;
+				void history.load('latest', false, anchor.requestId);
+			}
+		}
+	}
+
+	private pageHistoryAtBoundary(delta: number): void {
+		const history = this._viewModel?.historyWindow;
+		if (!this._visible || !history || history.loading || history.error || this._scrollingToEnd || this._suppressAutoScroll || this._historyScrollSuppressed) { return; }
+		if (delta < 0 && history.hasOlder && this._tree.scrollTop < 200) {
+			void history.load('older');
+		} else if (delta > 0 && history.hasNewer && this.maxScrollTop - this._tree.scrollTop < 200) {
+			void history.load('newer');
+		}
+	}
+
+	private canEvictHistory(ids: readonly string[], preserveAnchor: boolean): boolean {
+		const evicted = new Set(ids);
+		if (this._viewModel?.editing && evicted.has(this._viewModel.editing.id)) { return false; }
+		const items = this.getItems();
+		if (preserveAnchor) {
+			const anchor = this.captureHistoryAnchor();
+			if (anchor && evicted.has(anchor.requestId)) { return false; }
+		}
+		const protectedNode = (node: Node | null) => {
+			const row = node && [...this.renderedHistoryRows()].find(row => row.contains(node));
+			const item = row && items[Number(row.dataset.index)];
+			return !!item && (preserveAnchor || evicted.has(isResponseVM(item) ? item.requestId : item.id));
+		};
+		const selection = dom.getWindow(this._container).getSelection();
+		if (selection && !selection.isCollapsed) {
+			// A selection may span multiple pages; keep it intact until it is cleared.
+			if (this._container.contains(selection.anchorNode) || this._container.contains(selection.focusNode) || selection.containsNode(this._tree.getHTMLElement(), true)) { return false; }
+		}
+		return !protectedNode(this._container.ownerDocument.activeElement)
+			&& !(this._tree.isDOMFocused() && this.getFocus().some(item => evicted.has(isResponseVM(item) ? item.requestId : item.id)));
+	}
+
+	private renderedHistoryRows(): NodeListOf<HTMLElement> {
+		// The virtual tree owns these rows and exposes no persistent element references.
+		// eslint-disable-next-line no-restricted-syntax
+		return this._tree.getHTMLElement().querySelectorAll<HTMLElement>(':scope > .monaco-scrollable-element > .monaco-list-rows > .monaco-list-row[data-index]');
+	}
+
+	private captureHistoryAnchor(): IChatHistoryAnchor | undefined {
+		if (!this._visible) { return this._hiddenHistoryAnchor; }
+		const top = this._container.getBoundingClientRect().top;
+		const items = this.getItems();
+		const rows = [...this.renderedHistoryRows()];
+		const row = rows.filter(row => row.getBoundingClientRect().bottom > top).sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index))[0];
+		const item = row && items[Number(row.dataset.index)];
+		return item ? { id: item.id, requestId: isResponseVM(item) ? item.requestId : item.id, isResponse: isResponseVM(item), offset: row.getBoundingClientRect().top - top } : undefined;
+	}
+
+	private restoreHistoryAnchor(): void {
+		const anchor = this._historyAnchor;
+		if (!anchor) { return; }
+		const viewModel = this._viewModel;
+		const restore = () => {
+			if (viewModel !== this._viewModel) { return; }
+			const items = this.getItems();
+			// Rehydrated responses get new UI IDs; the durable request ID and row
+			// kind identify the same message after switching chats.
+			const index = items.findIndex(item => item.id === anchor.id || (isResponseVM(item) === anchor.isResponse && (isResponseVM(item) ? item.requestId : item.id) === anchor.requestId));
+			if (index < 0) { return; }
+			this._tree.reveal(items[index], 0);
+			const row = [...this.renderedHistoryRows()].find(row => Number(row.dataset.index) === index);
+			if (row) { this._tree.scrollTop += row.getBoundingClientRect().top - this._container.getBoundingClientRect().top - anchor.offset; }
+		};
+		restore();
+		this._historyAnchor = undefined;
+		this._historyAnchorRestore.value = dom.scheduleAtNextAnimationFrame(dom.getWindow(this._container), () => {
+			this._historyAnchorRestore.clear();
+			restore();
+			this._historyScrollSuppressed = false;
+		});
 	}
 
 	/**
@@ -744,6 +854,7 @@ export class ChatListWidget extends Disposable {
 		const startedAt = perfEnabled ? performance.now() : 0;
 		if (!this._viewModel) {
 			this._tree.setChildren(null, []);
+			this.cachePromptDotRail([]);
 			this._lastItem = undefined;
 			this._latestConversationItem = undefined;
 			this._lastItemIdContextKey.set([]);
@@ -757,6 +868,7 @@ export class ChatListWidget extends Disposable {
 		}
 
 		const items = this._viewModel.getItems();
+		this.cachePromptDotRail(items);
 		this._lastItem = items.at(-1);
 		this._latestConversationItem = items.findLast(item => !isPendingDividerVM(item) && !(isRequestVM(item) && !!item.pendingKind));
 		this._lastItemIdContextKey.set(this._latestConversationItem ? [this._latestConversationItem.id] : []);
@@ -767,11 +879,12 @@ export class ChatListWidget extends Disposable {
 			collapsible: false,
 		}));
 		const lastPhysicalItemId = this._lastItem?.id;
-		const mostRecentResponseId = items.findLast(isResponseVM)?.id;
-		const currentTurnResponseId = isResponseVM(this._latestConversationItem) ? this._latestConversationItem.id : undefined;
-		const latestTurnRequestId = isRequestVM(this._latestConversationItem)
+		const liveRequest = this._viewModel.historyWindow ? this._viewModel.model.lastRequest : undefined;
+		const mostRecentResponseId = liveRequest?.response?.id ?? items.findLast(isResponseVM)?.id;
+		const currentTurnResponseId = liveRequest?.response?.id ?? (isResponseVM(this._latestConversationItem) ? this._latestConversationItem.id : undefined);
+		const latestTurnRequestId = liveRequest?.id ?? (isRequestVM(this._latestConversationItem)
 			? this._latestConversationItem.id
-			: isResponseVM(this._latestConversationItem) ? this._latestConversationItem.requestId : undefined;
+			: isResponseVM(this._latestConversationItem) ? this._latestConversationItem.requestId : undefined);
 		const sessionIdentity = this._viewModel.model.sessionResource.toString();
 		const pendingPositions = new Map<string, { position: number; total: number }>();
 		for (const kind of [ChatRequestQueueKind.Steering, ChatRequestQueueKind.Queued]) {
@@ -848,7 +961,9 @@ export class ChatListWidget extends Disposable {
 				this._tree.rerender(response);
 			}
 		}
+		this._renderer.releaseHistoryItems(new Set(items.map(item => item.id)));
 		this.updateLastItemMinHeight();
+		this.restoreHistoryAnchor();
 		this.schedulePromptDotRailUpdate();
 		if (perfEnabled) {
 			logChatPerf(this.logService, 'list.refresh', {
@@ -864,6 +979,16 @@ export class ChatListWidget extends Disposable {
 	 */
 	setScrollLock(value: boolean): void {
 		this._scrollLock = value;
+		const viewModel = this._viewModel;
+		const history = viewModel?.historyWindow;
+		if (history) {
+			history.followLive = value;
+			if (value && history.hasNewer) {
+				void history.load('latest').then(loaded => {
+					if (loaded && viewModel === this._viewModel && this._scrollLock) { this.scrollToEnd(); }
+				});
+			}
+		}
 		this.updateScrollDownButtonVisibility();
 	}
 
@@ -1022,15 +1147,22 @@ export class ChatListWidget extends Disposable {
 	 * Scroll the list to reveal the last item.
 	 */
 	scrollToEnd(): void {
-		if (this._lastItem) {
-			const offset = Math.max(this._lastItem.currentRenderedHeight ?? 0, 1e6);
-			if (this._tree.hasElement(this._lastItem)) {
-				this._tree.reveal(this._lastItem, offset);
+		if (this._lastItem && this._tree.hasElement(this._lastItem) && !this._scrollingToEnd) {
+			// Animated intermediate positions look like user scrolling and can
+			// stop following before unmeasured historical rows settle. Keep this
+			// programmatic move immediate; ordinary wheel scrolling stays smooth.
+			this._scrollingToEnd = true;
+			this._tree.updateOptions({ smoothScrolling: false });
+			try {
+				this._tree.reveal(this._lastItem, 1);
 				if (this._bottomInset > 0) {
 					// reveal() aligns the row to the viewport bottom, which sits under a
 					// floating composer; include the reserved inset.
 					this._tree.scrollTop = this.maxScrollTop;
 				}
+			} finally {
+				this._tree.updateOptions({ smoothScrolling: !this.accessibilityService.isMotionReduced() });
+				this._scrollingToEnd = false;
 			}
 		}
 	}
@@ -1044,7 +1176,7 @@ export class ChatListWidget extends Disposable {
 	}
 
 	private _withPersistedAutoScroll(fn: () => void): void {
-		if (this._suppressAutoScroll) {
+		if (this._suppressAutoScroll || this._historyScrollSuppressed) {
 			fn();
 			return;
 		}
@@ -1163,13 +1295,15 @@ export class ChatListWidget extends Disposable {
 	 */
 	setVisible(visible: boolean): boolean {
 		this.updateBackboardTranscriptHostClasses();
+		if (!visible && this._visible) { this._hiddenHistoryAnchor = this.captureHistoryAnchor(); }
 		this._visible = visible;
+		if (visible) { this.schedulePromptDotRailUpdate(); }
 		this._renderer.setVisible(visible);
 		if (visible && this._renderingSuspended) {
 			const perfEnabled = isChatPerfLoggingEnabled(this.logService);
 			const startedAt = perfEnabled ? performance.now() : 0;
 			this._renderingSuspended = false;
-			const scrollTop = this._suspendedScrollTop;
+			const scrollTop = this._historyAnchor ? undefined : this._suspendedScrollTop;
 			this._suspendedScrollTop = undefined;
 			this.refresh();
 			if (scrollTop !== undefined) {
@@ -1198,6 +1332,9 @@ export class ChatListWidget extends Disposable {
 		this._suspendedScrollTop = this._tree.scrollTop;
 		this._renderer.suspendRendering();
 		this._tree.setChildren(null, []);
+		this.cachePromptDotRail([]);
+		this._lastItem = undefined;
+		this._latestConversationItem = undefined;
 		if (perfEnabled) {
 			logChatPerf(this.logService, 'list.suspend', {
 				session: this._viewModel?.sessionResource.toString(),
@@ -1222,6 +1359,7 @@ export class ChatListWidget extends Disposable {
 			return;
 		}
 		this._bottomInset = inset;
+		this._container.style.setProperty('--chat-list-bottom-inset', `${inset}px`);
 		this._tree.updateOptions({ paddingBottom: inset });
 		this.updateLastItemMinHeight();
 	}
@@ -1250,7 +1388,7 @@ export class ChatListWidget extends Disposable {
 		} else {
 			const items = this._viewModel?.getItems() ?? [];
 			const lastResponse = items.at(-1);
-			if (!isResponseVM(lastResponse)) {
+			if (!isResponseVM(lastResponse) || (this._viewModel?.historyWindow && lastResponse.requestId !== this._viewModel.model.lastRequest?.id)) {
 				this._container.style.removeProperty('--chat-current-response-min-height');
 				this._previousLastItemMinHeight = null;
 				return;

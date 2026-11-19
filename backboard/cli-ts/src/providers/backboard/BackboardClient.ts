@@ -69,10 +69,7 @@ function wireRequest<T extends Pick<SendMessageRequest, "source">>(
 }
 
 /** JSON-encodes the object-valued request fields the form path expects as strings. */
-function messageFormData(
-	req: SendMessageRequest & { stream: boolean },
-	filePaths: string[],
-): FormData {
+function messageFormData(req: object, filePaths: string[] = []): FormData {
 	const form = new FormData();
 	for (const [key, value] of Object.entries(req)) {
 		if (value === undefined || value === null) continue;
@@ -134,17 +131,26 @@ export class BackboardClient implements AgentClient {
 		options: RequestOptions,
 	): Promise<T> {
 		const url = `${this.env.apiUrl}${path}`;
+		const isForm = body instanceof FormData;
 		const headers = this.headers();
+		if (isForm) delete headers["Content-Type"];
 		const started = Date.now();
 
-		this.serverLog?.request({ endpoint: path, method: "POST", headers, body });
+		this.serverLog?.request({
+			endpoint: path,
+			method: "POST",
+			headers,
+			body: isForm
+				? { multipart: true, fields: Array.from(body.keys()) }
+				: body,
+		});
 
 		let res: Response;
 		try {
 			res = await fetch(url, {
 				method: "POST",
 				headers,
-				body: JSON.stringify(body),
+				body: isForm ? body : JSON.stringify(body),
 				signal: options.signal,
 			});
 		} catch (err) {
@@ -271,16 +277,37 @@ export class BackboardClient implements AgentClient {
 		request: GenerateVideoRequest,
 		options: RequestOptions = {},
 	): Promise<GenerateVideoResult> {
-		const response = await this.post<BackboardResponse>(
+		const wire = {
+			operation: "generate_video",
+			content: request.prompt,
+			video_model_provider: request.video_model_provider,
+			video_model_name: request.video_model_name,
+			video_config: request.video_config,
+			stream: false,
+		};
+		let body: typeof wire | FormData = wire;
+		if (request.firstFramePath || request.lastFramePath) {
+			const form = messageFormData(wire);
+			if (request.firstFramePath) {
+				form.append(
+					"input_image",
+					Bun.file(request.firstFramePath),
+					basename(request.firstFramePath),
+				);
+			}
+			if (request.lastFramePath) {
+				form.append(
+					"input_last_frame",
+					Bun.file(request.lastFramePath),
+					basename(request.lastFramePath),
+				);
+			}
+			body = form;
+		}
+		// An ambiguous HTTP error can arrive after the paid job has started.
+		const response = await this.postOnce<BackboardResponse>(
 			"/threads/messages",
-			{
-				operation: "generate_video",
-				content: request.prompt,
-				video_model_provider: request.video_model_provider,
-				video_model_name: request.video_model_name,
-				...(request.video_config ? { video_config: request.video_config } : {}),
-				stream: false,
-			},
+			body,
 			options,
 		);
 		const media = generatedVideoFromResponse(response);

@@ -2208,6 +2208,13 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		}
 
 		newSession.setStatus(SessionStatus.InProgress);
+		// The composer's picks reach the backend session directly and only
+		// reach this draft through state deltas, which can miss them. Apply
+		// them here so the config forwarded with the first request matches
+		// what the composer shows.
+		for (const [property, value] of Object.entries(options.sessionConfigOverrides ?? {})) {
+			newSession.setConfigValue(property, value);
+		}
 		const selectedModelId = options.userSelectedModelId ?? newSession.getSelectedModelId();
 		if (options.userSelectedModelId) {
 			newSession.setSelectedModelId(options.userSelectedModelId);

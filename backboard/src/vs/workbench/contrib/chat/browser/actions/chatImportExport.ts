@@ -76,7 +76,7 @@ export function registerChatExportActions() {
 			}
 
 			// Using toJSON on the model
-			const content = VSBuffer.fromString(JSON.stringify(model.toExport(), undefined, 2));
+			const content = VSBuffer.fromString(JSON.stringify(model.toFullExport ? await model.toFullExport() : model.toExport(), undefined, 2));
 			await fileService.writeFile(outputPath, content);
 		}
 	});

@@ -18,9 +18,6 @@ interface IChatPromptDotConstants {
 	readonly fadeZone: number;
 }
 
-/** A row sitting a hair below the viewport top still counts as the active prompt. */
-const ACTIVE_PROMPT_TOLERANCE = 4;
-
 /**
  * First prompt of the sliding dot window. Keeps the active dot centred once the
  * transcript is long enough and clamps the window to both ends of the list.
@@ -29,23 +26,6 @@ export function promptWindowStart(count: number, activeIndex: number, visibleDot
 	const clampedActive = Math.min(Math.max(activeIndex, 0), Math.max(count - 1, 0));
 	const visibleCount = Math.min(visibleDots, count);
 	return Math.min(Math.max(clampedActive - Math.floor(visibleCount / 2), 0), Math.max(0, count - visibleCount));
-}
-
-/**
- * Index of the last prompt whose row starts at or above the top of the
- * viewport, i.e. the prompt the reader is currently in.
- * @param offsets Content offset (scroll position) of every prompt row, in order.
- */
-export function activePromptIndex(offsets: readonly number[], scrollTop: number): number {
-	let index = 0;
-	for (let i = 0; i < offsets.length; i++) {
-		if (offsets[i] <= scrollTop + ACTIVE_PROMPT_TOLERANCE) {
-			index = i;
-		} else {
-			break;
-		}
-	}
-	return index;
 }
 
 /**
@@ -68,7 +48,6 @@ export class ChatPromptDotRail extends Disposable {
 	private readonly _viewport: HTMLElement;
 	private readonly _track: HTMLElement;
 	private _dots: HTMLElement[] = [];
-	private _renderedCount = -1;
 
 	private readonly _constants: IChatPromptDotConstants = {
 		visibleDots: 15,
@@ -116,13 +95,11 @@ export class ChatPromptDotRail extends Disposable {
 	update(prompts: readonly IChatPromptDot[], activeIndex: number): void {
 		if (prompts.length < 2) {
 			this._rail.classList.add('hidden');
+			this._track.replaceChildren();
+			this._dots = [];
 			return;
 		}
 		this._rail.classList.remove('hidden');
-
-		if (prompts.length !== this._renderedCount) {
-			this.rebuildDots(prompts);
-		}
 
 		const { visibleDots, spacing, fadeZone } = this._constants;
 		const visibleCount = Math.min(visibleDots, prompts.length);
@@ -135,11 +112,25 @@ export class ChatPromptDotRail extends Disposable {
 		// Dots sliding out of the window sit in the fade zones and fade away; the
 		// outermost visible dots are dimmed so the edges look feathered.
 		const viewportHeight = visibleCount * spacing;
-		for (let i = 0; i < prompts.length; i++) {
-			const dot = this._dots[i];
+		const first = Math.max(0, windowStart - 2);
+		const end = Math.min(prompts.length, windowStart + visibleCount + 2);
+		while (this._dots.length > end - first) {
+			this._dots.pop()!.remove();
+		}
+		for (let i = first; i < end; i++) {
+			let dot = this._dots[i - first];
 			if (!dot) {
-				continue;
+				dot = $('.chat-prompt-dot');
+				dot.setAttribute('role', 'button');
+				dot.setAttribute('tabindex', '-1');
+				this._track.appendChild(dot);
+				this._dots.push(dot);
 			}
+			const prompt = prompts[i];
+			dot.style.top = `${i * spacing}px`;
+			dot.dataset.index = String(i);
+			dot.setAttribute('aria-label', `Go to prompt ${i + 1}: ${prompt.label}`);
+			dot.title = prompt.label;
 			const center = (i - windowStart) * spacing + spacing / 2;
 			const distanceToEdge = Math.min(center, viewportHeight - center);
 			const t = Math.min(Math.max(distanceToEdge / fadeZone, 0), 1);
@@ -166,22 +157,4 @@ export class ChatPromptDotRail extends Disposable {
 		}
 	}
 
-	private rebuildDots(prompts: readonly IChatPromptDot[]): void {
-		for (const dot of this._dots) {
-			dot.remove();
-		}
-		this._dots = [];
-		this._renderedCount = prompts.length;
-		prompts.forEach((prompt, index) => {
-			const dot = $('.chat-prompt-dot');
-			dot.style.top = `${index * this._constants.spacing}px`;
-			dot.dataset.index = String(index);
-			dot.setAttribute('role', 'button');
-			dot.setAttribute('tabindex', '-1');
-			dot.setAttribute('aria-label', `Go to prompt ${index + 1}: ${prompt.label}`);
-			dot.title = prompt.label;
-			this._track.appendChild(dot);
-			this._dots.push(dot);
-		});
-	}
 }

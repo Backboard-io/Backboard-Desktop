@@ -37,6 +37,12 @@ export interface ISendRequestOptions {
 	readonly modeInfo?: IChatRequestModeInfo;
 	/** Tool and sub-agent enablement selected by the shared chat composer. */
 	readonly instructionContext?: IChatSendRequestOptions['instructionContext'];
+	/**
+	 * Session config values the shared composer shows for the properties it
+	 * owns (capability toggles, image and video models), read at send time.
+	 * A new session's first request applies them over its draft config.
+	 */
+	readonly sessionConfigOverrides?: Readonly<Record<string, unknown>>;
 }
 
 /**

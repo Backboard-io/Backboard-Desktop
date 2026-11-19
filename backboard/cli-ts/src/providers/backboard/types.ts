@@ -201,11 +201,14 @@ export interface GenerateVideoRequest {
 	prompt: string;
 	video_model_provider: string;
 	video_model_name: string;
+	firstFramePath?: string;
+	lastFramePath?: string;
 	video_config?: {
 		duration?: number;
 		resolution?: string;
 		generate_audio?: boolean;
 		aspect_ratio?: string;
+		seed?: number;
 	};
 }
 

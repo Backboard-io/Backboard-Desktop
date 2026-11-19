@@ -13,6 +13,7 @@ import { ok, type ToolResult } from "../src/core/tools/ToolResult.ts";
 import { ApplyPatchTool } from "../src/tools/ApplyPatchTool.tsx";
 import { EditTool } from "../src/tools/EditTool.tsx";
 import { ExecuteTool } from "../src/tools/ExecuteTool.tsx";
+import { GenerateVideoTool } from "../src/tools/GenerateVideoTool.tsx";
 import { WriteTool } from "../src/tools/WriteTool.tsx";
 
 const schema = z.object({ command: z.string().optional() });
@@ -68,6 +69,49 @@ function pctx(overrides: Partial<PermissionContext> = {}): PermissionContext {
 }
 
 describe("decidePermission", () => {
+	it("matches legacy and direct video rules before the tool's allow verdict", () => {
+		const tool = new GenerateVideoTool({
+			generate: async () => ({ url: "https://example.test/video.mp4" }),
+		});
+		const input = tool.parseInput({
+			prompt: "A paper boat",
+			duration: 4,
+			resolution: "720p",
+			generate_audio: false,
+			aspect_ratio: "16:9",
+			seed: 42,
+			first_frame: 1,
+			last_frame: 2,
+		});
+		const content = "Veo 3.1 Lite · 4s · 720p · audio off · A paper boat";
+		for (const rule of [
+			"generate_video",
+			"generate_video(Veo 3.1:*)",
+			`generate_video(=${content})`,
+			`generate_video_direct(=${content})`,
+		]) {
+			const context = pctx({
+				mode: "bypass",
+				rules: parseRuleSet({ deny: [rule], ask: ["generate_video_direct"] }),
+			});
+			expect(decidePermission(tool, input, context, "/tmp")).toEqual({
+				behavior: "deny",
+				reason: `Denied by permission rule "${rule}"`,
+			});
+		}
+		const ask = pctx({
+			rules: parseRuleSet({ ask: [`generate_video(=${content})`] }),
+		});
+		expect(decidePermission(tool, input, ask, "/tmp")).toEqual({
+			behavior: "ask",
+			content,
+		});
+		expect(
+			decidePermission(tool, { ...input, prompt: "A tree" }, ask, "/tmp")
+				.behavior,
+		).toBe("allow");
+	});
+
 	it("deny rule wins over everything, even bypass", () => {
 		const context = pctx({
 			mode: "bypass",

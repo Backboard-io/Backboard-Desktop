@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Config } from "../../config/Config.ts";
 import type { ModelRef } from "../../config/defaults.ts";
 import { qSessionDir } from "../../config/paths.ts";
@@ -56,7 +56,7 @@ import { userMessage } from "../session/Message.ts";
 import type { Session } from "../session/Session.ts";
 import type { SkillController } from "../skills/SkillController.ts";
 import { ClientProxyTool } from "../tools/ClientToolBridge.ts";
-import { canonicalToolName } from "../tools/names.ts";
+import { canonicalToolName, DIRECT_VIDEO_TOOL } from "../tools/names.ts";
 import type { OpenAITool } from "../tools/schema.ts";
 import type { ToolContext } from "../tools/ToolContext.ts";
 import type { ToolRegistry } from "../tools/ToolRegistry.ts";
@@ -412,7 +412,10 @@ export class AgentController {
 			session.addMessage(userMessage(text));
 			turnStarted = true;
 
-			const ctx = { ...this.buildContext(signal), modelRoute: route };
+			const ctx: ToolContext = {
+				...this.buildContext(signal),
+				modelRoute: route,
+			};
 			// All five are independent of each other: assistant resolution and
 			// thinking metadata are network round-trips, the skill scan reads
 			// only the skill catalog + filesystem, the tool sync talks to MCP
@@ -469,13 +472,6 @@ export class AgentController {
 					),
 					timed("prepare_baseline", baselineCapture),
 				]);
-			const promptProfile = toPromptProfileId(modelProfile.name);
-			const tools = config.toolPolicy.visibleSchemas(
-				this.deps.registry,
-				[],
-				promptProfile,
-			);
-			const enabledTools = tools.map((tool) => tool.function.name);
 			// Backboard's hosted media tools only run on Backboard-billed turns. A
 			// key or subscription turn never reaches them, so it must not promise
 			// them, send their fields, or hold its answer back for them.
@@ -486,6 +482,35 @@ export class AgentController {
 				provider: route.provider,
 			};
 			const backboardMedia = mediaRoute.source === "backboard";
+			const videoModel =
+				backboardMedia && config.isVideoGenerationEnabled
+					? config.selectedVideoModel
+					: undefined;
+			const useDirectVideo =
+				videoModel?.provider === "openrouter" &&
+				videoModel.name === "google/veo-3.1-lite";
+			const promptProfile = toPromptProfileId(modelProfile.name);
+			const tools = config.toolPolicy.visibleSchemas(
+				this.deps.registry,
+				[],
+				promptProfile,
+				useDirectVideo && !!this.deps.client.generateVideo,
+			);
+			const enabledTools = tools.map((tool) => tool.function.name);
+			const askBeforeGenerating = config.isAskBeforeGeneratingEnabled;
+			if (
+				videoModel &&
+				useDirectVideo &&
+				enabledTools.includes(DIRECT_VIDEO_TOOL)
+			) {
+				ctx.directVideoGeneration = {
+					model: videoModel,
+					askBeforeGenerating,
+					framePaths: (options.attachmentFilePaths ?? []).filter((path) =>
+						Bun.file(path).type.startsWith("image/"),
+					),
+				};
+			}
 			const todoWriteAvailable = enabledTools.some(
 				(name) => canonicalToolName(name) === "todo_write",
 			);
@@ -503,8 +528,14 @@ export class AgentController {
 						...(backboardMedia
 							? {
 									imageModel: config.selectedImageModel,
-									videoModel: config.selectedVideoModel,
-									askBeforeGenerating: config.isAskBeforeGeneratingEnabled,
+									videoModel:
+										useDirectVideo && !ctx.directVideoGeneration
+											? undefined
+											: videoModel,
+									askBeforeGenerating,
+									directVideoFrames: ctx.directVideoGeneration?.framePaths.map(
+										(path) => basename(path),
+									),
 								}
 							: {}),
 						route: mediaRoute,
@@ -591,8 +622,8 @@ export class AgentController {
 					config.memory === "off" ? undefined : config.getWorkspaceId(),
 				imageGeneration: backboardMedia && config.isImageGenerationEnabled,
 				imageModel: backboardMedia ? config.selectedImageModel : undefined,
-				videoGeneration: backboardMedia && config.isVideoGenerationEnabled,
-				videoModel: backboardMedia ? config.selectedVideoModel : undefined,
+				videoGeneration: !!videoModel && !useDirectVideo,
+				videoModel: useDirectVideo ? undefined : videoModel,
 				openRouterProvider: config.selectedOpenRouterProvider,
 				generatedMediaDir: join(config.cwd, "generated-images"),
 				generatedVideoDir: join(config.cwd, "generated-videos"),

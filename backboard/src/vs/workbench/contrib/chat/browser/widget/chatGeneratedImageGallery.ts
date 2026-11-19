@@ -24,7 +24,36 @@ export const OPEN_CANVAS_COMMAND_ID = 'workbench.action.sessions.rightWorkbench.
 export const OPEN_CANVAS_IN_SIMPLE_COMMAND_ID = 'workbench.action.chat.openImageInSimpleCanvas';
 
 /** The CLI's "Saved to `generated-images/…`." note that follows each image. */
-const SAVED_TO_NOTE = /^Saved to `?generated-(?:images|videos)\/[^`]+`?\.?$/;
+const SAVED_TO_PREFIX = 'Saved to ';
+const SAVED_MEDIA_FOLDERS = ['generated-images/', 'generated-videos/'];
+
+/** The project-relative path in the text of a "Saved to `generated-images/…`." note. */
+function pathInSavedToNote(text: string): string | undefined {
+	if (!text.startsWith(SAVED_TO_PREFIX)) {
+		return undefined;
+	}
+	let path = text.slice(SAVED_TO_PREFIX.length);
+	if (path.startsWith('`')) {
+		path = path.slice(1);
+	}
+	const folder = SAVED_MEDIA_FOLDERS.find(candidate => path.startsWith(candidate));
+	if (!folder) {
+		return undefined;
+	}
+	// The note ends with an optional closing backtick, then an optional period.
+	if (path.endsWith('.') && path.length > folder.length + 1) {
+		path = path.slice(0, -1);
+	}
+	if (path.endsWith('`')) {
+		path = path.slice(0, -1);
+	}
+	return path.length > folder.length && !path.includes('`') ? path : undefined;
+}
+
+/** The project-relative path a rendered "Saved to `generated-images/…`." paragraph names. */
+export function savedMediaPath(element: Element | null | undefined): string | undefined {
+	return element?.tagName === 'P' ? pathInSavedToNote(element.textContent?.trim() ?? '') : undefined;
+}
 
 /** Aspect ratio the stage holds until the first image reports its size. */
 const DEFAULT_STAGE_ASPECT = '16 / 9';
@@ -49,9 +78,10 @@ export function renderGeneratedImageGalleries(root: HTMLElement, isGeneratedImag
 		if (media instanceof HTMLVideoElement) {
 			return !!media.getAttribute('src');
 		}
-		const src = media.getAttribute('src');
+		// An image shown from a local copy keeps its markdown URL in `data-media-url`.
+		const url = media.dataset.mediaUrl ?? media.getAttribute('src');
 		try {
-			return !!src && isGeneratedImage(URI.parse(src));
+			return !!url && isGeneratedImage(URI.parse(url));
 		} catch {
 			return false;
 		}
@@ -68,7 +98,7 @@ export function renderGeneratedImageGalleries(root: HTMLElement, isGeneratedImag
 		const src = media.getAttribute('src')!;
 		const kind: 'image' | 'video' = media instanceof HTMLVideoElement ? 'video' : 'image';
 		// Canvas knows media by the URL written in the markdown.
-		const key = media instanceof HTMLVideoElement ? media.dataset.mediaUrl ?? src : src;
+		const key = media.dataset.mediaUrl ?? src;
 		return { src, key, kind, label: (media instanceof HTMLVideoElement ? media.getAttribute('aria-label') : media.getAttribute('alt')) || '' };
 	});
 	for (const img of images) {
@@ -81,7 +111,7 @@ export function renderGeneratedImageGalleries(root: HTMLElement, isGeneratedImag
 	}
 	// eslint-disable-next-line no-restricted-syntax -- the markdown renderer owns these nodes
 	for (const paragraph of [...root.querySelectorAll('p')]) {
-		if (SAVED_TO_NOTE.test(paragraph.textContent?.trim() ?? '')) {
+		if (pathInSavedToNote(paragraph.textContent?.trim() ?? '')) {
 			paragraph.remove();
 		}
 	}

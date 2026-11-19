@@ -4,13 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { getActiveWindow } from '../../../../base/browser/dom.js';
-import { Disposable, DisposableStore, IDisposable } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore, IDisposable, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
 import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
 import { ISpotlightTourIntro, ISpotlightTourStep, SpotlightTour, TourPlacement } from './spotlightTour.js';
+import { isWorkbenchVisible, onceWorkbenchVisible } from './workbenchVisibility.js';
 import { ONBOARDING_EDITOR_TOUR_PENDING_KEY, ONBOARDING_STORAGE_KEY, ONBOARDING_TOUR_STORAGE_KEY, shouldOfferOnboardingTour } from '../common/onboardingTypes.js';
 import { IOnboardingService } from '../common/onboardingService.js';
 
@@ -24,6 +25,7 @@ export class PostOnboardingEditorTour extends Disposable implements IWorkbenchCo
 	static readonly ID = 'workbench.contrib.postOnboardingEditorTour';
 
 	private started = false;
+	private readonly whenVisible = this._register(new MutableDisposable());
 
 	constructor(
 		@IStorageService private readonly storageService: IStorageService,
@@ -63,6 +65,14 @@ export class PostOnboardingEditorTour extends Disposable implements IWorkbenchCo
 			} catch {
 				return;
 			}
+		}
+		if (!isWorkbenchVisible()) {
+			// Finishing onboarding here can switch to Simple first; offer the tour when the user comes back.
+			this.whenVisible.value ??= onceWorkbenchVisible(() => {
+				this.whenVisible.clear();
+				this._maybeStart();
+			});
+			return;
 		}
 
 		this.started = true;

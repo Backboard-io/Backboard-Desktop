@@ -18,6 +18,7 @@ import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
 import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
 import { Severity, INotificationService } from '../../../../platform/notification/common/notification.js';
 import { ConfigurationTarget, IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { EXTENSION_IDENTIFIER_REGEX, EXTENSION_INSTALL_SKIP_PUBLISHER_TRUST_CONTEXT, EXTENSION_INSTALL_SKIP_WALKTHROUGH_CONTEXT, IExtensionGalleryService, IExtensionIdentifier, IExtensionManagementService } from '../../../../platform/extensionManagement/common/extensionManagement.js';
@@ -31,13 +32,14 @@ import { IOpenerService } from '../../../../platform/opener/common/opener.js';
 import { ITelemetryService } from '../../../../platform/telemetry/common/telemetry.js';
 import { IBackboardAnalyticsService } from '../../../services/backboardAnalytics/common/backboardAnalytics.js';
 import { IAccessibilityService } from '../../../../platform/accessibility/common/accessibility.js';
-import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
+import { IStorageService, IStorageValueChangeEvent, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IPathService } from '../../../services/path/common/pathService.js';
 import { IWorkbenchEnvironmentService } from '../../../services/environment/common/environmentService.js';
 import { IWorkbenchColorTheme, IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
 import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
 import { IBackboardBillingService } from '../../backboardBilling/common/backboardBilling.js';
 import { BillingPlansView } from '../../backboardBilling/browser/billingPlansView.js';
+import { BackboardAuthContextKeys } from '../../chat/common/backboardAuth.js';
 import { OPEN_AGENTS_WINDOW_COMMAND_ID } from '../../chat/common/constants.js';
 import { SessionType } from '../../chat/common/chatSessionsService.js';
 import { ADD_PROVIDER_KEY_COMMAND_ID } from '../../chat/browser/byokKeys/byokKeys.js';
@@ -57,6 +59,7 @@ import {
 } from '../common/onboardingTypes.js';
 import { createCustomizePanel, IThemePreviewPalette, OTHER_PREVIEW_PALETTE, ThemeChoice } from './onboardingCustomize.js';
 import { createMadeByFooter, createSignInPanel } from './onboardingSignIn.js';
+import { isWorkbenchVisible, onceWorkbenchVisible } from './workbenchVisibility.js';
 
 type OnboardingStepViewClassification = {
 	owner: 'cwebster-99';
@@ -83,6 +86,12 @@ type OnboardingActionEvent = {
 	step: string;
 	argument: string | undefined;
 };
+
+/** What the Backboard extension's `backboard.extension.runSignIn` resolves to; it shows no messages itself. */
+type BackboardSignInOutcome =
+	| { readonly status: 'signedIn' }
+	| { readonly status: 'cancelled' }
+	| { readonly status: 'failed'; readonly error: string };
 
 interface ISettingsImportSource {
 	readonly id: string;
@@ -201,6 +210,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private readonly footerFocusableElements: HTMLElement[] = [];
 	private readonly stepFocusableElements: HTMLElement[] = [];
 	private readonly stepFade = this._register(new MutableDisposable());
+	/** Waits for this mode to come on screen before a first-run show. */
+	private readonly pendingShow = this._register(new MutableDisposable());
 
 	/** What Enter does on the current screen, as on Devin's onboarding. */
 	private enterAction: (() => void) | undefined;
@@ -236,10 +247,25 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		@IBackboardAnalyticsService private readonly analytics: IBackboardAnalyticsService,
 		@IBackboardBillingService private readonly billingService: IBackboardBillingService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
+		@IContextKeyService private readonly contextKeyService: IContextKeyService,
 	) {
 		super();
 
 		this._syncSelectedThemeWithCurrentTheme();
+		this._register(this.storageService.onDidChangeValue(StorageScope.APPLICATION, ONBOARDING_STORAGE_KEY, this._store)(event => this._onDidChangeOnboardingState(event)));
+	}
+
+	/**
+	 * Another mode window finished or skipped onboarding: put this copy away
+	 * without recording a dismissal or overwriting the state it saved.
+	 */
+	private _onDidChangeOnboardingState(event: IStorageValueChangeEvent): void {
+		if (event.external && this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)) {
+			this.pendingShow.clear();
+			if (this.overlay) {
+				this._removeFromDOM();
+			}
+		}
 	}
 
 	private _syncSelectedThemeWithCurrentTheme(): void {
@@ -254,7 +280,25 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		return this._isShowing;
 	}
 
+	showWhenVisible(): void {
+		if (this.overlay || this.pendingShow.value) {
+			return;
+		}
+		const showIfStillNew = () => {
+			this.pendingShow.clear();
+			if (!this.storageService.get(ONBOARDING_STORAGE_KEY, StorageScope.APPLICATION)) {
+				this.show();
+			}
+		};
+		if (isWorkbenchVisible()) {
+			showIfStillNew();
+		} else {
+			this.pendingShow.value = onceWorkbenchVisible(showIfStillNew);
+		}
+	}
+
 	show(): void {
+		this.pendingShow.clear();
 		if (this.overlay) {
 			return;
 		}
@@ -329,19 +373,19 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			this._nextStep();
 		}));
 
-		this.disposables.add(addDisposableListener(this.overlay, EventType.MOUSE_DOWN, (event: MouseEvent) => {
-			if (event.target === this.overlay) {
-				this._dismiss('skip');
-			}
-		}));
-
+		// Clicking outside the card does nothing, and Escape goes back a step:
+		// either used to end onboarding for good, and the full-window launch
+		// screens show no Skip to suggest that. Every screen has its own way on.
 		this.disposables.add(addDisposableListener(this.overlay, EventType.KEY_DOWN, (event: KeyboardEvent) => {
 			const keyboardEvent = new StandardKeyboardEvent(event);
 			event.stopPropagation();
 
 			if (keyboardEvent.keyCode === KeyCode.Escape) {
-				event.preventDefault();
-				this._dismiss('skip');
+				// A dialog inside the card has already closed itself.
+				if (!event.defaultPrevented) {
+					event.preventDefault();
+					this._prevStep();
+				}
 				return;
 			}
 
@@ -411,9 +455,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		}
 
 		this._logAction('dismiss', undefined, reason);
-		if (reason === 'skip') {
-			this.postOnboardingSignInPromptShown = true;
-		}
 		this._storeOnboardingState(reason);
 		this.overlay.classList.remove('visible');
 		this.overlay.classList.add('exiting');
@@ -484,7 +525,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private async _promptBackboardSsoAfterOnboarding(): Promise<void> {
-		if (this.postOnboardingSignInPromptShown || !this._isBackboardProduct()) {
+		if (this.postOnboardingSignInPromptShown || !this._isBackboardProduct() || this._hasOwnCredentials()) {
 			return;
 		}
 
@@ -570,6 +611,20 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 	private _isBackboardProduct(): boolean {
 		return product.defaultChatAgent?.provider?.default?.id === 'backboard';
+	}
+
+	/**
+	 * A Backboard sign-in or a provider key from the API Keys page, so the
+	 * sign-in screen has nothing to offer. A guest key does not count.
+	 */
+	private _isAlreadyConnected(): boolean {
+		return this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.signedIn.key) === true
+			|| this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.providerKeyConfigured.key) === true;
+	}
+
+	/** A ChatGPT or Claude subscription or a provider key, so there is nothing to sign in for. */
+	private _hasOwnCredentials(): boolean {
+		return this.contextKeyService.getContextKeyValue<boolean>(BackboardAuthContextKeys.byoConfigured.key) === true;
 	}
 
 	private _nextStep(): void {
@@ -661,6 +716,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _shouldSkipStep(step: OnboardingStepId): boolean {
+		if (step === OnboardingStepId.Welcome && this._isAlreadyConnected()) {
+			return true;
+		}
+
 		if (this.selectedExperience === OnboardingExperience.Simple) {
 			return step === OnboardingStepId.ImportSettings;
 		}
@@ -784,10 +843,14 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	}
 
 	private _renderConnectAIStep(container: HTMLElement): void {
-		const { element, signUpButton, logInButton, apiKeyButton, skipButton } = createSignInPanel(container);
-		for (const button of [signUpButton, logInButton, apiKeyButton, skipButton]) {
+		const { element, signUpButton, logInButton, apiKeyButton, skipButton, waiting, copyLinkButton, cancelButton, message } = createSignInPanel(container);
+		for (const button of [signUpButton, logInButton, copyLinkButton, cancelButton, apiKeyButton, skipButton]) {
 			this._registerStepFocusable(button);
 		}
+		const showMessage = (text: string, isError = false) => {
+			message.textContent = text;
+			message.classList.toggle('error', isError);
+		};
 		this.enterAction = () => signUpButton.click();
 
 		let didContinueWithoutAccount = false;
@@ -829,28 +892,56 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			if (label) {
 				label.textContent = localize('onboarding.backboard.signInConnecting', "Connecting to Backboard…");
 			}
+			showMessage('');
+			waiting.style.display = '';
+			cancelButton.focus();
+			// Failures come back here instead of as a notification, which would
+			// sit underneath this screen while the button stayed stuck.
+			let outcome: BackboardSignInOutcome;
 			try {
-				// Resolves true once the tokens are saved; false when the sign-in
-				// failed or was denied (the extension already surfaced that error).
-				const connected = await this.commandService.executeCommand<boolean>('backboard.signIn');
-				if (connected && !didContinueWithoutAccount && element.isConnected) {
-					this.hasConfirmedBackboardSignIn = true;
-					this.postOnboardingSignInPromptShown = true;
-					this._advanceOrComplete();
-					return;
-				}
+				outcome = await this.commandService.executeCommand<BackboardSignInOutcome>('backboard.extension.runSignIn') ?? { status: 'failed', error: '' };
 			} catch (error) {
-				this.notificationService.notify({
-					severity: Severity.Error,
-					message: localize('onboarding.connectionFailed', "Could not connect. Please try again."),
-					source: error instanceof Error ? error.message : undefined,
-				});
+				outcome = { status: 'failed', error: error instanceof Error ? error.message : String(error) };
+			}
+			if (outcome.status === 'signedIn' && !didContinueWithoutAccount && element.isConnected) {
+				this.hasConfirmedBackboardSignIn = true;
+				this.postOnboardingSignInPromptShown = true;
+				this._advanceOrComplete();
+				return;
 			}
 			signUpButton.disabled = logInButton.disabled = false;
 			if (label) {
 				label.textContent = idleLabel ?? null;
 			}
+			waiting.style.display = 'none';
+			// A copied link stops working with the sign-in it came from.
+			showMessage('');
+			if (outcome.status === 'failed') {
+				this._logAction('signInFailed');
+				showMessage(outcome.error
+					? localize('onboarding.signIn.failedWithReason', "Sign-in didn't finish: {0}", outcome.error)
+					: localize('onboarding.signIn.failed', "Sign-in didn't finish. Please try again."), true);
+			}
+			if (element.isConnected) {
+				sourceButton.focus();
+			}
 		};
+
+		this.stepDisposables.add(addDisposableListener(cancelButton, EventType.CLICK, () => {
+			this._logAction('cancelSignIn');
+			void this.commandService.executeCommand('backboard.extension.cancelSignIn').catch(() => undefined);
+		}));
+		// For when the browser that opened is not the one the user signs in with.
+		this.stepDisposables.add(addDisposableListener(copyLinkButton, EventType.CLICK, async () => {
+			this._logAction('copySignInLink');
+			const link = await this.commandService.executeCommand<{ url: string; userCode: string }>('backboard.extension.signInLink').catch(() => undefined);
+			if (!link) {
+				showMessage(localize('onboarding.signIn.linkNotReady', "The sign-in link isn't ready yet. Try again in a moment."));
+				return;
+			}
+			await this.clipboardService.writeText(link.url);
+			showMessage(localize('onboarding.signIn.linkCopied', "Link copied. Open it in any browser and check that it shows the code {0}.", link.userCode));
+		}));
 
 		this.stepDisposables.add(addDisposableListener(signUpButton, EventType.CLICK, () => {
 			void startSignIn(signUpButton, 'signUpBackboard');

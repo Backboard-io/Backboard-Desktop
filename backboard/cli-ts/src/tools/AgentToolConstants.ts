@@ -1,3 +1,5 @@
+import { DIRECT_VIDEO_TOOL } from "../core/tools/names.ts";
+
 export const DEFAULT_AGENT_MAX_DEPTH = 2;
 
 export const NON_DELEGATABLE_AGENT_TOOLS: ReadonlySet<string> = new Set([
@@ -14,6 +16,7 @@ export const NON_DELEGATABLE_AGENT_TOOLS: ReadonlySet<string> = new Set([
 	"browser",
 	"computer",
 	"generate_video",
+	DIRECT_VIDEO_TOOL,
 ]);
 
 /**

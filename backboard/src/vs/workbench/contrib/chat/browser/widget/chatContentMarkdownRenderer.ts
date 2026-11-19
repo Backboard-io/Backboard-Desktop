@@ -8,7 +8,8 @@ import { IRenderedMarkdown, MarkdownRenderOptions } from '../../../../../base/br
 import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
 import { DisposableStore, IDisposable } from '../../../../../base/common/lifecycle.js';
-import { URI } from '../../../../../base/common/uri.js';
+import { dirname, isEqualOrParent, resolvePath } from '../../../../../base/common/resources.js';
+import { URI, UriComponents } from '../../../../../base/common/uri.js';
 import { IMarkdownRenderer, IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { ILanguageService } from '../../../../../editor/common/languages/language.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -18,7 +19,7 @@ import product from '../../../../../platform/product/common/product.js';
 import { FileAccess, Schemas } from '../../../../../base/common/network.js';
 import { AGENT_HOST_SCHEME } from '../../../../../platform/agentHost/common/agentHostUri.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { OPEN_CANVAS_COMMAND_ID, OPEN_CANVAS_IN_SIMPLE_COMMAND_ID, renderGeneratedImageGalleries } from './chatGeneratedImageGallery.js';
+import { OPEN_CANVAS_COMMAND_ID, OPEN_CANVAS_IN_SIMPLE_COMMAND_ID, renderGeneratedImageGalleries, savedMediaPath } from './chatGeneratedImageGallery.js';
 
 const BACKBOARD_GENERATED_IMAGE_HOST = 'backboard-prod.s3.ca-central-1.amazonaws.com';
 /**
@@ -196,6 +197,7 @@ export class ChatContentMarkdownRenderer implements IMarkdownRenderer {
 			}
 		}
 		const upgraded = this.upgradeGeneratedVideos(result);
+		this.showSavedSvgCopies(upgraded, markdown.baseUri);
 		// The Sessions window opens its own Canvas; the Editor window hands the
 		// image over to the Simple window's Canvas instead.
 		const canvasCommand = [OPEN_CANVAS_COMMAND_ID, OPEN_CANVAS_IN_SIMPLE_COMMAND_ID].find(id => !!CommandsRegistry.getCommand(id));
@@ -237,6 +239,40 @@ export class ChatContentMarkdownRenderer implements IMarkdownRenderer {
 			image.replaceWith(video);
 		}
 		return result;
+	}
+
+	/**
+	 * The main process blocks remote SVGs, so a Backboard-generated SVG shows
+	 * the copy the CLI saved into the chat's folder, named by the "Saved to"
+	 * note after it. The markdown URL stays its identity for the gallery and
+	 * Canvas. Without a saved copy the image is left as it was.
+	 */
+	private showSavedSvgCopies(result: IRenderedMarkdown, baseUri: UriComponents | undefined): void {
+		if (!baseUri) {
+			return;
+		}
+		const base = URI.from(baseUri);
+		const folder = base.path.endsWith('/') ? base : dirname(base);
+		// eslint-disable-next-line no-restricted-syntax -- the markdown renderer owns these nodes
+		for (const image of result.element.querySelectorAll('img')) {
+			const src = image.getAttribute('src');
+			const saved = savedMediaPath(image.closest('p')?.nextElementSibling);
+			if (!src || !saved?.toLowerCase().endsWith('.svg')) {
+				continue;
+			}
+			let uri: URI;
+			try {
+				uri = URI.parse(src);
+			} catch {
+				continue;
+			}
+			const copy = resolvePath(folder, saved);
+			if (!isBackboardGeneratedImage(uri) || !uri.path.toLowerCase().endsWith('.svg') || !isEqualOrParent(copy, folder)) {
+				continue;
+			}
+			image.dataset.mediaUrl = src;
+			image.setAttribute('src', FileAccess.uriToBrowserUri(copy).toString(true));
+		}
 	}
 
 	private attachCustomHover(result: IRenderedMarkdown, ...owned: IDisposable[]): IRenderedMarkdown {

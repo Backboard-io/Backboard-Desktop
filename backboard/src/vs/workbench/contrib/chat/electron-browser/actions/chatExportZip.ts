@@ -64,7 +64,7 @@ export function registerChatExportZipAction() {
 			const files: { path: string; contents: string }[] = [
 				{
 					path: 'chat.json',
-					contents: JSON.stringify(model.toExport(), undefined, 2)
+					contents: JSON.stringify(model.toFullExport ? await model.toFullExport() : model.toExport(), undefined, 2)
 				}
 			];
 

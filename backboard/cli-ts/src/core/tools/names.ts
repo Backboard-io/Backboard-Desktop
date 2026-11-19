@@ -1,3 +1,5 @@
+export const DIRECT_VIDEO_TOOL = "generate_video_direct";
+
 const BUILTIN_AGENT_NAMES: Record<string, string> = {
 	Read: "read",
 	Write: "write",

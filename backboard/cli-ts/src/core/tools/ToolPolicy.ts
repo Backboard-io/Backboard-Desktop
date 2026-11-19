@@ -1,5 +1,5 @@
 import type { PromptProfileId } from "../../prompts/profiles/ids.ts";
-import { canonicalToolName } from "./names.ts";
+import { canonicalToolName, DIRECT_VIDEO_TOOL } from "./names.ts";
 import type { OpenAITool } from "./schema.ts";
 import type { Tool } from "./Tool.ts";
 import type { ToolRegistry } from "./ToolRegistry.ts";
@@ -64,7 +64,9 @@ export class ToolPolicy {
 	}
 
 	isRuntimeAllowed(name: string): boolean {
-		const canonicalName = canonicalToolName(name);
+		const wireName = canonicalToolName(name);
+		const canonicalName =
+			wireName === DIRECT_VIDEO_TOOL ? "generate_video" : wireName;
 		if (canonicalName === "computer" && !this.snapshot.computerUseEnabled) {
 			return false;
 		}
@@ -83,7 +85,11 @@ export class ToolPolicy {
 		) {
 			return false;
 		}
-		if (this.excludedToolNames.includes(canonicalName)) return false;
+		if (
+			this.excludedToolNames.includes(wireName) ||
+			this.excludedToolNames.includes(canonicalName)
+		)
+			return false;
 		return (
 			isAllowedByToolList(canonicalName, this.snapshot.profileTools) &&
 			isAllowedByToolList(canonicalName, this.snapshot.modelTools)
@@ -107,10 +113,12 @@ export class ToolPolicy {
 		registry: ToolRegistry,
 		extraExcluded: readonly string[] = [],
 		profile?: PromptProfileId,
+		allowDirectVideo = false,
 	): OpenAITool[] {
 		const schemaExcluded = new Set(
 			this.schemaExcludedNames().map(canonicalToolName),
 		);
+		if (!allowDirectVideo) schemaExcluded.add(DIRECT_VIDEO_TOOL);
 		return registry.toJSONSchemasFor(
 			this.visibleTools(registry, extraExcluded).filter(
 				(tool) => !schemaExcluded.has(canonicalToolName(tool.agentName)),

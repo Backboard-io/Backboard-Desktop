@@ -13,6 +13,12 @@ export interface ISignInPanel {
 	readonly logInButton: HTMLButtonElement;
 	readonly apiKeyButton: HTMLButtonElement;
 	readonly skipButton: HTMLButtonElement;
+	/** Hidden until a sign-in is waiting on the browser. */
+	readonly waiting: HTMLElement;
+	readonly copyLinkButton: HTMLButtonElement;
+	readonly cancelButton: HTMLButtonElement;
+	/** Why the last sign-in failed, or where a copied link goes. */
+	readonly message: HTMLElement;
 }
 
 function createMark(parent: HTMLElement, className: string): void {
@@ -65,11 +71,20 @@ export function createSignInPanel(parent: HTMLElement): ISignInPanel {
 	enterHint.setAttribute('aria-hidden', 'true');
 	const logInButton = createButton(actions, 'onboarding-signin-btn-secondary', localize('onboarding.signIn.logIn', "Log in"));
 
+	const waiting = append(element, $('p.onboarding-signin-waiting'));
+	waiting.style.display = 'none';
+	append(waiting, $('span')).textContent = localize('onboarding.signIn.waiting', "Continue in your browser.");
+	const copyLinkButton = createLink(waiting, localize('onboarding.signIn.copyLink', "Copy link"));
+	const cancelButton = createLink(waiting, localize('onboarding.signIn.cancel', "Cancel"));
+
+	const message = append(element, $('p.onboarding-signin-message'));
+	message.setAttribute('aria-live', 'polite');
+
 	const help = append(element, $('p.onboarding-signin-help'));
 	append(help, $('span')).textContent = localize('onboarding.signIn.trouble', "Having trouble?");
 	const apiKeyButton = createLink(help, localize('onboarding.signIn.apiKey', "Use an API key"));
 	append(help, $('span')).textContent = localize('onboarding.signIn.or', "or");
 	const skipButton = createLink(help, localize('onboarding.signIn.skip', "skip for now"));
 
-	return { element, signUpButton, logInButton, apiKeyButton, skipButton };
+	return { element, signUpButton, logInButton, apiKeyButton, skipButton, waiting, copyLinkButton, cancelButton, message };
 }
