@@ -5,13 +5,14 @@
 
 import * as fs from 'fs';
 import { join } from '../../../base/common/path.js';
-import { ILiveAppBadRecord, ILiveAppBootRecord, ILiveAppPointer, ILiveUpdateProductConfiguration, LIVE_APP_MAX_BOOT_ATTEMPTS, LIVE_BASE_APP_ROOT_ENV, LIVE_UPDATE_ID_PATTERN } from '../common/liveUpdate.js';
+import { ILiveAppBadRecord, ILiveAppBootRecord, ILiveAppPointer, ILiveUpdateBuildInfo, ILiveUpdateProductConfiguration, LIVE_APP_MAX_BOOT_ATTEMPTS, LIVE_BASE_APP_ROOT_ENV, LIVE_UPDATE_ID_PATTERN, liveComponentBuildMismatch, liveUpdateBuildId } from '../common/liveUpdate.js';
 import { verifyLiveUpdateEnvelope } from './liveUpdateSignature.js';
 
 export interface ILiveAppBootOptions {
 	readonly liveUpdatesDir: string;
 	readonly product: {
 		readonly backboardVersion?: string;
+		readonly backboardBuildInfo?: ILiveUpdateBuildInfo;
 		readonly backboardLiveUpdate?: ILiveUpdateProductConfiguration;
 	};
 	readonly electronVersion: string;
@@ -142,6 +143,10 @@ function chooseLiveApp(options: ILiveAppBootOptions, appDir: string, publicKeys:
 	}
 	if (!options.product.backboardVersion || !component.bases.includes(options.product.backboardVersion)) {
 		return { reason: `overlay ${id} targets ${component.bases.join(', ')}, installed app is ${options.product.backboardVersion}` };
+	}
+	const buildMismatch = liveComponentBuildMismatch(component.builds, liveUpdateBuildId(options.product.backboardBuildInfo));
+	if (buildMismatch) {
+		return { reason: `overlay ${id} ${buildMismatch}` };
 	}
 	if (component.electron !== options.electronVersion) {
 		return { reason: `overlay ${id} needs Electron ${component.electron}, installed app has ${options.electronVersion}` };

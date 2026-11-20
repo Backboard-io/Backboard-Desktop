@@ -104,6 +104,15 @@ export interface IProductConfiguration {
 	 * stamped by the release packaging scripts. Absent in development builds.
 	 */
 	readonly backboardUpdateChannel?: string;
+	/**
+	 * The source a release was packaged from, stamped by the release packaging
+	 * scripts. Live updates run only on the build they were made from.
+	 */
+	readonly backboardBuildInfo?: {
+		readonly sourceCommit?: string;
+		/** sha256 of uncommitted changes included in the build. */
+		readonly sourceDirtySha256?: string;
+	};
 	readonly date?: string;
 	readonly quality?: string;
 	readonly commit?: string;

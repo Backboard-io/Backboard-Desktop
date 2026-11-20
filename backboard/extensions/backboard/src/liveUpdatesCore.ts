@@ -36,6 +36,8 @@ export interface LiveUpdateRollout {
 export interface LiveAppComponent {
 	readonly id: string;
 	readonly bases: readonly string[];
+	/** `liveUpdateBuildId` of each installed app it was made from. Missing: refused. */
+	readonly builds?: readonly string[];
 	readonly electron: string;
 	readonly files: LiveUpdateFileSet;
 	readonly rollout?: LiveUpdateRollout;
@@ -46,6 +48,7 @@ export interface LiveAppComponent {
 export interface LiveAgentComponent {
 	readonly id: string;
 	readonly bases: readonly string[];
+	readonly builds?: readonly string[];
 	readonly protocolVersion: number;
 	readonly bunVersion: string;
 	readonly entry: string;
@@ -490,10 +493,16 @@ async function materializeComponent(context: LiveStageContext, manifestUrl: stri
 
 // #region Reconcile
 
-export interface LiveApplyContext extends LiveStageContext {
+/** What a component must have been made from to run on this install. */
+export interface LiveInstalledApp {
+	readonly appVersion: string;
+	/** `liveUpdateBuildId` of the installed app; undefined when it records none. */
+	readonly appBuild: string | undefined;
+}
+
+export interface LiveApplyContext extends LiveStageContext, LiveInstalledApp {
 	readonly publicKeys: readonly string[];
 	readonly channel: string;
-	readonly appVersion: string;
 	readonly electronVersion: string;
 	readonly machineId: string;
 	/** Overlay the running app started from, if any. Never deleted. */
@@ -512,8 +521,42 @@ export interface LiveApplyResult {
 	readonly errors: readonly string[];
 }
 
-function appliesTo(bases: readonly string[], appVersion: string): boolean {
-	return Array.isArray(bases) && bases.includes(appVersion);
+/** sha256 of no bytes: what the package scripts record for a clean source tree. */
+const cleanSourceSha256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
+/**
+ * The source an installed app was built from (product.json `backboardBuildInfo`):
+ * its commit, plus the hash of uncommitted changes when there were any. Must
+ * equal liveUpdateBuildId in src/vs/platform/backboardLiveUpdate/common/liveUpdate.ts.
+ */
+export function liveUpdateBuildId(info: { readonly sourceCommit?: unknown; readonly sourceDirtySha256?: unknown } | undefined): string | undefined {
+	const commit = info?.sourceCommit;
+	if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/i.test(commit)) {
+		return undefined;
+	}
+	const dirty = info?.sourceDirtySha256;
+	return typeof dirty === 'string' && sha256Pattern.test(dirty.toLowerCase()) && dirty.toLowerCase() !== cleanSourceSha256
+		? `${commit}+${dirty}`.toLowerCase()
+		: commit.toLowerCase();
+}
+
+/**
+ * Why a component does not fit the installed app, or undefined when it does.
+ * A release rebuilt under the same version is another build, and a component
+ * made from the old one would run older code over it. One without builds was
+ * published before they were recorded, so it is refused as well.
+ */
+export function installedAppMismatch(component: { readonly bases: readonly string[]; readonly builds?: readonly string[] }, installed: LiveInstalledApp): string | undefined {
+	if (!Array.isArray(component.bases) || !component.bases.includes(installed.appVersion)) {
+		return `targets ${Array.isArray(component.bases) ? component.bases.join(', ') : 'no release'}, installed app is ${installed.appVersion}`;
+	}
+	if (!Array.isArray(component.builds) || !component.builds.length) {
+		return 'records no base build';
+	}
+	if (!installed.appBuild) {
+		return 'needs a known build, installed app records none';
+	}
+	return component.builds.includes(installed.appBuild) ? undefined : `was made from build ${component.builds.join(', ')}, installed app is build ${installed.appBuild}`;
 }
 
 export function liveAppDir(liveUpdatesDir: string): string {
@@ -531,12 +574,12 @@ export function readBadAppIds(liveUpdatesDir: string): readonly string[] {
 /**
  * The overlay the next app start will use, or undefined for the installed app.
  * Mirrors the boot loader's checks, so a pointer left from before a full
- * release (built for the old version) does not offer a pointless restart.
+ * release (built for the old version or build) does not offer a pointless restart.
  */
-export function readDesiredApp(liveUpdatesDir: string, publicKeys: readonly string[], appVersion: string, electronVersion: string): LiveAppComponent | undefined {
+export function readDesiredApp(liveUpdatesDir: string, publicKeys: readonly string[], installed: LiveInstalledApp, electronVersion: string): LiveAppComponent | undefined {
 	const pointer = readLiveJson<LiveComponentPointer>(path.join(liveAppDir(liveUpdatesDir), 'current.json'));
 	const app = verifyLiveUpdateEnvelope(pointer?.manifest, publicKeys)?.components.app;
-	if (!app || app.id !== pointer?.id || !appliesTo(app.bases, appVersion) || app.electron !== electronVersion || readBadAppIds(liveUpdatesDir).includes(app.id)) {
+	if (!app || app.id !== pointer?.id || installedAppMismatch(app, installed) || app.electron !== electronVersion || readBadAppIds(liveUpdatesDir).includes(app.id)) {
 		return undefined;
 	}
 	return fs.existsSync(path.join(liveAppDir(liveUpdatesDir), app.id, liveAppCompleteMarker)) ? app : undefined;
@@ -588,9 +631,13 @@ export async function applyLiveManifest(context: LiveApplyContext, manifestUrl: 
 	const appPointerPath = path.join(appDir, 'current.json');
 	const appPointer = readLiveJson<LiveComponentPointer>(appPointerPath);
 	const app = manifest.components.app;
+	const appMismatch = app && installedAppMismatch(app, context);
+	if (app && appMismatch) {
+		context.log(`[live] app overlay ${app.id} ${appMismatch}; not using it`);
+	}
 	let desiredAppId: string | undefined;
 	if (app && idPattern.test(app.id) && !revoked.has(app.id) && !readBadAppIds(context.liveUpdatesDir).includes(app.id)
-		&& appliesTo(app.bases, context.appVersion) && app.electron === context.electronVersion && inRollout(app.rollout, context.machineId, app.id)) {
+		&& !appMismatch && app.electron === context.electronVersion && inRollout(app.rollout, context.machineId, app.id)) {
 		try {
 			const localRoots = [context.baseAppRoot, ...(appPointer?.id && idPattern.test(appPointer.id) ? [path.join(appDir, appPointer.id)] : [])];
 			await materializeComponent(context, manifestUrl, app.files, path.join(appDir, app.id), localRoots, true);
@@ -612,9 +659,13 @@ export async function applyLiveManifest(context: LiveApplyContext, manifestUrl: 
 	const agentPointerPath = path.join(agentDir, 'current.json');
 	const agentPointer = readLiveJson<LiveComponentPointer>(agentPointerPath);
 	const agent = manifest.components.agent;
+	const agentMismatch = agent && installedAppMismatch(agent, context);
+	if (agent && agentMismatch) {
+		context.log(`[live] agent runtime ${agent.id} ${agentMismatch}; not using it`);
+	}
 	let agentId: string | undefined;
 	if (agent && idPattern.test(agent.id) && !revoked.has(agent.id) && isSafeRelativePath(agent.entry)
-		&& agent.protocolVersion === liveAgentProtocolVersion && appliesTo(agent.bases, context.appVersion) && inRollout(agent.rollout, context.machineId, agent.id)) {
+		&& agent.protocolVersion === liveAgentProtocolVersion && !agentMismatch && inRollout(agent.rollout, context.machineId, agent.id)) {
 		try {
 			const bundleDir = path.join(agentDir, agent.id);
 			const localRoots = agentPointer?.id && idPattern.test(agentPointer.id) ? [path.join(agentDir, agentPointer.id)] : [];

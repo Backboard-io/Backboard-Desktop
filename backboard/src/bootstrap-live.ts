@@ -14,8 +14,8 @@ import minimist from 'minimist';
 import { product } from './bootstrap-meta.js';
 import { getUserDataPath } from './vs/platform/environment/node/userDataPath.js';
 import type { NativeParsedArgs } from './vs/platform/environment/common/argv.js';
-import { type ILiveUpdateProductConfiguration, LIVE_APP_ID_ENV, LIVE_APP_SELECTION_ENV, LIVE_BASE_APP_ROOT_ENV, LIVE_UPDATES_DIR_ENV } from './vs/platform/backboardLiveUpdate/common/liveUpdate.js';
-import { markLiveAppBad, selectLiveAppRoot } from './vs/platform/backboardLiveUpdate/node/liveUpdateBoot.js';
+import { LIVE_APP_ID_ENV, LIVE_APP_SELECTION_ENV, LIVE_BASE_APP_ROOT_ENV, LIVE_UPDATES_DIR_ENV } from './vs/platform/backboardLiveUpdate/common/liveUpdate.js';
+import { type ILiveAppBootOptions, markLiveAppBad, selectLiveAppRoot } from './vs/platform/backboardLiveUpdate/node/liveUpdateBoot.js';
 
 const baseOutDir = import.meta.dirname;
 const args = minimist(process.argv, { string: ['user-data-dir'] }) as NativeParsedArgs;
@@ -31,7 +31,7 @@ let selection: ReturnType<typeof selectLiveAppRoot>;
 try {
 	selection = selectLiveAppRoot({
 		liveUpdatesDir,
-		product: product as { backboardVersion?: string; backboardLiveUpdate?: ILiveUpdateProductConfiguration },
+		product: product as ILiveAppBootOptions['product'],
 		electronVersion: process.versions.electron,
 		isDev: !!process.env['VSCODE_DEV'],
 	});

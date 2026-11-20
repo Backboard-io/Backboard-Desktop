@@ -26,6 +26,8 @@ const hasBun = spawnSync('bun', ['--version']).status === 0;
 
 const ELECTRON = '42.2.0';
 const BASE_VERSION = '9.9.9';
+const BASE_COMMIT = 'af5489c6cb81d23ed6675756a9dadbe370434678';
+const CLEAN_TREE = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 const MACHO = Buffer.from([0xcf, 0xfa, 0xed, 0xfe, 1, 2, 3, 4]);
 
 let work;
@@ -47,8 +49,9 @@ function publishCli(...args) {
 }
 
 /** A packaged app root, laid out like Contents/Resources/app. */
-function makeApp(root, { main, extension, native }) {
-	write(path.join(root, 'product.json'), JSON.stringify({ nameShort: 'Test', backboardVersion: BASE_VERSION, backboardUpdateChannel: 'stable', backboardLiveUpdate: { publicKeys: [publicKey] } }));
+function makeApp(root, { main, extension, native, commit = BASE_COMMIT }) {
+	const backboardBuildInfo = { version: BASE_VERSION, sourceCommit: commit, sourceDirtySha256: CLEAN_TREE };
+	write(path.join(root, 'product.json'), JSON.stringify({ nameShort: 'Test', backboardVersion: BASE_VERSION, backboardUpdateChannel: 'stable', backboardBuildInfo, backboardLiveUpdate: { publicKeys: [publicKey] } }));
 	write(path.join(root, 'package.json'), JSON.stringify({ name: 'test', devDependencies: { electron: ELECTRON } }));
 	write(path.join(root, 'backboard-build-info.json'), JSON.stringify({ version: BASE_VERSION }));
 	write(path.join(root, 'out', 'main.js'), main);
@@ -70,6 +73,7 @@ function context(liveUpdatesDir, baseAppRoot) {
 		publicKeys: [publicKey],
 		channel: 'stable',
 		appVersion: BASE_VERSION,
+		appBuild: BASE_COMMIT,
 		electronVersion: ELECTRON,
 		machineId: 'machine',
 	};
@@ -133,7 +137,7 @@ test('a published overlay stages from the installed app plus changed files, boot
 	});
 
 	if (hasBun) {
-		const agent = liveAgent.resolveLiveAgent({ backboardVersion: BASE_VERSION, backboardLiveUpdate: { publicKeys: [publicKey] } }, liveUpdatesDir);
+		const agent = liveAgent.resolveLiveAgent({ backboardVersion: BASE_VERSION, backboardBuildInfo: { sourceCommit: BASE_COMMIT }, backboardLiveUpdate: { publicKeys: [publicKey] } }, liveUpdatesDir);
 		assert.equal(agent?.id, result.agentId);
 		assert.match(fs.readFileSync(agent.entry, 'utf8').slice(0, 200), /delete process\.env\.BUN_BE_BUN/);
 	}
@@ -163,6 +167,32 @@ test('a corrupted object or a foreign key never reaches the live folder', async 
 	assert.equal(fs.existsSync(path.join(liveUpdatesDir, 'app', 'current.json')), false);
 
 	await assert.rejects(core.applyLiveManifest({ ...context(path.join(work, 'LiveUpdates3'), base), publicKeys: [core.liveUpdateKeyId(publicKey)] }, manifestUrl, await fetchEnvelope()), /not signed by a trusted key/);
+});
+
+test('a rebuild of the base version from other source never runs an overlay of the old build', async () => {
+	const base = makeApp(path.join(work, 'base4'), { main: 'old\n', extension: 'old\n', native: MACHO });
+	const next = makeApp(path.join(work, 'next4'), { main: 'overlay\n', extension: 'old\n', native: MACHO });
+	assert.match(publishCli('publish', '--channel', 'stable', '--base-app', base, '--new-app', next), new RegExp(`base build ${BASE_COMMIT}`));
+	const liveUpdatesDir = path.join(work, 'LiveUpdates4');
+	const manifestUrl = `http://127.0.0.1:${port}/stable/${process.platform}-${process.arch}/manifest.json`;
+	const staged = await core.applyLiveManifest(context(liveUpdatesDir, base), manifestUrl, await fetchEnvelope());
+	assert.deepEqual(staged.errors, []);
+
+	// The same version packaged again from newer source replaces the installed app.
+	const newerCommit = '0123456789abcdef0123456789abcdef01234567';
+	const rebuild = makeApp(path.join(work, 'rebuild4'), { main: 'newer\n', extension: 'newer\n', native: MACHO, commit: newerCommit });
+	const rebuildProduct = JSON.parse(fs.readFileSync(path.join(rebuild, 'product.json'), 'utf8'));
+	const selection = boot.selectLiveAppRoot({ liveUpdatesDir, product: rebuildProduct, electronVersion: ELECTRON, isDev: false });
+	const reapplied = await core.applyLiveManifest({ ...context(liveUpdatesDir, rebuild), appBuild: core.liveUpdateBuildId(rebuildProduct.backboardBuildInfo) }, manifestUrl, await fetchEnvelope());
+	assert.deepEqual({
+		boot: selection.reason,
+		desired: reapplied.desiredAppId,
+		pointer: fs.existsSync(path.join(liveUpdatesDir, 'app', 'current.json')),
+	}, {
+		boot: `overlay ${staged.desiredAppId} was made from build ${BASE_COMMIT}, installed app is build ${newerCommit}`,
+		desired: undefined,
+		pointer: false,
+	});
 });
 
 test('the events server pushes each new manifest to connected apps', async () => {
