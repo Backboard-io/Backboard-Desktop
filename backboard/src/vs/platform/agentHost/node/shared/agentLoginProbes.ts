@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { execFile } from 'child_process';
+import { execFile, type ExecFileOptionsWithStringEncoding } from 'child_process';
 import * as fs from 'fs';
 import { homedir } from 'os';
 import { delimiter, join } from '../../../../base/common/path.js';
@@ -19,7 +19,59 @@ import { delimiter, join } from '../../../../base/common/path.js';
  * credentials themselves.
  */
 
-/** Every distinct Claude Code binary in PATH and the vendor's install dirs, PATH order first. */
+/**
+ * `execFile` that always answers through the callback. Node throws some spawn
+ * failures (ENOEXEC, EINVAL) synchronously instead, which rejected the whole
+ * Connect flow with a bare "spawn ENOEXEC".
+ */
+function execFileSafely(file: string, args: readonly string[], options: ExecFileOptionsWithStringEncoding, callback: (error: Error | null, stdout: string, stderr: string) => void): void {
+	try {
+		execFile(file, args, options, callback);
+	} catch (err) {
+		callback(err instanceof Error ? err : new Error(String(err)), '', '');
+	}
+}
+
+/**
+ * Whether the OS can start a file directly: a native binary (Mach-O, ELF, PE)
+ * or a script with a `#!` line. npm's Claude Code links `claude` to
+ * `bin/claude.exe`, a shell stub without `#!` that its postinstall replaces
+ * with the native binary. When the postinstall did not run (`--ignore-scripts`,
+ * pnpm, Bun, a missing optional dependency) a terminal still runs the stub,
+ * which prints "claude native binary not installed", but spawning it fails
+ * with ENOEXEC. An unreadable file is left for spawn to judge.
+ */
+export function isSpawnableExecutable(file: string): boolean {
+	let descriptor: number | undefined;
+	try {
+		descriptor = fs.openSync(file, 'r');
+		const header = Buffer.alloc(4);
+		const bytesRead = fs.readSync(descriptor, header, 0, header.length, 0);
+		const prefix = header.toString('latin1', 0, Math.min(bytesRead, 2));
+		if (prefix === '#!' || prefix === 'MZ') {
+			return true;
+		}
+		if (bytesRead < 4) {
+			return false;
+		}
+		switch (header.readUInt32BE(0)) {
+			case 0x7f454c46: // ELF
+			case 0xcffaedfe: case 0xcefaedfe: case 0xfeedfacf: case 0xfeedface: // Mach-O
+			case 0xcafebabe: case 0xcafebabf: // universal Mach-O
+				return true;
+			default:
+				return false;
+		}
+	} catch {
+		return true;
+	} finally {
+		if (descriptor !== undefined) {
+			fs.closeSync(descriptor);
+		}
+	}
+}
+
+/** Every distinct, startable Claude Code binary in PATH and the vendor's install dirs, PATH order first. */
 function claudeBinaryCandidates(): string[] {
 	const name = process.platform === 'win32' ? 'claude.exe' : 'claude';
 	const dirs = [
@@ -39,7 +91,7 @@ function claudeBinaryCandidates(): string[] {
 		try {
 			fs.accessSync(full, fs.constants.X_OK);
 			const real = fs.realpathSync(full);
-			if (!seen.has(real)) {
+			if (!seen.has(real) && isSpawnableExecutable(real)) {
 				seen.add(real);
 				candidates.push(full);
 			}
@@ -65,7 +117,7 @@ function readClaudeCodeVersion(binary: string): Promise<string | undefined> {
 		return cached.version;
 	}
 	const version = new Promise<string | undefined>(resolve => {
-		execFile(binary, ['--version'], { timeout: 10_000, env: claudeSubscriptionProbeEnv() }, (err, stdout) => {
+		execFileSafely(binary, ['--version'], { timeout: 10_000, env: claudeSubscriptionProbeEnv() }, (err, stdout) => {
 			resolve(err ? undefined : parseClaudeCodeVersion(stdout)?.join('.'));
 		});
 	});
@@ -141,7 +193,7 @@ export async function isClaudeLoggedIn(): Promise<boolean> {
 		return false;
 	}
 	return new Promise<boolean>(resolve => {
-		execFile(claude, ['auth', 'status', '--json'], { timeout: 10_000, env: claudeSubscriptionProbeEnv() }, (err, stdout) => {
+		execFileSafely(claude, ['auth', 'status', '--json'], { timeout: 10_000, env: claudeSubscriptionProbeEnv() }, (err, stdout) => {
 			if (err) {
 				resolve(false);
 				return;
@@ -280,7 +332,7 @@ export async function updateClaudeCode(): Promise<void> {
 		// An explicit Update click overrides a disabled background updater.
 		const env = claudeSubscriptionProbeEnv();
 		delete env.DISABLE_AUTOUPDATER;
-		execFile(claude, ['update'], { timeout: CLAUDE_CODE_UPDATE_TIMEOUT_MS, env }, (err, stdout, stderr) => {
+		execFileSafely(claude, ['update'], { timeout: CLAUDE_CODE_UPDATE_TIMEOUT_MS, env }, (err, stdout, stderr) => {
 			if (err) {
 				reject(new Error((stderr || stdout).trim() || err.message));
 				return;
@@ -296,7 +348,7 @@ const CLAUDE_CODE_INSTALL_SCRIPT = 'curl -fsSL https://claude.ai/install.sh | ba
 /** Installs Claude Code with the vendor's native installer; rejects with its output when it fails. */
 export async function installClaudeCode(): Promise<void> {
 	await new Promise<void>((resolve, reject) => {
-		execFile('/bin/bash', ['-c', CLAUDE_CODE_INSTALL_SCRIPT], { timeout: CLAUDE_CODE_UPDATE_TIMEOUT_MS, env: claudeSubscriptionProbeEnv(), cwd: homedir() }, (err, stdout, stderr) => {
+		execFileSafely('/bin/bash', ['-c', CLAUDE_CODE_INSTALL_SCRIPT], { timeout: CLAUDE_CODE_UPDATE_TIMEOUT_MS, env: claudeSubscriptionProbeEnv(), cwd: homedir() }, (err, stdout, stderr) => {
 			if (err) {
 				reject(new Error((stderr || stdout).trim() || err.message));
 				return;
@@ -313,7 +365,7 @@ export async function installClaudeCode(): Promise<void> {
  */
 export function claudeSupportsAuthCommands(binary: string): Promise<boolean> {
 	return new Promise<boolean>(resolve => {
-		execFile(binary, ['auth', 'login', '--help'], { timeout: 10_000, env: claudeSubscriptionProbeEnv() }, (err, stdout, stderr) => {
+		execFileSafely(binary, ['auth', 'login', '--help'], { timeout: 10_000, env: claudeSubscriptionProbeEnv() }, (err, stdout, stderr) => {
 			resolve(!err && `${stdout}${stderr}`.includes('--claudeai'));
 		});
 	});

@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -84,6 +84,40 @@ export function buildClaudeSubscriptionEnv(
 	return sanitized;
 }
 
+const EXECUTABLE_MAGIC = new Set([
+	0x7f454c46, // ELF
+	0xcffaedfe, // Mach-O
+	0xcefaedfe,
+	0xfeedfacf,
+	0xfeedface,
+	0xcafebabe, // universal Mach-O
+	0xcafebabf,
+]);
+
+/**
+ * Whether the OS can start a file directly: a native binary or a `#!` script.
+ * npm's Claude Code links `claude` to `bin/claude.exe`, a shell stub without
+ * `#!` that its postinstall swaps for the native binary; when the postinstall
+ * did not run, spawning the stub fails with ENOEXEC (a terminal still runs it
+ * and prints "claude native binary not installed"). Mirrors the IDE host's
+ * check in agentLoginProbes.ts. An unreadable file is left for spawn to judge.
+ */
+async function isSpawnableExecutable(file: string): Promise<boolean> {
+	let handle: Awaited<ReturnType<typeof open>> | undefined;
+	try {
+		handle = await open(file, "r");
+		const header = Buffer.alloc(4);
+		const { bytesRead } = await handle.read(header, 0, header.length, 0);
+		const prefix = header.toString("latin1", 0, Math.min(bytesRead, 2));
+		if (prefix === "#!" || prefix === "MZ") return true;
+		return bytesRead === 4 && EXECUTABLE_MAGIC.has(header.readUInt32BE(0));
+	} catch {
+		return true;
+	} finally {
+		await handle?.close();
+	}
+}
+
 /** Locate Claude Code in PATH and the vendor's well-known user install dirs. */
 export async function findClaudeCodeExecutable(
 	options: ClaudeSubscriptionAuthOptions = {},
@@ -118,7 +152,7 @@ export async function findClaudeCodeExecutable(
 	for (const candidate of candidates) {
 		try {
 			await access(candidate);
-			return candidate;
+			if (await isSpawnableExecutable(candidate)) return candidate;
 		} catch {
 			// Keep looking. The final error names every supported recovery path.
 		}

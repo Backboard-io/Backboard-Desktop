@@ -1,5 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	chmod,
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
@@ -11,6 +18,7 @@ import {
 	buildClaudeSubscriptionEnv,
 	CLAUDE_LOGIN_TRUST_MS,
 	enableClaudeSubscription,
+	findClaudeCodeExecutable,
 	forgetClaudeSubscriptionLogin,
 	isClaudeAiSubscriptionStatus,
 } from "../src/providers/subscription/ClaudeSubscriptionAuth.ts";
@@ -156,6 +164,44 @@ describe("Claude subscription authentication", () => {
 				afterForget: await timesAsked(),
 			}).toEqual({ whileTrusted: 1, afterExpiry: 2, afterForget: 3 });
 		} finally {
+			await rm(homeDir, { recursive: true, force: true });
+		}
+	});
+
+	it("skips npm's postinstall stub for a Claude Code that can be spawned", async () => {
+		if (process.platform === "win32") return;
+		const homeDir = await mkdtemp(path.join(os.tmpdir(), "claude-sub-find-"));
+		const stubDir = path.join(homeDir, "npm-global", "bin");
+		const nativeDir = path.join(homeDir, ".local", "bin");
+		const saved = {
+			PATH: process.env.PATH,
+			BACKBOARD_CLAUDE_CODE_PATH: process.env.BACKBOARD_CLAUDE_CODE_PATH,
+		};
+		try {
+			await mkdir(stubDir, { recursive: true });
+			await mkdir(nativeDir, { recursive: true });
+			// What `bin/claude.exe` holds until the package's postinstall runs.
+			await writeFile(
+				path.join(stubDir, "claude"),
+				'echo "Error: claude native binary not installed." >&2\nexit 1\n',
+				{ mode: 0o755 },
+			);
+			await writeFile(
+				path.join(nativeDir, "claude"),
+				'#!/bin/sh\necho "2.1.308 (Claude Code)"\n',
+				{ mode: 0o755 },
+			);
+			process.env.PATH = stubDir;
+			delete process.env.BACKBOARD_CLAUDE_CODE_PATH;
+
+			expect(await findClaudeCodeExecutable({ homeDir })).toBe(
+				path.join(nativeDir, "claude"),
+			);
+		} finally {
+			for (const [key, value] of Object.entries(saved)) {
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
 			await rm(homeDir, { recursive: true, force: true });
 		}
 	});
